@@ -11,15 +11,45 @@ const spreadsheetId = process.env.SPREADSHEET_ID;
 export async function getSheetsClient() {
   if (sheetsClient) return sheetsClient;
 
-  const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  if (!keyPath) {
-    throw new Error('GOOGLE_APPLICATION_CREDENTIALS environment variable is not defined.');
+  let auth = null;
+  if (process.env.GOOGLE_CREDENTIALS_JSON) {
+    try {
+      const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+      auth = new google.auth.GoogleAuth({
+        credentials,
+        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+      });
+    } catch (e) {
+      console.error('[Sheets] Error parsing GOOGLE_CREDENTIALS_JSON env var:', e);
+    }
+  } else if (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY) {
+    try {
+      const credentials = {
+        client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+        private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      };
+      auth = new google.auth.GoogleAuth({
+        credentials,
+        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+      });
+    } catch (e) {
+      console.error('[Sheets] Error setting up GOOGLE_SERVICE_ACCOUNT_EMAIL auth:', e);
+    }
+  } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    try {
+      auth = new google.auth.GoogleAuth({
+        keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+      });
+    } catch (e) {
+      console.error('[Sheets] Error loading GOOGLE_APPLICATION_CREDENTIALS file:', e);
+    }
   }
 
-  const auth = new google.auth.GoogleAuth({
-    keyFile: keyPath,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-  });
+  if (!auth) {
+    console.warn('⚠️ [Sheets] Google credentials env var not set. Running in memory storage mode.');
+    return null;
+  }
 
   sheetsClient = google.sheets({ version: 'v4', auth });
   return sheetsClient;
@@ -38,7 +68,7 @@ async function processQueue() {
     try {
       await task();
     } catch (err) {
-      console.error('Error executing Google Sheets write task:', err);
+      console.error('Error executing write queue task:', err);
     }
     writeQueue.shift();
   }
@@ -54,6 +84,9 @@ export function queueWrite(task) {
 // Fetch all sheets in one batch call for startup speed
 export async function batchFetchSheets() {
   const sheets = await getSheetsClient();
+  if (!sheets || !spreadsheetId) {
+    return { players: [], transactions: [], bets: [], chatLogs: [] };
+  }
   try {
     const response = await sheets.spreadsheets.values.batchGet({
       spreadsheetId,
@@ -69,7 +102,7 @@ export async function batchFetchSheets() {
     };
   } catch (err) {
     console.error('Error batch fetching sheets:', err);
-    throw err;
+    return { players: [], transactions: [], bets: [], chatLogs: [] };
   }
 }
 
