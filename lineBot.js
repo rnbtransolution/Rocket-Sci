@@ -152,6 +152,20 @@ export async function sendAdminMessageToLine(targetId, messageText) {
   return true;
 }
 
+export async function handleUnsendMessage(unsendMessageId, userId, displayName, groupId) {
+  const lastLogs = db.getDashboardData()?.chatLogs || [];
+  const foundLog = lastLogs.find(l => l.userId === userId && l.sender === 'player');
+  const msgText = foundLog ? foundLog.text : 'ข้อความในกลุ่ม';
+
+  if (groupId) {
+    await pushToLine(groupId, `🚨 [แจ้งเตือนระบบตรวจจับยกเลิกข้อความ (UNSEND ALERT)]\n\nผู้เล่น: คุณ ${displayName}\nข้อความเดิมที่ถูกยกเลิก: "${msgText}"\n\n⚠️ หมายเหตุ: ตามระเบียนข้อตกลงดวล ผลรายการท้าดวลและเครดิตในระบบยังคงบันทึกมีผลเรียบร้อยตามเดิมค่ะ 🚀`);
+  } else if (userId) {
+    await pushToLine(userId, `🚨 [แจ้งเตือนระบบตรวจจับยกเลิกข้อความ]\n\nคุณได้ยกเลิกข้อความ: "${msgText}"\nบันทึกรายการท้าดวลของคุณยังคงได้รับการบันทึกและตรวจสอบเรียบร้อยแล้วค่ะ`);
+  }
+
+  db.logLineChatMessage(userId, displayName, 'system', `[UNSEND ALERT] User unsent message: "${msgText}"`, 'warning');
+}
+
 // --- LINE BOT CONTROLLER / WEBHOOK HANDLERS ---
 
 export async function handleTextMessage(text, userId, displayName, replyToken, groupId) {
@@ -519,14 +533,27 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   
   // 1. Check Accept Match Command (e.g. "ต", "ติด")
   if (keywordsAccept.includes(clean)) {
-    db.matchExistingOpenBet(userId, displayName).then(matched => {
+    db.matchExistingOpenBet(userId, displayName).then(async matched => {
       if (matched) {
-        // Send Flex notification to both players
-        const matchCard = constructBetOpenFlex(matched.orderNumber, matched.amount, matched.creatorId === matched.matcherId ? 'low' : 'high', matched.playerLowName, 'MATCHED');
-        pushToLine(matched.creatorId, `☄️ ดีลดวล Order #${matched.orderNumber} ได้คู่ดวลแล้ว!\nผู้ดวลของคุณ: ${displayName}\nยอดดวล: ${matched.amount} เครดิต`);
-        replyToLine(replyToken, `☄️ จับคู่ดวลสำเร็จ!\nคุณจับคู่สำเร็จกับ Order #${matched.orderNumber}\nคู่ดวลของคุณ: ${matched.playerLowName || matched.playerHighName}\nยอดเดิมพัน: ${matched.amount} แต้มถูกหักเรียบร้อยแล้วค่ะ`, userId);
+        // Send Private 1-on-1 Flex Notification DM to Creator
+        const creatorName = matched.playerLowName || matched.playerHighName;
+        const creatorBal = await db.getPlayerBalance(matched.creatorId, creatorName);
+        const flexCreator = constructMatchNotificationFlex(matched.orderNumber, matched.amount, displayName, 'creator', creatorBal);
+        await pushToLine(matched.creatorId, flexCreator);
+
+        // Send Private 1-on-1 Flex Notification DM to Matcher
+        const matcherBal = await db.getPlayerBalance(matched.matcherId, displayName);
+        const flexMatcher = constructMatchNotificationFlex(matched.orderNumber, matched.amount, creatorName, 'matcher', matcherBal);
+        await pushToLine(matched.matcherId, flexMatcher);
+
+        // Reply in group or chat
+        if (groupId) {
+          await pushToLine(groupId, `☄️ [จับคู่ดวลสำเร็จ!]\nOrder #${matched.orderNumber}\nคู่ดวล: คุณ ${matched.playerLowName} 🆚 คุณ ${matched.playerHighName}\nยอดดวล: ${matched.amount} แต้ม\nสถานะ: แมตช์ดวลเรียบร้อย (หักเครดิตเข้ากองกลาง 100% เรียบร้อยแล้วค่ะ) 🚀`);
+        } else {
+          await replyToLine(replyToken, flexMatcher, userId);
+        }
       } else {
-        replyToLine(replyToken, `❌ ขออภัยค่ะ ตอนนี้ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ดวลในระบบเลยค่ะ คุณสามารถเปิดแผลใหม่ได้ทันทีค่ะ`, userId);
+        await replyToLine(replyToken, `❌ ขออภัยค่ะ ตอนนี้ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ดวลในระบบเลยค่ะ คุณสามารถเปิดแผลใหม่ได้ทันทีค่ะ`, userId);
       }
     });
     return true;
@@ -1475,6 +1502,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
     "footer": {
       "type": "box",
       "layout": "vertical",
+      "spacing": "sm",
       "contents": [
         {
           "type": "button",
@@ -1483,8 +1511,106 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "color": "#1E88E5",
           "action": {
             "type": "message",
-            "label": "(ยอมรับดีลดวลนี้)",
+            "label": "🤝 กดรับแผลดวลนี้ (Order #" + orderNo + ")",
             "text": "ต"
+          }
+        },
+        {
+          "type": "button",
+          "style": "secondary",
+          "height": "sm",
+          "action": {
+            "type": "message",
+            "label": "📋 รายการดวลของคุณ",
+            "text": "รายการดวล"
+          }
+        }
+      ],
+      "paddingAll": "16px"
+    }
+  };
+}
+
+export function constructMatchNotificationFlex(orderNo, amount, opponentName, role, currentBalance) {
+  const isCreator = role === 'creator';
+  return {
+    "type": "bubble",
+    "size": "mega",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "contents": [
+        {
+          "type": "text",
+          "text": isCreator ? "☄️ มีผู้เล่นกดรับแผลดวลของคุณ!" : "☄️ ยืนยันการรับแผลดวลสำเร็จ!",
+          "weight": "bold",
+          "color": "#FFFFFF",
+          "size": "md"
+        }
+      ],
+      "backgroundColor": isCreator ? "#1E88E5" : "#43A047",
+      "paddingAll": "16px"
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "spacing": "md",
+      "contents": [
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            { "type": "text", "text": "เลขที่ดีล:", "color": "#888888", "size": "sm", "flex": 4 },
+            { "type": "text", "text": "#" + orderNo, "weight": "bold", "color": "#333333", "size": "sm", "flex": 6, "align": "end" }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            { "type": "text", "text": "คู่ดวลของคุณ:", "color": "#888888", "size": "sm", "flex": 4 },
+            { "type": "text", "text": opponentName, "weight": "bold", "color": "#00796B", "size": "sm", "flex": 6, "align": "end" }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            { "type": "text", "text": "ยอดท้าดวล:", "color": "#888888", "size": "sm", "flex": 4 },
+            { "type": "text", "text": amount + " แต้ม", "weight": "bold", "color": "#E65100", "size": "sm", "flex": 6, "align": "end" }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            { "type": "text", "text": "สถานะแต้ม:", "color": "#888888", "size": "sm", "flex": 4 },
+            { "type": "text", "text": "หักแต้มเข้ากองกลางแล้ว", "weight": "bold", "color": "#43A047", "size": "sm", "flex": 6, "align": "end" }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            { "type": "text", "text": "เครดิตคงเหลือ:", "color": "#888888", "size": "sm", "flex": 4 },
+            { "type": "text", "text": currentBalance + " แต้ม", "weight": "bold", "color": "#333333", "size": "sm", "flex": 6, "align": "end" }
+          ]
+        }
+      ],
+      "paddingAll": "20px"
+    },
+    "footer": {
+      "type": "box",
+      "layout": "vertical",
+      "contents": [
+        {
+          "type": "button",
+          "style": "secondary",
+          "height": "sm",
+          "action": {
+            "type": "message",
+            "label": "📋 ดูรายการดวลทั้งหมด",
+            "text": "รายการดวล"
           }
         }
       ],

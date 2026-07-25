@@ -191,12 +191,15 @@ app.post('/webhook', (req, res) => {
           const message = event.message;
           if (message.type === 'text') {
             if (groupId) {
-              db.recordGroupActivity(groupId, null, userId, displayName, message.text);
+              db.recordGroupActivity(groupId, message.id, userId, displayName, message.text);
             }
-            await lineBot.handleTextMessage(message.text, userId, displayName, replyToken, groupId);
+            await lineBot.handleTextMessage(message.text, userId, displayName, replyToken, groupId, message.id);
           } else if (message.type === 'image') {
             await lineBot.handleImageSlipMessage(message.id, userId, displayName, replyToken);
           }
+        } else if (event.type === 'unsend') {
+          const unsendMessageId = event.unsend?.messageId;
+          await lineBot.handleUnsendMessage(unsendMessageId, userId, displayName, groupId);
         }
         // Push update to all SSE dashboard clients immediately after each event
         broadcastUpdate();
