@@ -61,71 +61,77 @@ export function cleanUserId(userId) {
 }
 
 // Initialize and pull all data from Google Sheets into memory
-export async function init(quiet = false) {
+export async function init(isSilent = false) {
   try {
     const data = await batchFetchSheets();
 
-    // 1. Players Sheet
-    players = data.players.slice(1).map((row, idx) => {
-      const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
-      return {
-        id: row[0]?.toString() || '',
-        name: row[1]?.toString() || '',
-        balance: Number(row[2]) || 0,
-        joinDate: row[3] ? formatDate(row[3]) : '-',
-        bankName: row[4]?.toString() || '',
-        bankAccount: row[5] ? formatBankAccount(row[5]) : '',
-        accountName: row[6]?.toString() || '',
-        isUser: row[0]?.toString() === 'user',
-        avatar: avatars[(idx + 1) % avatars.length],
-        lineUserId: row[7]?.toString() || '',
-      };
-    });
-
-
+    // 1. Players Sheet (Only update if valid data returned from Sheets)
+    if (data.players && data.players.length > 1) {
+      players = data.players.slice(1).map((row, idx) => {
+        const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
+        return {
+          id: row[0]?.toString() || '',
+          name: row[1]?.toString() || '',
+          balance: Number(row[2]) || 0,
+          joinDate: row[3] ? formatDate(row[3]) : '-',
+          bankName: row[4]?.toString() || '',
+          bankAccount: row[5] ? formatBankAccount(row[5]) : '',
+          accountName: row[6]?.toString() || '',
+          isUser: row[0]?.toString() === 'user',
+          avatar: avatars[(idx + 1) % avatars.length],
+          lineUserId: row[7]?.toString() || '',
+        };
+      });
+    }
 
     // 2. Transactions Sheet
-    transactions = data.transactions.slice(1).map((row) => ({
-      id: row[0]?.toString() || '',
-      playerId: row[1]?.toString() || '',
-      playerName: row[2]?.toString() || '',
-      requestedAmount: Number(row[3]) || 0,
-      actualAmount: Number(row[4]) || 0,
-      slipRef: row[5]?.toString() || '',
-      status: row[6]?.toString() || '',
-      reviewReason: row[7]?.toString() || '',
-      timestamp: row[8] ? formatTime(row[8]) : '',
-      logs: [`Verified in Sheets Database`, `Status: ${row[6]}`],
-    })).reverse(); // Show newest transactions first in Dashboard
+    if (data.transactions && data.transactions.length > 1) {
+      transactions = data.transactions.slice(1).map((row) => ({
+        id: row[0]?.toString() || '',
+        playerId: row[1]?.toString() || '',
+        playerName: row[2]?.toString() || '',
+        requestedAmount: Number(row[3]) || 0,
+        actualAmount: Number(row[4]) || 0,
+        slipRef: row[5]?.toString() || '',
+        status: row[6]?.toString() || '',
+        reviewReason: row[7]?.toString() || '',
+        timestamp: row[8] ? formatTime(row[8]) : '',
+        logs: [`Verified in Sheets Database`, `Status: ${row[6]}`],
+      })).reverse();
+    }
 
     // 3. Bets Sheet
-    bets = data.bets.slice(1).map((row) => ({
-      id: 'bet_' + row[0]?.toString(),
-      orderNumber: row[0]?.toString() || '',
-      playerLowId: row[1]?.toString() || '',
-      playerLowName: row[2]?.toString() || '',
-      playerHighId: row[3]?.toString() || '',
-      playerHighName: row[4]?.toString() || '',
-      amount: Number(row[5]) || 0,
-      type: row[6]?.toString() || '',
-      rangeMin: row[7] ? Number(row[7]) : null,
-      rangeMax: row[8] ? Number(row[8]) : null,
-      status: row[9]?.toString() || '',
-      winnerName: row[10]?.toString() || '',
-      timestamp: row[11] ? formatTime(row[11]) : '',
-    }));
+    if (data.bets && data.bets.length > 1) {
+      bets = data.bets.slice(1).map((row) => ({
+        id: 'bet_' + row[0]?.toString(),
+        orderNumber: row[0]?.toString() || '',
+        playerLowId: row[1]?.toString() || '',
+        playerLowName: row[2]?.toString() || '',
+        playerHighId: row[3]?.toString() || '',
+        playerHighName: row[4]?.toString() || '',
+        amount: Number(row[5]) || 0,
+        type: row[6]?.toString() || '',
+        rangeMin: row[7] ? Number(row[7]) : null,
+        rangeMax: row[8] ? Number(row[8]) : null,
+        status: row[9]?.toString() || '',
+        winnerName: row[10]?.toString() || '',
+        timestamp: row[11] ? formatTime(row[11]) : '',
+      }));
+    }
 
     // 4. LineChatLogs Sheet
-    chatLogs = data.chatLogs.slice(1).map((row) => ({
-      timestamp: row[0] ? formatTime(row[0]) : '',
-      userId: row[1]?.toString() || '',
-      displayName: row[2]?.toString() || '',
-      sender: row[3]?.toString() || '',
-      text: row[4]?.toString() || '',
-      type: row[5]?.toString() || 'text',
-    }));
+    if (data.chatLogs && data.chatLogs.length > 1) {
+      chatLogs = data.chatLogs.slice(1).map((row) => ({
+        timestamp: row[0] ? formatTime(row[0]) : '',
+        userId: row[1]?.toString() || '',
+        displayName: row[2]?.toString() || '',
+        sender: row[3]?.toString() || '',
+        text: row[4]?.toString() || '',
+        type: row[5]?.toString() || 'text',
+      }));
+    }
 
-    if (!quiet) {
+    if (!isSilent) {
       console.log(
         `[DB] Initialized: ${players.length} players, ${transactions.length} transactions, ${bets.length} bets, ${chatLogs.length} chat logs.`
       );
