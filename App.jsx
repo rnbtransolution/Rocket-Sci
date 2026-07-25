@@ -224,6 +224,11 @@ export default function App() {
       }
     };
 
+    // Determine backend API origin (if loaded from GitHub Pages, point to Render cloud backend)
+    const API_BASE_URL = (typeof window !== 'undefined' && window.location.hostname.includes('github.io'))
+      ? 'https://rocket-sci.onrender.com'
+      : '';
+
     const runBackendFunction = async (functionName, args = []) => {
       if (isGAS) {
         if (window.google && window.google.script && window.google.script.run && window.google.script.run[functionName]) {
@@ -231,7 +236,7 @@ export default function App() {
         }
       } else {
         try {
-          const res = await fetch('/api/run', {
+          const res = await fetch(`${API_BASE_URL}/api/run`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ functionName, args })
@@ -259,12 +264,12 @@ export default function App() {
       return () => clearInterval(interval);
 
     } else if (isLiveBackend) {
-      // Node.js server (Render / Local): use SSE for zero-delay real-time push from server
+      // Node.js server (Render / Local / GitHub Pages): use SSE for zero-delay real-time push from server
       let es;
       let reconnectTimer;
 
       const connect = () => {
-        es = new EventSource('/api/events');
+        es = new EventSource(`${API_BASE_URL}/api/events`);
 
         es.onmessage = (event) => {
           try {
@@ -274,9 +279,9 @@ export default function App() {
         };
 
         es.onerror = () => {
-          // SSE connection dropped — close and reconnect after 2s
+          // SSE connection dropped — close and reconnect after 3s
           es.close();
-          reconnectTimer = setTimeout(connect, 2000);
+          reconnectTimer = setTimeout(connect, 3000);
         };
       };
 
