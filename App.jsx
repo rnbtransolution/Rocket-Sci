@@ -205,12 +205,10 @@ export default function App() {
   // Detect Google Apps Script Environment
   const isGAS = typeof window !== 'undefined' && window.google && window.google.script && window.google.script.run;
 
-  // Detect local Node.js server environment (served from localhost)
-  const isLocalServer = typeof window !== 'undefined' && !isGAS && (
-    window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  );
+  // Detect live Node.js Express backend (localhost, Render, Vercel, Railway, or custom host)
+  const isLiveBackend = typeof window !== 'undefined' && !isGAS;
 
-  // Unified live-data: GAS uses polling RPC; local Node.js server uses SSE for instant push
+  // Unified live-data: GAS uses polling RPC; Node.js backend uses SSE for instant push
   useEffect(() => {
     const applyData = (data) => {
       if (!data) return;
@@ -260,8 +258,8 @@ export default function App() {
       const interval = setInterval(fetchGAS, 3000);
       return () => clearInterval(interval);
 
-    } else if (isLocalServer) {
-      // Local Node.js server: use SSE for zero-delay real-time push from server
+    } else if (isLiveBackend) {
+      // Node.js server (Render / Local): use SSE for zero-delay real-time push from server
       let es;
       let reconnectTimer;
 
@@ -289,7 +287,7 @@ export default function App() {
         if (reconnectTimer) clearTimeout(reconnectTimer);
       };
     }
-  }, [isGAS, isLocalServer]);
+  }, [isGAS, isLiveBackend]);
 
   // Auto scroll chats inside container without moving the browser viewport
   useEffect(() => {
