@@ -132,8 +132,9 @@ app.post('/api/run', async (req, res) => {
 // SSE Endpoint - dashboard clients subscribe here for real-time push updates
 app.get('/api/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
   // Send current snapshot immediately on connect
