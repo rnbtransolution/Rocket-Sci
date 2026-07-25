@@ -1,0 +1,1080 @@
+import {
+  batchFetchSheets,
+  appendRowToSheet,
+  updateRowInSheet,
+  overwriteSheet,
+  queueWrite,
+} from './sheetsHelper.js';
+
+let players = [];
+let transactions = [];
+let bets = [];
+let chatLogs = [];
+
+// Helper to format dates to dd/MM/yy for visual consistency with GAS
+function formatDate(dateVal) {
+  if (!dateVal) return '-';
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return '-';
+  // Adjust to GMT+7 timezone
+  const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+  const nd = new Date(utc + 3600000 * 7);
+
+  const dd = String(nd.getDate()).padStart(2, '0');
+  const mm = String(nd.getMonth() + 1).padStart(2, '0');
+  const yy = String(nd.getFullYear()).slice(-2);
+  return `${dd}/${mm}/${yy}`;
+}
+
+// Helper to format timestamps to HH:mm:ss for visual consistency with GAS
+function formatTime(dateVal) {
+  if (!dateVal) return '';
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return '';
+  // Adjust to GMT+7 timezone
+  const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+  const nd = new Date(utc + 3600000 * 7);
+
+  const hh = String(nd.getHours()).padStart(2, '0');
+  const mm = String(nd.getMinutes()).padStart(2, '0');
+  const ss = String(nd.getSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
+// Helper to format bank account numbers (keep leading zeros)
+export function formatBankAccount(acc) {
+  if (acc === null || acc === undefined) return '';
+  let str = acc.toString().trim();
+  if (/^\d+$/.test(str) && !str.startsWith('0')) {
+    if (str.length === 9 || str.length === 11 || str.length === 14) {
+      str = '0' + str;
+    }
+  }
+  return str;
+}
+
+// Helper to clean and normalize User ID
+export function cleanUserId(userId) {
+  if (userId === null || userId === undefined) return '';
+  const id = userId.toString().trim();
+  return id.toLowerCase() === 'user' ? 'user' : id;
+}
+
+// Initialize and pull all data from Google Sheets into memory
+export async function init(isSilent = false) {
+  try {
+    const data = await batchFetchSheets();
+
+    // 1. Players Sheet (Only update if valid data returned from Sheets)
+    if (data.players && data.players.length > 1) {
+      players = data.players.slice(1).map((row, idx) => {
+        const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
+        return {
+          id: row[0]?.toString() || '',
+          name: row[1]?.toString() || '',
+          balance: Number(row[2]) || 0,
+          joinDate: row[3] ? formatDate(row[3]) : '-',
+          bankName: row[4]?.toString() || '',
+          bankAccount: row[5] ? formatBankAccount(row[5]) : '',
+          accountName: row[6]?.toString() || '',
+          isUser: row[0]?.toString() === 'user',
+          avatar: avatars[(idx + 1) % avatars.length],
+          lineUserId: row[7]?.toString() || '',
+        };
+      });
+    }
+
+    // 2. Transactions Sheet
+    if (data.transactions && data.transactions.length > 1) {
+      transactions = data.transactions.slice(1).map((row) => ({
+        id: row[0]?.toString() || '',
+        playerId: row[1]?.toString() || '',
+        playerName: row[2]?.toString() || '',
+        requestedAmount: Number(row[3]) || 0,
+        actualAmount: Number(row[4]) || 0,
+        slipRef: row[5]?.toString() || '',
+        status: row[6]?.toString() || '',
+        reviewReason: row[7]?.toString() || '',
+        timestamp: row[8] ? formatTime(row[8]) : '',
+        logs: [`Verified in Sheets Database`, `Status: ${row[6]}`],
+      })).reverse();
+    }
+
+    // 3. Bets Sheet
+    if (data.bets && data.bets.length > 1) {
+      bets = data.bets.slice(1).map((row) => ({
+        id: 'bet_' + row[0]?.toString(),
+        orderNumber: row[0]?.toString() || '',
+        playerLowId: row[1]?.toString() || '',
+        playerLowName: row[2]?.toString() || '',
+        playerHighId: row[3]?.toString() || '',
+        playerHighName: row[4]?.toString() || '',
+        amount: Number(row[5]) || 0,
+        type: row[6]?.toString() || '',
+        rangeMin: row[7] ? Number(row[7]) : null,
+        rangeMax: row[8] ? Number(row[8]) : null,
+        status: row[9]?.toString() || '',
+        winnerName: row[10]?.toString() || '',
+        timestamp: row[11] ? formatTime(row[11]) : '',
+      }));
+    }
+
+    // 4. LineChatLogs Sheet
+    if (data.chatLogs && data.chatLogs.length > 1) {
+      chatLogs = data.chatLogs.slice(1).map((row) => ({
+        timestamp: row[0] ? formatTime(row[0]) : '',
+        userId: row[1]?.toString() || '',
+        displayName: row[2]?.toString() || '',
+        sender: row[3]?.toString() || '',
+        text: row[4]?.toString() || '',
+        type: row[5]?.toString() || 'text',
+      }));
+    }
+
+    if (!isSilent) {
+      console.log(
+        `[DB] Initialized: ${players.length} players, ${transactions.length} transactions, ${bets.length} bets, ${chatLogs.length} chat logs.`
+      );
+    }
+  } catch (err) {
+    if (!quiet) {
+      console.error('[DB] Initialization error:', err);
+    }
+    throw err;
+  }
+}
+
+let activeGroupId = null;
+let lineGroups = [];
+
+export function recordGroupActivity(groupId, groupName, userId, displayName, text) {
+  if (!groupId || typeof groupId !== 'string' || groupId.length <= 5) return;
+  activeGroupId = groupId;
+  let group = lineGroups.find(g => g.id === groupId);
+  const nowStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+  if (!group) {
+    group = {
+      id: groupId,
+      name: groupName || `กลุ่มดวลสด LINE (#${groupId.slice(-4)})`,
+      lastMessage: text || 'มีการเคลื่อนไหวในกลุ่ม',
+      timestamp: nowStr,
+      msgCount: 1
+    };
+    lineGroups.push(group);
+  } else {
+    group.lastMessage = text || group.lastMessage;
+    group.timestamp = nowStr;
+    group.msgCount = (group.msgCount || 0) + 1;
+    if (groupName && groupName !== group.name) {
+      group.name = groupName;
+    }
+  }
+}
+
+export function saveActiveGroupId(groupId) {
+  if (groupId && typeof groupId === 'string' && groupId.length > 5) {
+    activeGroupId = groupId;
+    recordGroupActivity(groupId, null, null, null, 'เชื่อมต่อแล้ว');
+  }
+}
+
+export function getActiveGroupId() {
+  return activeGroupId;
+}
+
+// GET DATA FOR THE REACT DASHBOARD
+export function getDashboardData() {
+  // Sort transactions to match dashboard's ordering expectation (newest first)
+  return {
+    players: [...players],
+    transactions: [...transactions],
+    bets: [...bets],
+    chatLogs: [...chatLogs],
+    activeGroupId: activeGroupId,
+    lineGroups: [...lineGroups],
+  };
+}
+
+// get player's registered bank details
+export function getPlayerBank(userId) {
+  const searchId = cleanUserId(userId);
+  if (!searchId) return null;
+  const player = players.find((p) => cleanUserId(p.id) === searchId);
+  if (player && player.bankName && player.bankAccount) {
+    return {
+      bankName: player.bankName,
+      accountNumber: player.bankAccount,
+      accountName: player.accountName,
+    };
+  }
+  return null;
+}
+
+// update a player's registered bank details
+export function updatePlayerBank(userId, bankName, accountNumber, accountName) {
+  const searchId = cleanUserId(userId);
+  if (!searchId) return;
+  const player = players.find((p) => cleanUserId(p.id) === searchId);
+  if (player) {
+    player.bankName = bankName;
+    player.bankAccount = formatBankAccount(accountNumber);
+    player.accountName = accountName;
+
+    updateRowInSheet('Players', searchId, {
+      4: bankName,
+      5: accountNumber.toString(),
+      6: accountName,
+    });
+  }
+}
+
+// checks if the player has at least one successful deposit
+export function hasSuccessfulDeposit(userId) {
+  const searchId = cleanUserId(userId);
+  return transactions.some(
+    (t) => cleanUserId(t.playerId) === searchId && t.status === 'success'
+  );
+}
+
+// get active bets for player
+export function getPlayerActiveBets(userId) {
+  const searchId = cleanUserId(userId);
+  return bets.filter(
+    (b) =>
+      (cleanUserId(b.playerLowId) === searchId ||
+        cleanUserId(b.playerHighId) === searchId) &&
+      (b.status === 'pending_match' || b.status === 'matched')
+  );
+}
+
+// retrieve a player's balance, registering them if they do not exist
+// Generate a unique Passport-style ID (2 uppercase letters + 6 digits, e.g. RS481729).
+export function generatePassportStyleId() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const existingIds = new Set(players.map(p => p.id.toUpperCase()));
+  
+  let code = '';
+  let attempts = 0;
+  while (attempts < 1000) {
+    const letters = chars[Math.floor(Math.random() * 26)] + chars[Math.floor(Math.random() * 26)];
+    const digits = Math.floor(100000 + Math.random() * 900000).toString();
+    code = letters + digits;
+    if (!existingIds.has(code)) {
+      return code;
+    }
+    attempts++;
+  }
+  return 'PL' + Date.now().toString().slice(-6); // fallback
+}
+
+// Get or create a unique short Passport-style ID mapped to a raw LINE User ID.
+export async function getOrCreateShortUserId(rawLineUserId, displayName) {
+  if (!rawLineUserId) return '';
+  const searchId = rawLineUserId.toString().trim();
+  
+  // If it's already a short ID or a sandbox ID, return as is
+  if (searchId.toLowerCase() === 'user' || searchId.length <= 8) {
+    return searchId;
+  }
+  
+  // Check memory array for matching lineUserId
+  const player = players.find(p => p.lineUserId === searchId);
+  if (player) {
+    return player.id;
+  }
+  
+  // Check memory array for matching id (for legacy)
+  const legacyPlayer = players.find(p => p.id === searchId);
+  if (legacyPlayer) {
+    if (!legacyPlayer.lineUserId) {
+      legacyPlayer.lineUserId = searchId;
+      updateRowInSheet('Players', legacyPlayer.id, { 7: searchId });
+    }
+    return legacyPlayer.id;
+  }
+  
+  // Register new player with short ID
+  const shortId = generatePassportStyleId();
+  const name = displayName || 'ผู้เล่น LINE';
+  const joinDateStr = new Date().toISOString();
+  const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
+  
+  const newPlayer = {
+    id: shortId,
+    name: name,
+    balance: 0,
+    joinDate: formatDate(joinDateStr),
+    bankName: '',
+    bankAccount: '',
+    accountName: '',
+    isUser: false,
+    avatar: avatars[players.length % avatars.length],
+    lineUserId: searchId
+  };
+  
+  players.push(newPlayer);
+  appendRowToSheet('Players', [shortId, name, 0, joinDateStr, '', '', '', searchId]);
+  return shortId;
+}
+
+// Translate a short Passport-style ID back to its raw LINE User ID.
+export function getRawLineUserId(shortUserId) {
+  if (!shortUserId) return '';
+  const searchId = shortUserId.toString().trim();
+  if (searchId.toLowerCase() === 'user' || searchId.length > 8) {
+    return searchId;
+  }
+  
+  const player = players.find(p => p.id === searchId);
+  if (player) {
+    return player.lineUserId || searchId;
+  }
+  return searchId;
+}
+
+// retrieve a player's balance, registering them if they do not exist
+export async function getPlayerBalance(userId, displayName) {
+  const shortUserId = await getOrCreateShortUserId(userId, displayName);
+  const searchId = cleanUserId(shortUserId);
+  if (!searchId) return 0;
+  
+  const player = players.find((p) => cleanUserId(p.id) === searchId);
+  return player ? player.balance : 0;
+}
+
+// adjust a player's balance (adds or deducts credits)
+export async function adjustPlayerBalance(userId, delta, displayName) {
+  const shortUserId = await getOrCreateShortUserId(userId, displayName);
+  const searchId = cleanUserId(shortUserId);
+  if (!searchId) return;
+  
+  const numericDelta = Number(delta) || 0;
+  const player = players.find((p) => cleanUserId(p.id) === searchId);
+
+  if (player) {
+    player.balance += numericDelta;
+    updateRowInSheet('Players', searchId, { 2: player.balance });
+  }
+}
+
+// Save an open bet
+export function saveOpenBet(
+  orderNo,
+  userId,
+  displayName,
+  side,
+  amount,
+  type,
+  rMin,
+  rMax
+) {
+  const searchId = cleanUserId(userId);
+  const now = new Date();
+
+  const newBet = {
+    id: 'bet_' + orderNo,
+    orderNumber: orderNo.toString(),
+    playerLowId: side === 'low' ? searchId : '',
+    playerLowName: side === 'low' ? displayName : '',
+    playerHighId: side === 'high' ? searchId : '',
+    playerHighName: side === 'high' ? displayName : '',
+    amount: Number(amount) || 0,
+    type: type,
+    rangeMin: rMin ? Number(rMin) : null,
+    rangeMax: rMax ? Number(rMax) : null,
+    status: 'pending_match',
+    winnerName: '',
+    timestamp: formatTime(now),
+  };
+  bets.push(newBet);
+
+  appendRowToSheet('Bets', [
+    orderNo.toString(),
+    newBet.playerLowId,
+    newBet.playerLowName,
+    newBet.playerHighId,
+    newBet.playerHighName,
+    amount.toString(),
+    type,
+    rMin ? rMin.toString() : '',
+    rMax ? rMax.toString() : '',
+    'pending_match',
+    '',
+    now.toISOString(),
+  ]);
+}
+
+// match against an existing open bet
+export async function matchExistingOpenBet(userId, displayName) {
+  const searchId = cleanUserId(userId);
+
+  for (const bet of bets) {
+    if (bet.status === 'pending_match') {
+      if (
+        cleanUserId(bet.playerLowId) === searchId ||
+        cleanUserId(bet.playerHighId) === searchId
+      ) {
+        continue; // Cannot match own bet
+      }
+
+      const creatorId = bet.playerLowId ? bet.playerLowId : bet.playerHighId;
+
+      if (!bet.playerLowId) {
+        bet.playerLowId = searchId;
+        bet.playerLowName = displayName;
+      } else {
+        bet.playerHighId = searchId;
+        bet.playerHighName = displayName;
+      }
+
+      bet.status = 'matched';
+
+      // Update in Google Sheets
+      updateRowInSheet('Bets', bet.orderNumber, {
+        1: bet.playerLowId,
+        2: bet.playerLowName,
+        3: bet.playerHighId,
+        4: bet.playerHighName,
+        9: 'matched',
+      });
+
+      // Deduct credit from matcher
+      await adjustPlayerBalance(searchId, -bet.amount, displayName);
+
+      return {
+        orderNumber: bet.orderNumber,
+        amount: bet.amount,
+        playerLowName: bet.playerLowName,
+        playerHighName: bet.playerHighName,
+        creatorId: creatorId,
+        matcherId: searchId,
+      };
+    }
+  }
+  return null;
+}
+
+// log transactions (deposits/withdrawals)
+export function logTransaction(
+  userId,
+  displayName,
+  reqAmt,
+  actAmt,
+  refCode,
+  status,
+  reason
+) {
+  const now = new Date();
+  const txId = 'TX' + Math.floor(Math.random() * 89999 + 10000);
+
+  const newTx = {
+    id: txId,
+    playerId: userId,
+    playerName: displayName,
+    requestedAmount: Number(reqAmt) || 0,
+    actualAmount: Number(actAmt) || 0,
+    slipRef: refCode,
+    status: status,
+    reviewReason: reason,
+    timestamp: formatTime(now),
+    logs: ['Verified in Sheets Database', `Status: ${status}`],
+  };
+
+  transactions.unshift(newTx); // Add to beginning of memory list
+
+  appendRowToSheet('Transactions', [
+    txId,
+    userId,
+    displayName,
+    reqAmt.toString(),
+    actAmt.toString(),
+    refCode,
+    status,
+    reason,
+    now.toISOString(),
+  ]);
+
+  return txId;
+}
+
+export function checkIfRefExists(refCode) {
+  if (!refCode) return false;
+  const cleanRef = refCode.toString().trim().toLowerCase();
+  return transactions.some((t) => t.slipRef.toString().trim().toLowerCase() === cleanRef);
+}
+
+export function findPendingRequestedAmount(userId) {
+  const searchId = cleanUserId(userId);
+  // Find last transaction for user with status escalated (or pending) waiting for slip
+  const found = transactions.find(
+    (t) =>
+      cleanUserId(t.playerId) === searchId &&
+      t.status === 'escalated' &&
+      t.reviewReason.toString().includes('Waiting for user')
+  );
+  return found ? found.requestedAmount : null;
+}
+
+// --- ADMIN DASHBOARD MUTATIONS ---
+
+export function adminSetPlayerBank(userId, bankName, accountNumber, accountName) {
+  updatePlayerBank(userId, bankName, accountNumber, accountName);
+  return getDashboardData();
+}
+
+export async function adminCreatePlayer(lineId, displayName, initialBalance) {
+  const cleanId = cleanUserId(lineId);
+  const bal = Number(initialBalance) || 0;
+  await adjustPlayerBalance(cleanId, bal, displayName);
+  return getDashboardData();
+}
+
+export function adminUpdatePlayerName(userId, newName) {
+  const searchId = cleanUserId(userId);
+  const player = players.find((p) => cleanUserId(p.id) === searchId);
+  if (player) {
+    player.name = newName;
+    updateRowInSheet('Players', searchId, { 1: newName });
+  }
+  return getDashboardData();
+}
+
+export function adminSetPlayerBalance(userId, newBalance) {
+  const searchId = cleanUserId(userId);
+  const bal = Number(newBalance) || 0;
+  const player = players.find((p) => cleanUserId(p.id) === searchId);
+  if (player) {
+    const diff = bal - player.balance;
+    player.balance = bal;
+    updateRowInSheet('Players', searchId, { 2: bal });
+
+    // Replicate transaction logging from Code.gs
+    logTransaction(
+      searchId,
+      player.name,
+      0,
+      diff,
+      'ADMIN_ADJUST',
+      'success',
+      `Admin manually set balance to ${bal}`
+    );
+  }
+  return getDashboardData();
+}
+
+export function adminDeletePlayer(userId) {
+  const searchId = cleanUserId(userId);
+  players = players.filter((p) => cleanUserId(p.id) !== searchId);
+
+  // Clear player row in Sheets (overwrite player list)
+  queueWrite(async () => {
+    const matrix = [
+      [
+        'User ID',
+        'Display Name',
+        'Balance (Credits)',
+        'Registered Date',
+        'Bank Name',
+        'Bank Account Number',
+        'Bank Account Holder Name',
+      ],
+    ];
+    for (const p of players) {
+      matrix.push([
+        p.id,
+        p.name,
+        p.balance.toString(),
+        new Date().toISOString(), // Fallback date
+        p.bankName,
+        p.bankAccount,
+        p.accountName,
+      ]);
+    }
+    await overwriteSheet('Players', matrix);
+  });
+
+  return getDashboardData();
+}
+
+export async function adminApproveTransaction(txId) {
+  const tx = transactions.find((t) => t.id === txId);
+  if (tx && tx.status !== 'success') {
+    tx.status = 'success';
+    tx.reviewReason = 'Manually approved by supervisor';
+    updateRowInSheet('Transactions', txId, { 6: 'success', 7: tx.reviewReason });
+
+    let amountToAdd = tx.actualAmount;
+    const isWithdrawal = txId.startsWith('WD');
+    
+    if (isWithdrawal) {
+      // In withdrawal flow, the requested amount is the negative withdraw amount, and it was already deducted from balance.
+      // So no balance adjustment is needed here (payout approved).
+    } else {
+      await adjustPlayerBalance(tx.playerId, amountToAdd, tx.playerName);
+    }
+
+    // Dynamic import to send LINE notifications
+    try {
+      const lineBot = await import('./lineBot.js');
+      if (isWithdrawal) {
+        let details = "ถอนเงินคืนเข้าบัญชีของคุณ";
+        const bank = getPlayerBank(tx.playerId);
+        if (bank) {
+          details = `โอนเข้าบัญชี ${bank.bankName} ${bank.accountNumber} (${bank.accountName})`;
+        }
+        const flex = lineBot.constructBankingFlex("withdraw", tx.requestedAmount, details, null, tx.playerId);
+        await lineBot.pushToLine(tx.playerId, flex);
+      } else {
+        const flex = lineBot.constructBankingFlex("deposit", tx.actualAmount, "เติมเงินสำเร็จ (แอดมินอนุมัติแมนนวล)", null, tx.playerId);
+        await lineBot.pushToLine(tx.playerId, flex);
+      }
+    } catch (err) {
+      console.error("[DB] Error sending Line approval notification:", err);
+    }
+  }
+  return getDashboardData();
+}
+
+export async function adminRejectTransaction(txId, reason) {
+  const tx = transactions.find((t) => t.id === txId);
+  if (tx && tx.status !== 'success') {
+    tx.status = 'rejected';
+    tx.reviewReason = reason || 'Admin rejected';
+    updateRowInSheet('Transactions', txId, { 6: 'rejected', 7: tx.reviewReason });
+
+    const isWithdrawal = txId.startsWith('WD');
+    if (isWithdrawal) {
+      // Refund the locked balance back to player
+      await adjustPlayerBalance(tx.playerId, tx.requestedAmount, tx.playerName);
+    }
+
+    // Dynamic import to send LINE notifications
+    try {
+      const lineBot = await import('./lineBot.js');
+      const currentBalance = await getPlayerBalance(tx.playerId, tx.playerName);
+      if (isWithdrawal) {
+        const flex = lineBot.constructRejectionFlex("WD", tx.requestedAmount, reason || 'ข้อมูลไม่ถูกต้อง', currentBalance, tx.playerId);
+        await lineBot.pushToLine(tx.playerId, flex);
+      } else {
+        const flex = lineBot.constructRejectionFlex("DP", tx.requestedAmount, reason || 'สลิปไม่ผ่านเกณฑ์ตรวจสอบ', currentBalance, tx.playerId);
+        await lineBot.pushToLine(tx.playerId, flex);
+      }
+    } catch (err) {
+      console.error("[DB] Error sending Line rejection notification:", err);
+    }
+  }
+  return getDashboardData();
+}
+
+export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxParam, sendPushCallback) {
+  // Support both single target or range target (e.g. 330 - 380)
+  let targetMin = Number(targetMinOrTime) || 350;
+  let targetMax = targetMin;
+  let callback = sendPushCallback;
+
+  if (typeof targetMaxParam === 'number' || (typeof targetMaxParam === 'string' && targetMaxParam !== '' && !isNaN(Number(targetMaxParam)))) {
+    targetMax = Number(targetMaxParam);
+  } else if (typeof targetMaxParam === 'function') {
+    callback = targetMaxParam;
+  }
+
+  // 1. Perform automatic matching
+  await autoMatchPendingBets();
+
+  const finalScaled = Math.round(finalTime * 100);
+  const minScaled = Math.round(targetMin * 100);
+  const maxScaled = Math.round(targetMax * 100);
+
+  for (const bet of bets) {
+    if (bet.status === 'matched') {
+      const pLowId = cleanUserId(bet.playerLowId);
+      const pLowName = bet.playerLowName;
+      const pHighId = cleanUserId(bet.playerHighId);
+      const pHighName = bet.playerHighName;
+      const amount = Number(bet.amount);
+      const type = bet.type;
+      const rangeMin = bet.rangeMin ? Math.round(bet.rangeMin * 100) : null;
+      const rangeMax = bet.rangeMax ? Math.round(bet.rangeMax * 100) : null;
+
+      let isLowWinner = true;
+      if (type === 'range' && rangeMin && rangeMax) {
+        const midPoint = (rangeMin + rangeMax) / 2;
+        if (finalScaled < rangeMin) {
+          isLowWinner = true;
+        } else if (finalScaled > rangeMax) {
+          isLowWinner = false;
+        } else {
+          isLowWinner = finalScaled <= midPoint;
+        }
+      } else {
+        if (finalScaled < minScaled) {
+          isLowWinner = true; // Lower than min target -> Low (ชล) wins
+        } else if (finalScaled > maxScaled) {
+          isLowWinner = false; // Higher than max target -> High (ชถ) wins
+        } else {
+          const midPoint = (minScaled + maxScaled) / 2;
+          isLowWinner = finalScaled <= midPoint;
+        }
+      }
+
+      const winnerId = isLowWinner ? pLowId : pHighId;
+      const winnerName = isLowWinner ? pLowName : pHighName;
+      const loserId = isLowWinner ? pHighId : pLowId;
+      const loserName = isLowWinner ? pHighName : pLowName;
+
+      // 10% commission on the opponent's wager portion
+      const commissionRate = 0.1;
+      const winnings = amount;
+      const commission = winnings * commissionRate;
+      const payout = amount + (winnings - commission); // amount * 1.90
+
+      // Add balance to winner
+      await adjustPlayerBalance(winnerId, payout, winnerName);
+
+      bet.status = 'resolved';
+      bet.winnerName = winnerName;
+
+      updateRowInSheet('Bets', bet.orderNumber, {
+        9: 'resolved',
+        10: winnerName,
+      });
+
+      // Send push notifications to winner & loser
+      if (sendPushCallback) {
+        try {
+          const winBal = players.find((p) => cleanUserId(p.id) === winnerId)?.balance || 0;
+          const loseBal = players.find((p) => cleanUserId(p.id) === loserId)?.balance || 0;
+
+          await sendPushCallback(winnerId, true, bet.orderNumber, amount, finalTime, payout, winBal, winnings, commission);
+          await sendPushCallback(loserId, false, bet.orderNumber, amount, finalTime, 0, loseBal, winnings, commission);
+        } catch (err) {
+          console.error('[LINE Push] Error sending match results:', err);
+        }
+      }
+    }
+  }
+
+  if (activeGroupId) {
+    try {
+      const lineBot = await import('./lineBot.js');
+      const outcomeText = finalTime < targetMin ? 'ต่ำ (ชล) 🔵' : finalTime > targetMax ? 'สูง (ชถ) 🔴' : 'ในราคาช่าง 🎯';
+      await lineBot.pushToLine(activeGroupId, `🏆 [แจ้งผลการยิงสด]\n\n⏱️ เวลาผลบินจริง: ${finalTime} วินาที\n🎯 ช่วงราคาช่าง: ${targetMin}-${targetMax} วินาที\n🎉 ผลสรุปฝั่งชนะ: ${outcomeText}\n\nระบบเคลียร์ผลและชำระแต้มผู้ชนะเรียบร้อยค่ะ! 🚀`);
+    } catch (e) {
+      console.error("[DB] Error broadcasting round result to group:", e);
+    }
+  }
+
+  return getDashboardData();
+}
+
+export async function autoMatchPendingBets() {
+  const bots = [
+    { id: 'p1', name: 'วชิระ ส. (โบ๊ท)' },
+    { id: 'p2', name: 'เบนซ์ (Benz)' },
+    { id: 'p3', name: 'อาร์ต (Art)' },
+    { id: 'p4', name: 'เจ๋ง (Jeng)' },
+  ];
+
+  for (let i = 0; i < bets.length; i++) {
+    const bet = bets[i];
+    if (bet.status === 'pending_match') {
+      let pLowId = cleanUserId(bet.playerLowId);
+      let pLowName = bet.playerLowName;
+      let pHighId = cleanUserId(bet.playerHighId);
+      let pHighName = bet.playerHighName;
+      const amount = Number(bet.amount);
+
+      let paired = false;
+      // Search opposite pending bet of same amount in other rows
+      for (let j = i + 1; j < bets.length; j++) {
+        const oBet = bets[j];
+        const oAmount = Number(oBet.amount);
+
+        if (oBet.status === 'pending_match' && oAmount === amount) {
+          const oLowId = cleanUserId(oBet.playerLowId);
+          const oHighId = cleanUserId(oBet.playerHighId);
+
+          if (pLowId && !pHighId && !oLowId && oHighId && pLowId !== oHighId) {
+            pHighId = oHighId;
+            pHighName = oBet.playerHighName;
+            paired = true;
+          } else if (!pLowId && pHighId && oLowId && !oHighId && pHighId !== oLowId) {
+            pLowId = oLowId;
+            pLowName = oBet.playerLowName;
+            paired = true;
+          }
+
+          if (paired) {
+            bet.playerLowId = pLowId;
+            bet.playerLowName = pLowName;
+            bet.playerHighId = pHighId;
+            bet.playerHighName = pHighName;
+            bet.status = 'matched';
+
+            updateRowInSheet('Bets', bet.orderNumber, {
+              1: pLowId,
+              2: pLowName,
+              3: pHighId,
+              4: pHighName,
+              9: 'matched',
+            });
+
+            // Mark opposite row as cancelled
+            oBet.status = 'cancelled';
+            updateRowInSheet('Bets', oBet.orderNumber, { 9: 'cancelled' });
+            break;
+          }
+        }
+      }
+
+      // Match against system bot if no opponent found
+      if (!paired) {
+        let opponent = null;
+        for (const bot of bots) {
+          if (bot.id !== pLowId && bot.id !== pHighId) {
+            opponent = bot;
+            break;
+          }
+        }
+
+        if (opponent) {
+          if (!pLowId) {
+            pLowId = opponent.id;
+            pLowName = opponent.name;
+          } else {
+            pHighId = opponent.id;
+            pHighName = opponent.name;
+          }
+
+          bet.playerLowId = pLowId;
+          bet.playerLowName = pLowName;
+          bet.playerHighId = pHighId;
+          bet.playerHighName = pHighName;
+          bet.status = 'matched';
+
+          // Lock bot credit
+          await adjustPlayerBalance(opponent.id, -amount, opponent.name);
+
+          updateRowInSheet('Bets', bet.orderNumber, {
+            1: pLowId,
+            2: pLowName,
+            3: pHighId,
+            4: pHighName,
+            9: 'matched',
+          });
+        }
+      }
+    }
+  }
+}
+
+export async function adminRequestCancelBet(betId) {
+  const orderNumber = betId.replace('bet_', '');
+  const bet = bets.find((b) => b.orderNumber === orderNumber);
+  if (bet && bet.status !== 'resolved' && bet.status !== 'cancelled') {
+    const prevStatus = bet.status;
+    const amount = bet.amount;
+    bet.status = 'cancelled';
+    updateRowInSheet('Bets', orderNumber, { 9: 'cancelled' });
+
+    // Refund credits
+    if (prevStatus === 'pending_match') {
+      const creatorId = bet.playerLowId ? bet.playerLowId : bet.playerHighId;
+      await adjustPlayerBalance(creatorId, amount);
+    } else if (prevStatus === 'matched') {
+      // Refund both players
+      if (bet.playerLowId) await adjustPlayerBalance(bet.playerLowId, amount);
+      if (bet.playerHighId) await adjustPlayerBalance(bet.playerHighId, amount);
+    }
+  }
+  return getDashboardData();
+}
+
+export function handleCancelBetRequest(userId, orderNo) {
+  const searchId = cleanUserId(userId);
+  if (!searchId || !orderNo) return '❌ ผิดพลาด: ไม่สามารถทำรายการได้';
+  const orderStr = orderNo.toString().trim();
+  const bet = bets.find((b) => b.orderNumber === orderStr);
+
+  if (!bet) return `❌ ไม่พบเลขแผลดวล Order #${orderNo} ในระบบ`;
+
+  if (
+    cleanUserId(bet.playerLowId) !== searchId &&
+    cleanUserId(bet.playerHighId) !== searchId
+  ) {
+    return '❌ ขออภัยค่ะ แผลดวลนี้ไม่ใช่แผลของคุณ';
+  }
+
+  if (bet.status === 'resolved' || bet.status === 'cancelled') {
+    return '⚠️ แผลดวลนี้จบหรือถูกยกเลิกไปแล้วเรียบร้อยค่ะ';
+  }
+
+  if (bet.status === 'pending_match') {
+    bet.status = 'cancelled';
+    updateRowInSheet('Bets', orderStr, { 9: 'cancelled' });
+    adjustPlayerBalance(searchId, bet.amount);
+    return `❌ ยกเลิกแผล Order #${orderNo} สำเร็จ!\nระบบได้ทำการยกเลิกแผลและคืนแต้ม ${bet.amount} เครดิตเข้าบัญชีคุณเรียบร้อยแล้วค่ะ`;
+  }
+
+  if (bet.status === 'matched') {
+    bet.status = 'pending_cancel';
+    updateRowInSheet('Bets', orderStr, { 9: 'pending_cancel' });
+    return `⚠️ ร้องขอยกเลิกแผล Order #${orderNo} สำเร็จ\nเนื่องจากแผลถูกจับคู่แล้ว ต้องรอการยืนยันยกเลิกจากฝั่งคู่ดวลของคุณค่ะ`;
+  }
+
+  return '❌ ผิดพลาดในการปรับปรุงสถานะแผล';
+}
+
+export function verifyMockSlipFromClient(depositAmt, realAmt, ref, isQRValid, isDupe) {
+  // Simulator endpoint to simulate slip checking results
+  console.log(`[Simulator] Verifying mock slip: amt=${depositAmt}, real=${realAmt}, ref=${ref}`);
+  return {
+    success: isQRValid,
+    data: isQRValid
+      ? {
+          amountInSlip: realAmt,
+          transRef: ref,
+          transDate: new Date().toISOString(),
+        }
+      : null,
+    message: isQRValid ? 'OK' : 'Cannot read QR code',
+  };
+}
+
+export function resetGoogleSheetsDatabase() {
+  players = [];
+  transactions = [];
+  bets = [];
+  chatLogs = [];
+
+  const headers = {
+    Players: [
+      [
+        'User ID',
+        'Display Name',
+        'Balance (Credits)',
+        'Registered Date',
+        'Bank Name',
+        'Bank Account Number',
+        'Bank Account Holder Name',
+        'LINE User ID',
+      ],
+    ],
+    Transactions: [
+      [
+        'Tx ID',
+        'User ID',
+        'Display Name',
+        'Requested Amount',
+        'Actual Amount',
+        'Bank Ref',
+        'Status',
+        'Reason',
+        'Timestamp',
+      ],
+    ],
+    Bets: [
+      [
+        'Order Number',
+        'Player Low ID',
+        'Player Low Name',
+        'Player High ID',
+        'Player High Name',
+        'Amount',
+        'Type',
+        'Range Min',
+        'Range Max',
+        'Status',
+        'Winner Name',
+        'Timestamp',
+      ],
+    ],
+    LineChatLogs: [
+      ['Timestamp', 'User ID', 'Display Name', 'Sender', 'Message Text', 'Message Type'],
+    ],
+  };
+
+  overwriteSheet('Players', headers.Players);
+  overwriteSheet('Transactions', headers.Transactions);
+  overwriteSheet('Bets', headers.Bets);
+  overwriteSheet('LineChatLogs', headers.LineChatLogs);
+
+
+
+  return getDashboardData();
+}
+
+export function logLineChatMessage(userId, displayName, sender, messageText, messageType) {
+  const now = new Date();
+  const newLog = {
+    timestamp: formatTime(now),
+    userId,
+    displayName,
+    sender,
+    text: messageText,
+    type: messageType || 'text',
+  };
+  chatLogs.push(newLog);
+
+  appendRowToSheet('LineChatLogs', [
+    now.toISOString(),
+    userId,
+    displayName,
+    sender,
+    messageText,
+    messageType || 'text',
+  ]);
+}
+
+export function getPlayerNameFromDb(userId) {
+  const searchId = cleanUserId(userId);
+  const player = players.find((p) => cleanUserId(p.id) === searchId || cleanUserId(p.lineUserId) === searchId);
+  return player ? player.name : null;
+}
+
+export function getLineChatLogs() {
+  return [...chatLogs];
+}
+
+// --- ROCKET ROUND & FLOOD DEDUPLICATION HELPERS ---
+let activeRocketRound = { name: 'ทั่วไป', status: 'ACTIVE', startTime: new Date() };
+const userMessageHistory = new Map();
+
+export function isDuplicateGroupMessage(userId, text) {
+  const clean = text.trim().replace(/\s+/g, '').toLowerCase();
+  if (!clean || clean.length < 2) return false;
+  
+  const key = `${userId}_${clean}`;
+  const now = Date.now();
+  const lastTime = userMessageHistory.get(key);
+  
+  // 4 second sliding window deduplication
+  if (lastTime && (now - lastTime < 4000)) {
+    return true; // Duplicate spam detected
+  }
+  
+  userMessageHistory.set(key, now);
+  
+  // Maintenance: cleanup old keys
+  if (userMessageHistory.size > 200) {
+    for (const [k, v] of userMessageHistory.entries()) {
+      if (now - v > 10000) userMessageHistory.delete(k);
+    }
+  }
+  
+  return false;
+}
+
+export function setActiveRocketRound(roundName) {
+  activeRocketRound = {
+    name: roundName,
+    status: 'ACTIVE',
+    startTime: new Date()
+  };
+  return activeRocketRound;
+}
+
+export function getActiveRocketRound() {
+  return activeRocketRound;
+}
+
