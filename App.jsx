@@ -179,6 +179,22 @@ export default function App() {
   const [rocketName, setRocketName] = useState(''); // Technician / Rocket Team Name (entered manually by admin)
   const [targetMin, setTargetMin] = useState(330.00); // Default Range Min (e.g. 330s)
   const [targetMax, setTargetMax] = useState(380.00); // Default Range Max (e.g. 380s)
+  const [quoteBetAmount, setQuoteBetAmount] = useState(500);
+  const [quoteIsChotoy, setQuoteIsChotoy] = useState(false);
+
+  const handleBroadcastFastQuote = (overrideMin = null, overrideMax = null, overrideAmt = null, overrideChotoy = null) => {
+    const min = overrideMin !== null ? overrideMin : targetMin;
+    const max = overrideMax !== null ? overrideMax : targetMax;
+    const amt = overrideAmt !== null ? overrideAmt : quoteBetAmount;
+    const isChotoy = overrideChotoy !== null ? overrideChotoy : quoteIsChotoy;
+    const name = rocketName.trim() || 'ช่างบั้งไฟสด';
+
+    const chotoyTag = isChotoy ? ' (ชตย: เผื่อช่างไม่ต่อย)' : '';
+    const quoteMsg = `🚀 [ประกาศออกราคาดวลบั้งไฟสด]\n\n🏷️ บั้งไฟ: ${name}\n🎯 ช่วงราคาช่าง: ${min}-${max} วินาที\n💰 แต้มเดิมพันเริ่มต้น: ${amt} pt${chotoyTag}\n\n💡 ตัวอย่างวิธีพิมพ์แทงดวลในกลุ่ม:\n• พิมพ์ "${min}-${max}ล" (ฝั่งต่ำ)\n• พิมพ์ "${min}-${max}ถ" (ฝั่งสูง)\n• พิมพ์ "${min}-${max}ล${amt} ชตย" (เผื่อช่างไม่ต่อย)\n\nเชิญผู้เล่นลงราคา/ท้าดวลได้เลยครับ! ☄️`;
+
+    runBackendFunction('sendAdminMessageToLine', [activeGroupId, quoteMsg]);
+    addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) เข้ากลุ่ม LINE เรียบร้อย!`, 'success');
+  };
   const [customRocketTime, setCustomRocketTime] = useState(355.00); // Default manual entry (e.g. 355s)
   const [flightLogs, setFlightLogs] = useState([]);
   const [settlementResult, setSettlementResult] = useState(null); // Settle results popup summary
@@ -1945,6 +1961,96 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Fast Quote Generator & Preset Shortcuts Card */}
+                <div className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-200 space-y-3 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wider text-emerald-950 flex items-center gap-1.5 font-heading">
+                      🚀 เครื่องมือออกราคาช่างด่วนลงกลุ่มสด (Fast Quote Generator)
+                    </span>
+                    <span className="text-[10px] text-emerald-700 font-bold bg-emerald-100 px-2 py-0.5 rounded-full">
+                      LINE Broadcast Ready
+                    </span>
+                  </div>
+
+                  {/* Preset Buttons */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-slate-500 block font-heading">เลือกราคาสำเร็จรูป (Preset Options):</span>
+                    <div className="flex flex-wrap gap-1.5 text-xs font-bold">
+                      <button
+                        onClick={() => { setTargetMin(300); setTargetMax(340); setQuoteBetAmount(500); setQuoteIsChotoy(false); }}
+                        className="px-2.5 py-1 bg-white hover:bg-emerald-100 border border-emerald-300 text-emerald-900 rounded-lg shadow-2xs transition-all active:scale-95"
+                      >
+                        ⚡ 300-340 (500pt)
+                      </button>
+                      <button
+                        onClick={() => { setTargetMin(310); setTargetMax(355); setQuoteBetAmount(500); setQuoteIsChotoy(false); }}
+                        className="px-2.5 py-1 bg-white hover:bg-emerald-100 border border-emerald-300 text-emerald-900 rounded-lg shadow-2xs transition-all active:scale-95"
+                      >
+                        ⚡ 310-355 (500pt)
+                      </button>
+                      <button
+                        onClick={() => { setTargetMin(315); setTargetMax(360); setQuoteBetAmount(500); setQuoteIsChotoy(false); }}
+                        className="px-2.5 py-1 bg-white hover:bg-emerald-100 border border-emerald-300 text-emerald-900 rounded-lg shadow-2xs transition-all active:scale-95"
+                      >
+                        ⚡ 315-360 (500pt)
+                      </button>
+                      <button
+                        onClick={() => { setTargetMin(320); setTargetMax(370); setQuoteBetAmount(500); setQuoteIsChotoy(false); }}
+                        className="px-2.5 py-1 bg-white hover:bg-emerald-100 border border-emerald-300 text-emerald-900 rounded-lg shadow-2xs transition-all active:scale-95"
+                      >
+                        ⚡ 320-370 (500pt)
+                      </button>
+                      <button
+                        onClick={() => { setTargetMin(340); setTargetMax(380); setQuoteBetAmount(500); setQuoteIsChotoy(false); }}
+                        className="px-2.5 py-1 bg-white hover:bg-emerald-100 border border-emerald-300 text-emerald-900 rounded-lg shadow-2xs transition-all active:scale-95"
+                      >
+                        ⚡ 340-380 (500pt)
+                      </button>
+                      <button
+                        onClick={() => { setTargetMin(345); setTargetMax(385); setQuoteBetAmount(500); setQuoteIsChotoy(true); }}
+                        className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 border border-amber-400 text-amber-950 rounded-lg shadow-2xs transition-all active:scale-95"
+                      >
+                        ⚡ 345-385 (ชตย)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Bet Amount & Chotoy Option Row */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-emerald-200">
+                      <span className="text-[11px] font-bold text-slate-600 whitespace-nowrap">แต้มดวลเริ่มต้น:</span>
+                      <input
+                        type="number"
+                        step="50"
+                        value={quoteBetAmount}
+                        onChange={(e) => setQuoteBetAmount(parseInt(e.target.value) || 500)}
+                        className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold px-2 py-1 rounded-lg text-xs font-mono"
+                      />
+                      <span className="text-xs text-slate-500 font-mono">pt</span>
+                    </div>
+
+                    <label className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-emerald-200 cursor-pointer hover:bg-emerald-50/50 transition-all">
+                      <input
+                        type="checkbox"
+                        checked={quoteIsChotoy}
+                        onChange={(e) => setQuoteIsChotoy(e.target.checked)}
+                        className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span className="text-xs font-extrabold text-amber-900">
+                        เผื่อช่างไม่ต่อย (ชตย) Option
+                      </span>
+                    </label>
+                  </div>
+
+                  {/* Broadcast Quote Button */}
+                  <button
+                    onClick={() => handleBroadcastFastQuote()}
+                    className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 font-heading"
+                  >
+                    🚀 ประกาศออกราคาช่าง {targetMin}-{targetMax} วินาที ลงกลุ่มดวลสด (Broadcast Quote)
+                  </button>
+                </div>
+
                 {/* Admin Quick Action Command Bar */}
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block font-heading">
@@ -1953,7 +2059,7 @@ export default function App() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs font-bold">
                     <button
                       onClick={() => {
-                        runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🤖 [แอดมินเปิดรับแผลบ้าน]\n🚀 บั้งไฟ: ${rocketName}\n🎯 ราคาช่าง: ${targetMin}-${targetMax}s\n\nเปิดรับดวล: ชล 500 pt / ชถ 500 pt (พิมพ์ 'ต' หรือ 'ชล'/'ชถ' เพื่อรับแผลดวลได้ทันทีค่ะ)`]);
+                        runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🤖 [แอดมินเปิดรับแผลบ้าน]\n🚀 บั้งไฟ: ${rocketName || 'ช่างบั้งไฟสด'}\n🎯 ราคาช่าง: ${targetMin}-${targetMax}s\n\nเปิดรับดวล: ชล 500 pt / ชถ 500 pt (พิมพ์ 'ต' หรือ 'ชล'/'ชถ' เพื่อรับแผลดวลได้ทันทีค่ะ)`]);
                         addToast(`🤖 กระจายแผลบ้านเข้ากลุ่ม LINE [${rocketName}] เรียบร้อย!`, 'success');
                       }}
                       className="py-2 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95"
@@ -1962,7 +2068,7 @@ export default function App() {
                     </button>
                     <button
                       onClick={() => {
-                        runBackendFunction('sendAdminMessageToLine', [activeGroupId, `⛔ [แจ้งเตือนจากสนาม]\n🚀 รอบบั้งไฟ: ${rocketName}\n❌ ผลประกาศ: ช่าง ⛔ (โมฆะยกเลิกแผลดวลทั้งรอบ และคืนเครดิต 100% เรียบร้อยแล้วค่ะ)`]);
+                        runBackendFunction('sendAdminMessageToLine', [activeGroupId, `⛔ [แจ้งเตือนจากสนาม]\n🚀 รอบบั้งไฟ: ${rocketName || 'ช่างบั้งไฟสด'}\n❌ ผลประกาศ: ช่าง ⛔ (โมฆะยกเลิกแผลดวลทั้งรอบ และคืนเครดิต 100% เรียบร้อยแล้วค่ะ)`]);
                         addToast(`⛔ ประกาศ "ช่าง ⛔" และบรอดแคสต์เข้ากลุ่ม LINE เรียบร้อย!`, 'danger');
                       }}
                       className="py-2 px-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95"
