@@ -667,10 +667,16 @@ export async function adminRejectTransaction(txId, reason) {
 }
 
 export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxParam, sendPushCallback) {
-  // Support both single target or range target (e.g. 350 - 375)
+  // Support both single target or range target (e.g. 330 - 380)
   let targetMin = Number(targetMinOrTime) || 350;
-  let targetMax = targetMaxParam !== undefined && targetMaxParam !== null ? Number(targetMaxParam) : targetMin;
-  let callback = typeof targetMaxParam === 'function' ? targetMaxParam : sendPushCallback;
+  let targetMax = targetMin;
+  let callback = sendPushCallback;
+
+  if (typeof targetMaxParam === 'number' || (typeof targetMaxParam === 'string' && targetMaxParam !== '' && !isNaN(Number(targetMaxParam)))) {
+    targetMax = Number(targetMaxParam);
+  } else if (typeof targetMaxParam === 'function') {
+    callback = targetMaxParam;
+  }
 
   // 1. Perform automatic matching
   await autoMatchPendingBets();

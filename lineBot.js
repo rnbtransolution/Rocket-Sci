@@ -532,11 +532,14 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     return true;
   }
 
-  // 2. Betting commands (e.g., "ล200", "ถ500", "+5ชล200", "300-340ล1000")
-  // Format 1: [keywords][amount]
+  // 2. Betting commands (e.g., "ล200", "ถ500", "+5ชล200", "300-340ล", "345-385ล500 ชตย")
+  const isChotoy = clean.includes('ชตย') || text.includes('ชตย');
+  const cleanBetText = clean.replace(/ชตย/g, '').trim();
+
+  // Format 1: [keywords][amount] (e.g. "ล200", "ถ500")
   const betRegex = /^(\+?5?[a-zA-Z\u0e00-\u0e7f]+)(\d+)$/;
-  if (betRegex.test(clean)) {
-    const match = clean.match(betRegex);
+  if (betRegex.test(cleanBetText)) {
+    const match = cleanBetText.match(betRegex);
     const cmd = match[1];
     const amount = parseInt(match[2]);
     
@@ -545,26 +548,26 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     else if (keywordsHigh.includes(cmd)) side = 'high';
     
     if (side && amount >= 10) {
-      processOpenBetRequest(side, amount, 'normal', null, null, userId, displayName, replyToken);
+      processOpenBetRequest(side, amount, 'normal', null, null, userId, displayName, replyToken, isChotoy);
       return true;
     }
   }
 
-  // Format 2: [Min]-[Max][keywords][amount] (e.g. "300-340ล500")
-  const rangeBetRegex = /^(\d+)-(\d+)([a-zA-Z\u0e00-\u0e7f]+)(\d+)$/;
-  if (rangeBetRegex.test(clean)) {
-    const match = clean.match(rangeBetRegex);
+  // Format 2: [Min]-[Max][keywords][amount?] (e.g. "300-340ล", "300-340ถ", "300-340ล1000", "345-385ล500 ชตย")
+  const rangeBetRegex = /^(\d+)-(\d+)([a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
+  if (rangeBetRegex.test(cleanBetText)) {
+    const match = cleanBetText.match(rangeBetRegex);
     const minVal = parseInt(match[1]);
     const maxVal = parseInt(match[2]);
     const cmd = match[3];
-    const amount = parseInt(match[4]);
+    const amount = match[4] ? parseInt(match[4]) : 500; // Default amount to 500 pt if not specified
     
     let side = '';
     if (keywordsLow.includes(cmd)) side = 'low';
     else if (keywordsHigh.includes(cmd)) side = 'high';
     
     if (side && amount >= 10 && minVal < maxVal) {
-      processOpenBetRequest(side, amount, 'range', minVal, maxVal, userId, displayName, replyToken);
+      processOpenBetRequest(side, amount, 'range', minVal, maxVal, userId, displayName, replyToken, isChotoy);
       return true;
     }
   }
@@ -572,7 +575,7 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   return false;
 }
 
-async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken) {
+async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false) {
   const balance = await db.getPlayerBalance(userId, displayName);
   if (balance < amount) {
     await replyToLine(replyToken, `⚠️ ขออภัยค่ะ ยอดเงินเครดิตคงเหลือของคุณไม่เพียงพอสำหรับการท้าดวลแผลนี้ (คงเหลือ ${balance} แต้ม ต้องการใช้ ${amount} แต้ม)\n\nกรุณาพิมพ์ "ฝากเงิน" เพื่อทำรายการเติมทุนค่ะ`, userId);
@@ -589,7 +592,11 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal);
   
   let rangeInfo = '';
-  if (type === 'range') rangeInfo = `${minVal}-${maxVal}`;
+  if (type === 'range') {
+    rangeInfo = `${minVal}-${maxVal}${isChotoy ? ' (ชตย: ช่างไม่ต่อย)' : ''}`;
+  } else if (isChotoy) {
+    rangeInfo = '(ชตย: ช่างไม่ต่อย)';
+  }
   
   const betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfo);
   await replyToLine(replyToken, betCard, userId);

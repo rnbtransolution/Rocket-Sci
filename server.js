@@ -66,7 +66,8 @@ app.post('/api/run', async (req, res) => {
         
       case 'adminResolveBets':
         // Pass sendMatchResultPush callback to resolve bets and send push notifications
-        result = await db.adminResolveBets(args[0], args[1], lineBot.sendMatchResultPush);
+        // args: [finalTime, targetMin, targetMax]
+        result = await db.adminResolveBets(args[0], args[1], args[2], lineBot.sendMatchResultPush);
         break;
         
       case 'adminRequestCancelBet':
