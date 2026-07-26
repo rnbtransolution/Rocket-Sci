@@ -531,9 +531,39 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   const keywordsHigh = ['ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', '+5ชย', '+5ชถ', '+5ย', '+5ถ', 'ช่างยั่ง', 'ช่างถอย'];
   const keywordsAccept = ['ต', 'ติด', 'ครับ', 'เค', 'จ้า', 'ยอมรับ', 'ดีล'];
   
-  // 1. Check Accept Match Command (e.g. "ต", "ติด")
-  if (keywordsAccept.includes(clean)) {
-    db.matchExistingOpenBet(userId, displayName).then(async matched => {
+  // 0. Pending Deals Board Command ("กระดานดวล", "แผลค้าง", "เปิดรอคู่")
+  if (clean === 'กระดานดวล' || clean === 'แผลค้าง' || clean === 'เปิดรอคู่' || clean === 'รอคู่') {
+    const pendingList = db.getPendingBetsList();
+    if (pendingList.length === 0) {
+      replyToLine(replyToken, `📊 [กระดานดวลสด]\n\n❌ ปัจจุบันไม่มีแผลดวลที่เปิดรอคู่ในระบบเลยค่ะ คุณสามารถเปิดแผลท้าดวลใหม่ได้ทันทีค่ะ 🚀`, userId);
+    } else {
+      let boardMsg = `📊 [กระดานแผลดวลที่เปิดรอคู่ดวลสด (${pendingList.length} รายการ)]\n`;
+      pendingList.forEach((b, idx) => {
+        const creatorName = b.playerLowName || b.playerHighName;
+        const sideText = b.playerLowId ? 'ต่ำ (ชล)' : 'สูง (ชถ)';
+        const rangeText = b.rangeMin && b.rangeMax ? `ช่วง ${b.rangeMin}-${b.rangeMax}s` : '';
+        const shortCode = b.orderNumber.slice(-2);
+        boardMsg += `\n${idx + 1}. Order #${b.orderNumber} (รหัส: ${shortCode})\n   👤 ผู้ท้า: คุณ${creatorName}\n   🎯 ฝั่ง: ${sideText} ${rangeText}\n   💰 ยอด: ${b.amount} pt\n   👉 พิมพ์ "ต${shortCode}" เพื่อกดรับแผลนี้โดยเฉพาะ\n-----------------------`;
+      });
+      boardMsg += `\n\n💡 พิมพ์ "ต [เลขแผล]" หรือกดปุ่มบนการ์ดแผลเพื่อรับดวลได้ทันทีค่ะ! ☄️`;
+      replyToLine(replyToken, boardMsg, userId);
+    }
+    return true;
+  }
+
+  // 1. Check Accept Match Command (e.g. "ต", "ต12", "ต 12", "12ต", "ต#12", "ติด", "รับแผล")
+  const specificAcceptRegex = /^(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*#?(\d{2,6})$/;
+  const reverseAcceptRegex = /^#?(\d{2,6})\s*(ต|ติด|รับ)$/;
+  let targetOrderNo = null;
+
+  if (specificAcceptRegex.test(clean)) {
+    targetOrderNo = clean.match(specificAcceptRegex)[2];
+  } else if (reverseAcceptRegex.test(clean)) {
+    targetOrderNo = clean.match(reverseAcceptRegex)[1];
+  }
+
+  if (keywordsAccept.includes(clean) || targetOrderNo) {
+    db.matchExistingOpenBet(userId, displayName, targetOrderNo).then(async matched => {
       if (matched && matched.error === 'INSUFFICIENT_BALANCE') {
         await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้เล่นเกินเครดิต]\n\nคุณไม่สามารถกดรับแผลดวลนี้ได้ เนื่องจากยอดเครดิตคงเหลือไม่เพียงพอ!\n• เครดิตคงเหลือของคุณ: ${matched.current} แต้ม\n• ยอดแผลที่ต้องการดวล: ${matched.required} แต้ม\n\n❌ ระบบได้ทำการบล็อกรายการนี้เรียบร้อยค่ะ กรุณาพิมพ์ "ฝากเงิน" เพื่อเติมเครดิตก่อนแทงดวลนะคะ 🚀`, userId);
         return;
@@ -558,7 +588,10 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
           await replyToLine(replyToken, flexMatcher, userId);
         }
       } else {
-        await replyToLine(replyToken, `❌ ขออภัยค่ะ ตอนนี้ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ดวลในระบบเลยค่ะ คุณสามารถเปิดแผลใหม่ได้ทันทีค่ะ`, userId);
+        const notFoundText = targetOrderNo
+          ? `❌ ไม่พบแผลดวล Order #${targetOrderNo} ที่เปิดรอคู่ในระบบเลยค่ะ (แผลอาจจับคู่แล้วหรือถูกยกเลิก)`
+          : `❌ ขออภัยค่ะ ตอนนี้ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ดวลในระบบเลยค่ะ คุณสามารถเปิดแผลใหม่ได้ทันทีค่ะ`;
+        await replyToLine(replyToken, notFoundText, userId);
       }
     });
     return true;

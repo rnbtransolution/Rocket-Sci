@@ -426,11 +426,12 @@ export function saveOpenBet(
   return true;
 }
 
-// match against an existing open bet (with strict credit verification)
-export async function matchExistingOpenBet(userId, displayName) {
+// match against an existing open bet (supports optional specific target order number e.g. "12" or "123456")
+export async function matchExistingOpenBet(userId, displayName, targetOrderNo = null) {
   const searchId = cleanUserId(userId);
   const matcherPlayer = players.find((p) => cleanUserId(p.id) === searchId);
   const matcherBal = matcherPlayer ? matcherPlayer.balance : 0;
+  const cleanTargetOrder = targetOrderNo ? targetOrderNo.toString().trim().replace(/#/g, '') : null;
 
   for (const bet of bets) {
     if (bet.status === 'pending_match') {
@@ -439,6 +440,14 @@ export async function matchExistingOpenBet(userId, displayName) {
         cleanUserId(bet.playerHighId) === searchId
       ) {
         continue; // Cannot match own bet
+      }
+
+      // If specific order number target requested, verify match
+      if (cleanTargetOrder) {
+        const orderStr = bet.orderNumber.toString();
+        if (orderStr !== cleanTargetOrder && !orderStr.endsWith(cleanTargetOrder)) {
+          continue;
+        }
       }
 
       // Strict Credit Check: Matcher must have enough balance
@@ -481,6 +490,10 @@ export async function matchExistingOpenBet(userId, displayName) {
     }
   }
   return null;
+}
+
+export function getPendingBetsList() {
+  return bets.filter(b => b.status === 'pending_match');
 }
 
 // log transactions (deposits/withdrawals)
