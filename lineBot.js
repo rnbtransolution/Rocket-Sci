@@ -39,7 +39,12 @@ export async function replyToLine(replyToken, text, userId) {
       contents: text
     };
   } else {
-    messageObj = { type: 'text', text: text };
+    let outText = String(text);
+    if (userId && !outText.includes('คุณ ') && !outText.includes('ถึงคุณ')) {
+      const pName = db.getPlayerNameFromDb(userId) || 'ผู้เล่น';
+      outText = `👤 [ถึงคุณ ${pName}]:\n` + outText;
+    }
+    messageObj = { type: 'text', text: outText };
   }
   
   const payload = {
@@ -606,7 +611,7 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
         // Reply in group or chat
         if (groupId) {
-          await pushToLine(groupId, `☄️ [จับคู่ดวลสำเร็จ!]\nOrder #${matched.orderNumber}\nคู่ดวล: คุณ ${matched.playerLowName} 🆚 คุณ ${matched.playerHighName}\nยอดดวล: ${matched.amount} แต้ม\nสถานะ: แมตช์ดวลเรียบร้อย (หักเครดิตเข้ากองกลาง 100% เรียบร้อยแล้วค่ะ) 🚀`);
+          await pushToLine(groupId, `☄️ [จับคู่ดวลสำเร็จ!]\n👤 ผู้กดรับแผล: คุณ ${displayName}\nOrder #${matched.orderNumber}\nคู่ดวล: คุณ ${matched.playerLowName} 🆚 คุณ ${matched.playerHighName}\nยอดดวล: ${matched.amount} แต้ม\nสถานะ: แมตช์ดวลเรียบร้อย (หักเครดิตเข้ากองกลาง 100% เรียบร้อยแล้วค่ะ) 🚀`);
         } else {
           await replyToLine(replyToken, flexMatcher, userId);
         }
