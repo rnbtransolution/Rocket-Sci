@@ -553,6 +553,9 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
       boardMsg += `\n\n💡 พิมพ์ "ต [เลขแผล]" หรือกดปุ่มบนการ์ดแผลเพื่อรับดวลได้ทันทีค่ะ! ☄️`;
       replyToLine(replyToken, boardMsg, userId);
     }
+    return true;
+  }
+
   // 0.1 Cancel Bet Command (e.g., "ยกเลิก", "ยกเลิก 70572", "ยกเลิก#70572", "ยกเลิก 72", "cancel")
   const cancelBetRegex = /^(ยกเลิก|cancel)\s*#?(\d{2,6})?$/i;
   if (cancelBetRegex.test(clean)) {
