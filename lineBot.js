@@ -548,6 +548,29 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
       boardMsg += `\n\n💡 พิมพ์ "ต [เลขแผล]" หรือกดปุ่มบนการ์ดแผลเพื่อรับดวลได้ทันทีค่ะ! ☄️`;
       replyToLine(replyToken, boardMsg, userId);
     }
+  // 0.1 Cancel Bet Command (e.g., "ยกเลิก", "ยกเลิก 70572", "ยกเลิก#70572", "ยกเลิก 72", "cancel")
+  const cancelBetRegex = /^(ยกเลิก|cancel)\s*#?(\d{2,6})?$/i;
+  if (cancelBetRegex.test(clean)) {
+    const match = clean.match(cancelBetRegex);
+    const targetOrderNo = match[2] || null;
+
+    db.cancelOpenBet(userId, targetOrderNo).then(async res => {
+      if (res.success) {
+        const msg = `❌ [ยกเลิกแผลดวลสำเร็จ]\nOrder #${res.orderNumber} ถูกยกเลิกโดย คุณ${res.creatorName}\n💰 ระบบคืนเครดิต ${res.amount} แต้มกลับเข้าบัญชีเรียบร้อยแล้วค่ะ 🚀`;
+        if (groupId) {
+          await pushToLine(groupId, msg);
+        } else {
+          await replyToLine(replyToken, msg, userId);
+        }
+      } else if (res.error === 'UNAUTHORIZED') {
+        await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้ยกเลิกแผลผู้เล่นอื่น]\n\nเฉพาะเจ้าของแผลท้าดวล (คุณ${res.creatorName}) หรือแอดมินเท่านั้นที่สามารถยกเลิก Order #${res.orderNumber} ได้ค่ะ`, userId);
+      } else {
+        const notFoundText = targetOrderNo
+          ? `❌ ไม่พบแผลดวล Order #${targetOrderNo} ที่เปิดรอคู่ในระบบเลยค่ะ (แผลอาจจับคู่แล้วหรือถูกยกเลิกไปแล้ว)`
+          : `❌ ขออภัยค่ะ คุณไม่มีแผลดวลที่เปิดรอคู่อยู่ในระบบเลยค่ะ`;
+        await replyToLine(replyToken, notFoundText, userId);
+      }
+    });
     return true;
   }
 
@@ -1558,7 +1581,18 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "action": {
             "type": "message",
             "label": "🤝 กดรับแผลดวลนี้ (Order #" + orderNo + ")",
-            "text": "ต"
+            "text": "ต " + orderNo
+          }
+        },
+        {
+          "type": "button",
+          "style": "secondary",
+          "height": "sm",
+          "color": "#D32F2F",
+          "action": {
+            "type": "message",
+            "label": "❌ ยกเลิกแผลนี้ (เจ้าของแผล)",
+            "text": "ยกเลิก " + orderNo
           }
         },
         {

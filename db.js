@@ -496,6 +496,53 @@ export function getPendingBetsList() {
   return bets.filter(b => b.status === 'pending_match');
 }
 
+// Cancel an open pending bet and refund credit to the creator (supports optional specific target order number e.g. "70572")
+export async function cancelOpenBet(userId, targetOrderNo = null, isAdmin = false) {
+  const searchId = cleanUserId(userId);
+  const cleanTargetOrder = targetOrderNo ? targetOrderNo.toString().trim().replace(/#/g, '') : null;
+
+  for (const bet of bets) {
+    if (bet.status === 'pending_match') {
+      const creatorId = bet.playerLowId ? cleanUserId(bet.playerLowId) : cleanUserId(bet.playerHighId);
+      const creatorName = bet.playerLowName || bet.playerHighName || 'ผู้เล่น';
+
+      // If specific order requested, verify match
+      if (cleanTargetOrder) {
+        const orderStr = bet.orderNumber.toString();
+        if (orderStr !== cleanTargetOrder && !orderStr.endsWith(cleanTargetOrder)) {
+          continue;
+        }
+      }
+
+      // Authorization Guard: Only bet creator or admin can cancel an open bet
+      if (creatorId !== searchId && !isAdmin) {
+        return { error: 'UNAUTHORIZED', creatorName: creatorName, orderNumber: bet.orderNumber };
+      }
+
+      // Mark status as cancelled
+      bet.status = 'cancelled';
+
+      // Update in Google Sheets
+      updateRowInSheet('Bets', bet.orderNumber, {
+        9: 'cancelled',
+      });
+
+      // Refund full credit back to creator
+      await adjustPlayerBalance(creatorId, bet.amount, creatorName);
+
+      return {
+        success: true,
+        orderNumber: bet.orderNumber,
+        amount: bet.amount,
+        creatorId: creatorId,
+        creatorName: creatorName,
+      };
+    }
+  }
+
+  return { error: 'NOT_FOUND' };
+}
+
 // log transactions (deposits/withdrawals)
 export function logTransaction(
   userId,
@@ -739,24 +786,17 @@ export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxPara
       const rangeMax = bet.rangeMax ? Math.round(bet.rangeMax * 100) : null;
 
       let isLowWinner = true;
-      if (type === 'range' && rangeMin && rangeMax) {
-        const midPoint = (rangeMin + rangeMax) / 2;
-        if (finalScaled < rangeMin) {
-          isLowWinner = true;
-        } else if (finalScaled > rangeMax) {
-          isLowWinner = false;
-        } else {
-          isLowWinner = finalScaled <= midPoint;
-        }
+      const timeSec = Number(finalTime);
+      const minSec = (type === 'range' && bet.rangeMin !== null && bet.rangeMax !== null) ? Number(bet.rangeMin) : Number(targetMin);
+      const maxSec = (type === 'range' && bet.rangeMin !== null && bet.rangeMax !== null) ? Number(bet.rangeMax) : Number(targetMax);
+
+      if (timeSec < minSec) {
+        isLowWinner = true; // Lower than min target -> Low (ชล) wins
+      } else if (timeSec > maxSec) {
+        isLowWinner = false; // Higher than max target -> High (ชถ) wins
       } else {
-        if (finalScaled < minScaled) {
-          isLowWinner = true; // Lower than min target -> Low (ชล) wins
-        } else if (finalScaled > maxScaled) {
-          isLowWinner = false; // Higher than max target -> High (ชถ) wins
-        } else {
-          const midPoint = (minScaled + maxScaled) / 2;
-          isLowWinner = finalScaled <= midPoint;
-        }
+        const midPoint = (minSec + maxSec) / 2;
+        isLowWinner = timeSec <= midPoint;
       }
 
       const winnerId = isLowWinner ? pLowId : pHighId;

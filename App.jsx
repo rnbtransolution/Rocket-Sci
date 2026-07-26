@@ -1404,19 +1404,17 @@ export default function App() {
           const previouslyMatched = bets.filter(b => b.status === 'matched');
           const payouts = previouslyMatched.map(b => {
             let isLowWinner = true;
-            if (b.type === 'range' && b.rangeMin && b.rangeMax) {
-              const midPoint = (b.rangeMin + b.rangeMax) / 2;
-              if (finalScaled < b.rangeMin) {
-                isLowWinner = true;
-              } else if (finalScaled > b.rangeMax) {
-                isLowWinner = false;
-              } else {
-                isLowWinner = finalScaled <= midPoint;
-              }
+            const timeSec = Number(finalTime);
+            const minSec = (b.type === 'range' && b.rangeMin !== null && b.rangeMax !== null) ? Number(b.rangeMin) : Number(targetMin);
+            const maxSec = (b.type === 'range' && b.rangeMin !== null && b.rangeMax !== null) ? Number(b.rangeMax) : Number(targetMax);
+
+            if (timeSec < minSec) {
+              isLowWinner = true;
+            } else if (timeSec > maxSec) {
+              isLowWinner = false;
             } else {
-              if (finalScaled < targetMin * 100) isLowWinner = true;
-              else if (finalScaled > targetMax * 100) isLowWinner = false;
-              else isLowWinner = finalScaled <= ((targetMin + targetMax) / 2) * 100;
+              const midPoint = (minSec + maxSec) / 2;
+              isLowWinner = timeSec <= midPoint;
             }
             const winnerName = isLowWinner ? b.playerLowName : b.playerHighName;
             return {
@@ -1462,19 +1460,17 @@ export default function App() {
           if (bet.status !== 'matched') return bet;
 
           let isLowWinner = true;
-          if (bet.type === 'range' && bet.rangeMin && bet.rangeMax) {
-            const midPoint = (bet.rangeMin + bet.rangeMax) / 2;
-            if (finalScaled < bet.rangeMin) {
-              isLowWinner = true;
-            } else if (finalScaled > bet.rangeMax) {
-              isLowWinner = false;
-            } else {
-              isLowWinner = finalScaled <= midPoint;
-            }
+          const timeSec = Number(finalTime);
+          const minSec = (bet.type === 'range' && bet.rangeMin !== null && bet.rangeMax !== null) ? Number(bet.rangeMin) : Number(targetMin);
+          const maxSec = (bet.type === 'range' && bet.rangeMin !== null && bet.rangeMax !== null) ? Number(bet.rangeMax) : Number(targetMax);
+
+          if (timeSec < minSec) {
+            isLowWinner = true;
+          } else if (timeSec > maxSec) {
+            isLowWinner = false;
           } else {
-            if (finalScaled < targetMin * 100) isLowWinner = true;
-            else if (finalScaled > targetMax * 100) isLowWinner = false;
-            else isLowWinner = finalScaled <= ((targetMin + targetMax) / 2) * 100;
+            const midPoint = (minSec + maxSec) / 2;
+            isLowWinner = timeSec <= midPoint;
           }
 
           const winnerId = isLowWinner ? bet.playerLowId : bet.playerHighId;
