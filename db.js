@@ -342,22 +342,29 @@ export async function getPlayerBalance(userId, displayName) {
   return player ? player.balance : 0;
 }
 
-// adjust a player's balance (adds or deducts credits)
+// adjust a player's balance (adds or deducts credits with strict anti-overdraft protection)
 export async function adjustPlayerBalance(userId, delta, displayName) {
   const shortUserId = await getOrCreateShortUserId(userId, displayName);
   const searchId = cleanUserId(shortUserId);
-  if (!searchId) return;
+  if (!searchId) return false;
   
   const numericDelta = Number(delta) || 0;
   const player = players.find((p) => cleanUserId(p.id) === searchId);
 
   if (player) {
+    // Strict Anti-Overdraft Guard: Block deductions if resulting balance would be less than 0
+    if (numericDelta < 0 && (player.balance + numericDelta < 0)) {
+      console.warn(`[CREDIT BLOCK] Refused deduction for ${searchId} (${player.name}): current balance ${player.balance}, attempted ${numericDelta}`);
+      return false;
+    }
     player.balance += numericDelta;
     updateRowInSheet('Players', searchId, { 2: player.balance });
+    return true;
   }
+  return false;
 }
 
-// Save an open bet
+// Save an open bet (with credit verification)
 export function saveOpenBet(
   orderNo,
   userId,
@@ -369,16 +376,29 @@ export function saveOpenBet(
   rMax
 ) {
   const searchId = cleanUserId(userId);
+  const player = players.find((p) => cleanUserId(p.id) === searchId);
+  const currentBal = player ? player.balance : 0;
+  const betAmount = Number(amount) || 0;
+
+  if (currentBal < betAmount) {
+    console.warn(`[BET BLOCK] Refused saveOpenBet for ${searchId}: balance ${currentBal} < betAmount ${betAmount}`);
+    return false;
+  }
+
   const now = new Date();
+  const lowId = side === 'low' ? searchId : '';
+  const lowName = side === 'low' ? displayName : '';
+  const highId = side === 'high' ? searchId : '';
+  const highName = side === 'high' ? displayName : '';
 
   const newBet = {
     id: 'bet_' + orderNo,
     orderNumber: orderNo.toString(),
-    playerLowId: side === 'low' ? searchId : '',
-    playerLowName: side === 'low' ? displayName : '',
-    playerHighId: side === 'high' ? searchId : '',
-    playerHighName: side === 'high' ? displayName : '',
-    amount: Number(amount) || 0,
+    playerLowId: lowId,
+    playerLowName: lowName,
+    playerHighId: highId,
+    playerHighName: highName,
+    amount: betAmount,
     type: type,
     rangeMin: rMin ? Number(rMin) : null,
     rangeMax: rMax ? Number(rMax) : null,
@@ -386,15 +406,15 @@ export function saveOpenBet(
     winnerName: '',
     timestamp: formatTime(now),
   };
-  bets.push(newBet);
+  bets.unshift(newBet); // Add to beginning of memory list
 
   appendRowToSheet('Bets', [
     orderNo.toString(),
-    newBet.playerLowId,
-    newBet.playerLowName,
-    newBet.playerHighId,
-    newBet.playerHighName,
-    amount.toString(),
+    lowId,
+    lowName,
+    highId,
+    highName,
+    betAmount.toString(),
     type,
     rMin ? rMin.toString() : '',
     rMax ? rMax.toString() : '',
@@ -402,11 +422,15 @@ export function saveOpenBet(
     '',
     now.toISOString(),
   ]);
+  
+  return true;
 }
 
-// match against an existing open bet
+// match against an existing open bet (with strict credit verification)
 export async function matchExistingOpenBet(userId, displayName) {
   const searchId = cleanUserId(userId);
+  const matcherPlayer = players.find((p) => cleanUserId(p.id) === searchId);
+  const matcherBal = matcherPlayer ? matcherPlayer.balance : 0;
 
   for (const bet of bets) {
     if (bet.status === 'pending_match') {
@@ -415,6 +439,11 @@ export async function matchExistingOpenBet(userId, displayName) {
         cleanUserId(bet.playerHighId) === searchId
       ) {
         continue; // Cannot match own bet
+      }
+
+      // Strict Credit Check: Matcher must have enough balance
+      if (matcherBal < bet.amount) {
+        return { error: 'INSUFFICIENT_BALANCE', required: bet.amount, current: matcherBal };
       }
 
       const creatorId = bet.playerLowId ? bet.playerLowId : bet.playerHighId;

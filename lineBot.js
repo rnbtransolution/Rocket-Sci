@@ -534,7 +534,12 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   // 1. Check Accept Match Command (e.g. "ต", "ติด")
   if (keywordsAccept.includes(clean)) {
     db.matchExistingOpenBet(userId, displayName).then(async matched => {
-      if (matched) {
+      if (matched && matched.error === 'INSUFFICIENT_BALANCE') {
+        await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้เล่นเกินเครดิต]\n\nคุณไม่สามารถกดรับแผลดวลนี้ได้ เนื่องจากยอดเครดิตคงเหลือไม่เพียงพอ!\n• เครดิตคงเหลือของคุณ: ${matched.current} แต้ม\n• ยอดแผลที่ต้องการดวล: ${matched.required} แต้ม\n\n❌ ระบบได้ทำการบล็อกรายการนี้เรียบร้อยค่ะ กรุณาพิมพ์ "ฝากเงิน" เพื่อเติมเครดิตก่อนแทงดวลนะคะ 🚀`, userId);
+        return;
+      }
+
+      if (matched && matched.orderNumber) {
         // Send Private 1-on-1 Flex Notification DM to Creator
         const creatorName = matched.playerLowName || matched.playerHighName;
         const creatorBal = await db.getPlayerBalance(matched.creatorId, creatorName);
@@ -605,18 +610,26 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false) {
   const balance = await db.getPlayerBalance(userId, displayName);
   if (balance < amount) {
-    await replyToLine(replyToken, `⚠️ ขออภัยค่ะ ยอดเงินเครดิตคงเหลือของคุณไม่เพียงพอสำหรับการท้าดวลแผลนี้ (คงเหลือ ${balance} แต้ม ต้องการใช้ ${amount} แต้ม)\n\nกรุณาพิมพ์ "ฝากเงิน" เพื่อทำรายการเติมทุนค่ะ`, userId);
+    await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้เล่นเกินเครดิต]\n\nยอดเงินเครดิตคงเหลือของคุณไม่เพียงพอสำหรับการท้าดวลแผลนี้!\n• เครดิตคงเหลือของคุณ: ${balance} แต้ม\n• ยอดที่ต้องการใช้: ${amount} แต้ม\n\n❌ กรุณาพิมพ์ "ฝากเงิน" เพื่อทำรายการเติมทุนก่อนแทงดวลนะคะ 🚀`, userId);
     return;
   }
 
   // Generate order number
   const orderNo = Math.floor(Math.random() * 899999 + 100000);
   
-  // Deduct balance
-  await db.adjustPlayerBalance(userId, -amount, displayName);
+  // Deduct balance (with strict return check)
+  const success = await db.adjustPlayerBalance(userId, -amount, displayName);
+  if (!success) {
+    await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้เล่นเกินเครดิต]\n\nเกิดข้อผิดพลาด: ยอดเงินเครดิตคงเหลือของคุณไม่เพียงพอสำหรับการท้าดวลแผลนี้ (คงเหลือ ${balance} แต้ม ต้องการใช้ ${amount} แต้ม)\n\n❌ กรุณาพิมพ์ "ฝากเงิน" เพื่อเติมเครดิตก่อนแทงดวลนะคะ 🚀`, userId);
+    return;
+  }
   
   // Save open bet
-  db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal);
+  const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal);
+  if (!saved) {
+    await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้เล่นเกินเครดิต]\n\nไม่สามารถบันทึกรายการท้าดวลได้ เนื่องจากเครดิตไม่เพียงพอค่ะ`, userId);
+    return;
+  }
   
   let rangeInfo = '';
   if (type === 'range') {
