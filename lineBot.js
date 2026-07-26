@@ -147,7 +147,11 @@ export async function sendAdminMessageToLine(targetId, messageText) {
       payload = "❌ ผู้เล่นรายนี้ยังไม่ได้ลงทะเบียนบัญชีธนาคาร (กรุณาทำรายการฝากเงินเข้ามาก่อน)";
     }
   } else if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start') {
-    payload = constructMainMenuFlex();
+    if (destinationId && (destinationId.startsWith('C') || db.getActiveGroupId() === destinationId)) {
+      payload = `💡 [เมนูระบบดวลส่วนตัว]\n\nเมนูเช็คยอด เติมเงิน ถอนเงิน และตั้งค่าบัญชี เป็นข้อมูลส่วนบุคคลส่วนตัวค่ะ 💬\n\nท่านสามารถกดทักแชตตรงหา LINE OA แบบส่วนตัวเพื่อใช้งานได้ทันทีค่ะ!\n\n📌 สำหรับในกลุ่มนี้ ใช้สำหรับส่งคำสั่งแทงดวลสด (ชล, ชถ, 330-380ล) และพิมพ์ "กระดานดวล" เพื่อดูแผลค้างเท่านั้นค่ะ 🚀`;
+    } else {
+      payload = constructMainMenuFlex();
+    }
   }
   
   await pushToLine(destinationId, payload);
@@ -332,8 +336,12 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
 
   // I. HELP MENU
   if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start' || clean === 'ช่วยเหลือ') {
-    const menuFlex = constructMainMenuFlex();
-    await replyToLine(replyToken, menuFlex, userId);
+    if (groupId) {
+      await replyToLine(replyToken, `💡 [เมนูระบบดวลส่วนตัว]\n\nเมนูเช็คยอด เติมเงิน ถอนเงิน และตั้งค่าบัญชี เป็นข้อมูลส่วนบุคคลส่วนตัวค่ะ 💬\n\nท่านสามารถกดทักแชตตรงหา LINE OA แบบส่วนตัวเพื่อใช้งานได้ทันทีค่ะ!\n\n📌 สำหรับในกลุ่มนี้ ใช้สำหรับส่งคำสั่งแทงดวลสด (ชล, ชถ, 330-380ล) และพิมพ์ "กระดานดวล" เพื่อดูแผลค้างเท่านั้นค่ะ 🚀`, userId);
+    } else {
+      const menuFlex = constructMainMenuFlex();
+      await replyToLine(replyToken, menuFlex, userId);
+    }
     return;
   }
 
