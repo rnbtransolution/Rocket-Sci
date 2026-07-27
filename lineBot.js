@@ -540,11 +540,25 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   const clean = text.replace(/\s+/g, '').toLowerCase();
   
   // Keywords definition
-  const keywordsLow = ['ชล', 'ล', 'ไล่', '+5ชล', '+5ล', 'ช่างไล่'];
-  const keywordsHigh = ['ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', '+5ชย', '+5ชถ', '+5ย', '+5ถ', 'ช่างยั่ง', 'ช่างถอย'];
-  const keywordsAccept = ['ต', 'ติด', 'ครับ', 'เค', 'จ้า', 'ยอมรับ', 'ดีล'];
-  
-  // 0. Pending Deals Board Command ("กระดานดวล", "แผลค้าง", "เปิดรอคู่")
+  const keywordsLowBase = ['ชล', 'ล', 'ไล่', 'ช่างไล่'];
+  const keywordsHighBase = ['ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'ช่างยั่ง', 'ช่างถอย'];
+  const keywordsAccept = ['ต', 'ติด', 'ครับ', 'เค', 'จ้า', 'ยอมรับ', 'ดีล', 'รับแผล', 'รับ'];
+
+  const mechanicPricedKeywords = ['ช่างต่อย', 'ช่างมีราคา', 'ช่างตีราคา'];
+  const mechanicUnpricedKeywords = ['ช่างไม่ต่อย', 'ช่างไม่มีราคา', 'ช่างไม่ตีราคา', 'ช่างไม่เปิดราคา'];
+
+  // 0. Mechanic status query / announcement
+  if (mechanicPricedKeywords.includes(clean)) {
+    replyToLine(replyToken, `🔧 [สถานะราคาช่าง]\n\n✅ ช่างต่อย (ช่างมีราคา / ช่างตีราคาแล้ว)\nเปิดรับแทงราคาช่างเรียบร้อยค่ะ 🚀`, userId);
+    return true;
+  }
+
+  if (mechanicUnpricedKeywords.includes(clean)) {
+    replyToLine(replyToken, `🔧 [สถานะราคาช่าง]\n\n⚠️ ช่างไม่ต่อย (ช่างไม่มีราคา / ช่างไม่ตีราคา / ช่างไม่เปิดราคา)\nให้ผู้เล่นเจรจาเสนอเปิดราคาเป็นตัวเลขได้เองค่ะ 🚀`, userId);
+    return true;
+  }
+
+  // 0.1 Pending Deals Board Command ("กระดานดวล", "แผลค้าง", "เปิดรอคู่")
   if (clean === 'กระดานดวล' || clean === 'แผลค้าง' || clean === 'เปิดรอคู่' || clean === 'รอคู่') {
     const pendingList = db.getPendingBetsList();
     if (pendingList.length === 0) {
@@ -564,7 +578,7 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     return true;
   }
 
-  // 0.1 Cancel Bet Command (e.g., "ยกเลิก", "ยกเลิก 70572", "ยกเลิก#70572", "ยกเลิก 72", "cancel")
+  // 0.2 Cancel Bet Command (e.g., "ยกเลิก", "ยกเลิก 70572", "ยกเลิก#70572", "ยกเลิก 72", "cancel")
   const cancelBetRegex = /^(ยกเลิก|cancel)\s*#?(\d{2,6})?$/i;
   if (cancelBetRegex.test(clean)) {
     const match = clean.match(cancelBetRegex);
@@ -590,7 +604,7 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     return true;
   }
 
-  // 1. Check Accept Match Command (e.g. "ต", "ต12", "ต 12", "12ต", "ต#12", "ติด", "รับแผล")
+  // 1. Check Accept Match Command (e.g. "ต", "ต12", "ต 12", "12ต", "ต#12", "ติด", "ครับ", "เค", "จ้า", "ยอมรับ", "ดีล", "รับแผล", "รับ")
   const specificAcceptRegex = /^(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*#?(\d{2,6})$/;
   const reverseAcceptRegex = /^#?(\d{2,6})\s*(ต|ติด|รับ)$/;
   let targetOrderNo = null;
@@ -636,43 +650,67 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     return true;
   }
 
-  // 2. Betting commands (e.g., "ล200", "ถ500", "+5ชล200", "300-340ล", "345-385ล500 ชตย")
+  // 2. Advanced Betting Command Parser (handles modifiers: ก+5, ก-5, ม+5, ม-5, +5, -5, range 330-370, side, amount, ชตย)
   const isChotoy = clean.includes('ชตย') || text.includes('ชตย');
   const cleanBetText = clean.replace(/ชตย/g, '').trim();
 
-  // Format 1: [keywords][amount] (e.g. "ล200", "ถ500")
-  const betRegex = /^(\+?5?[a-zA-Z\u0e00-\u0e7f]+)(\d+)$/;
-  if (betRegex.test(cleanBetText)) {
-    const match = cleanBetText.match(betRegex);
-    const cmd = match[1];
-    const amount = parseInt(match[2]);
-    
-    let side = '';
-    if (keywordsLow.includes(cmd)) side = 'low';
-    else if (keywordsHigh.includes(cmd)) side = 'high';
-    
-    if (side && amount >= 10) {
-      processOpenBetRequest(side, amount, 'normal', null, null, userId, displayName, replyToken, isChotoy);
-      return true;
-    }
-  }
+  // Pattern: Optional Base Range + Optional Modifier + Side Keyword + Optional Amount
+  // Examples: "330-370ล500", "330-370ก+5ล200", "ก+5ล200", "ก-5ถ400", "ม+5ล100", "ม-5ถ200", "+5ล300", "-5ถ400", "ล200", "+5ชล400", "300-330ถ300ชตย"
+  const fullBetRegex = /^(?:(\d+)-(\d+))?\s*(?:(ก|เกิบ|ม|หมวก)?([+-]\d+))?\s*(ชล|ล|ไล่|ช่างไล่|ชย|ชถ|ย|ถ|ยั่ง|ถอย|ช่างยั่ง|ช่างถอย)\s*(\d+)?$/;
 
-  // Format 2: [Min]-[Max][keywords][amount?] (e.g. "300-340ล", "300-340ถ", "300-340ล1000", "345-385ล500 ชตย")
-  const rangeBetRegex = /^(\d+)-(\d+)([a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
-  if (rangeBetRegex.test(cleanBetText)) {
-    const match = cleanBetText.match(rangeBetRegex);
-    const minVal = parseInt(match[1]);
-    const maxVal = parseInt(match[2]);
-    const cmd = match[3];
-    const amount = match[4] ? parseInt(match[4]) : 500; // Default amount to 500 pt if not specified
-    
+  if (fullBetRegex.test(cleanBetText)) {
+    const match = cleanBetText.match(fullBetRegex);
+    const rawMin = match[1];
+    const rawMax = match[2];
+    const modifierTarget = match[3];
+    const modifierVal = match[4];
+    const sideKeyword = match[5];
+    const rawAmount = match[6];
+
     let side = '';
-    if (keywordsLow.includes(cmd)) side = 'low';
-    else if (keywordsHigh.includes(cmd)) side = 'high';
-    
-    if (side && amount >= 10 && minVal < maxVal) {
-      processOpenBetRequest(side, amount, 'range', minVal, maxVal, userId, displayName, replyToken, isChotoy);
-      return true;
+    if (keywordsLowBase.includes(sideKeyword)) side = 'low';
+    else if (keywordsHighBase.includes(sideKeyword)) side = 'high';
+
+    if (side) {
+      const amount = rawAmount ? parseInt(rawAmount) : 500; // Default amount to 500 if omitted
+      let minVal = rawMin ? parseInt(rawMin) : null;
+      let maxVal = rawMax ? parseInt(rawMax) : null;
+
+      // Handle Modifier (+- from mechanic price)
+      if (modifierVal) {
+        const offset = parseInt(modifierVal);
+        
+        // If range is not provided in command, use active mechanic base price (default 330-370)
+        if (minVal === null || maxVal === null) {
+          const activeRound = db.getActiveMechanicPrice ? db.getActiveMechanicPrice() : { min: 330, max: 370 };
+          minVal = activeRound.min;
+          maxVal = activeRound.max;
+        }
+
+        const target = (modifierTarget || '').toLowerCase();
+        if (target === 'ก' || target === 'เกิบ') {
+          minVal += offset; // Modify lower bound (Kip) only
+        } else if (target === 'ม' || target === 'หมวก') {
+          maxVal += offset; // Modify upper bound (Muak) only
+        } else {
+          // Both bounds modified (+5 or -5)
+          minVal += offset;
+          maxVal += offset;
+        }
+      }
+
+      if (amount >= 10) {
+        if (minVal !== null && maxVal !== null) {
+          // Update active mechanic base price if a new explicit base range was provided without modifier
+          if (rawMin && rawMax && !modifierVal && db.setActiveMechanicPrice) {
+            db.setActiveMechanicPrice(parseInt(rawMin), parseInt(rawMax));
+          }
+          processOpenBetRequest(side, amount, 'range', minVal, maxVal, userId, displayName, replyToken, isChotoy);
+        } else {
+          processOpenBetRequest(side, amount, 'normal', null, null, userId, displayName, replyToken, isChotoy);
+        }
+        return true;
+      }
     }
   }
 
@@ -705,9 +743,9 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   
   let rangeInfo = '';
   if (type === 'range') {
-    rangeInfo = `${minVal}-${maxVal}${isChotoy ? ' (ชตย: ช่างไม่ต่อย)' : ''}`;
+    rangeInfo = `${minVal}-${maxVal}${isChotoy ? ' (ชตย: ช่างต่อยยุติ)' : ''}`;
   } else if (isChotoy) {
-    rangeInfo = '(ชตย: ช่างไม่ต่อย)';
+    rangeInfo = '(ชตย: ช่างต่อยยุติ)';
   }
   
   const betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfo);

@@ -1160,3 +1160,15 @@ export function getActiveRocketRound() {
   return activeRocketRound;
 }
 
+let activeMechanicPrice = { min: 330, max: 370 };
+
+export function setActiveMechanicPrice(min, max) {
+  activeMechanicPrice = { min: Number(min) || 330, max: Number(max) || 370 };
+  return activeMechanicPrice;
+}
+
+export function getActiveMechanicPrice() {
+  return activeMechanicPrice;
+}
+
+

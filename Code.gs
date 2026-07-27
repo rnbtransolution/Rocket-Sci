@@ -481,8 +481,18 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
     return;
   }
 
-  // 1. MATCH ACTION: ACCEPT / LOCK DEALS ("ต", "ติด", "ครับ", "เค", "จ้า")
-  if (['ต', 'ติด', 'ครับ', 'เค', 'จ้า'].indexOf(clean) !== -1) {
+  // 1. MECHANIC STATUS QUERY / ANNOUNCEMENT
+  if (['ช่างต่อย', 'ช่างมีราคา', 'ช่างตีราคา'].indexOf(clean) !== -1) {
+    replyToLine(replyToken, `🔧 [สถานะราคาช่าง]\n\n✅ ช่างต่อย (ช่างมีราคา / ช่างตีราคาแล้ว)\nเปิดรับแทงราคาช่างเรียบร้อยค่ะ 🚀`, userId);
+    return;
+  }
+  if (['ช่างไม่ต่อย', 'ช่างไม่มีราคา', 'ช่างไม่ตีราคา', 'ช่างไม่เปิดราคา'].indexOf(clean) !== -1) {
+    replyToLine(replyToken, `🔧 [สถานะราคาช่าง]\n\n⚠️ ช่างไม่ต่อย (ช่างไม่มีราคา / ช่างไม่ตีราคา / ช่างไม่เปิดราคา)\nให้ผู้เล่นเจรจาเสนอเปิดราคาเป็นตัวเลขได้เลยค่ะ 🚀`, userId);
+    return;
+  }
+
+  // 2. MATCH ACTION: ACCEPT / LOCK DEALS ("ต", "ติด", "ครับ", "เค", "จ้า", "ยอมรับ", "ดีล", "รับแผล", "รับ")
+  if (['ต', 'ติด', 'ครับ', 'เค', 'จ้า', 'ยอมรับ', 'ดีล', 'รับแผล', 'รับ'].indexOf(clean) !== -1) {
     const matchedBet = matchExistingOpenBet(userId, displayName);
     if (matchedBet) {
       replyToLine(replyToken, `✅ จับคู่สำเร็จ! (Order #${matchedBet.orderNumber})\nยอดดวล: ${matchedBet.amount} แต้ม\nฝั่งต่ำ (Low): ${matchedBet.playerLowName}\nฝั่งสูง (High): ${matchedBet.playerHighName}\n\nระบบล็อกเครดิตทั้งคู่แล้ว รอการสรุปผลจรวดครับ 🚀`, userId);
@@ -492,30 +502,60 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
     return;
   }
   
-  // 2. PARSE BET FORMULAS (ชล100, ชถ500, 300-340ล100, ส100, ต100, สูง100, ต่ำ100, etc.)
-  const rangeRegex = /^(\d+)-(\d+)([ลถตส]|สูง|ต่ำ)(\d+)$/;
-  const simpleRegex = /^(ชล|ล|ไล่|ต|ต่ำ|ชย|ชถ|ย|ถ|ถอย|ส|สูง)(\d+)$/;
-  
+  // 3. PARSE BET FORMULAS (ชล100, ชถ500, 300-340ล100, ก+5ล200, ก-5ถ400, ม+5ล100, +5ล300, -5ถ400, 300-330ถ300ชตย, etc.)
+  const isChotoy = clean.indexOf('ชตย') !== -1;
+  const cleanBetText = clean.replace(/ชตย/g, '').trim();
+
+  const keywordsLowBase = ['ชล', 'ล', 'ไล่', 'ช่างไล่'];
+  const keywordsHighBase = ['ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'ช่างยั่ง', 'ช่างถอย'];
+
+  const fullBetRegex = /^(?:(\d+)-(\d+))?\s*(?:(ก|เกิบ|ม|หมวก)?([+-]\d+))?\s*(ชล|ล|ไล่|ช่างไล่|ชย|ชถ|ย|ถ|ยั่ง|ถอย|ช่างยั่ง|ช่างถอย)\s*(\d+)?$/;
+
   let betType = '';
   let rangeMin = null;
   let rangeMax = null;
   let side = '';
   let amount = 0;
-  
-  if (rangeRegex.test(clean)) {
-    const match = clean.match(rangeRegex);
-    rangeMin = parseInt(match[1]);
-    rangeMax = parseInt(match[2]);
-    side = ['ล', 'ต', 'ต่ำ'].indexOf(match[3]) !== -1 ? 'low' : 'high';
-    amount = parseInt(match[4]);
-    betType = 'range';
-  } else if (simpleRegex.test(clean)) {
-    const match = clean.match(simpleRegex);
-    const sub = match[1];
-    side = ['ชล', 'ล', 'ไล่', 'ต', 'ต่ำ'].indexOf(sub) !== -1 ? 'low' : 'high';
-    amount = parseInt(match[2]);
-    betType = 'high_low';
-  } else {
+
+  if (fullBetRegex.test(cleanBetText)) {
+    const match = cleanBetText.match(fullBetRegex);
+    const rawMin = match[1];
+    const rawMax = match[2];
+    const modifierTarget = match[3];
+    const modifierVal = match[4];
+    const sideKeyword = match[5];
+    const rawAmount = match[6];
+
+    if (keywordsLowBase.indexOf(sideKeyword) !== -1) side = 'low';
+    else if (keywordsHighBase.indexOf(sideKeyword) !== -1) side = 'high';
+
+    if (side) {
+      amount = rawAmount ? parseInt(rawAmount) : 500;
+      rangeMin = rawMin ? parseInt(rawMin) : null;
+      rangeMax = rawMax ? parseInt(rawMax) : null;
+
+      if (modifierVal) {
+        const offset = parseInt(modifierVal);
+        if (rangeMin === null || rangeMax === null) {
+          rangeMin = 330;
+          rangeMax = 370;
+        }
+        const target = (modifierTarget || '').toLowerCase();
+        if (target === 'ก' || target === 'เกิบ') {
+          rangeMin += offset;
+        } else if (target === 'ม' || target === 'หมวก') {
+          rangeMax += offset;
+        } else {
+          rangeMin += offset;
+          rangeMax += offset;
+        }
+      }
+
+      betType = (rangeMin !== null && rangeMax !== null) ? 'range' : 'high_low';
+    }
+  }
+
+  if (!side || amount < 10) {
     // Check if the user is typing "เมนู" or "menu" or "สวัสดี" or if it is an unrecognized private message
     const isPrivateChat = !groupId;
     if (isPrivateChat || clean === 'เมนู' || clean === 'menu' || clean === 'สวัสดี' || clean === 'help' || clean === 'เริ่ม' || clean === 'start') {
@@ -539,7 +579,13 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
   const orderNumber = Math.floor(Math.random() * 89999 + 10000).toString();
   saveOpenBet(orderNumber, userId, displayName, side, amount, betType, rangeMin, rangeMax);
   
-  const rangeInfo = rangeMin ? `ช่วง ${rangeMin/100}-${rangeMax/100}s` : '';
+  let rangeInfo = '';
+  if (betType === 'range') {
+    rangeInfo = `${rangeMin}-${rangeMax}${isChotoy ? ' (ชตย: ช่างต่อยยุติ)' : ''}`;
+  } else if (isChotoy) {
+    rangeInfo = '(ชตย: ช่างต่อยยุติ)';
+  }
+  
   const betOpenFlex = constructBetOpenFlex(orderNumber, amount, side, displayName, rangeInfo);
   replyToLine(replyToken, betOpenFlex, userId);
 }
