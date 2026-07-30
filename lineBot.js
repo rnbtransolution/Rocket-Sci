@@ -336,7 +336,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
 
   // I. RULES & EXAMPLES COMMAND HANDLER
   if (clean === 'วิธีเล่น' || clean === 'กติกา' || clean === 'ตัวอย่าง' || clean === 'ราคา') {
-    const rulesMsg = `📌 [ตัวอย่างการเล่นราคาตัวเลขเอง]\nต้องใส่จำนวนตัวเลขจำนวนเต็มเท่านั้น‼️\nเช่น 👇🏻\n300-340ล  300-340ถ\n310-355ล  310-355ถ\n315-360ล  315-360ถ\n320-370ล  320-370ถ\n340-380ล  340-380ถ\n\n‼️ กรณีเล่นเผื่อช่างไม่ต่อย\nให้พิมพ์ ชตย ไว้หลังราคา\nเช่น 👇🏻 (ต้องมีเครดิตเหลือด้วยนะครับ)\n345-385ล500 ชตย  345-385ถ500 ชตย\n360-390ล100 ชตย  360-390ถ100 ชต`;
+    const rulesMsg = `📌 [วิธีพิมพ์แทงดวล]\n• 300-340ล (ฝั่งต่ำ)\n• 300-340ถ (ฝั่งสูง)\n• 345-385ล500 ชตย (เผื่อช่างไม่ต่อย)\n• พิมพ์ "ต" หรือ "ต [เลขแผล]" เพื่อกดรับแผลดวล 🚀`;
     await replyToLine(replyToken, rulesMsg, userId);
     return;
   }
@@ -344,7 +344,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   // J. HELP MENU
   if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start' || clean === 'ช่วยเหลือ') {
     if (groupId) {
-      await replyToLine(replyToken, `💡 [เมนูระบบดวลส่วนตัว]\n\nเมนูเช็คยอด เติมเงิน ถอนเงิน และตั้งค่าบัญชี เป็นข้อมูลส่วนบุคคลส่วนตัวค่ะ 💬\n\nท่านสามารถกดทักแชตตรงหา LINE OA แบบส่วนตัวเพื่อใช้งานได้ทันทีค่ะ!\n\n📌 สำหรับในกลุ่มนี้ ใช้สำหรับส่งคำสั่งแทงดวลสด (ชล, ชถ, 330-380ล) และพิมพ์ "กระดานดวล" เพื่อดูแผลค้างเท่านั้นค่ะ 🚀`, userId);
+      await replyToLine(replyToken, `💡 [เมนูส่วนตัว] กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวเพื่อเช็คยอด/ฝาก-ถอนค่ะ (ในกลุ่มใช้พิมพ์แทงดวลสด และพิมพ์ "กระดานดวล") 🚀`, userId);
     } else {
       const menuFlex = constructMainMenuFlex();
       await replyToLine(replyToken, menuFlex, userId);
@@ -353,7 +353,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   }
 
   // K. FALLBACK
-  await replyToLine(replyToken, `🤖 ขออภัยค่ะ ไม่เข้าใจคำสั่งของคุณ\nกรุณากดปุ่มที่เมนูด้านล่าง หรือพิมพ์คำสั่ง เช่น "ฝากเงิน", "ถอนยอด" หรือ "เช็คยอด" เพื่อเริ่มทำรายการค่ะ`, userId);
+  await replyToLine(replyToken, `🤖 ขออภัยค่ะ ไม่เข้าใจคำสั่ง กรุณาพิมพ์ "ฝากเงิน", "ถอนยอด", "เช็คยอด" หรือพิมพ์ราคาแทงดวลได้เลยค่ะ`, userId);
 }
 
 export async function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
@@ -556,12 +556,12 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
   // 0. Mechanic status query / announcement
   if (mechanicPricedKeywords.includes(clean)) {
-    replyToLine(replyToken, `🔧 [สถานะราคาช่าง]\n\n✅ ช่างต่อย (ช่างมีราคา / ช่างตีราคาแล้ว)\nเปิดรับแทงราคาช่างเรียบร้อยค่ะ 🚀`, userId);
+    replyToLine(replyToken, `🔧 [สถานะราคาช่าง] ✅ ช่างต่อยแล้ว เปิดรับแทงราคาช่างค่ะ 🚀`, userId);
     return true;
   }
 
   if (mechanicUnpricedKeywords.includes(clean)) {
-    replyToLine(replyToken, `🔧 [สถานะราคาช่าง]\n\n⚠️ ช่างไม่ต่อย (ช่างไม่มีราคา / ช่างไม่ตีราคา / ช่างไม่เปิดราคา)\nให้ผู้เล่นเจรจาเสนอเปิดราคาเป็นตัวเลขได้เองค่ะ 🚀`, userId);
+    replyToLine(replyToken, `🔧 [สถานะราคาช่าง] ⚠️ ช่างไม่ต่อย ให้ผู้เล่นเสนอเปิดราคาตัวเลขเองค่ะ 🚀`, userId);
     return true;
   }
 
@@ -569,17 +569,17 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   if (clean === 'กระดานดวล' || clean === 'แผลค้าง' || clean === 'เปิดรอคู่' || clean === 'รอคู่') {
     const pendingList = db.getPendingBetsList();
     if (pendingList.length === 0) {
-      replyToLine(replyToken, `📊 [กระดานดวลสด]\n\n❌ ปัจจุบันไม่มีแผลดวลที่เปิดรอคู่ในระบบเลยค่ะ คุณสามารถเปิดแผลท้าดวลใหม่ได้ทันทีค่ะ 🚀`, userId);
+      replyToLine(replyToken, `📊 [กระดานดวลสด] ❌ ไม่มีแผลดวลเปิดรอคู่ในขณะนี้ค่ะ คุณสามารถเปิดแผลท้าดวลใหม่ได้ทันที 🚀`, userId);
     } else {
-      let boardMsg = `📊 [กระดานแผลดวลที่เปิดรอคู่ดวลสด (${pendingList.length} รายการ)]\n`;
+      let boardMsg = `📊 [กระดานดวลสด (${pendingList.length} แผล)]\n`;
       pendingList.forEach((b, idx) => {
         const creatorName = b.playerLowName || b.playerHighName;
-        const sideText = b.playerLowId ? 'ต่ำ (ชล)' : 'สูง (ชถ)';
-        const rangeText = b.rangeMin && b.rangeMax ? `ช่วง ${b.rangeMin}-${b.rangeMax}s` : '';
+        const sideText = b.playerLowId ? 'ต่ำ(ชล)' : 'สูง(ชถ)';
+        const rangeText = b.rangeMin && b.rangeMax ? `${b.rangeMin}-${b.rangeMax}s` : '';
         const shortCode = b.orderNumber.slice(-2);
-        boardMsg += `\n${idx + 1}. Order #${b.orderNumber} (รหัส: ${shortCode})\n   👤 ผู้ท้า: คุณ${creatorName}\n   🎯 ฝั่ง: ${sideText} ${rangeText}\n   💰 ยอด: ${b.amount} pt\n   👉 พิมพ์ "ต${shortCode}" เพื่อกดรับแผลนี้โดยเฉพาะ\n-----------------------`;
+        boardMsg += `${idx + 1}. #${b.orderNumber} (${shortCode}) | ${sideText} ${rangeText} | ${b.amount}pt (คุณ${creatorName}) 👉 พิมพ์ "ต${shortCode}"\n`;
       });
-      boardMsg += `\n\n💡 พิมพ์ "ต [เลขแผล]" หรือกดปุ่มบนการ์ดแผลเพื่อรับดวลได้ทันทีค่ะ! ☄️`;
+      boardMsg += `💡 พิมพ์ "ต [เลขแผล]" เพื่อรับดวลได้ทันทีค่ะ! ☄️`;
       replyToLine(replyToken, boardMsg, userId);
     }
     return true;
@@ -593,18 +593,18 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
     db.cancelOpenBet(userId, targetOrderNo).then(async res => {
       if (res.success) {
-        const msg = `❌ [ยกเลิกแผลดวลสำเร็จ]\nOrder #${res.orderNumber} ถูกยกเลิกโดย คุณ${res.creatorName}\n💰 ระบบคืนเครดิต ${res.amount} แต้มกลับเข้าบัญชีเรียบร้อยแล้วค่ะ 🚀`;
+        const msg = `❌ [ยกเลิกแผลดวล #${res.orderNumber}]\nคืนเครดิต ${res.amount}pt ให้คุณ${res.creatorName} เรียบร้อยแล้วค่ะ 🚀`;
         if (groupId) {
           await pushToLine(groupId, msg);
         } else {
           await replyToLine(replyToken, msg, userId);
         }
       } else if (res.error === 'UNAUTHORIZED') {
-        await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้ยกเลิกแผลผู้เล่นอื่น]\n\nเฉพาะเจ้าของแผลท้าดวล (คุณ${res.creatorName}) หรือแอดมินเท่านั้นที่สามารถยกเลิก Order #${res.orderNumber} ได้ค่ะ`, userId);
+        await replyToLine(replyToken, `⚠️ [ยกเลิกไม่ได้] เฉพาะผู้ท้าดวล (คุณ${res.creatorName}) หรือแอดมินเท่านั้นที่สามารถยกเลิกแผลนี้ได้ค่ะ`, userId);
       } else {
         const notFoundText = targetOrderNo
-          ? `❌ ไม่พบแผลดวล Order #${targetOrderNo} ที่เปิดรอคู่ในระบบเลยค่ะ (แผลอาจจับคู่แล้วหรือถูกยกเลิกไปแล้ว)`
-          : `❌ ขออภัยค่ะ คุณไม่มีแผลดวลที่เปิดรอคู่อยู่ในระบบเลยค่ะ`;
+          ? `❌ ไม่พบแผลดวล Order #${targetOrderNo} ที่เปิดรอคู่ในระบบค่ะ`
+          : `❌ คุณไม่มีแผลดวลที่เปิดรอคู่อยู่ในระบบค่ะ`;
         await replyToLine(replyToken, notFoundText, userId);
       }
     });
@@ -625,7 +625,7 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   if (keywordsAccept.includes(clean) || targetOrderNo) {
     db.matchExistingOpenBet(userId, displayName, targetOrderNo).then(async matched => {
       if (matched && matched.error === 'INSUFFICIENT_BALANCE') {
-        await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้เล่นเกินเครดิต]\n\nคุณไม่สามารถกดรับแผลดวลนี้ได้ เนื่องจากยอดเครดิตคงเหลือไม่เพียงพอ!\n• เครดิตคงเหลือของคุณ: ${matched.current} แต้ม\n• ยอดแผลที่ต้องการดวล: ${matched.required} แต้ม\n\n❌ ระบบได้ทำการบล็อกรายการนี้เรียบร้อยค่ะ กรุณาพิมพ์ "ฝากเงิน" เพื่อเติมเครดิตก่อนแทงดวลนะคะ 🚀`, userId);
+        await replyToLine(replyToken, `⚠️ [เครดิตไม่พอ] คุณมี ${matched.current} แต้ม (ต้องใช้ ${matched.required} แต้ม) พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตค่ะ 🚀`, userId);
         return;
       }
 
@@ -643,14 +643,14 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
         // Reply in group or chat
         if (groupId) {
-          await pushToLine(groupId, `☄️ [จับคู่ดวลสำเร็จ!]\n👤 ผู้กดรับแผล: คุณ ${displayName}\nOrder #${matched.orderNumber}\nคู่ดวล: คุณ ${matched.playerLowName} 🆚 คุณ ${matched.playerHighName}\nยอดดวล: ${matched.amount} แต้ม\nสถานะ: แมตช์ดวลเรียบร้อย (หักเครดิตเข้ากองกลาง 100% เรียบร้อยแล้วค่ะ) 🚀`);
+          await pushToLine(groupId, `☄️ [จับคู่ดวลสำเร็จ! #${matched.orderNumber}]\nคุณ${matched.playerLowName} (ต่ำ) 🆚 คุณ${matched.playerHighName} (สูง) | ยอด ${matched.amount} pt 🚀`);
         } else {
           await replyToLine(replyToken, flexMatcher, userId);
         }
       } else {
         const notFoundText = targetOrderNo
-          ? `❌ ไม่พบแผลดวล Order #${targetOrderNo} ที่เปิดรอคู่ในระบบเลยค่ะ (แผลอาจจับคู่แล้วหรือถูกยกเลิก)`
-          : `❌ ขออภัยค่ะ ตอนนี้ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ดวลในระบบเลยค่ะ คุณสามารถเปิดแผลใหม่ได้ทันทีค่ะ`;
+          ? `❌ ไม่พบแผลดวล Order #${targetOrderNo} ที่เปิดรอคู่ในระบบค่ะ`
+          : `❌ ตอนนี้ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ดวลในขณะนี้ค่ะ`;
         await replyToLine(replyToken, notFoundText, userId);
       }
     });
@@ -727,7 +727,7 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false) {
   const balance = await db.getPlayerBalance(userId, displayName);
   if (balance < amount) {
-    await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้เล่นเกินเครดิต]\n\nยอดเงินเครดิตคงเหลือของคุณไม่เพียงพอสำหรับการท้าดวลแผลนี้!\n• เครดิตคงเหลือของคุณ: ${balance} แต้ม\n• ยอดที่ต้องการใช้: ${amount} แต้ม\n\n❌ กรุณาพิมพ์ "ฝากเงิน" เพื่อทำรายการเติมทุนก่อนแทงดวลนะคะ 🚀`, userId);
+    await replyToLine(replyToken, `⚠️ [เครดิตไม่พอ] คุณมี ${balance} แต้ม (ต้องการใช้ ${amount} แต้ม) พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตค่ะ 🚀`, userId);
     return;
   }
 
@@ -737,7 +737,7 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   // Deduct balance (with strict return check)
   const success = await db.adjustPlayerBalance(userId, -amount, displayName);
   if (!success) {
-    await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้เล่นเกินเครดิต]\n\nเกิดข้อผิดพลาด: ยอดเงินเครดิตคงเหลือของคุณไม่เพียงพอสำหรับการท้าดวลแผลนี้ (คงเหลือ ${balance} แต้ม ต้องการใช้ ${amount} แต้ม)\n\n❌ กรุณาพิมพ์ "ฝากเงิน" เพื่อเติมเครดิตก่อนแทงดวลนะคะ 🚀`, userId);
+    await replyToLine(replyToken, `⚠️ [เครดิตไม่พอ] คุณมี ${balance} แต้ม (ต้องการใช้ ${amount} แต้ม) พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตค่ะ 🚀`, userId);
     return;
   }
   

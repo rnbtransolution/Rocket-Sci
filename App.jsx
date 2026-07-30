@@ -195,7 +195,7 @@ export default function App() {
     }
 
     const chotoyTag = isChotoy ? ' (ชตย: เผื่อช่างไม่ต่อย)' : '';
-    const quoteMsg = `🚀 [ประกาศออกราคาดวลบั้งไฟสด]\n\n🏷️ บั้งไฟ: ${name}\n🎯 ช่วงราคาช่าง: ${min}-${max} วินาที\n💰 แต้มเดิมพันเริ่มต้น: ${amt} pt${chotoyTag}\n\n📌 ตัวอย่างการเล่นราคาตัวเลขเอง (ต้องใส่จำนวนตัวเลขจำนวนเต็มเท่านั้น‼️):\n• ${min}-${max}ล  ${min}-${max}ถ\n• 310-355ล  310-355ถ\n• 315-360ล  315-360ถ\n• 320-370ล  320-370ถ\n• 340-380ล  340-380ถ\n\n‼️ กรณีเล่นเผื่อช่างไม่ต่อย (ให้พิมพ์ ชตย ไว้หลังราคา และต้องมีเครดิตเหลือด้วย):\n• 345-385ล500 ชตย  345-385ถ500 ชตย\n• 360-390ล100 ชตย  360-390ถ100 ชต\n\nเชิญผู้เล่นลงราคา/ท้าดวลได้เลยครับ! ☄️`;
+    const quoteMsg = `🚀 [ประกาศออกราคาดวลบั้งไฟสด]\n\n🏷️ บั้งไฟ: ${name}\n🎯 ช่วงราคาช่าง: ${min}-${max} วินาที\n💰 แต้มเดิมพันเริ่มต้น: ${amt} pt${chotoyTag}\n\n💡 ตัวอย่างวิธีพิมพ์แทงดวลในกลุ่ม:\n• พิมพ์ "${min}-${max}ล" (ฝั่งต่ำ)\n• พิมพ์ "${min}-${max}ถ" (ฝั่งสูง)\n• พิมพ์ "${min}-${max}ล${amt} ชตย" (เผื่อช่างไม่ต่อย)\n\nเชิญผู้เล่นลงราคา/ท้าดวลได้เลยครับ! ☄️`;
 
     runBackendFunction('sendAdminMessageToLine', [activeGroupId, quoteMsg]);
     addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) เข้ากลุ่ม LINE เรียบร้อย!`, 'success');
@@ -1998,25 +1998,6 @@ export default function App() {
                       เผื่อช่างไม่ต่อย (ชตย: ช่างต่อยยุติ) Option
                     </span>
                   </label>
-                </div>
-
-                {/* Additional Reference Information Guide Block */}
-                <div className="p-3 bg-slate-900 text-white rounded-xl border border-slate-800 space-y-1.5 text-xs font-sans shadow-sm">
-                  <div className="flex items-center gap-1.5 font-bold text-amber-300 font-heading">
-                    <span>📌 ตัวอย่างการเล่นราคาตัวเลขเอง</span>
-                    <span className="text-[10px] bg-red-600 text-white px-1.5 py-0.5 rounded font-extrabold">ต้องใส่จำนวนเต็มเท่านั้น‼️</span>
-                  </div>
-                  <div className="font-mono text-[11px] text-slate-200 leading-relaxed bg-slate-950 p-2 rounded-lg border border-slate-800">
-                    <p className="text-emerald-400">ตัวอย่างราคาธรรมดา 👇🏻</p>
-                    <p>• 300-340ล  300-340ถ</p>
-                    <p>• 310-355ล  310-355ถ</p>
-                    <p>• 315-360ล  315-360ถ</p>
-                    <p>• 320-370ล  320-370ถ</p>
-                    <p>• 340-380ล  340-380ถ</p>
-                    <p className="text-amber-400 mt-1">‼️ กรณีเล่นเผื่อช่างไม่ต่อย (ให้พิมพ์ ชตย ไว้หลังราคา):</p>
-                    <p className="text-amber-200">• 345-385ล500 ชตย  345-385ถ500 ชตย</p>
-                    <p className="text-amber-200">• 360-390ล100 ชตย  360-390ถ100 ชต</p>
-                  </div>
                 </div>
 
                 {/* Broadcast Quote Primary Button */}
