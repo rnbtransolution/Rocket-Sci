@@ -840,7 +840,7 @@ export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxPara
     try {
       const lineBot = await import('./lineBot.js');
       const outcomeText = finalTime < targetMin ? 'ต่ำ (ชล) 🔵' : finalTime > targetMax ? 'สูง (ชถ) 🔴' : 'ในราคาช่าง 🎯';
-      await lineBot.pushToLine(activeGroupId, `🏆 [แจ้งผลการยิงสด]\n\n⏱️ เวลาผลบินจริง: ${finalTime} วินาที\n🎯 ช่วงราคาช่าง: ${targetMin}-${targetMax} วินาที\n🎉 ผลสรุปฝั่งชนะ: ${outcomeText}\n\nระบบเคลียร์ผลและชำระแต้มผู้ชนะเรียบร้อยค่ะ! 🚀`);
+      await lineBot.pushToLine(activeGroupId, `🏆 [ผลรอบ]: ${finalTime}s (ราคา ${targetMin}-${targetMax}s) | ฝั่งชนะ: ${outcomeText} 🚀`);
     } catch (e) {
       console.error("[DB] Error broadcasting round result to group:", e);
     }
