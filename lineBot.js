@@ -40,11 +40,31 @@ export async function replyToLine(replyToken, text, userId) {
     };
   } else {
     let outText = String(text);
-    if (userId && !outText.includes('คุณ ') && !outText.includes('ถึงคุณ')) {
-      const pName = db.getPlayerNameFromDb(userId) || 'ผู้เล่น';
-      outText = `👤 [ถึงคุณ ${pName}]:\n` + outText;
+    const pName = (userId ? db.getPlayerNameFromDb(userId) : null) || 'ผู้เล่น';
+    const tagStr = `@${pName}`;
+    
+    if (userId && !outText.includes('@') && !outText.includes('ถึงคุณ')) {
+      outText = `👤 [ถึงคุณ ${tagStr}]:\n` + outText;
     }
+    
     messageObj = { type: 'text', text: outText };
+
+    // Attach native LINE mention object if target is a real LINE User ID
+    const rawUserId = userId ? (db.getRawLineUserId(userId) || userId) : null;
+    if (typeof rawUserId === 'string' && rawUserId.startsWith('U')) {
+      const tagIndex = outText.indexOf(tagStr);
+      if (tagIndex !== -1) {
+        messageObj.mention = {
+          mentionees: [
+            {
+              index: tagIndex,
+              length: tagStr.length,
+              userId: rawUserId
+            }
+          ]
+        };
+      }
+    }
   }
   
   const payload = {
@@ -167,9 +187,9 @@ export async function handleUnsendMessage(unsendMessageId, userId, displayName, 
   const msgText = foundLog ? foundLog.text : 'ข้อความในกลุ่ม';
 
   if (groupId) {
-    await pushToLine(groupId, `🚨 [แจ้งเตือนระบบตรวจจับยกเลิกข้อความ (UNSEND ALERT)]\n\nผู้เล่น: คุณ ${displayName}\nข้อความเดิมที่ถูกยกเลิก: "${msgText}"\n\n⚠️ หมายเหตุ: ตามระเบียนข้อตกลงดวล ผลรายการท้าดวลและเครดิตในระบบยังคงบันทึกมีผลเรียบร้อยตามเดิมค่ะ 🚀`);
+    await pushToLine(groupId, `🚨 [แจ้งเตือนระบบตรวจจับยกเลิกข้อความ (UNSEND ALERT)]\n\nผู้เล่น: คุณ @${displayName}\nข้อความเดิมที่ถูกยกเลิก: "${msgText}"\n\n⚠️ หมายเหตุ: ตามระเบียนข้อตกลงดวล ผลรายการท้าดวลและเครดิตในระบบยังคงบันทึกมีผลเรียบร้อยตามเดิมครับ 🚀`);
   } else if (userId) {
-    await pushToLine(userId, `🚨 [แจ้งเตือนระบบตรวจจับยกเลิกข้อความ]\n\nคุณได้ยกเลิกข้อความ: "${msgText}"\nบันทึกรายการท้าดวลของคุณยังคงได้รับการบันทึกและตรวจสอบเรียบร้อยแล้วค่ะ`);
+    await pushToLine(userId, `🚨 [แจ้งเตือนระบบตรวจจับยกเลิกข้อความ]\n\nคุณ @${displayName} ได้ยกเลิกข้อความ: "${msgText}"\nบันทึกรายการท้าดวลของคุณยังคงได้รับการบันทึกและตรวจสอบเรียบร้อยแล้วครับ`);
   }
 
   db.logLineChatMessage(userId, displayName, 'system', `[UNSEND ALERT] User unsent message: "${msgText}"`, 'warning');
@@ -213,9 +233,13 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   
   // A. CHECK BALANCE
   if (clean === 'เช็คยอด' || clean === 'คงเหลือ' || clean === 'balance') {
-    const balance = await db.getPlayerBalance(userId, displayName);
-    const balanceFlex = constructBalanceFlex(displayName, balance);
-    await replyToLine(replyToken, balanceFlex, userId);
+    if (groupId) {
+      await replyToLine(replyToken, `💡 [เมนูส่วนตัว] รายการเช็คยอด เติมเงิน ถอนเงิน เป็นข้อมูลส่วนบุคคลส่วนตัว กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ 🚀`, userId);
+    } else {
+      const balance = await db.getPlayerBalance(userId, displayName);
+      const balanceFlex = constructBalanceFlex(displayName, balance);
+      await replyToLine(replyToken, balanceFlex, userId);
+    }
     return;
   }
   
@@ -223,7 +247,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   if (clean === 'รายการจับคู่' || clean === 'matched' || clean === 'รายการดวล') {
     const matchedBets = db.getPlayerActiveBets(userId);
     if (matchedBets.length === 0) {
-      await replyToLine(replyToken, `📝 รายการดวลของคุณ:\n\n❌ ปัจจุบันไม่มีแผลดวลค้างหรือรอคู่ในระบบค่ะ`, userId);
+      await replyToLine(replyToken, `📝 รายการดวลของคุณ:\n\n❌ ปัจจุบันไม่มีแผลดวลค้างหรือรอคู่ในระบบครับ`, userId);
     } else {
       let replyMsg = `📝 รายการดวลของคุณ (${matchedBets.length} รายการ):\n`;
       matchedBets.forEach(b => {
@@ -249,25 +273,33 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   
   // D. INITIATE DEPOSIT
   if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit' || clean === 'เติมเครดิต') {
-    const depositFlex = constructDepositFlex();
-    await replyToLine(replyToken, depositFlex, userId);
+    if (groupId) {
+      await replyToLine(replyToken, `💡 [เมนูส่วนตัว] รายการเช็คยอด เติมเงิน ถอนเงิน เป็นข้อมูลส่วนบุคคลส่วนตัว กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ 🚀`, userId);
+    } else {
+      const depositFlex = constructDepositFlex();
+      await replyToLine(replyToken, depositFlex, userId);
+    }
     return;
   }
 
   // E. INITIATE WITHDRAWAL
   if (clean === 'ถอนเงิน' || clean === 'ถอนยอด' || clean === 'withdraw') {
-    const bank = db.getPlayerBank(userId);
-    if (!bank) {
-      if (db.hasSuccessfulDeposit(userId)) {
-        const regFlex = constructBankRegistrationFlex();
-        await replyToLine(replyToken, regFlex, userId);
-      } else {
-        await replyToLine(replyToken, `❌ คุณไม่สามารถถอนเงินได้เนื่องจากยังไม่มีข้อมูลบัญชี หรือ ไม่เคยทำรายการฝากเครดิตเข้าระบบสำเร็จมาก่อนค่ะ`, userId);
-      }
+    if (groupId) {
+      await replyToLine(replyToken, `💡 [เมนูส่วนตัว] รายการเช็คยอด เติมเงิน ถอนเงิน เป็นข้อมูลส่วนบุคคลส่วนตัว กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ 🚀`, userId);
     } else {
-      const balance = await db.getPlayerBalance(userId, bank.accountName || displayName);
-      const withdrawFlex = constructWithdrawalFlex(bank.bankName, bank.accountNumber, bank.accountName, balance);
-      await replyToLine(withdrawFlex ? withdrawFlex : `💸 บัญชีของคุณคือ:\nธนาคาร: ${bank.bankName}\nเลขบัญชี: ${bank.accountNumber}\nชื่อบัญชี: ${bank.accountName}\nยอดคงเหลือ: ${balance} แต้ม\n\n💡 พิมพ์ "ถอน [จำนวน]" เพื่อเริ่มทำรายการค่ะ`, userId);
+      const bank = db.getPlayerBank(userId);
+      if (!bank) {
+        if (db.hasSuccessfulDeposit(userId)) {
+          const regFlex = constructBankRegistrationFlex();
+          await replyToLine(replyToken, regFlex, userId);
+        } else {
+          await replyToLine(replyToken, `❌ คุณไม่สามารถถอนเงินได้เนื่องจากยังไม่มีข้อมูลบัญชี หรือ ไม่เคยทำรายการฝากเครดิตเข้าระบบสำเร็จมาก่อนครับ`, userId);
+        }
+      } else {
+        const balance = await db.getPlayerBalance(userId, bank.accountName || displayName);
+        const withdrawFlex = constructWithdrawalFlex(bank.bankName, bank.accountNumber, bank.accountName, balance);
+        await replyToLine(withdrawFlex ? withdrawFlex : `💸 บัญชีของคุณคือ:\nธนาคาร: ${bank.bankName}\nเลขบัญชี: ${bank.accountNumber}\nชื่อบัญชี: ${bank.accountName}\nยอดคงเหลือ: ${balance} แต้ม\n\n💡 พิมพ์ "ถอน [จำนวน]" เพื่อเริ่มทำรายการครับ`, userId);
+      }
     }
     return;
   }
@@ -275,23 +307,27 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   // F. PROCESS WITHDRAWAL REQUEST ("ถอน [amount]")
   const withdrawTextRegex = /^(ถอน|ถอนเงิน|ถอนยอด)(\d+)$/;
   if (withdrawTextRegex.test(clean)) {
+    if (groupId) {
+      await replyToLine(replyToken, `💡 [เมนูส่วนตัว] รายการเช็คยอด เติมเงิน ถอนเงิน เป็นข้อมูลส่วนบุคคลส่วนตัว กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ 🚀`, userId);
+      return;
+    }
     const match = clean.match(withdrawTextRegex);
     const withdrawAmt = parseInt(match[2]);
     const bank = db.getPlayerBank(userId);
     
     if (!bank) {
-      await replyToLine(replyToken, `❌ ยังไม่ได้ลงทะเบียนบัญชีธนาคารสำหรับถอนเงิน กรุณาพิมพ์ "ฝากเงิน" เพื่อเริ่มทำการทำรายการ หรือ ส่งรูปหน้าบัญชีธนาคารให้แอดมินลงทะเบียนค่ะ`, userId);
+      await replyToLine(replyToken, `❌ ยังไม่ได้ลงทะเบียนบัญชีธนาคารสำหรับถอนเงิน กรุณาพิมพ์ "ฝากเงิน" เพื่อเริ่มทำการทำรายการ หรือ ส่งรูปหน้าบัญชีธนาคารให้แอดมินลงทะเบียนครับ`, userId);
       return;
     }
     
     const balance = await db.getPlayerBalance(userId, bank.accountName || displayName);
     if (balance < withdrawAmt) {
-      await replyToLine(replyToken, `⚠️ ขออภัยค่ะ เครดิตของคุณมีไม่เพียงพอ (คงเหลือ ${balance} แต้ม ต้องการถอน ${withdrawAmt} แต้ม)`, userId);
+      await replyToLine(replyToken, `⚠️ ขออภัยครับ เครดิตของคุณมีไม่เพียงพอ (คงเหลือ ${balance} แต้ม ต้องการถอน ${withdrawAmt} แต้ม)`, userId);
       return;
     }
     
     if (withdrawAmt < 100) {
-      await replyToLine(replyToken, `⚠️ ขออภัยค่ะ ระบบกำหนดการถอนเงินขั้นต่ำ 100 แต้มค่ะ`, userId);
+      await replyToLine(replyToken, `⚠️ ขออภัยครับ ระบบกำหนดการถอนเงินขั้นต่ำ 100 แต้มครับ`, userId);
       return;
     }
 
@@ -319,8 +355,12 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   }
 
   if (depositAmt !== null) {
+    if (groupId) {
+      await replyToLine(replyToken, `💡 [เมนูส่วนตัว] รายการเช็คยอด เติมเงิน ถอนเงิน เป็นข้อมูลส่วนบุคคลส่วนตัว กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ 🚀`, userId);
+      return;
+    }
     if (depositAmt < 100 || depositAmt > 10000) {
-      await replyToLine(replyToken, `⚠️ ขออภัยค่ะ ระบบรองรับการฝากยอดขั้นต่ำ 100 THB และสูงสุดไม่เกิน 10,000 THB ต่อครั้งค่ะ`, userId);
+      await replyToLine(replyToken, `⚠️ ขออภัยครับ ระบบรองรับการฝากยอดขั้นต่ำ 100 THB และสูงสุดไม่เกิน 10,000 THB ต่อครั้งครับ`, userId);
       return;
     }
 
@@ -334,17 +374,10 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   const isMatchCommand = parseBetCommand(text, userId, displayName, replyToken, groupId);
   if (isMatchCommand) return;
 
-  // I. RULES & EXAMPLES COMMAND HANDLER
-  if (clean === 'วิธีเล่น' || clean === 'กติกา' || clean === 'ตัวอย่าง' || clean === 'ราคา') {
-    const rulesMsg = `📌 [วิธีพิมพ์แทงดวล]\n• 300-340ล (ฝั่งต่ำ)\n• 300-340ถ (ฝั่งสูง)\n• 345-385ล500 ชตย (เผื่อช่างไม่ต่อย)\n• พิมพ์ "ต" หรือ "ต [เลขแผล]" เพื่อกดรับแผลดวล 🚀`;
-    await replyToLine(replyToken, rulesMsg, userId);
-    return;
-  }
-
-  // J. HELP MENU
+  // I. HELP MENU
   if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start' || clean === 'ช่วยเหลือ') {
     if (groupId) {
-      await replyToLine(replyToken, `💡 [เมนูส่วนตัว] กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวเพื่อเช็คยอด/ฝาก-ถอนค่ะ (ในกลุ่มใช้พิมพ์แทงดวลสด และพิมพ์ "กระดานดวล") 🚀`, userId);
+      await replyToLine(replyToken, `💡 [เมนูส่วนตัว] รายการเช็คยอด เติมเงิน ถอนเงิน เป็นข้อมูลส่วนบุคคลส่วนตัว กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ (ในกลุ่มใช้พิมพ์แทงดวลสด และพิมพ์ "กระดานดวล") 🚀`, userId);
     } else {
       const menuFlex = constructMainMenuFlex();
       await replyToLine(replyToken, menuFlex, userId);
@@ -352,8 +385,8 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
     return;
   }
 
-  // K. FALLBACK
-  await replyToLine(replyToken, `🤖 ขออภัยค่ะ ไม่เข้าใจคำสั่ง กรุณาพิมพ์ "ฝากเงิน", "ถอนยอด", "เช็คยอด" หรือพิมพ์ราคาแทงดวลได้เลยค่ะ`, userId);
+  // J. FALLBACK
+  await replyToLine(replyToken, `🤖 ขออภัยค่ะ ไม่เข้าใจคำสั่งของคุณ\nกรุณากดปุ่มที่เมนูด้านล่าง หรือพิมพ์คำสั่ง เช่น "ฝากเงิน", "ถอนยอด" หรือ "เช็คยอด" เพื่อเริ่มทำรายการค่ะ`, userId);
 }
 
 export async function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
@@ -547,21 +580,27 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   const clean = text.replace(/\s+/g, '').toLowerCase();
   
   // Keywords definition
-  const keywordsLowBase = ['ชล', 'ล', 'ไล่', 'ช่างไล่'];
-  const keywordsHighBase = ['ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'ช่างยั่ง', 'ช่างถอย'];
-  const keywordsAccept = ['ต', 'ติด', 'ครับ', 'เค', 'จ้า', 'ยอมรับ', 'ดีล', 'รับแผล', 'รับ'];
-
-  const mechanicPricedKeywords = ['ช่างต่อย', 'ช่างมีราคา', 'ช่างตีราคา'];
-  const mechanicUnpricedKeywords = ['ช่างไม่ต่อย', 'ช่างไม่มีราคา', 'ช่างไม่ตีราคา', 'ช่างไม่เปิดราคา'];
-
-  // 0. Mechanic status query / announcement
-  if (mechanicPricedKeywords.includes(clean)) {
-    replyToLine(replyToken, `🔧 [สถานะราคาช่าง] ✅ ช่างต่อยแล้ว เปิดรับแทงราคาช่างค่ะ 🚀`, userId);
-    return true;
-  }
-
-  if (mechanicUnpricedKeywords.includes(clean)) {
-    replyToLine(replyToken, `🔧 [สถานะราคาช่าง] ⚠️ ช่างไม่ต่อย ให้ผู้เล่นเสนอเปิดราคาตัวเลขเองค่ะ 🚀`, userId);
+  const keywordsLow = ['ชล', 'ล', 'ไล่', '+5ชล', '+5ล', 'ช่างไล่'];
+  const keywordsHigh = ['ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', '+5ชย', '+5ชถ', '+5ย', '+5ถ', 'ช่างยั่ง', 'ช่างถอย'];
+  const keywordsAccept = ['ต', 'ติด', 'ครับ', 'เค', 'จ้า', 'ยอมรับ', 'ดีล'];
+  
+  // 0. Pending Deals Board Command ("กระดานดวล", "แผลค้าง", "เปิดรอคู่")
+  if (clean === 'กระดานดวล' || clean === 'แผลค้าง' || clean === 'เปิดรอคู่' || clean === 'รอคู่') {
+    const pendingList = db.getPendingBetsList();
+    if (pendingList.length === 0) {
+      replyToLine(replyToken, `📊 [กระดานดวลสด]\n\n❌ ปัจจุบันไม่มีแผลดวลที่เปิดรอคู่ในระบบเลยค่ะ คุณสามารถเปิดแผลท้าดวลใหม่ได้ทันทีค่ะ 🚀`, userId);
+    } else {
+      let boardMsg = `📊 [กระดานแผลดวลที่เปิดรอคู่ดวลสด (${pendingList.length} รายการ)]\n`;
+      pendingList.forEach((b, idx) => {
+        const creatorName = b.playerLowName || b.playerHighName;
+        const sideText = b.playerLowId ? 'ต่ำ (ชล)' : 'สูง (ชถ)';
+        const rangeText = b.rangeMin && b.rangeMax ? `ช่วง ${b.rangeMin}-${b.rangeMax}s` : '';
+        const shortCode = b.orderNumber.slice(-2);
+        boardMsg += `\n${idx + 1}. Order #${b.orderNumber} (รหัส: ${shortCode})\n   👤 ผู้ท้า: คุณ${creatorName}\n   🎯 ฝั่ง: ${sideText} ${rangeText}\n   💰 ยอด: ${b.amount} pt\n   👉 พิมพ์ "ต${shortCode}" เพื่อกดรับแผลนี้โดยเฉพาะ\n-----------------------`;
+      });
+      boardMsg += `\n\n💡 พิมพ์ "ต [เลขแผล]" หรือกดปุ่มบนการ์ดแผลเพื่อรับดวลได้ทันทีค่ะ! ☄️`;
+      replyToLine(replyToken, boardMsg, userId);
+    }
     return true;
   }
 
@@ -569,17 +608,17 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   if (clean === 'กระดานดวล' || clean === 'แผลค้าง' || clean === 'เปิดรอคู่' || clean === 'รอคู่') {
     const pendingList = db.getPendingBetsList();
     if (pendingList.length === 0) {
-      replyToLine(replyToken, `📊 [กระดานดวลสด] ❌ ไม่มีแผลดวลเปิดรอคู่ในขณะนี้ค่ะ คุณสามารถเปิดแผลท้าดวลใหม่ได้ทันที 🚀`, userId);
+      replyToLine(replyToken, `📊 [กระดานดวลสด]\n\n❌ ปัจจุบันไม่มีแผลดวลที่เปิดรอคู่ในระบบครับ คุณสามารถเปิดแผลท้าดวลใหม่ได้ทันทีครับ 🚀`, userId);
     } else {
-      let boardMsg = `📊 [กระดานดวลสด (${pendingList.length} แผล)]\n`;
+      let boardMsg = `📊 [กระดานแผลดวลที่เปิดรอคู่ดวลสด (${pendingList.length} รายการ)]\n`;
       pendingList.forEach((b, idx) => {
         const creatorName = b.playerLowName || b.playerHighName;
-        const sideText = b.playerLowId ? 'ต่ำ(ชล)' : 'สูง(ชถ)';
-        const rangeText = b.rangeMin && b.rangeMax ? `${b.rangeMin}-${b.rangeMax}s` : '';
+        const sideText = b.playerLowId ? 'ต่ำ (ชล)' : 'สูง (ชถ)';
+        const rangeText = b.rangeMin && b.rangeMax ? `ช่วง ${b.rangeMin}-${b.rangeMax}s` : '';
         const shortCode = b.orderNumber.slice(-2);
-        boardMsg += `${idx + 1}. #${b.orderNumber} (${shortCode}) | ${sideText} ${rangeText} | ${b.amount}pt (คุณ${creatorName}) 👉 พิมพ์ "ต${shortCode}"\n`;
+        boardMsg += `\n${idx + 1}. Order #${b.orderNumber} (รหัส: ${shortCode})\n   👤 ผู้ท้า: คุณ @${creatorName}\n   🎯 ฝั่ง: ${sideText} ${rangeText}\n   💰 ยอด: ${b.amount} pt\n   👉 พิมพ์ "ต${shortCode}" เพื่อกดรับแผลนี้โดยเฉพาะ\n-----------------------`;
       });
-      boardMsg += `💡 พิมพ์ "ต [เลขแผล]" เพื่อรับดวลได้ทันทีค่ะ! ☄️`;
+      boardMsg += `\n\n💡 พิมพ์ "ต [เลขแผล]" หรือกดปุ่มบนการ์ดแผลเพื่อรับดวลได้ทันทีครับ! ☄️`;
       replyToLine(replyToken, boardMsg, userId);
     }
     return true;
@@ -593,25 +632,25 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
     db.cancelOpenBet(userId, targetOrderNo).then(async res => {
       if (res.success) {
-        const msg = `❌ [ยกเลิกแผลดวล #${res.orderNumber}]\nคืนเครดิต ${res.amount}pt ให้คุณ${res.creatorName} เรียบร้อยแล้วค่ะ 🚀`;
+        const msg = `❌ [ยกเลิกแผลดวลสำเร็จ]\nOrder #${res.orderNumber} ถูกยกเลิกโดย คุณ @${res.creatorName}\n💰 ระบบคืนเครดิต ${res.amount} แต้มกลับเข้าบัญชีเรียบร้อยแล้วครับ 🚀`;
         if (groupId) {
           await pushToLine(groupId, msg);
         } else {
           await replyToLine(replyToken, msg, userId);
         }
       } else if (res.error === 'UNAUTHORIZED') {
-        await replyToLine(replyToken, `⚠️ [ยกเลิกไม่ได้] เฉพาะผู้ท้าดวล (คุณ${res.creatorName}) หรือแอดมินเท่านั้นที่สามารถยกเลิกแผลนี้ได้ค่ะ`, userId);
+        await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้ยกเลิกแผลผู้เล่นอื่น]\n\nเฉพาะเจ้าของแผลท้าดวล (คุณ @${res.creatorName}) หรือแอดมินเท่านั้นที่สามารถยกเลิก Order #${res.orderNumber} ได้ครับ`, userId);
       } else {
         const notFoundText = targetOrderNo
-          ? `❌ ไม่พบแผลดวล Order #${targetOrderNo} ที่เปิดรอคู่ในระบบค่ะ`
-          : `❌ คุณไม่มีแผลดวลที่เปิดรอคู่อยู่ในระบบค่ะ`;
+          ? `❌ ไม่พบแผลดวล Order #${targetOrderNo} ที่เปิดรอคู่ในระบบครับ (แผลอาจจับคู่แล้วหรือถูกยกเลิกไปแล้ว)`
+          : `❌ ขออภัยครับ คุณไม่มีแผลดวลที่เปิดรอคู่อยู่ในระบบครับ`;
         await replyToLine(replyToken, notFoundText, userId);
       }
     });
     return true;
   }
 
-  // 1. Check Accept Match Command (e.g. "ต", "ต12", "ต 12", "12ต", "ต#12", "ติด", "ครับ", "เค", "จ้า", "ยอมรับ", "ดีล", "รับแผล", "รับ")
+  // 1. Check Accept Match Command (e.g. "ต", "ต12", "ต 12", "12ต", "ต#12", "ติด", "รับแผล")
   const specificAcceptRegex = /^(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*#?(\d{2,6})$/;
   const reverseAcceptRegex = /^#?(\d{2,6})\s*(ต|ติด|รับ)$/;
   let targetOrderNo = null;
@@ -625,7 +664,7 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   if (keywordsAccept.includes(clean) || targetOrderNo) {
     db.matchExistingOpenBet(userId, displayName, targetOrderNo).then(async matched => {
       if (matched && matched.error === 'INSUFFICIENT_BALANCE') {
-        await replyToLine(replyToken, `⚠️ [เครดิตไม่พอ] คุณมี ${matched.current} แต้ม (ต้องใช้ ${matched.required} แต้ม) พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตค่ะ 🚀`, userId);
+        await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้เล่นเกินเครดิต]\n\nคุณไม่สามารถกดรับแผลดวลนี้ได้ เนื่องจากยอดเครดิตคงเหลือไม่เพียงพอ!\n• เครดิตคงเหลือของคุณ: ${matched.current} แต้ม\n• ยอดแผลที่ต้องการดวล: ${matched.required} แต้ม\n\n❌ ระบบได้ทำการบล็อกรายการนี้เรียบร้อยครับ กรุณาพิมพ์ "ฝากเงิน" เพื่อเติมเครดิตก่อนแทงดวลนะครับ 🚀`, userId);
         return;
       }
 
@@ -643,81 +682,57 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
         // Reply in group or chat
         if (groupId) {
-          await pushToLine(groupId, `☄️ [จับคู่ดวลสำเร็จ! #${matched.orderNumber}]\nคุณ${matched.playerLowName} (ต่ำ) 🆚 คุณ${matched.playerHighName} (สูง) | ยอด ${matched.amount} pt 🚀`);
+          await pushToLine(groupId, `☄️ [จับคู่ดวลสำเร็จ!]\n👤 ผู้กดรับแผล: คุณ @${displayName}\nOrder #${matched.orderNumber}\nคู่ดวล: คุณ @${matched.playerLowName} 🆚 คุณ @${matched.playerHighName}\nยอดดวล: ${matched.amount} แต้ม\nสถานะ: แมตช์ดวลเรียบร้อย (หักเครดิตเข้ากองกลาง 100% เรียบร้อยแล้วครับ) 🚀`);
         } else {
           await replyToLine(replyToken, flexMatcher, userId);
         }
       } else {
         const notFoundText = targetOrderNo
-          ? `❌ ไม่พบแผลดวล Order #${targetOrderNo} ที่เปิดรอคู่ในระบบค่ะ`
-          : `❌ ตอนนี้ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ดวลในขณะนี้ค่ะ`;
+          ? `❌ ไม่พบแผลดวล Order #${targetOrderNo} ที่เปิดรอคู่ในระบบครับ (แผลอาจจับคู่แล้วหรือถูกยกเลิก)`
+          : `❌ ขออภัยครับ ตอนนี้ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ดวลในระบบเลยครับ คุณสามารถเปิดแผลใหม่ได้ทันทีครับ`;
         await replyToLine(replyToken, notFoundText, userId);
       }
     });
     return true;
   }
 
-  // 2. Advanced Betting Command Parser (handles modifiers: ก+5, ก-5, ม+5, ม-5, +5, -5, range 330-370, side, amount, ชตย)
+  // 2. Betting commands (e.g., "ล200", "ถ500", "+5ชล200", "300-340ล", "345-385ล500 ชตย")
   const isChotoy = clean.includes('ชตย') || text.includes('ชตย');
   const cleanBetText = clean.replace(/ชตย/g, '').trim();
 
-  // Pattern: Optional Base Range + Optional Modifier + Side Keyword + Optional Amount
-  // Examples: "330-370ล500", "330-370ก+5ล200", "ก+5ล200", "ก-5ถ400", "ม+5ล100", "ม-5ถ200", "+5ล300", "-5ถ400", "ล200", "+5ชล400", "300-330ถ300ชตย"
-  const fullBetRegex = /^(?:(\d+)-(\d+))?\s*(?:(ก|เกิบ|ม|หมวก)?([+-]\d+))?\s*(ชล|ล|ไล่|ช่างไล่|ชย|ชถ|ย|ถ|ยั่ง|ถอย|ช่างยั่ง|ช่างถอย)\s*(\d+)?$/;
-
-  if (fullBetRegex.test(cleanBetText)) {
-    const match = cleanBetText.match(fullBetRegex);
-    const rawMin = match[1];
-    const rawMax = match[2];
-    const modifierTarget = match[3];
-    const modifierVal = match[4];
-    const sideKeyword = match[5];
-    const rawAmount = match[6];
-
+  // Format 1: [keywords][amount] (e.g. "ล200", "ถ500")
+  const betRegex = /^(\+?5?[a-zA-Z\u0e00-\u0e7f]+)(\d+)$/;
+  if (betRegex.test(cleanBetText)) {
+    const match = cleanBetText.match(betRegex);
+    const cmd = match[1];
+    const amount = parseInt(match[2]);
+    
     let side = '';
-    if (keywordsLowBase.includes(sideKeyword)) side = 'low';
-    else if (keywordsHighBase.includes(sideKeyword)) side = 'high';
+    if (keywordsLow.includes(cmd)) side = 'low';
+    else if (keywordsHigh.includes(cmd)) side = 'high';
+    
+    if (side && amount >= 10) {
+      processOpenBetRequest(side, amount, 'normal', null, null, userId, displayName, replyToken, isChotoy);
+      return true;
+    }
+  }
 
-    if (side) {
-      const amount = rawAmount ? parseInt(rawAmount) : 500; // Default amount to 500 if omitted
-      let minVal = rawMin ? parseInt(rawMin) : null;
-      let maxVal = rawMax ? parseInt(rawMax) : null;
-
-      // Handle Modifier (+- from mechanic price)
-      if (modifierVal) {
-        const offset = parseInt(modifierVal);
-        
-        // If range is not provided in command, use active mechanic base price (default 330-370)
-        if (minVal === null || maxVal === null) {
-          const activeRound = db.getActiveMechanicPrice ? db.getActiveMechanicPrice() : { min: 330, max: 370 };
-          minVal = activeRound.min;
-          maxVal = activeRound.max;
-        }
-
-        const target = (modifierTarget || '').toLowerCase();
-        if (target === 'ก' || target === 'เกิบ') {
-          minVal += offset; // Modify lower bound (Kip) only
-        } else if (target === 'ม' || target === 'หมวก') {
-          maxVal += offset; // Modify upper bound (Muak) only
-        } else {
-          // Both bounds modified (+5 or -5)
-          minVal += offset;
-          maxVal += offset;
-        }
-      }
-
-      if (amount >= 10) {
-        if (minVal !== null && maxVal !== null) {
-          // Update active mechanic base price if a new explicit base range was provided without modifier
-          if (rawMin && rawMax && !modifierVal && db.setActiveMechanicPrice) {
-            db.setActiveMechanicPrice(parseInt(rawMin), parseInt(rawMax));
-          }
-          processOpenBetRequest(side, amount, 'range', minVal, maxVal, userId, displayName, replyToken, isChotoy);
-        } else {
-          processOpenBetRequest(side, amount, 'normal', null, null, userId, displayName, replyToken, isChotoy);
-        }
-        return true;
-      }
+  // Format 2: [Min]-[Max][keywords][amount?] (e.g. "300-340ล", "300-340ถ", "300-340ล1000", "345-385ล500 ชตย")
+  const rangeBetRegex = /^(\d+)-(\d+)([a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
+  if (rangeBetRegex.test(cleanBetText)) {
+    const match = cleanBetText.match(rangeBetRegex);
+    const minVal = parseInt(match[1]);
+    const maxVal = parseInt(match[2]);
+    const cmd = match[3];
+    const amount = match[4] ? parseInt(match[4]) : 500; // Default amount to 500 pt if not specified
+    
+    let side = '';
+    if (keywordsLow.includes(cmd)) side = 'low';
+    else if (keywordsHigh.includes(cmd)) side = 'high';
+    
+    if (side && amount >= 10 && minVal < maxVal) {
+      processOpenBetRequest(side, amount, 'range', minVal, maxVal, userId, displayName, replyToken, isChotoy);
+      return true;
     }
   }
 
@@ -727,7 +742,7 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false) {
   const balance = await db.getPlayerBalance(userId, displayName);
   if (balance < amount) {
-    await replyToLine(replyToken, `⚠️ [เครดิตไม่พอ] คุณมี ${balance} แต้ม (ต้องการใช้ ${amount} แต้ม) พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตค่ะ 🚀`, userId);
+    await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้เล่นเกินเครดิต]\n\nยอดเงินเครดิตคงเหลือของคุณไม่เพียงพอสำหรับการท้าดวลแผลนี้!\n• เครดิตคงเหลือของคุณ: ${balance} แต้ม\n• ยอดที่ต้องการใช้: ${amount} แต้ม\n\n❌ กรุณาพิมพ์ "ฝากเงิน" เพื่อทำรายการเติมทุนก่อนแทงดวลนะคะ 🚀`, userId);
     return;
   }
 
@@ -737,7 +752,7 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   // Deduct balance (with strict return check)
   const success = await db.adjustPlayerBalance(userId, -amount, displayName);
   if (!success) {
-    await replyToLine(replyToken, `⚠️ [เครดิตไม่พอ] คุณมี ${balance} แต้ม (ต้องการใช้ ${amount} แต้ม) พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตค่ะ 🚀`, userId);
+    await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้เล่นเกินเครดิต]\n\nเกิดข้อผิดพลาด: ยอดเงินเครดิตคงเหลือของคุณไม่เพียงพอสำหรับการท้าดวลแผลนี้ (คงเหลือ ${balance} แต้ม ต้องการใช้ ${amount} แต้ม)\n\n❌ กรุณาพิมพ์ "ฝากเงิน" เพื่อเติมเครดิตก่อนแทงดวลนะคะ 🚀`, userId);
     return;
   }
   
@@ -750,9 +765,9 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   
   let rangeInfo = '';
   if (type === 'range') {
-    rangeInfo = `${minVal}-${maxVal}${isChotoy ? ' (ชตย: ช่างต่อยยุติ)' : ''}`;
+    rangeInfo = `${minVal}-${maxVal}${isChotoy ? ' (ชตย: ช่างไม่ต่อย)' : ''}`;
   } else if (isChotoy) {
-    rangeInfo = '(ชตย: ช่างต่อยยุติ)';
+    rangeInfo = '(ชตย: ช่างไม่ต่อย)';
   }
   
   const betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfo);
@@ -761,26 +776,24 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
 
 // --- LINE FLEX CONSTRUCTORS ---
 
-// --- LINE FLEX CONSTRUCTORS ---
-
 export function constructMainMenuFlex() {
   return {
     "type": "bubble",
-    "size": "kilo",
+    "size": "mega",
     "header": {
       "type": "box",
       "layout": "vertical",
       "contents": [
         {
           "type": "text",
-          "text": "🚀 Rocket Science",
+          "text": "🚀 Rocket Science Billing",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "sm"
+          "size": "md"
         }
       ],
       "backgroundColor": "#00796B",
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     },
     "body": {
       "type": "box",
@@ -788,23 +801,23 @@ export function constructMainMenuFlex() {
       "contents": [
         {
           "type": "text",
-          "text": "เลือกรายการที่ต้องการทำรายการค่ะ",
-          "size": "xs",
-          "color": "#666666",
+          "text": "ยินดีต้อนรับสู่ระบบเติมทุนหลังบ้าน Rocket Science\nกรุณาเลือกบริการที่คุณต้องการทำรายการด้านล่างค่ะ",
+          "size": "sm",
+          "color": "#555555",
           "wrap": true
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "20px"
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "xs",
+      "spacing": "sm",
       "contents": [
         {
           "type": "box",
           "layout": "horizontal",
-          "spacing": "xs",
+          "spacing": "sm",
           "contents": [
             {
               "type": "button",
@@ -813,7 +826,7 @@ export function constructMainMenuFlex() {
               "color": "#00796B",
               "action": {
                 "type": "message",
-                "label": "เช็คยอด",
+                "label": "ตรวจสอบยอด",
                 "text": "เช็คยอด"
               }
             },
@@ -833,7 +846,7 @@ export function constructMainMenuFlex() {
         {
           "type": "box",
           "layout": "horizontal",
-          "spacing": "xs",
+          "spacing": "sm",
           "contents": [
             {
               "type": "button",
@@ -860,7 +873,7 @@ export function constructMainMenuFlex() {
           ]
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     }
   };
 }
@@ -868,21 +881,21 @@ export function constructMainMenuFlex() {
 export function constructBalanceFlex(displayName, balance) {
   return {
     "type": "bubble",
-    "size": "kilo",
+    "size": "mega",
     "header": {
       "type": "box",
       "layout": "vertical",
       "contents": [
         {
           "type": "text",
-          "text": "💳 ยอดเครดิตคงเหลือ",
+          "text": "💳 ยอดเครดิตคงเหลือของคุณ",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "sm"
+          "size": "md"
         }
       ],
       "backgroundColor": "#00796B",
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     },
     "body": {
       "type": "box",
@@ -896,16 +909,16 @@ export function constructBalanceFlex(displayName, balance) {
               "type": "text",
               "text": "👤 ผู้เล่น:",
               "color": "#888888",
-              "size": "xs",
-              "flex": 4
+              "size": "sm",
+              "flex": 3
             },
             {
               "type": "text",
               "text": displayName,
               "weight": "bold",
               "color": "#333333",
-              "size": "xs",
-              "flex": 6,
+              "size": "sm",
+              "flex": 7,
               "align": "end"
             }
           ]
@@ -913,38 +926,38 @@ export function constructBalanceFlex(displayName, balance) {
         {
           "type": "box",
           "layout": "horizontal",
-          "margin": "sm",
+          "margin": "md",
           "contents": [
             {
               "type": "text",
               "text": "💰 คงเหลือ:",
               "color": "#888888",
-              "size": "xs",
-              "flex": 4
+              "size": "sm",
+              "flex": 3
             },
             {
               "type": "text",
               "text": balance.toFixed(2) + " แต้ม",
               "weight": "bold",
               "color": "#2E7D32",
-              "size": "md",
-              "flex": 6,
+              "size": "lg",
+              "flex": 7,
               "align": "end"
             }
           ]
         }
       ],
-      "paddingAll": "12px"
+      "paddingAll": "20px"
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "xs",
+      "spacing": "sm",
       "contents": [
         {
           "type": "box",
           "layout": "horizontal",
-          "spacing": "xs",
+          "spacing": "sm",
           "contents": [
             {
               "type": "button",
@@ -981,7 +994,7 @@ export function constructBalanceFlex(displayName, balance) {
           }
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     }
   };
 }
@@ -989,7 +1002,7 @@ export function constructBalanceFlex(displayName, balance) {
 export function constructDepositFlex() {
   return {
     "type": "bubble",
-    "size": "kilo",
+    "size": "mega",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -999,11 +1012,11 @@ export function constructDepositFlex() {
           "text": "💰 ฝากเครดิตเข้าระบบ",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "sm"
+          "size": "md"
         }
       ],
       "backgroundColor": "#00796B",
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     },
     "body": {
       "type": "box",
@@ -1011,23 +1024,23 @@ export function constructDepositFlex() {
       "contents": [
         {
           "type": "text",
-          "text": "เลือกยอดเงินที่ต้องการฝาก หรือพิมพ์ระบุยอดได้เลยค่ะ",
-          "size": "xs",
+          "text": "กรุณาเลือกยอดเงินที่ต้องการฝากเพื่อรับใบแจ้งยอดโอนเงิน หรือพิมพ์ระบุจำนวนเงินที่ต้องการฝากอื่นๆ ได้เลยค่ะ",
+          "size": "sm",
           "color": "#555555",
           "wrap": true
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "20px"
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "xs",
+      "spacing": "sm",
       "contents": [
         {
           "type": "box",
           "layout": "horizontal",
-          "spacing": "xs",
+          "spacing": "sm",
           "contents": [
             {
               "type": "button",
@@ -1056,7 +1069,7 @@ export function constructDepositFlex() {
         {
           "type": "box",
           "layout": "horizontal",
-          "spacing": "xs",
+          "spacing": "sm",
           "contents": [
             {
               "type": "button",
@@ -1093,7 +1106,7 @@ export function constructDepositFlex() {
           }
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     }
   };
 }
@@ -1101,7 +1114,7 @@ export function constructDepositFlex() {
 export function constructDepositInvoiceFlex(depositAmt) {
   return {
     "type": "bubble",
-    "size": "kilo",
+    "size": "mega",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1111,21 +1124,21 @@ export function constructDepositInvoiceFlex(depositAmt) {
           "text": "🧾 ใบแจ้งยอดโอนเงิน",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "sm"
+          "size": "md"
         }
       ],
       "backgroundColor": "#00796B",
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     },
     "body": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "sm",
+      "spacing": "md",
       "contents": [
         {
           "type": "text",
-          "text": "กรุณาโอนเงินตามยอดนี้ และส่งรูปสลิปในแชทเพื่อรับเครดิตอัตโนมัติค่ะ",
-          "size": "xs",
+          "text": "กรุณาโอนเงินตามยอดด้านล่างนี้ และส่งรูปภาพสลิปที่ได้ลงในแชทนี้ ระบบจะสแกนและอัพเครดิตทันทีค่ะ",
+          "size": "sm",
           "color": "#555555",
           "wrap": true
         },
@@ -1140,7 +1153,7 @@ export function constructDepositInvoiceFlex(depositAmt) {
               "type": "text",
               "text": "🏦 ธนาคาร:",
               "color": "#888888",
-              "size": "xs",
+              "size": "sm",
               "flex": 4
             },
             {
@@ -1148,7 +1161,7 @@ export function constructDepositInvoiceFlex(depositAmt) {
               "text": "ไทยพาณิชย์ (SCB)",
               "weight": "bold",
               "color": "#333333",
-              "size": "xs",
+              "size": "sm",
               "flex": 6,
               "align": "end"
             }
@@ -1162,7 +1175,7 @@ export function constructDepositInvoiceFlex(depositAmt) {
               "type": "text",
               "text": "🔢 เลขบัญชี:",
               "color": "#888888",
-              "size": "xs",
+              "size": "sm",
               "flex": 4
             },
             {
@@ -1170,7 +1183,7 @@ export function constructDepositInvoiceFlex(depositAmt) {
               "text": "064-2-35656-6",
               "weight": "bold",
               "color": "#333333",
-              "size": "xs",
+              "size": "sm",
               "flex": 6,
               "align": "end"
             }
@@ -1184,7 +1197,7 @@ export function constructDepositInvoiceFlex(depositAmt) {
               "type": "text",
               "text": "👤 ชื่อบัญชี:",
               "color": "#888888",
-              "size": "xs",
+              "size": "sm",
               "flex": 4
             },
             {
@@ -1192,7 +1205,7 @@ export function constructDepositInvoiceFlex(depositAmt) {
               "text": "อิทธิรัตน์ แนวหล่า",
               "weight": "bold",
               "color": "#333333",
-              "size": "xs",
+              "size": "sm",
               "flex": 6,
               "align": "end",
               "wrap": true
@@ -1205,9 +1218,9 @@ export function constructDepositInvoiceFlex(depositAmt) {
           "contents": [
             {
               "type": "text",
-              "text": "💵 ยอดโอน:",
+              "text": "💵 ยอดโอนตรง:",
               "color": "#888888",
-              "size": "xs",
+              "size": "sm",
               "flex": 4
             },
             {
@@ -1215,19 +1228,19 @@ export function constructDepositInvoiceFlex(depositAmt) {
               "text": depositAmt + ".00 บาท",
               "weight": "bold",
               "color": "#2E7D32",
-              "size": "sm",
+              "size": "md",
               "flex": 6,
               "align": "end"
             }
           ]
         }
       ],
-      "paddingAll": "12px"
+      "paddingAll": "20px"
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "xs",
+      "spacing": "sm",
       "contents": [
         {
           "type": "button",
@@ -1240,7 +1253,7 @@ export function constructDepositInvoiceFlex(depositAmt) {
           }
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     }
   };
 }
@@ -1248,7 +1261,7 @@ export function constructDepositInvoiceFlex(depositAmt) {
 export function constructBankRegistrationFlex() {
   return {
     "type": "bubble",
-    "size": "kilo",
+    "size": "mega",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1258,37 +1271,93 @@ export function constructBankRegistrationFlex() {
           "text": "📋 ยืนยันบัญชีธนาคาร",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "sm"
+          "size": "md"
         },
         {
           "type": "text",
           "text": "เพื่อรับเงินโอนคืนอย่างปลอดภัย",
-          "color": "#E0F2F1",
-          "size": "xs"
+          "color": "#B2DFDB",
+          "size": "sm"
         }
       ],
       "backgroundColor": "#00796B",
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     },
     "body": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "xs",
+      "spacing": "md",
       "contents": [
         {
           "type": "text",
-          "text": "กรุณาถ่ายรูปหน้าสมุดบัญชี/สกรีนช็อตแอป ที่เห็นชื่อและเลขบัญชีที่โอนฝากเข้ามา แล้วส่งในแชทนี้ได้เลยค่ะ",
-          "size": "xs",
+          "text": "ระบบพบว่าคุณมียอดเงินในระบบแล้ว แต่ยังไม่ได้ลงทะเบียนบัญชีสำหรับรับเงินโอนคืน",
+          "size": "sm",
           "color": "#555555",
+          "wrap": true
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "text",
+          "text": "📸 วิธีลงทะเบียนบัญชี:",
+          "weight": "bold",
+          "size": "sm",
+          "color": "#00695C"
+        },
+        {
+          "type": "box",
+          "layout": "vertical",
+          "backgroundColor": "#E0F2F1",
+          "cornerRadius": "8px",
+          "paddingAll": "12px",
+          "spacing": "sm",
+          "contents": [
+            {
+              "type": "text",
+              "text": "📷 ถ่ายรูปหน้าสมุดบัญชี หรือ สกรีนช็อตแอปธนาคาร ที่แสดง:",
+              "size": "sm",
+              "color": "#004D40",
+              "wrap": true
+            },
+            {
+              "type": "text",
+              "text": "• ชื่อ-นามสกุล เจ้าของบัญชี",
+              "size": "sm",
+              "color": "#00695C",
+              "wrap": true
+            },
+            {
+              "type": "text",
+              "text": "• เลขบัญชีที่ใช้โอนเงินฝากเข้ามาเท่านั้น",
+              "size": "sm",
+              "color": "#00695C",
+              "wrap": true
+            },
+            {
+              "type": "text",
+              "text": "แล้วส่งรูปในแชทนี้ได้เลยค่ะ",
+              "size": "sm",
+              "color": "#004D40",
+              "weight": "bold",
+              "wrap": true
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "⚠️ ต้องเป็นบัญชีเดียวกับที่โอนเงินเข้ามาเท่านั้น ทีมงานจะยืนยันและลงทะเบียนให้ภายใน 24 ชั่วโมงค่ะ",
+          "size": "xs",
+          "color": "#E65100",
           "wrap": true
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "20px"
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "xs",
+      "spacing": "sm",
       "contents": [
         {
           "type": "button",
@@ -1297,12 +1366,12 @@ export function constructBankRegistrationFlex() {
           "color": "#00796B",
           "action": {
             "type": "uri",
-            "label": "📞 ติดต่อทีมงาน",
+            "label": "📞 โทรติดต่อทีมงาน 089-104-1992",
             "uri": "tel:0891041992"
           }
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "12px"
     }
   };
 }
@@ -1310,7 +1379,7 @@ export function constructBankRegistrationFlex() {
 export function constructWithdrawalFlex(bankName, accountNumber, accountName, balance) {
   return {
     "type": "bubble",
-    "size": "kilo",
+    "size": "mega",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1320,37 +1389,51 @@ export function constructWithdrawalFlex(bankName, accountNumber, accountName, ba
           "text": "💸 ถอนเงินคืนเข้าบัญชี",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "sm"
+          "size": "md"
         }
       ],
       "backgroundColor": "#455A64",
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     },
     "body": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "xs",
+      "spacing": "md",
       "contents": [
         {
           "type": "text",
-          "text": "🏦 ธนาคาร: " + bankName,
-          "size": "xs",
-          "color": "#333333",
-          "weight": "bold"
+          "text": "บัญชีรับเงินโอนคืนของคุณ (บัญชีเดียวกับที่เคยใช้ฝากเงิน):",
+          "size": "sm",
+          "color": "#555555",
+          "wrap": true
         },
         {
-          "type": "text",
-          "text": "🔢 เลขบัญชี: " + accountNumber,
-          "size": "xs",
-          "color": "#333333",
-          "weight": "bold"
-        },
-        {
-          "type": "text",
-          "text": "👤 ชื่อบัญชี: " + accountName,
-          "size": "xs",
-          "color": "#333333",
-          "weight": "bold"
+          "type": "box",
+          "layout": "vertical",
+          "spacing": "xs",
+          "contents": [
+            {
+              "type": "text",
+              "text": "🏦 ธนาคาร: " + bankName,
+              "size": "sm",
+              "color": "#333333",
+              "weight": "bold"
+            },
+            {
+              "type": "text",
+              "text": "🔢 เลขบัญชี: " + accountNumber,
+              "size": "sm",
+              "color": "#333333",
+              "weight": "bold"
+            },
+            {
+              "type": "text",
+              "text": "👤 ชื่อบัญชี: " + accountName,
+              "size": "sm",
+              "color": "#333333",
+              "weight": "bold"
+            }
+          ]
         },
         {
           "type": "separator"
@@ -1358,22 +1441,22 @@ export function constructWithdrawalFlex(bankName, accountNumber, accountName, ba
         {
           "type": "text",
           "text": "💰 เครดิตคงเหลือ: " + balance.toFixed(2) + " แต้ม",
-          "size": "xs",
+          "size": "sm",
           "color": "#2E7D32",
           "weight": "bold"
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "20px"
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "xs",
+      "spacing": "sm",
       "contents": [
         {
           "type": "box",
           "layout": "horizontal",
-          "spacing": "xs",
+          "spacing": "sm",
           "contents": [
             {
               "type": "button",
@@ -1402,7 +1485,7 @@ export function constructWithdrawalFlex(bankName, accountNumber, accountName, ba
         {
           "type": "box",
           "layout": "horizontal",
-          "spacing": "xs",
+          "spacing": "sm",
           "contents": [
             {
               "type": "button",
@@ -1439,7 +1522,7 @@ export function constructWithdrawalFlex(bankName, accountNumber, accountName, ba
           }
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     }
   };
 }
@@ -1449,7 +1532,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
   const sideColor = side === 'low' ? '#1E88E5' : '#E53935';
   return {
     "type": "bubble",
-    "size": "kilo",
+    "size": "mega",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1459,56 +1542,112 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "text": "🚀 เปิดดีลดวล!",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "sm"
+          "size": "md"
         }
       ],
       "backgroundColor": "#1E1B4B",
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     },
     "body": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "xs",
+      "spacing": "md",
       "contents": [
         {
           "type": "box",
           "layout": "horizontal",
           "contents": [
-            { "type": "text", "text": "เลขที่ดีล:", "color": "#888888", "size": "xs", "flex": 4 },
-            { "type": "text", "text": "#" + orderNo, "weight": "bold", "color": "#333333", "size": "xs", "flex": 6, "align": "end" }
+            {
+              "type": "text",
+              "text": "เลขที่ดีล:",
+              "color": "#888888",
+              "size": "sm",
+              "flex": 4
+            },
+            {
+              "type": "text",
+              "text": "#" + orderNo,
+              "weight": "bold",
+              "color": "#333333",
+              "size": "sm",
+              "flex": 6,
+              "align": "end"
+            }
           ]
         },
         {
           "type": "box",
           "layout": "horizontal",
           "contents": [
-            { "type": "text", "text": "ผู้ท้าดวล:", "color": "#888888", "size": "xs", "flex": 4 },
-            { "type": "text", "text": creatorName, "weight": "bold", "color": "#333333", "size": "xs", "flex": 6, "align": "end" }
+            {
+              "type": "text",
+              "text": "ผู้ท้าดวล:",
+              "color": "#888888",
+              "size": "sm",
+              "flex": 4
+            },
+            {
+              "type": "text",
+              "text": creatorName,
+              "weight": "bold",
+              "color": "#333333",
+              "size": "sm",
+              "flex": 6,
+              "align": "end"
+            }
           ]
         },
         {
           "type": "box",
           "layout": "horizontal",
           "contents": [
-            { "type": "text", "text": "ฝั่งที่เลือก:", "color": "#888888", "size": "xs", "flex": 4 },
-            { "type": "text", "text": sideText + (rangeInfo ? " (" + rangeInfo + ")" : ""), "weight": "bold", "color": sideColor, "size": "xs", "flex": 6, "align": "end" }
+            {
+              "type": "text",
+              "text": "ฝั่งที่เลือก:",
+              "color": "#888888",
+              "size": "sm",
+              "flex": 4
+            },
+            {
+              "type": "text",
+              "text": sideText + (rangeInfo ? " (" + rangeInfo + ")" : ""),
+              "weight": "bold",
+              "color": sideColor,
+              "size": "sm",
+              "flex": 6,
+              "align": "end"
+            }
           ]
         },
         {
           "type": "box",
           "layout": "horizontal",
           "contents": [
-            { "type": "text", "text": "ยอดท้าดวล:", "color": "#888888", "size": "xs", "flex": 4 },
-            { "type": "text", "text": amount + " แต้ม", "weight": "bold", "color": "#E65100", "size": "xs", "flex": 6, "align": "end" }
+            {
+              "type": "text",
+              "text": "ยอดท้าดวล:",
+              "color": "#888888",
+              "size": "sm",
+              "flex": 4
+            },
+            {
+              "type": "text",
+              "text": amount + " แต้ม",
+              "weight": "bold",
+              "color": "#E65100",
+              "size": "sm",
+              "flex": 6,
+              "align": "end"
+            }
           ]
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "20px"
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "xs",
+      "spacing": "sm",
       "contents": [
         {
           "type": "button",
@@ -1517,7 +1656,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "color": "#1E88E5",
           "action": {
             "type": "message",
-            "label": "🤝 กดรับแผลดวล (Order #" + orderNo + ")",
+            "label": "🤝 กดรับแผลดวลนี้ (Order #" + orderNo + ")",
             "text": "ต " + orderNo
           }
         },
@@ -1528,12 +1667,22 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "color": "#D32F2F",
           "action": {
             "type": "message",
-            "label": "❌ ยกเลิกแผลดวล",
+            "label": "❌ ยกเลิกแผลนี้ (เจ้าของแผล)",
             "text": "ยกเลิก " + orderNo
+          }
+        },
+        {
+          "type": "button",
+          "style": "secondary",
+          "height": "sm",
+          "action": {
+            "type": "message",
+            "label": "📋 รายการดวลของคุณ",
+            "text": "รายการดวล"
           }
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     }
   };
 }
@@ -1542,61 +1691,69 @@ export function constructMatchNotificationFlex(orderNo, amount, opponentName, ro
   const isCreator = role === 'creator';
   return {
     "type": "bubble",
-    "size": "kilo",
+    "size": "mega",
     "header": {
       "type": "box",
       "layout": "vertical",
       "contents": [
         {
           "type": "text",
-          "text": isCreator ? "☄️ มีผู้รับแผลดวล!" : "☄️ รับแผลดวลสำเร็จ!",
+          "text": isCreator ? "☄️ มีผู้เล่นกดรับแผลดวลของคุณ!" : "☄️ ยืนยันการรับแผลดวลสำเร็จ!",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "sm"
+          "size": "md"
         }
       ],
       "backgroundColor": isCreator ? "#1E88E5" : "#43A047",
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     },
     "body": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "xs",
+      "spacing": "md",
       "contents": [
         {
           "type": "box",
           "layout": "horizontal",
           "contents": [
-            { "type": "text", "text": "เลขที่ดีล:", "color": "#888888", "size": "xs", "flex": 4 },
-            { "type": "text", "text": "#" + orderNo, "weight": "bold", "color": "#333333", "size": "xs", "flex": 6, "align": "end" }
+            { "type": "text", "text": "เลขที่ดีล:", "color": "#888888", "size": "sm", "flex": 4 },
+            { "type": "text", "text": "#" + orderNo, "weight": "bold", "color": "#333333", "size": "sm", "flex": 6, "align": "end" }
           ]
         },
         {
           "type": "box",
           "layout": "horizontal",
           "contents": [
-            { "type": "text", "text": "คู่ดวล:", "color": "#888888", "size": "xs", "flex": 4 },
-            { "type": "text", "text": opponentName, "weight": "bold", "color": "#00796B", "size": "xs", "flex": 6, "align": "end" }
+            { "type": "text", "text": "คู่ดวลของคุณ:", "color": "#888888", "size": "sm", "flex": 4 },
+            { "type": "text", "text": opponentName, "weight": "bold", "color": "#00796B", "size": "sm", "flex": 6, "align": "end" }
           ]
         },
         {
           "type": "box",
           "layout": "horizontal",
           "contents": [
-            { "type": "text", "text": "ยอดท้าดวล:", "color": "#888888", "size": "xs", "flex": 4 },
-            { "type": "text", "text": amount + " แต้ม", "weight": "bold", "color": "#E65100", "size": "xs", "flex": 6, "align": "end" }
+            { "type": "text", "text": "ยอดท้าดวล:", "color": "#888888", "size": "sm", "flex": 4 },
+            { "type": "text", "text": amount + " แต้ม", "weight": "bold", "color": "#E65100", "size": "sm", "flex": 6, "align": "end" }
           ]
         },
         {
           "type": "box",
           "layout": "horizontal",
           "contents": [
-            { "type": "text", "text": "คงเหลือ:", "color": "#888888", "size": "xs", "flex": 4 },
-            { "type": "text", "text": currentBalance + " แต้ม", "weight": "bold", "color": "#333333", "size": "xs", "flex": 6, "align": "end" }
+            { "type": "text", "text": "สถานะแต้ม:", "color": "#888888", "size": "sm", "flex": 4 },
+            { "type": "text", "text": "หักแต้มเข้ากองกลางแล้ว", "weight": "bold", "color": "#43A047", "size": "sm", "flex": 6, "align": "end" }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            { "type": "text", "text": "เครดิตคงเหลือ:", "color": "#888888", "size": "sm", "flex": 4 },
+            { "type": "text", "text": currentBalance + " แต้ม", "weight": "bold", "color": "#333333", "size": "sm", "flex": 6, "align": "end" }
           ]
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "20px"
     },
     "footer": {
       "type": "box",
@@ -1608,12 +1765,12 @@ export function constructMatchNotificationFlex(orderNo, amount, opponentName, ro
           "height": "sm",
           "action": {
             "type": "message",
-            "label": "📋 รายการดวล",
+            "label": "📋 ดูรายการดวลทั้งหมด",
             "text": "รายการดวล"
           }
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     }
   };
 }
@@ -1635,6 +1792,7 @@ export function constructBankingFlex(type, amount, accountDetails, targetUrl, us
   }
 
   const dateStr = new Date().toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
+
   const isIncome = (type === "Income" || type === "deposit" || type === "เงินเข้า" || type === "ฝากเงิน");
   const headerBgColor = isIncome ? "#00796B" : "#455A64"; 
   const badgeText = isIncome ? "เงินเข้า" : "เงินออก";
@@ -1646,10 +1804,16 @@ export function constructBankingFlex(type, amount, accountDetails, targetUrl, us
   
   const transactionLabel = isIncome ? "โอนเงินเข้าบัญชี" : "ถอน/โอนเงินออกจากบัญชี";
   const buttonColor = isIncome ? "#00796B" : "#455A64";
+  
+  let finalUrl = targetUrl || "";
+  if (!finalUrl) {
+    finalUrl = APP_URL;
+    if (userId) finalUrl += "?userId=" + userId;
+  }
 
   return {
     "type": "bubble",
-    "size": "kilo",
+    "size": "mega",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1682,8 +1846,8 @@ export function constructBankingFlex(type, amount, accountDetails, targetUrl, us
               ],
               "backgroundColor": badgeBgColor,
               "cornerRadius": "md",
-              "paddingStart": "6px",
-              "paddingEnd": "6px",
+              "paddingStart": "8px",
+              "paddingEnd": "8px",
               "paddingTop": "2px",
               "paddingBottom": "2px",
               "flex": 0
@@ -1692,7 +1856,7 @@ export function constructBankingFlex(type, amount, accountDetails, targetUrl, us
         }
       ],
       "backgroundColor": headerBgColor,
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     },
     "body": {
       "type": "box",
@@ -1702,46 +1866,98 @@ export function constructBankingFlex(type, amount, accountDetails, targetUrl, us
           "type": "text",
           "text": amountText,
           "weight": "bold",
-          "size": "lg",
+          "size": "xxl",
           "color": amountTextColor,
           "align": "center",
-          "margin": "xs"
+          "margin": "md"
         },
         {
           "type": "separator",
-          "margin": "sm",
+          "margin": "lg",
           "color": "#EAEAEA"
         },
         {
           "type": "box",
           "layout": "vertical",
-          "margin": "sm",
-          "spacing": "xs",
+          "margin": "lg",
+          "spacing": "md",
           "contents": [
             {
               "type": "box",
               "layout": "horizontal",
               "contents": [
-                { "type": "text", "text": "รายการ", "color": "#999999", "size": "xs", "flex": 4 },
-                { "type": "text", "text": transactionLabel, "weight": "bold", "color": "#333333", "size": "xs", "flex": 6, "align": "end" }
+                {
+                  "type": "text",
+                  "text": "รายการ",
+                  "color": "#999999",
+                  "size": "sm",
+                  "flex": 3
+                },
+                {
+                  "type": "text",
+                  "text": transactionLabel,
+                  "weight": "bold",
+                  "color": "#333333",
+                  "size": "sm",
+                  "flex": 7,
+                  "align": "end"
+                }
               ]
             },
             {
               "type": "box",
               "layout": "horizontal",
               "contents": [
-                { "type": "text", "text": "รายละเอียด", "color": "#999999", "size": "xs", "flex": 4 },
-                { "type": "text", "text": accountDetails, "weight": "regular", "color": "#333333", "size": "xs", "flex": 6, "align": "end", "wrap": true }
+                {
+                  "type": "text",
+                  "text": "รายละเอียด",
+                  "color": "#999999",
+                  "size": "sm",
+                  "flex": 3
+                },
+                {
+                  "type": "text",
+                  "text": accountDetails,
+                  "weight": "regular",
+                  "color": "#333333",
+                  "size": "sm",
+                  "flex": 7,
+                  "align": "end",
+                  "wrap": true
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "วัน-เวลา",
+                  "color": "#999999",
+                  "size": "sm",
+                  "flex": 3
+                },
+                {
+                  "type": "text",
+                  "text": dateStr + " น.",
+                  "weight": "regular",
+                  "color": "#333333",
+                  "size": "sm",
+                  "flex": 7,
+                  "align": "end"
+                }
               ]
             }
           ]
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "20px"
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
+      "spacing": "sm",
       "contents": [
         {
           "type": "button",
@@ -1750,12 +1966,13 @@ export function constructBankingFlex(type, amount, accountDetails, targetUrl, us
           "color": buttonColor,
           "action": {
             "type": "message",
-            "label": "🏠 เมนูหลัก",
+            "label": "กลับสู่เมนูหลัก 📋",
             "text": "เมนู"
           }
         }
       ],
-      "paddingAll": "10px"
+      "flex": 0,
+      "paddingAll": "16px"
     }
   };
 }
@@ -1776,19 +1993,123 @@ export function constructRejectionFlex(type, amount, reason, currentBalance, use
     formattedAmount = amount.toString();
   }
 
+  const dateStr = new Date().toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
+
   const isWithdrawal = (type === "WD" || type === "withdraw" || type === "ถอนเงิน");
   const title = isWithdrawal ? "คำขอถอนเงินถูกปฏิเสธ" : "บิลฝากเงินถูกปฏิเสธ";
-  const headerBgColor = "#D32F2F"; // Bright red background
+  const headerBgColor = "#E07A5F"; 
   const badgeText = "ปฏิเสธ";
-  const badgeBgColor = "#FFFFFF"; // White background badge
-  const badgeTextColor = "#D32F2F";
+  const badgeBgColor = "#FDF0ED";
+  const badgeTextColor = "#E07A5F";
   
   const amountText = formattedAmount + " บาท";
-  const amountTextColor = "#D32F2F";
+  const amountTextColor = "#E07A5F";
+  
+  const transactionLabel = isWithdrawal ? "ถอนเครดิต (คืนแต้ม)" : "แจ้งฝากเงิน";
+  const balanceLabel = isWithdrawal ? "ยอดคงเหลือปัจจุบัน" : "ยอดคงเหลือ";
+  const balanceText = currentBalance !== undefined ? currentBalance.toLocaleString('th-TH') + " แต้ม" : "-";
+
+  const contents = [
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        {
+          "type": "text",
+          "text": "รายการ",
+          "color": "#999999",
+          "size": "sm",
+          "flex": 3
+        },
+        {
+          "type": "text",
+          "text": transactionLabel,
+          "weight": "bold",
+          "color": "#333333",
+          "size": "sm",
+          "flex": 7,
+          "align": "end"
+        }
+      ]
+    },
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        {
+          "type": "text",
+          "text": "เหตุผล",
+          "color": "#999999",
+          "size": "sm",
+          "flex": 3
+        },
+        {
+          "type": "text",
+          "text": reason || "ข้อมูลไม่ถูกต้อง/สลิปไม่ผ่าน",
+          "weight": "bold",
+          "color": "#E07A5F",
+          "size": "sm",
+          "flex": 7,
+          "align": "end",
+          "wrap": true
+        }
+      ]
+    },
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        {
+          "type": "text",
+          "text": "วัน-เวลา",
+          "color": "#999999",
+          "size": "sm",
+          "flex": 3
+        },
+        {
+          "type": "text",
+          "text": dateStr + " น.",
+          "weight": "regular",
+          "color": "#333333",
+          "size": "sm",
+          "flex": 7,
+          "align": "end"
+        }
+      ]
+    }
+  ];
+
+  if (isWithdrawal && currentBalance !== undefined) {
+    contents.push({
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        {
+          "type": "text",
+          "text": balanceLabel,
+          "color": "#999999",
+          "size": "sm",
+          "flex": 4
+        },
+        {
+          "type": "text",
+          "text": balanceText,
+          "weight": "bold",
+          "color": "#2E7D32",
+          "size": "sm",
+          "flex": 6,
+          "align": "end"
+        }
+      ]
+    });
+  }
+
+  let finalUrl = APP_URL;
+  if (userId) finalUrl += "?userId=" + userId;
 
   return {
     "type": "bubble",
-    "size": "kilo",
+    "size": "mega",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1801,8 +2122,8 @@ export function constructRejectionFlex(type, amount, reason, currentBalance, use
               "type": "text",
               "text": title,
               "weight": "bold",
-              "color": "#FFFFFF", // Bright white text on Red header
-              "size": "xs",
+              "color": "#FFFFFF",
+              "size": "sm",
               "flex": 1,
               "align": "start"
             },
@@ -1821,8 +2142,8 @@ export function constructRejectionFlex(type, amount, reason, currentBalance, use
               ],
               "backgroundColor": badgeBgColor,
               "cornerRadius": "md",
-              "paddingStart": "6px",
-              "paddingEnd": "6px",
+              "paddingStart": "8px",
+              "paddingEnd": "8px",
               "paddingTop": "2px",
               "paddingBottom": "2px",
               "flex": 0
@@ -1831,7 +2152,7 @@ export function constructRejectionFlex(type, amount, reason, currentBalance, use
         }
       ],
       "backgroundColor": headerBgColor,
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     },
     "body": {
       "type": "box",
@@ -1841,44 +2162,36 @@ export function constructRejectionFlex(type, amount, reason, currentBalance, use
           "type": "text",
           "text": amountText,
           "weight": "bold",
-          "size": "lg",
+          "size": "xxl",
           "color": amountTextColor,
           "align": "center",
-          "margin": "xs"
+          "margin": "md"
         },
         {
           "type": "separator",
-          "margin": "sm",
+          "margin": "lg",
           "color": "#EAEAEA"
         },
         {
           "type": "box",
           "layout": "vertical",
-          "margin": "sm",
-          "spacing": "xs",
-          "contents": [
-            {
-              "type": "box",
-              "layout": "horizontal",
-              "contents": [
-                { "type": "text", "text": "เหตุผล", "color": "#999999", "size": "xs", "flex": 4 },
-                { "type": "text", "text": reason || "ข้อมูลไม่ถูกต้อง/สลิปไม่ผ่าน", "weight": "bold", "color": "#D32F2F", "size": "xs", "flex": 6, "align": "end", "wrap": true }
-              ]
-            }
-          ]
+          "margin": "lg",
+          "spacing": "md",
+          "contents": contents
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "20px"
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
+      "spacing": "sm",
       "contents": [
         {
           "type": "button",
           "style": "primary",
           "height": "sm",
-          "color": "#D32F2F",
+          "color": "#E07A5F",
           "action": {
             "type": "uri",
             "label": "ติดต่อฝ่ายสนับสนุน",
@@ -1886,24 +2199,124 @@ export function constructRejectionFlex(type, amount, reason, currentBalance, use
           }
         }
       ],
-      "paddingAll": "10px"
+      "flex": 0,
+      "paddingAll": "16px"
     }
   };
 }
 
 export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, payout, currentBalance, winnings, commission, userId) {
-  const headerBgColor = isWinner ? "#00796B" : "#D32F2F"; // Bright red background for Loss
+  const headerBgColor = isWinner ? "#00796B" : "#455A64"; 
   const title = isWinner ? "🏆 สรุปผลดวล - คุณชนะ!" : "☄️ สรุปผลดวล - คุณแพ้";
   const badgeText = isWinner ? "ชนะ" : "แพ้";
-  const badgeBgColor = "#FFFFFF";
-  const badgeTextColor = isWinner ? "#00796B" : "#D32F2F";
+  const badgeBgColor = isWinner ? "#E8F5E9" : "#ECEFF1";
+  const badgeTextColor = isWinner ? "#00796B" : "#455A64";
   
   const amountText = isWinner ? "+" + payout.toLocaleString('th-TH') + " แต้ม" : "-" + amount.toLocaleString('th-TH') + " แต้ม";
-  const amountTextColor = isWinner ? "#00796B" : "#D32F2F";
+  const amountTextColor = isWinner ? "#00796B" : "#E07A5F";
+  
+  const details = isWinner 
+    ? "คืนทุน " + amount + " + กำไรหลังหักคอมมิชชั่น 10% (" + (winnings - commission) + " แต้ม)"
+    : "หักเครดิตตามจำนวนเดิมพัน";
+
+  const contents = [
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        {
+          "type": "text",
+          "text": "แผลดวล",
+          "color": "#999999",
+          "size": "sm",
+          "flex": 3
+        },
+        {
+          "type": "text",
+          "text": "Order #" + orderNo,
+          "weight": "bold",
+          "color": "#333333",
+          "size": "sm",
+          "flex": 7,
+          "align": "end"
+        }
+      ]
+    },
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        {
+          "type": "text",
+          "text": "เวลาบินจริง",
+          "color": "#999999",
+          "size": "sm",
+          "flex": 3
+        },
+        {
+          "type": "text",
+          "text": finalTime + " วินาที 🚀",
+          "weight": "bold",
+          "color": "#333333",
+          "size": "sm",
+          "flex": 7,
+          "align": "end"
+        }
+      ]
+    },
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        {
+          "type": "text",
+          "text": "รายละเอียด",
+          "color": "#999999",
+          "size": "sm",
+          "flex": 3
+        },
+        {
+          "type": "text",
+          "text": details,
+          "weight": "regular",
+          "color": "#666666",
+          "size": "xs",
+          "flex": 7,
+          "align": "end",
+          "wrap": true
+        }
+      ]
+    },
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        {
+          "type": "text",
+          "text": "ยอดเครดิตปัจจุบัน",
+          "color": "#999999",
+          "size": "sm",
+          "flex": 4
+        },
+        {
+          "type": "text",
+          "text": currentBalance.toLocaleString('th-TH') + " แต้ม 💳",
+          "weight": "bold",
+          "color": "#2E7D32",
+          "size": "sm",
+          "flex": 6,
+          "align": "end"
+        }
+      ]
+    }
+  ];
+
+  let finalUrl = APP_URL;
+  if (userId) finalUrl += "?userId=" + userId;
 
   return {
     "type": "bubble",
-    "size": "kilo",
+    "size": "mega",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1916,8 +2329,8 @@ export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, p
               "type": "text",
               "text": title,
               "weight": "bold",
-              "color": "#FFFFFF", // Bright white text on dark/red header
-              "size": "xs",
+              "color": "#FFFFFF",
+              "size": "sm",
               "flex": 1,
               "align": "start"
             },
@@ -1936,8 +2349,8 @@ export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, p
               ],
               "backgroundColor": badgeBgColor,
               "cornerRadius": "md",
-              "paddingStart": "6px",
-              "paddingEnd": "6px",
+              "paddingStart": "8px",
+              "paddingEnd": "8px",
               "paddingTop": "2px",
               "paddingBottom": "2px",
               "flex": 0
@@ -1946,7 +2359,7 @@ export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, p
         }
       ],
       "backgroundColor": headerBgColor,
-      "paddingAll": "10px"
+      "paddingAll": "16px"
     },
     "body": {
       "type": "box",
@@ -1956,54 +2369,30 @@ export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, p
           "type": "text",
           "text": amountText,
           "weight": "bold",
-          "size": "lg",
+          "size": "xxl",
           "color": amountTextColor,
           "align": "center",
-          "margin": "xs"
+          "margin": "md"
         },
         {
           "type": "separator",
-          "margin": "sm",
+          "margin": "lg",
           "color": "#EAEAEA"
         },
         {
           "type": "box",
           "layout": "vertical",
-          "margin": "sm",
-          "spacing": "xs",
-          "contents": [
-            {
-              "type": "box",
-              "layout": "horizontal",
-              "contents": [
-                { "type": "text", "text": "แผลดวล", "color": "#999999", "size": "xs", "flex": 4 },
-                { "type": "text", "text": "Order #" + orderNo, "weight": "bold", "color": "#333333", "size": "xs", "flex": 6, "align": "end" }
-              ]
-            },
-            {
-              "type": "box",
-              "layout": "horizontal",
-              "contents": [
-                { "type": "text", "text": "เวลาบินจริง", "color": "#999999", "size": "xs", "flex": 4 },
-                { "type": "text", "text": finalTime + " วินาที 🚀", "weight": "bold", "color": "#333333", "size": "xs", "flex": 6, "align": "end" }
-              ]
-            },
-            {
-              "type": "box",
-              "layout": "horizontal",
-              "contents": [
-                { "type": "text", "text": "เครดิตปัจจุบัน", "color": "#999999", "size": "xs", "flex": 4 },
-                { "type": "text", "text": currentBalance.toLocaleString('th-TH') + " แต้ม 💳", "weight": "bold", "color": "#2E7D32", "size": "xs", "flex": 6, "align": "end" }
-              ]
-            }
-          ]
+          "margin": "lg",
+          "spacing": "md",
+          "contents": contents
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "20px"
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
+      "spacing": "sm",
       "contents": [
         {
           "type": "button",
@@ -2011,13 +2400,14 @@ export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, p
           "height": "sm",
           "color": headerBgColor,
           "action": {
-            "type": "message",
-            "label": "🏠 เมนูหลัก",
-            "text": "เมนู"
+            "type": "uri",
+            "label": "ร่วมดวลต่อรอบใหม่ 🚀",
+            "uri": finalUrl
           }
         }
       ],
-      "paddingAll": "10px"
+      "flex": 0,
+      "paddingAll": "16px"
     }
   };
 }

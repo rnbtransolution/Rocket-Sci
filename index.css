@@ -32,18 +32,25 @@
   padding: 0;
 }
 
-/* Contrast Rule: Ensure bright text on dark or red backgrounds */
+/* Contrast Rule 1: Solid Dark / Deep Red / Deep Blue / Deep Slate -> White text */
 .bg-dark,
-.bg-red-500, .bg-red-600, .bg-red-700, .bg-red-800, .bg-red-900,
-.bg-rose-500, .bg-rose-600, .bg-rose-700, .bg-rose-800, .bg-rose-900,
-.bg-slate-900, .bg-slate-800, .bg-indigo-950, .bg-emerald-900,
-[class*="bg-red-"], [class*="bg-rose-"] {
+.bg-red-600, .bg-red-700, .bg-red-800, .bg-red-900,
+.bg-rose-600, .bg-rose-700, .bg-rose-800, .bg-rose-900,
+.bg-slate-900, .bg-slate-800, .bg-indigo-950, .bg-emerald-900, .bg-sky-900 {
   color: #ffffff !important;
 }
 
 .text-bright-white {
   color: #ffffff !important;
 }
+
+/* Contrast Rule 2: Pastel / Light backgrounds -> Dark text (NOT white) */
+.bg-emerald-50, .bg-emerald-100 { color: #064e3b !important; }
+.bg-indigo-50, .bg-indigo-100 { color: #1e1b4b !important; }
+.bg-amber-50, .bg-amber-100 { color: #78350f !important; }
+.bg-rose-50, .bg-rose-100 { color: #881337 !important; }
+.bg-sky-50, .bg-sky-100 { color: #0c4a6e !important; }
+.bg-slate-50, .bg-slate-100 { color: #0f172a !important; }
 
 body {
   background-color: var(--bg-space);
