@@ -630,12 +630,17 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   }
 
   // 1. Check Accept Match Command (e.g. "ต", "ต12", "ต 12", "ต905662 400", "12ต", "ต#12", "ติด", "รับแผล")
-  const specificAcceptRegex = /^(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*#?(\d{2,6})(?:\s+\d+)?$/i;
-  const reverseAcceptRegex = /^#?(\d{2,6})\s*(ต|ติด|รับ)(?:\s+\d+)?$/i;
+  const specificAcceptRegex = /^(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*#?(\d{2,6})(?:\s*\d+)?$/i;
+  const reverseAcceptRegex = /^#?(\d{2,6})\s*(ต|ติด|รับ)(?:\s*\d+)?$/i;
   let targetOrderNo = null;
 
-  if (specificAcceptRegex.test(clean)) {
+  const rawTrimmed = text.trim();
+  if (specificAcceptRegex.test(rawTrimmed)) {
+    targetOrderNo = rawTrimmed.match(specificAcceptRegex)[2];
+  } else if (specificAcceptRegex.test(clean)) {
     targetOrderNo = clean.match(specificAcceptRegex)[2];
+  } else if (reverseAcceptRegex.test(rawTrimmed)) {
+    targetOrderNo = rawTrimmed.match(reverseAcceptRegex)[1];
   } else if (reverseAcceptRegex.test(clean)) {
     targetOrderNo = clean.match(reverseAcceptRegex)[1];
   }
@@ -721,7 +726,7 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false) {
   const balance = await db.getPlayerBalance(userId, displayName);
   if (balance < amount) {
-    await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้เล่นเกินเครดิต]\n\nยอดเงินเครดิตคงเหลือของคุณไม่เพียงพอสำหรับการท้าดวลแผลนี้!\n• เครดิตคงเหลือของคุณ: ${balance} แต้ม\n• ยอดที่ต้องการใช้: ${amount} แต้ม\n\n❌ กรุณาพิมพ์ "ฝากเงิน" เพื่อทำรายการเติมทุนก่อนแทงดวลนะคะ 🚀`, userId);
+    await replyToLine(replyToken, `⚠️ เครดิตไม่พอ (มี ${balance}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตค่ะ`, userId);
     return;
   }
 
@@ -731,14 +736,14 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   // Deduct balance (with strict return check)
   const success = await db.adjustPlayerBalance(userId, -amount, displayName);
   if (!success) {
-    await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้เล่นเกินเครดิต]\n\nเกิดข้อผิดพลาด: ยอดเงินเครดิตคงเหลือของคุณไม่เพียงพอสำหรับการท้าดวลแผลนี้ (คงเหลือ ${balance} แต้ม ต้องการใช้ ${amount} แต้ม)\n\n❌ กรุณาพิมพ์ "ฝากเงิน" เพื่อเติมเครดิตก่อนแทงดวลนะคะ 🚀`, userId);
+    await replyToLine(replyToken, `⚠️ เครดิตไม่พอ (มี ${balance}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตค่ะ`, userId);
     return;
   }
   
   // Save open bet
   const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal);
   if (!saved) {
-    await replyToLine(replyToken, `⚠️ [ไม่อนุญาตให้เล่นเกินเครดิต]\n\nไม่สามารถบันทึกรายการท้าดวลได้ เนื่องจากเครดิตไม่เพียงพอค่ะ`, userId);
+    await replyToLine(replyToken, `⚠️ ไม่สามารถบันทึกแผลดวลได้ เครดิตไม่พอค่ะ`, userId);
     return;
   }
   
@@ -1263,10 +1268,10 @@ export function constructWithdrawalFlex(bankName, accountNumber, accountName, ba
 }
 
 export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy) {
-  const sideShort = side === 'low' ? 'ล' : 'ชล';
-  const headerTitle = `${creatorName || 'ผู้เล่น'} ${rangeInfo || ''} ${sideShort}${amount}`;
-  const formulaTitle = `${rangeInfo || 'ราคาช่าง'} ${sideShort} = ${amount}`;
-  const chotaiLabel = isChotoy ? "ชตาย (เผื่อช่างไม่ต่อย)" : "ราคาช่าง";
+  const sideShort = side === 'low' ? 'ล' : 'ถ';
+  const headerTitle = `${creatorName || 'ผู้เล่น'} ${rangeInfo ? rangeInfo + ' ' : ''}${sideShort}${amount}`;
+  const formulaTitle = `${rangeInfo ? rangeInfo + ' ' : ''}${sideShort} = ${amount}`;
+  const chotaiLabel = isChotoy ? "ชตย (เผื่อช่างไม่ต่อย)" : "แผลดวลสด";
 
   return {
     "type": "bubble",
@@ -1742,7 +1747,7 @@ export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, p
           "margin": "xs",
           "contents": [
             { "type": "text", "text": "ราคาช่าง", "color": "#999999", "size": "xs", "flex": 4 },
-            { "type": "text", "text": rangeInfo ? `${rangeInfo}s` : "ราคาช่าง", "weight": "bold", "color": "#333333", "size": "xs", "flex": 6, "align": "end" }
+            { "type": "text", "text": rangeInfo ? `${rangeInfo}s` : "รอราคาช่าง", "weight": "bold", "color": "#333333", "size": "xs", "flex": 6, "align": "end" }
           ]
         },
         {
