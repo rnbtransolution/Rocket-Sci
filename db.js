@@ -1156,6 +1156,17 @@ export function setActiveRocketRound(roundName) {
   return activeRocketRound;
 }
 
+export function setRocketRoundStatus(status) {
+  if (activeRocketRound) {
+    activeRocketRound.status = status;
+  }
+  return activeRocketRound;
+}
+
+export function isRocketRoundClosed() {
+  return activeRocketRound && activeRocketRound.status === 'CLOSED';
+}
+
 export function getActiveRocketRound() {
   return activeRocketRound;
 }

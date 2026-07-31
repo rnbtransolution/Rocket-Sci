@@ -220,6 +220,16 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
     return;
   }
 
+  // Admin Command: Lock / Close Betting for Round ("ปิดรอบ", "ปิดรับดวล", "ล็อครอบ", "3-2-go")
+  const closeRoundRegex = /^(ปิดรอบ|ปิดรับดวล|ล็อครอบ|3-2-go|32go)$/i;
+  if (closeRoundRegex.test(clean)) {
+    db.setRocketRoundStatus('CLOSED');
+    const currentRound = db.getActiveRocketRound();
+    const closeFlex = constructRoundCloseFlex(currentRound.name);
+    await replyToLine(replyToken, closeFlex, userId);
+    return;
+  }
+
   // Admin Command 2: Settle Rocket Flight Round ("แจ้งผล [วินาที]")
   const announceResultRegex = /^(แจ้งผล|ผล|ผลรอบ)\s*(\d+)$/;
   if (announceResultRegex.test(text.trim())) {
@@ -370,7 +380,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   }
 
   // H. ROCKET BETTING PARSING (Custom Thai language regex rocket science logic)
-  const isMatchCommand = parseBetCommand(text, userId, displayName, replyToken, groupId);
+  const isMatchCommand = await parseBetCommand(text, userId, displayName, replyToken, groupId);
   if (isMatchCommand) return;
 
   // I. HELP MENU
@@ -575,7 +585,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
 
 // --- ROCKET BET COMMAND PARSING LOGIC ---
 
-function parseBetCommand(text, userId, displayName, replyToken, groupId) {
+async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   const clean = text.replace(/\s+/g, '').toLowerCase();
   
   // Keywords definition
@@ -646,6 +656,10 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   }
 
   if (keywordsAccept.includes(clean) || targetOrderNo) {
+    if (db.isRocketRoundClosed()) {
+      await replyToLine(replyToken, `⚠️ ปิดรับดวลรอบนี้แล้วค่ะ (หมดเวลาแทงก่อนปล่อยบั้งไฟ)`, userId);
+      return true;
+    }
     db.matchExistingOpenBet(userId, displayName, targetOrderNo).then(async matched => {
       if (matched && matched.error === 'INSUFFICIENT_BALANCE') {
         await replyToLine(replyToken, `⚠️ เครดิตไม่พอ (มี ${matched.current}pt ต้องใช้ ${matched.required}pt)`, userId);
@@ -724,6 +738,10 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 }
 
 async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false) {
+  if (db.isRocketRoundClosed()) {
+    await replyToLine(replyToken, `⚠️ ปิดรับดวลรอบนี้แล้วค่ะ (หมดเวลาแทงก่อนปล่อยบั้งไฟ)`, userId);
+    return;
+  }
   const balance = await db.getPlayerBalance(userId, displayName);
   if (balance < amount) {
     await replyToLine(replyToken, `⚠️ เครดิตไม่พอ (มี ${balance}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตค่ะ`, userId);

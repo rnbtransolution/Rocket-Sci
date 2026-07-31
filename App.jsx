@@ -2043,7 +2043,11 @@ export default function App() {
                 {/* Quick Action Commands */}
                 <div className="pt-2 border-t border-emerald-100 space-y-1.5">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block font-heading">⚡ คำสั่งลัดบรอดแคสต์หน้าร้าน (Admin Quick Broadcasts):</span>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs font-bold">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs font-bold">
+                    <button onClick={() => {
+                      runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🔒 ปิดรับดวล ➔ ${rocketName || 'ช่างบั้งไฟสด'}\n⛔ 3-2-GO! หมดเวลาแทงก่อนจุดบั้งไฟ`]);
+                      addToast(`🔒 ล็อคปิดรับดวลรอบ [${rocketName || 'ช่างบั้งไฟสด'}] (1 นาที ก่อนจุด) เรียบร้อย!`, 'warning');
+                    }} className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">🔒 ปิดรับดวล (1 นาที ก่อนจุด)</button>
                     <button onClick={() => {
                       if (!window.confirm("⛔ คุณต้องการประกาศ 'ช่าง ⛔' (โมฆะรอบ) และยกเลิกคืนแต้มแผลดวลทั้งหมดใช่หรือไม่?")) return;
                       // Refund all bets
@@ -2061,7 +2065,7 @@ export default function App() {
                       runBackendFunction('sendAdminMessageToLine', [activeGroupId, `⛔ [โมฆะ] รอบ ${rocketName || 'ช่างบั้งไฟสด'} | ช่าง ⛔ คืนแต้ม 100% ครับ`]);
                       addToast(`⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ) และคืนแต้มผู้เล่น ${activeBets.length} แผลเรียบร้อย!`, 'danger');
                     }} className="py-2.5 px-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ)</button>
-                    <button onClick={() => { runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🚨 [เตือนภัย] ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA เท่านั้นครับ ❌`]); addToast(`🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพไปยัง LINE เรียบร้อย!`, 'info'); }} className="py-2.5 px-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">🚨 บรอดแคสต์เตือนมิจฉาชีพ</button>
+                    <button onClick={() => { runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🚨 [เตือนภัย] ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA เท่านั้นครับ ❌`]); addToast(`🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพไปยัง LINE เรียบร้อย!`, 'info'); }} className="py-2.5 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">🚨 เตือนมิจฉาชีพ</button>
                   </div>
                 </div>
               </div>
