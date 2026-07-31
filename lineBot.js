@@ -656,7 +656,7 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
         // Send Private 1-on-1 Flex Notification DM to Matcher
         const matcherBal = await db.getPlayerBalance(matched.matcherId, displayName);
-        const flexMatcher = constructMatchNotificationFlex(matched.orderNumber, matched.amount, creatorName, 'matcher', matcherBal);
+        const flexMatcher = constructMatchNotificationFlex(matched.orderNumber, matched.amount, matched.playerLowName, matched.playerHighName, matched.rangeInfo, matched.isChotoy, matched.rocketName);
         await pushToLine(matched.matcherId, flexMatcher);
 
         // Reply in group or chat
@@ -1406,10 +1406,11 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
   };
 }
 
-export function constructMatchNotificationFlex(orderNo, amount, playerLowName, playerHighName, rangeInfo, isChotoy) {
+export function constructMatchNotificationFlex(orderNo, amount, playerLowName, playerHighName, rangeInfo, isChotoy, rocketName) {
   const lowText = playerLowName || "ผู้เล่น";
   const highText = playerHighName || "คู่ดวล";
-  const chotaiLabel = isChotoy ? "ชตาย" : "ราคาช่าง";
+  const formattedAmt = Number(amount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const dateStr = new Date().toLocaleDateString("en-GB", { day: '2-digit', month: 'short', year: '2-digit' }) + " " + new Date().toLocaleTimeString("th-TH", { hour: '2-digit', minute: '2-digit' });
 
   return {
     "type": "bubble",
@@ -1417,15 +1418,15 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
     "header": {
       "type": "box",
       "layout": "vertical",
-      "backgroundColor": "#00796B",
-      "paddingAll": "8px",
+      "backgroundColor": "#4CAF50",
+      "paddingAll": "10px",
       "contents": [
         {
           "type": "text",
-          "text": `${lowText} จับมือ ${highText}`,
+          "text": "✓ จับคู่สำเร็จ",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "sm",
+          "size": "md",
           "align": "center"
         }
       ]
@@ -1434,27 +1435,90 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "10px",
+      "paddingAll": "14px",
       "contents": [
         {
-          "type": "box",
-          "layout": "horizontal",
-          "contents": [
-            { "type": "text", "text": `ต่ำ (Low) ${rangeInfo || ''}`, "weight": "bold", "color": "#1E88E5", "size": "xs", "flex": 6 },
-            { "type": "text", "text": `สูง (High)`, "weight": "bold", "color": "#E53935", "size": "xs", "flex": 4, "align": "end" }
-          ]
+          "type": "text",
+          "text": `Order #${orderNo}`,
+          "color": "#999999",
+          "size": "xs",
+          "align": "center"
         },
         {
-          "type": "separator",
+          "type": "text",
+          "text": formattedAmt,
+          "weight": "bold",
+          "color": "#111111",
+          "size": "3xl",
+          "align": "center",
           "margin": "xs"
         },
         {
+          "type": "text",
+          "text": dateStr,
+          "color": "#AAAAAA",
+          "size": "xxs",
+          "align": "center",
+          "margin": "xs"
+        },
+        {
+          "type": "separator",
+          "margin": "md",
+          "color": "#F0F0F0"
+        },
+        {
           "type": "box",
           "layout": "horizontal",
+          "margin": "md",
           "contents": [
-            { "type": "text", "text": `ยอดดวล: ${amount} pt`, "weight": "bold", "color": "#333333", "size": "xs", "flex": 6 },
-            { "type": "text", "text": chotaiLabel, "weight": "bold", "color": isChotoy ? "#E65100" : "#00796B", "size": "xs", "flex": 4, "align": "end" }
+            { "type": "text", "text": lowText, "weight": "bold", "color": "#333333", "size": "xs", "flex": 5 },
+            { "type": "text", "text": "ทายต่ำ (Low)", "weight": "bold", "color": "#1E88E5", "size": "xs", "flex": 5, "align": "end" }
           ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "xs",
+          "contents": [
+            { "type": "text", "text": highText, "weight": "bold", "color": "#333333", "size": "xs", "flex": 5 },
+            { "type": "text", "text": "ทายสูง (High)", "weight": "bold", "color": "#E53935", "size": "xs", "flex": 5, "align": "end" }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "xs",
+          "contents": [
+            { "type": "text", "text": "ทีม", "color": "#999999", "size": "xs", "flex": 4 },
+            { "type": "text", "text": rocketName || "ช่างบั้งไฟสด", "weight": "bold", "color": "#333333", "size": "xs", "flex": 6, "align": "end" }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "xs",
+          "contents": [
+            { "type": "text", "text": "สถานะ", "color": "#999999", "size": "xs", "flex": 4 },
+            { "type": "text", "text": "✓ ยืนยันแล้ว", "weight": "bold", "color": "#4CAF50", "size": "xs", "flex": 6, "align": "end" }
+          ]
+        }
+      ]
+    },
+    "footer": {
+      "type": "box",
+      "layout": "vertical",
+      "paddingAll": "10px",
+      "contents": [
+        {
+          "type": "button",
+          "style": "secondary",
+          "height": "sm",
+          "color": "#E53935",
+          "action": {
+            "type": "message",
+            "label": "แตะเพื่อยกเลิก",
+            "text": `ยกเลิก ${orderNo}`
+          }
         }
       ]
     }
@@ -1601,57 +1665,94 @@ export function constructRejectionFlex(type, amount, reason, currentBalance, use
 
 export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, payout, currentBalance, winnings, commission, userId, rocketName, rangeInfo) {
   const isWin = !!isWinner;
-  const outcomeText = isWin ? `ชนะ ${finalTime} ✅ ✅` : `แพ้ ${finalTime} ❌ ❌`;
-  const outcomeColor = isWin ? "#2E7D32" : "#D32F2F";
-  const rocketTitle = rocketName ? `🚀 ${rocketName} 🚀` : `🚀 ร็อคเก็ต ไซเอนซ์ 🚀`;
-  const mechanicPrice = rangeInfo ? `ราคาช่าง ${rangeInfo}` : `ราคาช่าง`;
-  const timeStr = new Date().toLocaleTimeString("th-TH", { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: "Asia/Bangkok" });
+  const headerBg = isWin ? "#2E7D32" : "#D32F2F";
+  const headerTitle = isWin ? `🏆 ชนะ (${finalTime}s)` : `☄️ แพ้ (${finalTime}s)`;
+  const formattedAmt = isWin 
+    ? `+${Number(payout || (amount * 1.9)).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `-${Number(amount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const amtColor = isWin ? "#2E7D32" : "#D32F2F";
+  const dateStr = new Date().toLocaleDateString("en-GB", { day: '2-digit', month: 'short', year: '2-digit' }) + " " + new Date().toLocaleTimeString("th-TH", { hour: '2-digit', minute: '2-digit' });
 
   return {
     "type": "bubble",
     "size": "kilo",
-    "body": {
+    "header": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "md",
-      "paddingAll": "16px",
+      "backgroundColor": headerBg,
+      "paddingAll": "10px",
       "contents": [
         {
           "type": "text",
-          "text": outcomeText,
+          "text": headerTitle,
           "weight": "bold",
-          "color": outcomeColor,
-          "size": "xxl",
+          "color": "#FFFFFF",
+          "size": "md",
+          "align": "center"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "14px",
+      "contents": [
+        {
+          "type": "text",
+          "text": `Order #${orderNo}`,
+          "color": "#999999",
+          "size": "xs",
           "align": "center"
         },
         {
           "type": "text",
-          "text": rocketTitle,
+          "text": formattedAmt,
           "weight": "bold",
-          "color": "#111111",
-          "size": "md",
-          "align": "center"
+          "color": amtColor,
+          "size": "3xl",
+          "align": "center",
+          "margin": "xs"
+        },
+        {
+          "type": "text",
+          "text": dateStr,
+          "color": "#AAAAAA",
+          "size": "xxs",
+          "align": "center",
+          "margin": "xs"
         },
         {
           "type": "separator",
-          "color": "#EEEEEE",
-          "margin": "md"
+          "margin": "md",
+          "color": "#F0F0F0"
         },
         {
-          "type": "text",
-          "text": mechanicPrice,
-          "weight": "regular",
-          "color": "#333333",
-          "size": "sm",
-          "align": "center"
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "md",
+          "contents": [
+            { "type": "text", "text": "ทีม", "color": "#999999", "size": "xs", "flex": 4 },
+            { "type": "text", "text": rocketName || "ช่างบั้งไฟสด", "weight": "bold", "color": "#333333", "size": "xs", "flex": 6, "align": "end" }
+          ]
         },
         {
-          "type": "text",
-          "text": timeStr,
-          "weight": "regular",
-          "color": "#CCCCCC",
-          "size": "xxs",
-          "align": "center"
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "xs",
+          "contents": [
+            { "type": "text", "text": "ราคาช่าง", "color": "#999999", "size": "xs", "flex": 4 },
+            { "type": "text", "text": rangeInfo ? `${rangeInfo}s` : "ราคาช่าง", "weight": "bold", "color": "#333333", "size": "xs", "flex": 6, "align": "end" }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "xs",
+          "contents": [
+            { "type": "text", "text": "คงเหลือ", "color": "#999999", "size": "xs", "flex": 4 },
+            { "type": "text", "text": `${Number(currentBalance || 0).toLocaleString('th-TH')} pt`, "weight": "bold", "color": "#2E7D32", "size": "xs", "flex": 6, "align": "end" }
+          ]
         }
       ]
     }
@@ -1659,62 +1760,66 @@ export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, p
 }
 
 export function constructRoundCloseFlex(rocketName, timeStr) {
-  const rocketTitle = rocketName ? `🚀 ${rocketName} 🚀` : `🚀 ร็อคเก็ต ไซเอนซ์ 🚀`;
-  const time = timeStr || new Date().toLocaleTimeString("th-TH", { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: "Asia/Bangkok" });
+  const rocketTitle = rocketName || "ช่างบั้งไฟสด";
+  const time = timeStr || new Date().toLocaleTimeString("th-TH", { hour: '2-digit', minute: '2-digit' });
 
   return {
     "type": "bubble",
     "size": "kilo",
-    "body": {
+    "header": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "md",
-      "paddingAll": "16px",
+      "backgroundColor": "#D32F2F",
+      "paddingAll": "10px",
       "contents": [
         {
           "type": "text",
-          "text": "❌ ปิด ❌",
+          "text": "❌ ปิดรับดวลรอบนี้ ❌",
           "weight": "bold",
-          "color": "#D32F2F",
-          "size": "xxl",
-          "align": "center"
-        },
-        {
-          "type": "text",
-          "text": rocketTitle,
-          "weight": "bold",
-          "color": "#111111",
+          "color": "#FFFFFF",
           "size": "md",
           "align": "center"
-        },
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "14px",
+      "contents": [
         {
           "type": "text",
-          "text": "3 2 1 ใบ้!! 🚀 🚀 🚀",
+          "text": `ทีม: ${rocketTitle}`,
           "weight": "bold",
-          "color": "#333333",
+          "color": "#111111",
           "size": "sm",
           "align": "center"
         },
         {
-          "type": "separator",
-          "color": "#EEEEEE",
-          "margin": "md"
+          "type": "text",
+          "text": "3-2-GO! 🚀",
+          "weight": "bold",
+          "color": "#D32F2F",
+          "size": "md",
+          "align": "center",
+          "margin": "xs"
         },
         {
           "type": "text",
           "text": "⛔️ หลังปิด ไม่ติดทุกกรณี ⛔️",
-          "weight": "bold",
-          "color": "#D32F2F",
-          "size": "sm",
-          "align": "center"
+          "color": "#999999",
+          "size": "xs",
+          "align": "center",
+          "margin": "xs"
         },
         {
           "type": "text",
           "text": time,
-          "weight": "regular",
           "color": "#CCCCCC",
           "size": "xxs",
-          "align": "center"
+          "align": "center",
+          "margin": "xs"
         }
       ]
     }

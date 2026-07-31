@@ -189,8 +189,13 @@ export default function App() {
     const isChotoy = overrideChotoy !== null ? overrideChotoy : quoteIsChotoy;
     const name = rocketName.trim() || 'ช่างบั้งไฟสด';
 
-    if (!min || !max) {
-      addToast('⚠️ กรุณากรอกช่วงราคาช่าง (Min - Max) ก่อนประกาศออกราคาครับ', 'warning');
+    if (!min || !max || Number(min) >= Number(max)) {
+      addToast('⚠️ กรุณากรอกช่วงราคาช่างให้ถูกต้อง (Min ต้องน้อยกว่า Max) ก่อนประกาศออกราคาครับ', 'warning');
+      return;
+    }
+
+    if (Number(amt) <= 0) {
+      addToast('⚠️ แต้มเดิมพันเริ่มต้นต้องมากกว่า 0 pt ครับ', 'warning');
       return;
     }
 
@@ -374,6 +379,12 @@ export default function App() {
 
   // Safe portal close & reset function (preserves player data & transaction history)
   const handleClosePortal = () => {
+    const activeMatched = bets.filter(b => b.status === 'matched');
+    if (activeMatched.length > 0) {
+      addToast(`⚠️ ไม่สามารถปิดรอบพอร์ทัลได้ เนื่องจากยังมีแผลดวลจับคู่สดค้างอยู่ ${activeMatched.length} แผล! กรุณาชำระแต้มก่อนปิดครับ`, 'danger');
+      return;
+    }
+
     if (!window.confirm("🔒 คุณต้องการปิดและรีเซ็ตพอร์ทัลรอบปัจจุบันใช่หรือไม่?\n\n(ระบบจะเคลียร์สถานะเวลาบินและสรุปผลรอบนี้ โดยจะไม่ลบข้อมูลผู้เล่น ยอดเครดิตคงเหลือ หรือประวัติธุรกรรมใดๆ ทั้งสิ้น)")) {
       return;
     }
@@ -1337,6 +1348,11 @@ export default function App() {
 
   // Admin Manual Slip Reviews
   const handleAdminApproveReview = (txId) => {
+    const targetTx = transactions.find(t => t.id === txId);
+    if (!targetTx || targetTx.status !== 'escalated') {
+      addToast('⚠️ รายการนี้ถูกดำเนินการไปแล้วหรือไม่อยู่ในสถานะรอตรวจสอบ', 'warning');
+      return;
+    }
     if (isGAS) {
       window.google.script.run
         .withSuccessHandler(() => {
@@ -1360,6 +1376,11 @@ export default function App() {
   };
 
   const handleAdminRejectReview = (txId, reason) => {
+    const targetTx = transactions.find(t => t.id === txId);
+    if (!targetTx || targetTx.status !== 'escalated') {
+      addToast('⚠️ รายการนี้ถูกดำเนินการไปแล้วหรือไม่อยู่ในสถานะรอตรวจสอบ', 'warning');
+      return;
+    }
     if (isGAS) {
       window.google.script.run
         .withSuccessHandler(() => {
@@ -1393,7 +1414,18 @@ export default function App() {
   // Submit manual telemetry flight result (No flight animation, resolve immediately)
   const handleSubmitOnsiteResult = (finalTime) => {
     if (!finalTime || finalTime <= 0) {
-      addToast('กรุณาระบุเวลาผลการบินของจรวดให้ถูกต้อง', 'warning');
+      addToast('⚠️ กรุณาระบุเวลาผลการบินของจรวดให้ถูกต้อง', 'warning');
+      return;
+    }
+
+    if (!targetMin || !targetMax || Number(targetMin) >= Number(targetMax)) {
+      addToast('⚠️ กรุณาระบุช่วงราคาช่าง (Min ต้องน้อยกว่า Max) ก่อนชำระแต้มครับ', 'warning');
+      return;
+    }
+
+    const activeMatched = bets.filter(b => b.status === 'matched');
+    if (activeMatched.length === 0) {
+      addToast('⚠️ ไม่พบแผลดวลที่จับคู่สำเร็จ (Matched Bets = 0) ในรอบนี้! ระบบไม่สามารถชำระแต้มได้', 'warning');
       return;
     }
 
@@ -2012,8 +2044,31 @@ export default function App() {
                 <div className="pt-2 border-t border-emerald-100 space-y-1.5">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block font-heading">⚡ คำสั่งลัดบรอดแคสต์หน้าร้าน (Admin Quick Broadcasts):</span>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs font-bold">
-                    <button onClick={() => { runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🤖 [แผลบ้าน] ${rocketName || 'ช่างบั้งไฟสด'} ${targetMin || 330}-${targetMax || 380}s | ชล/ชถ ${quoteBetAmount || 500}pt`]); addToast(`🤖 กระจายแผลบ้านเข้ากลุ่ม LINE [${rocketName || 'ช่างบั้งไฟสด'}] เรียบร้อย!`, 'success'); }} className="py-2 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">🤖 ออกแผลบ้าน (500 pt)</button>
-                    <button onClick={() => { runBackendFunction('sendAdminMessageToLine', [activeGroupId, `⛔ [โมฆะ] รอบ ${rocketName || 'ช่างบั้งไฟสด'} | ช่าง ⛔ คืนแต้ม 100% ครับ`]); addToast(`⛔ ประกาศ "ช่าง ⛔" และบรอดแคสต์เข้ากลุ่ม LINE เรียบร้อย!`, 'danger'); }} className="py-2 px-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ)</button>
+                    <button onClick={() => {
+                      if (!targetMin || !targetMax || Number(targetMin) >= Number(targetMax)) {
+                        addToast('⚠️ กรุณาระบุช่วงราคาช่าง (Min - Max) ด้านบนก่อนออกแผลบ้านครับ', 'warning');
+                        return;
+                      }
+                      runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🤖 [แผลบ้าน] ${rocketName || 'ช่างบั้งไฟสด'} ${targetMin}-${targetMax}s | ชล/ชถ ${quoteBetAmount || 500}pt`]);
+                      addToast(`🤖 กระจายแผลบ้านเข้ากลุ่ม LINE [${rocketName || 'ช่างบั้งไฟสด'}] เรียบร้อย!`, 'success');
+                    }} className="py-2 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">🤖 ออกแผลบ้าน (500 pt)</button>
+                    <button onClick={() => {
+                      if (!window.confirm("⛔ คุณต้องการประกาศ 'ช่าง ⛔' (โมฆะรอบ) และยกเลิกคืนแต้มแผลดวลทั้งหมดใช่หรือไม่?")) return;
+                      // Refund all bets
+                      const activeBets = bets.filter(b => b.status === 'matched' || b.status === 'pending_match');
+                      if (activeBets.length > 0) {
+                        setPlayers(prev => prev.map(p => {
+                          let refund = 0;
+                          activeBets.forEach(b => {
+                            if (b.playerLowId === p.id || b.playerHighId === p.id) refund += b.amount;
+                          });
+                          return refund > 0 ? { ...p, balance: p.balance + refund } : p;
+                        }));
+                        setBets(prev => prev.map(b => (b.status === 'matched' || b.status === 'pending_match') ? { ...b, status: 'cancelled' } : b));
+                      }
+                      runBackendFunction('sendAdminMessageToLine', [activeGroupId, `⛔ [โมฆะ] รอบ ${rocketName || 'ช่างบั้งไฟสด'} | ช่าง ⛔ คืนแต้ม 100% ครับ`]);
+                      addToast(`⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ) และคืนแต้มผู้เล่น ${activeBets.length} แผลเรียบร้อย!`, 'danger');
+                    }} className="py-2 px-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ)</button>
                     <button onClick={() => { runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🚨 [เตือนภัย] ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA เท่านั้นครับ ❌`]); addToast(`🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพไปยัง LINE เรียบร้อย!`, 'info'); }} className="py-2 px-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">🚨 บรอดแคสต์เตือนมิจฉาชีพ</button>
                   </div>
                 </div>
