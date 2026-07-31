@@ -200,7 +200,7 @@ export default function App() {
     }
 
     const chotoyTag = isChotoy ? ' (ชตย)' : '';
-    const quoteMsg = `🚀 [เปิดรอบ] ${name} | ราคาช่าง ${min}-${max}s | ${amt}pt${chotoyTag}`;
+    const quoteMsg = `🚀 เปิดรอบ ➔ ${name}\n⏱️  ราคาช่าง ${min}-${max}s\n💰 เครดิต ${amt}pt${chotoyTag}`;
 
     runBackendFunction('sendAdminMessageToLine', [activeGroupId, quoteMsg]);
     addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) เข้ากลุ่ม LINE เรียบร้อย!`, 'success');
@@ -747,7 +747,7 @@ export default function App() {
       setPrivateMessages(prev => [...prev, {
         id: botMsgId,
         sender: 'bot',
-        text: `🤖 บอทหลังบ้าน Rocket Science ขออภัยค่ะ\n\nไม่เข้าใจคำสั่งของคุณ กรุณกดปุ่มที่เมนูด้านล่าง หรือพิมพ์คำสั่ง เช่น "ฝากเงิน", "ถอนยอด" หรือ "เช็คยอด" เพื่อเริ่มทำรายการค่ะ`,
+        text: `🤖 ไม่เข้าใจคำสั่ง พิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้ได้ค่ะ`,
         time: botTime
       }]);
 
@@ -2049,7 +2049,7 @@ export default function App() {
                         addToast('⚠️ กรุณาระบุช่วงราคาช่าง (Min - Max) ด้านบนก่อนออกแผลบ้านครับ', 'warning');
                         return;
                       }
-                      runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🤖 [แผลบ้าน] ${rocketName || 'ช่างบั้งไฟสด'} ${targetMin}-${targetMax}s | ชล/ชถ ${quoteBetAmount || 500}pt`]);
+                      runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🤖 แผลบ้าน ➔ ${rocketName || 'ช่างบั้งไฟสด'}\n⏱️  ราคาช่าง ${targetMin}-${targetMax}s\n💰 เครดิต ${quoteBetAmount || 500}pt`]);
                       addToast(`🤖 กระจายแผลบ้านเข้ากลุ่ม LINE [${rocketName || 'ช่างบั้งไฟสด'}] เรียบร้อย!`, 'success');
                     }} className="py-2 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">🤖 ออกแผลบ้าน (500 pt)</button>
                     <button onClick={() => {

@@ -216,7 +216,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
     const match = text.trim().match(openRoundRegex);
     const roundName = match[2];
     db.setActiveRocketRound(roundName);
-    await replyToLine(replyToken, `🚀 [เปิดรอบ]: ${roundName} | พิมพ์ ชล, ชถ, 330-370ล`, userId);
+    await replyToLine(replyToken, `🚀 เปิดรอบ ➔ ${roundName}`, userId);
     return;
   }
 
@@ -385,7 +385,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   }
 
   // J. FALLBACK
-  await replyToLine(replyToken, `🤖 ขออภัยค่ะ ไม่เข้าใจคำสั่งของคุณ\nกรุณากดปุ่มที่เมนูด้านล่าง หรือพิมพ์คำสั่ง เช่น "ฝากเงิน", "ถอนยอด" หรือ "เช็คยอด" เพื่อเริ่มทำรายการค่ะ`, userId);
+  await replyToLine(replyToken, `🤖 ไม่เข้าใจคำสั่ง พิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้ได้ค่ะ`, userId);
 }
 
 export async function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
@@ -401,7 +401,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
   } catch (err) {
     db.logTransaction(userId, displayName, 0, 0, 'ERR_LINE_IMG', 'escalated', 'LINE Image download failure: ' + err.toString());
-    await replyToLine(replyToken, `⚠️ ระบบตรวจสอบสลิปขัดข้องชั่วคราว (ไม่สามารถโหลดรูปภาพได้) บิลของคุณถูกส่งให้แอดมินตรวจสอบแมนนวลหลังบ้านแล้วครับ`);
+    await replyToLine(replyToken, `⚠️ ระบบตรวจสอบสลิปขัดข้องชั่วคราว\n📩 ส่งรายการให้แอดมินตรวจสอบแมนนวลแล้วค่ะ`);
     return;
   }
 
@@ -427,7 +427,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     slipData = JSON.parse(responseText);
   } catch (err) {
     db.logTransaction(userId, displayName, 0, 0, 'ERR_CONN', 'escalated', 'Slip API connectivity failure: ' + err.toString());
-    await replyToLine(replyToken, `⚠️ ระบบเช็คสลิปขัดข้อง\nการเชื่อมต่อไปยัง API เช็คสลิปขัดข้อง รายการเติมเงินได้ส่งให้แอดมินตรวจสอบแมนนวลในระบบหลังบ้านแล้วครับ`);
+    await replyToLine(replyToken, `⚠️ ระบบสแกนสลิปขัดข้องชั่วคราว\n📩 ส่งรายการให้แอดมินตรวจสอบแมนนวลแล้วค่ะ`);
     return;
   }
 
@@ -443,9 +443,9 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     db.logTransaction(userId, displayName, 0, 0, 'ERR_API_' + responseCode, 'escalated', 'API HTTP Error ' + responseCode + ': ' + errorDetail);
     
     if (errorDetail.indexOf("Bangkok Bank") !== -1 && errorDetail.indexOf("pending") !== -1) {
-      await replyToLine(replyToken, `🏦 สลิปธนาคารกรุงเทพอยู่ระหว่างประมวลผล\nเนื่องจากระบบธนาคารกรุงเทพมีความล่าช้าชั่วคราวในการอัพเดทข้อมูลธุรกรรม ทำให้ระบบออโต้ยังไม่สามารถตรวจสอบได้ในขณะนี้\n\nบิลของคุณได้ส่งถึงแอดมินเรียบร้อยแล้ว กำลังดำเนินการตรวจสอบแมนนวลหลังบ้านและจะปรับเครดิตให้คุณโดยเร็วที่สุดครับ`);
+      await replyToLine(replyToken, `🏦 สลิป BBL อยู่ระหว่างประมวลผล\n📩 ส่งรายการให้แอดมินตรวจสอบแมนนวลแล้วค่ะ`);
     } else {
-      await replyToLine(replyToken, `⚠️ ระบบเช็คสลิปขัดข้อง (HTTP ${responseCode})\nรายละเอียด: ${errorDetail}\n\nแอดมินได้รับบิลนี้เรียบร้อย กำลังตรวจสอบแมนนวลให้ในระบบหลังบ้านครับ`);
+      await replyToLine(replyToken, `⚠️ ระบบสแกนสลิปขัดข้อง (HTTP ${responseCode})\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วค่ะ`);
     }
     return;
   }
@@ -453,7 +453,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
   if (!slipData.success || !slipData.data) {
     const apiMessage = slipData.message || (slipData.error ? slipData.error.message : 'No QR code readable');
     db.logTransaction(userId, displayName, 0, 0, 'ERR_INVALID_SLIP', 'escalated', 'API check failed: ' + apiMessage);
-    await replyToLine(replyToken, `❌ สแกนสลิปไม่ผ่าน\nเหตุผล: ${apiMessage}\n\nระบบส่งต่อบิลนี้ให้แอดมินเช็คบัญชีแมนนวลแล้วครับ`);
+    await replyToLine(replyToken, `❌ สแกนสลิปไม่ผ่าน (${apiMessage})\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วค่ะ`);
     return;
   }
 
@@ -490,13 +490,13 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
 
   if (!refCode || refCode.trim() === '') {
     db.logTransaction(userId, displayName, 0, actualAmount, 'NO_REF', 'escalated', 'Slip has no transaction reference code');
-    await replyToLine(replyToken, `❌ สลิปไม่มีรหัสอ้างอิง!\nระบบตรวจพบว่าสลิปนี้ไม่มีเลขอ้างอิงธุรกรรม อาจเป็นภาพ Screenshot หรือถูกตัดต่อ\n\nกรุณาส่งสลิปจากแอปธนาคารโดยตรงครับ`);
+    await replyToLine(replyToken, `❌ สลิปไม่มีเลขอ้างอิงธุรกรรม\n📷 กรุณาส่งสลิปจากแอปธนาคารโดยตรงค่ะ`);
     return;
   }
 
   if (db.checkIfRefExists(refCode)) {
     db.logTransaction(userId, displayName, 0, actualAmount, refCode, 'escalated', 'Duplicate transaction ref code');
-    await replyToLine(replyToken, `⚠️ ตรวจพบสลิปซ้ำในระบบ!\nเลขอ้างอิง: ${refCode}\nสลิปนี้เคยถูกนำมาใช้งานแล้ว\n\nรายการส่งให้แอดมินตรวจสอบแมนนวลครับ`);
+    await replyToLine(replyToken, `⚠️ สลิปซ้ำในระบบ (Ref: ${refCode})\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วค่ะ`);
     return;
   }
 
@@ -520,7 +520,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     const hoursDiff = (nowDate - slipDate) / (1000 * 60 * 60);
     if (!isNaN(hoursDiff) && hoursDiff > 24) {
       db.logTransaction(userId, displayName, 0, actualAmount, refCode, 'escalated', `Stale slip rejected - date: ${slipDateStr}`);
-      await replyToLine(replyToken, `⏰ สลิปหมดอายุ!\nสลิปนี้มีวันที่: ${slipDateStr}\nระบบยอมรับเฉพาะสลิปที่โอนภายใน 24 ชั่วโมงที่ผ่านมาเท่านั้นครับ`);
+      await replyToLine(replyToken, `⏰ สลิปหมดอายุ (โอนเมื่อ ${slipDateStr})\n⚠️ รับเฉพาะสลิปภายใน 24 ชม. เท่านั้นค่ะ`);
       return;
     }
   }
@@ -548,13 +548,13 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
   const isMatchReceiver = receiverName.indexOf("อิทธิรัตน์") !== -1 || receiverName.toUpperCase().indexOf("ITTHIRAT") !== -1;
   if (!isMatchReceiver) {
     db.logTransaction(userId, displayName, requestedAmount, actualAmount, refCode, 'escalated', `Receiver Name Mismatch (Receiver: ${receiverName})`);
-    await replyToLine(replyToken, `❌ บัญชีปลายทางไม่ถูกต้อง!\nสลิปนี้ไม่ได้โอนเงินให้กับบัญชีของคุณ อิทธิรัตน์ แนวหล่า\n\nรายการส่งให้แอดมินตรวจสอบแล้วค่ะ`);
+    await replyToLine(replyToken, `❌ บัญชีปลายทางไม่ถูกต้อง\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วค่ะ`);
     return;
   }
 
   if (requestedAmount !== actualAmount) {
     db.logTransaction(userId, displayName, requestedAmount, actualAmount, refCode, 'escalated', `Amount Mismatch (Requested ${requestedAmount} vs Slip ${actualAmount})`);
-    await replyToLine(replyToken, `⚠️ ยอดเงินโอนไม่ตรงกับใบแจ้งยอด!\nใบแจ้งยอดระบุ: ${requestedAmount} บาท\nยอดโอนจริงในสลิป: ${actualAmount} บาท\n\nระบบโอนเข้าสู่หน้าตรวจสอบของแอดมิน เพื่อพิจารณาปรับเครดิตให้แมนนวลค่ะ`);
+    await replyToLine(replyToken, `⚠️ ยอดโอนไม่ตรง (ระบุ ${requestedAmount}B | สลิป ${actualAmount}B)\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วค่ะ`);
     return;
   }
 
@@ -629,9 +629,9 @@ function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     return true;
   }
 
-  // 1. Check Accept Match Command (e.g. "ต", "ต12", "ต 12", "12ต", "ต#12", "ติด", "รับแผล")
-  const specificAcceptRegex = /^(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*#?(\d{2,6})$/;
-  const reverseAcceptRegex = /^#?(\d{2,6})\s*(ต|ติด|รับ)$/;
+  // 1. Check Accept Match Command (e.g. "ต", "ต12", "ต 12", "ต905662 400", "12ต", "ต#12", "ติด", "รับแผล")
+  const specificAcceptRegex = /^(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*#?(\d{2,6})(?:\s+\d+)?$/i;
+  const reverseAcceptRegex = /^#?(\d{2,6})\s*(ต|ติด|รับ)(?:\s+\d+)?$/i;
   let targetOrderNo = null;
 
   if (specificAcceptRegex.test(clean)) {
