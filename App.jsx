@@ -159,7 +159,7 @@ export default function App() {
   // Private chat states
   const [myPrivateInput, setMyPrivateInput] = useState('');
   const [privateMessages, setPrivateMessages] = useState([
-    { id: 'bot_welcome', sender: 'bot', text: '🏦 ยินดีต้อนรับสู่ระบบเติมทุนหลังบ้าน Rocket Science 🚀\n\nโอนเงินด้วยยอดที่ท่านเลือก และส่งสลิปที่มี QR code ระบบจะเติมเครดิตให้อัตโนมัติในสเกล 1:1 ครับ\n\nกรุณาเลือกบริการจากเมนูด้านล่าง หรือพิมพ์บอกเราได้เลยค่ะ\n(เช่น พิมพ์ "ฝากเงิน", "ถอนยอด" หรือ "เช็คยอด")', time: '13:00' }
+    { id: 'bot_welcome', sender: 'bot', text: '🏦 ยินดีต้อนรับสู่ระบบเติมทุนหลังบ้าน Rocket Science 🚀\n\nโอนเงินด้วยยอดที่ท่านเลือก และส่งสลิปที่มี QR code ระบบจะเติมเครดิตให้อัตโนมัติในสเกล 1:1 ครับ\n\nกรุณาเลือกบริการจากเมนูด้านล่าง หรือพิมพ์บอกเราได้เลยครับ\n(เช่น พิมพ์ "ฝากเงิน", "ถอนยอด" หรือ "เช็คยอด")', time: '13:00' }
   ]);
 
   // Real LINE OA chat states
@@ -482,7 +482,7 @@ export default function App() {
           setPrivateMessages(prev => [...prev, {
             id: botMsgId,
             sender: 'bot',
-            text: `📝 รายการดวลของคุณ:\n\n❌ ปัจจุบันไม่มีแผลดวลค้างหรือรอคู่ในระบบค่ะ`,
+            text: `📝 รายการดวลของคุณ:\n\n❌ ปัจจุบันไม่มีแผลดวลค้างหรือรอคู่ในระบบครับ`,
             time: botTime
           }]);
         } else {
@@ -525,7 +525,7 @@ export default function App() {
           setPrivateMessages(prev => [...prev, {
             id: botMsgId,
             sender: 'bot',
-            text: `❌ ไม่พบเลขแผลดวล Order #${orderNo} ในระบบค่ะ`,
+            text: `❌ ไม่พบเลขแผลดวล Order #${orderNo} ในระบบครับ`,
             time: botTime
           }]);
           return;
@@ -537,7 +537,7 @@ export default function App() {
           setPrivateMessages(prev => [...prev, {
             id: botMsgId,
             sender: 'bot',
-            text: `❌ ขออภัยค่ะ แผลดวลนี้ไม่ใช่แผลดวลของคุณ จึงไม่สามารถกดยกเลิกได้`,
+            text: `❌ ขออภัยครับ แผลดวลนี้ไม่ใช่แผลดวลของคุณ จึงไม่สามารถกดยกเลิกได้`,
             time: botTime
           }]);
           return;
@@ -550,7 +550,7 @@ export default function App() {
           setPrivateMessages(prev => [...prev, {
             id: botMsgId,
             sender: 'bot',
-            text: `❌ ยกเลิกแผล Order #${orderNo} สำเร็จ!\n\nระบบได้คืนเครดิตจำนวน ${targetBet.amount} แต้ม ให้คุณเรียบร้อยแล้วค่ะ`,
+            text: `❌ ยกเลิกแผล Order #${orderNo} สำเร็จ!\n\nระบบได้คืนเครดิตจำนวน ${targetBet.amount} แต้ม ให้คุณเรียบร้อยแล้วครับ`,
             time: botTime
           }]);
         } else if (targetBet.status === 'matched') {
@@ -559,14 +559,14 @@ export default function App() {
           setPrivateMessages(prev => [...prev, {
             id: botMsgId,
             sender: 'bot',
-            text: `⚠️ ส่งคำร้องขอยกเลิกแผล Order #${orderNo} สำเร็จ!\n\nเนื่องจากแผลถูกจับคู่แล้ว ต้องรอฝั่งตรงข้ามตอบรับคำขอคำขอยกเลิกแผลนี้ค่ะ`,
+            text: `⚠️ ส่งคำร้องขอยกเลิกแผล Order #${orderNo} สำเร็จ!\n\nเนื่องจากแผลถูกจับคู่แล้ว ต้องรอฝั่งตรงข้ามตอบรับคำขอคำขอยกเลิกแผลนี้ครับ`,
             time: botTime
           }]);
         } else {
           setPrivateMessages(prev => [...prev, {
             id: botMsgId,
             sender: 'bot',
-            text: `⚠️ แผลดวลนี้จบหรือยกเลิกไปแล้ว ไม่สามารถยกเลิกซ้ำได้ค่ะ`,
+            text: `⚠️ แผลดวลนี้จบหรือยกเลิกไปแล้ว ไม่สามารถยกเลิกซ้ำได้ครับ`,
             time: botTime
           }]);
         }
@@ -579,7 +579,7 @@ export default function App() {
         setPrivateMessages(prev => [...prev, {
           id: botMsgId,
           sender: 'bot',
-          text: `💰 ขั้นตอนการฝากเครดิต (สเกล 1:1)\n\nกรุณากดเลือกยอดเงินที่ต้องการฝาก หรือพิมพ์ระบุจำนวนเงินที่ต้องการฝากเพื่อรับเลขที่บัญชีรับเงินได้เลยค่ะ:`,
+          text: `💰 ขั้นตอนการฝากเครดิต (สเกล 1:1)\n\nกรุณากดเลือกยอดเงินที่ต้องการฝาก หรือพิมพ์ระบุจำนวนเงินที่ต้องการฝากเพื่อรับเลขที่บัญชีรับเงินได้เลยครับ:`,
           time: botTime
         }]);
         return;
@@ -593,7 +593,7 @@ export default function App() {
           setPrivateMessages(prev => [...prev, {
             id: botMsgId,
             sender: 'bot',
-            text: `❌ ไม่พบประวัติการฝากเงินผ่านระบบ!\n\nเพื่อความปลอดภัยสูงสุด ระบบกำหนดให้บัญชีถอนเงินต้องตรงกับบัญชีที่ฝากเงินเข้ามาครั้งแรกเท่านั้น\n\nกรุณาทำรายการฝากเงินเข้ามาก่อนเพื่อลงทะเบียนบัญชีธนาคารค่ะ`,
+            text: `❌ ไม่พบประวัติการฝากเงินผ่านระบบ!\n\nเพื่อความปลอดภัยสูงสุด ระบบกำหนดให้บัญชีถอนเงินต้องตรงกับบัญชีที่ฝากเงินเข้ามาครั้งแรกเท่านั้น\n\nกรุณาทำรายการฝากเงินเข้ามาก่อนเพื่อลงทะเบียนบัญชีธนาคารครับ`,
             time: botTime
           }]);
         } else {
@@ -616,7 +616,7 @@ export default function App() {
           setPrivateMessages(prev => [...prev, {
             id: botMsgId,
             sender: 'bot',
-            text: `❌ ขออภัยค่ะ ไม่พบข้อมูลบัญชีธนาคารสำหรับถอนเงิน (ต้องใช้บัญชีเดียวกับที่ฝากเงินเข้ามาในครั้งแรก)`,
+            text: `❌ ขออภัยครับ ไม่พบข้อมูลบัญชีธนาคารสำหรับถอนเงิน (ต้องใช้บัญชีเดียวกับที่ฝากเงินเข้ามาในครั้งแรก)`,
             time: botTime
           }]);
           return;
@@ -626,7 +626,7 @@ export default function App() {
           setPrivateMessages(prev => [...prev, {
             id: botMsgId,
             sender: 'bot',
-            text: `❌ จำนวนเงินถอนต้องมากกว่า 0 แต้มค่ะ`,
+            text: `❌ จำนวนเงินถอนต้องมากกว่า 0 แต้มครับ`,
             time: botTime
           }]);
           return;
@@ -672,7 +672,7 @@ export default function App() {
         setPrivateMessages(prev => [...prev, {
           id: botMsgId,
           sender: 'bot',
-          text: `📥 บันทึกคำขอถอนเงินจำนวน ${withdrawAmt} แต้ม เรียบร้อยแล้วค่ะ!\n\nระบบกำลังส่งต่อข้อมูลให้แอดมินพิจารณาอนุมัติโอนเงินแบบแมนนวลเข้าบัญชีธนาคาร ${userPlayer.bankName} เลขบัญชี ${userPlayer.bankAccount} ของคุณค่ะ\n\nยอดคงเหลือหลังทำรายการ: ${userPlayer.balance - withdrawAmt} แต้ม`,
+          text: `📥 บันทึกคำขอถอนเงินจำนวน ${withdrawAmt} แต้ม เรียบร้อยแล้วครับ!\n\nระบบกำลังส่งต่อข้อมูลให้แอดมินพิจารณาอนุมัติโอนเงินแบบแมนนวลเข้าบัญชีธนาคาร ${userPlayer.bankName} เลขบัญชี ${userPlayer.bankAccount} ของคุณครับ\n\nยอดคงเหลือหลังทำรายการ: ${userPlayer.balance - withdrawAmt} แต้ม`,
           time: botTime
         }]);
         return;
@@ -694,7 +694,7 @@ export default function App() {
           setPrivateMessages(prev => [...prev, {
             id: botMsgId,
             sender: 'bot',
-            text: `⚠️ ขออภัยค่ะ ระบบรองรับการฝากยอดขั้นต่ำ 100 THB และสูงสุดไม่เกิน 10,000 THB ต่อครั้งค่ะ`,
+            text: `⚠️ ขออภัยครับ ระบบรองรับการฝากยอดขั้นต่ำ 100 THB และสูงสุดไม่เกิน 10,000 THB ต่อครั้งครับ`,
             time: botTime
           }]);
           return;
@@ -747,7 +747,7 @@ export default function App() {
       setPrivateMessages(prev => [...prev, {
         id: botMsgId,
         sender: 'bot',
-        text: `🤖 ไม่เข้าใจคำสั่ง พิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้ได้ค่ะ`,
+        text: `🤖 ไม่เข้าใจคำสั่ง พิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้ได้ครับ`,
         time: botTime
       }]);
 
@@ -1106,7 +1106,7 @@ export default function App() {
     setBillingResult(null);
     setScannerLogs([]);
     setPrivateMessages([
-      { id: 'bot_welcome', sender: 'bot', text: '🏦 ยินดีต้อนรับสู่ระบบเติมทุนหลังบ้าน Rocket Science 🚀\n\nโอนเงินด้วยยอดที่ท่านเลือก และส่งสลิปที่มี QR code ระบบจะเติมเครดิตให้อัตโนมัติในสเกล 1:1 ครับ\n\nกรุณาเลือกบริการจากเมนูด้านล่าง หรือพิมพ์บอกเราได้เลยค่ะ\n(เช่น พิมพ์ "ฝากเงิน", "ถอนยอด" หรือ "เช็คยอด")', time: '13:00' }
+      { id: 'bot_welcome', sender: 'bot', text: '🏦 ยินดีต้อนรับสู่ระบบเติมทุนหลังบ้าน Rocket Science 🚀\n\nโอนเงินด้วยยอดที่ท่านเลือก และส่งสลิปที่มี QR code ระบบจะเติมเครดิตให้อัตโนมัติในสเกล 1:1 ครับ\n\nกรุณาเลือกบริการจากเมนูด้านล่าง หรือพิมพ์บอกเราได้เลยครับ\n(เช่น พิมพ์ "ฝากเงิน", "ถอนยอด" หรือ "เช็คยอด")', time: '13:00' }
     ]);
   };
 
@@ -2045,7 +2045,7 @@ export default function App() {
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block font-heading">⚡ คำสั่งลัดบรอดแคสต์หน้าร้าน (Admin Quick Broadcasts):</span>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs font-bold">
                     <button onClick={() => {
-                      runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🔒 ปิดรับดวล ➔ ${rocketName || 'ช่างบั้งไฟสด'}\n⛔ 3-2-GO! หมดเวลาท้าดวลก่อนปล่อยบั้งไฟ\n⚠️ ออเดอร์และกดแมตช์หลังจากนี้จะไม่ถูกจับคู่ทุกกรณีค่ะ`]);
+                      runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🔒 ปิดรับดวล ➔ ${rocketName || 'ช่างบั้งไฟสด'}\n⛔ 3-2-GO! หมดเวลาท้าดวลก่อนปล่อยบั้งไฟ\n⚠️ ออเดอร์และกดแมตช์หลังจากนี้จะไม่ถูกจับคู่ทุกกรณีครับ`]);
                       addToast(`🔒 ล็อคปิดรับดวลรอบ [${rocketName || 'ช่างบั้งไฟสด'}] (1 นาที ก่อนจุด) เรียบร้อย!`, 'warning');
                     }} className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">🔒 ปิดรับดวล (1 นาที ก่อนจุด)</button>
                     <button onClick={() => {

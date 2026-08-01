@@ -183,7 +183,7 @@ export async function sendAdminMessageToLine(targetId, messageText) {
     }
   } else if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start') {
     if (destinationId && (destinationId.startsWith('C') || db.getActiveGroupId() === destinationId)) {
-      payload = `💡 [เมนูระบบดวลส่วนตัว]\n\nเมนูเช็คยอด เติมเงิน ถอนเงิน และตั้งค่าบัญชี เป็นข้อมูลส่วนบุคคลส่วนตัวค่ะ 💬\n\nท่านสามารถกดทักแชตตรงหา LINE OA แบบส่วนตัวเพื่อใช้งานได้ทันทีค่ะ!\n\n📌 สำหรับในกลุ่มนี้ ใช้สำหรับส่งคำสั่งแทงดวลสด (ชล, ชถ, 330-380ล) และพิมพ์ "กระดานดวล" เพื่อดูแผลค้างเท่านั้นค่ะ 🚀`;
+      payload = `💡 [เมนูระบบดวลส่วนตัว]\n\nเมนูเช็คยอด เติมเงิน ถอนเงิน และตั้งค่าบัญชี เป็นข้อมูลส่วนบุคคลส่วนตัวครับ 💬\n\nท่านสามารถกดทักแชตตรงหา LINE OA แบบส่วนตัวเพื่อใช้งานได้ทันทีครับ!\n\n📌 สำหรับในกลุ่มนี้ ใช้สำหรับส่งคำสั่งแทงดวลสด (ชล, ชถ, 330-380ล) และพิมพ์ "กระดานดวล" เพื่อดูแผลค้างเท่านั้นครับ 🚀`;
     } else {
       payload = constructMainMenuFlex();
     }
@@ -417,7 +417,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   }
 
   // J. FALLBACK
-  await replyToLine(replyToken, `🤖 ไม่เข้าใจคำสั่ง พิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้ได้ค่ะ`, userId);
+  await replyToLine(replyToken, `🤖 ไม่เข้าใจคำสั่ง พิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้ได้ครับ`, userId);
 }
 
 export async function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
@@ -433,7 +433,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
   } catch (err) {
     db.logTransaction(userId, displayName, 0, 0, 'ERR_LINE_IMG', 'escalated', 'LINE Image download failure: ' + err.toString());
-    await replyToLine(replyToken, `⚠️ ระบบตรวจสอบสลิปขัดข้องชั่วคราว\n📩 ส่งรายการให้แอดมินตรวจสอบแมนนวลแล้วค่ะ`);
+    await replyToLine(replyToken, `⚠️ ระบบตรวจสอบสลิปขัดข้องชั่วคราว\n📩 ส่งรายการให้แอดมินตรวจสอบแมนนวลแล้วครับ`);
     return;
   }
 
@@ -459,7 +459,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     slipData = JSON.parse(responseText);
   } catch (err) {
     db.logTransaction(userId, displayName, 0, 0, 'ERR_CONN', 'escalated', 'Slip API connectivity failure: ' + err.toString());
-    await replyToLine(replyToken, `⚠️ ระบบสแกนสลิปขัดข้องชั่วคราว\n📩 ส่งรายการให้แอดมินตรวจสอบแมนนวลแล้วค่ะ`);
+    await replyToLine(replyToken, `⚠️ ระบบสแกนสลิปขัดข้องชั่วคราว\n📩 ส่งรายการให้แอดมินตรวจสอบแมนนวลแล้วครับ`);
     return;
   }
 
@@ -475,9 +475,9 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     db.logTransaction(userId, displayName, 0, 0, 'ERR_API_' + responseCode, 'escalated', 'API HTTP Error ' + responseCode + ': ' + errorDetail);
     
     if (errorDetail.indexOf("Bangkok Bank") !== -1 && errorDetail.indexOf("pending") !== -1) {
-      await replyToLine(replyToken, `🏦 สลิป BBL อยู่ระหว่างประมวลผล\n📩 ส่งรายการให้แอดมินตรวจสอบแมนนวลแล้วค่ะ`);
+      await replyToLine(replyToken, `🏦 สลิป BBL อยู่ระหว่างประมวลผล\n📩 ส่งรายการให้แอดมินตรวจสอบแมนนวลแล้วครับ`);
     } else {
-      await replyToLine(replyToken, `⚠️ ระบบสแกนสลิปขัดข้อง (HTTP ${responseCode})\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วค่ะ`);
+      await replyToLine(replyToken, `⚠️ ระบบสแกนสลิปขัดข้อง (HTTP ${responseCode})\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วครับ`);
     }
     return;
   }
@@ -485,7 +485,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
   if (!slipData.success || !slipData.data) {
     const apiMessage = slipData.message || (slipData.error ? slipData.error.message : 'No QR code readable');
     db.logTransaction(userId, displayName, 0, 0, 'ERR_INVALID_SLIP', 'escalated', 'API check failed: ' + apiMessage);
-    await replyToLine(replyToken, `❌ สแกนสลิปไม่ผ่าน (${apiMessage})\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วค่ะ`);
+    await replyToLine(replyToken, `❌ สแกนสลิปไม่ผ่าน (${apiMessage})\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วครับ`);
     return;
   }
 
@@ -522,13 +522,13 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
 
   if (!refCode || refCode.trim() === '') {
     db.logTransaction(userId, displayName, 0, actualAmount, 'NO_REF', 'escalated', 'Slip has no transaction reference code');
-    await replyToLine(replyToken, `❌ สลิปไม่มีเลขอ้างอิงธุรกรรม\n📷 กรุณาส่งสลิปจากแอปธนาคารโดยตรงค่ะ`);
+    await replyToLine(replyToken, `❌ สลิปไม่มีเลขอ้างอิงธุรกรรม\n📷 กรุณาส่งสลิปจากแอปธนาคารโดยตรงครับ`);
     return;
   }
 
   if (db.checkIfRefExists(refCode)) {
     db.logTransaction(userId, displayName, 0, actualAmount, refCode, 'escalated', 'Duplicate transaction ref code');
-    await replyToLine(replyToken, `⚠️ สลิปซ้ำในระบบ (Ref: ${refCode})\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วค่ะ`);
+    await replyToLine(replyToken, `⚠️ สลิปซ้ำในระบบ (Ref: ${refCode})\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วครับ`);
     return;
   }
 
@@ -552,7 +552,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     const hoursDiff = (nowDate - slipDate) / (1000 * 60 * 60);
     if (!isNaN(hoursDiff) && hoursDiff > 24) {
       db.logTransaction(userId, displayName, 0, actualAmount, refCode, 'escalated', `Stale slip rejected - date: ${slipDateStr}`);
-      await replyToLine(replyToken, `⏰ สลิปหมดอายุ (โอนเมื่อ ${slipDateStr})\n⚠️ รับเฉพาะสลิปภายใน 24 ชม. เท่านั้นค่ะ`);
+      await replyToLine(replyToken, `⏰ สลิปหมดอายุ (โอนเมื่อ ${slipDateStr})\n⚠️ รับเฉพาะสลิปภายใน 24 ชม. เท่านั้นครับ`);
       return;
     }
   }
@@ -580,13 +580,13 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
   const isMatchReceiver = receiverName.indexOf("อิทธิรัตน์") !== -1 || receiverName.toUpperCase().indexOf("ITTHIRAT") !== -1;
   if (!isMatchReceiver) {
     db.logTransaction(userId, displayName, requestedAmount, actualAmount, refCode, 'escalated', `Receiver Name Mismatch (Receiver: ${receiverName})`);
-    await replyToLine(replyToken, `❌ บัญชีปลายทางไม่ถูกต้อง\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วค่ะ`);
+    await replyToLine(replyToken, `❌ บัญชีปลายทางไม่ถูกต้อง\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วครับ`);
     return;
   }
 
   if (requestedAmount !== actualAmount) {
     db.logTransaction(userId, displayName, requestedAmount, actualAmount, refCode, 'escalated', `Amount Mismatch (Requested ${requestedAmount} vs Slip ${actualAmount})`);
-    await replyToLine(replyToken, `⚠️ ยอดโอนไม่ตรง (ระบุ ${requestedAmount}B | สลิป ${actualAmount}B)\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วค่ะ`);
+    await replyToLine(replyToken, `⚠️ ยอดโอนไม่ตรง (ระบุ ${requestedAmount}B | สลิป ${actualAmount}B)\n📩 ส่งรายการให้แอดมินตรวจสอบแล้วครับ`);
     return;
   }
 
@@ -679,7 +679,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
   if (keywordsAccept.includes(clean) || targetOrderNo) {
     if (db.isRocketRoundClosed()) {
-      await replyToLine(replyToken, `⚠️ ปิดรับดวลรอบนี้แล้วค่ะ (ออเดอร์และกดแมตช์หลังประกาศไม่ถูกจับคู่)`, userId);
+      await replyToLine(replyToken, `⚠️ ปิดรับดวลรอบนี้แล้วครับ (ออเดอร์และกดแมตช์หลังประกาศไม่ถูกจับคู่)`, userId);
       return true;
     }
     db.matchExistingOpenBet(userId, displayName, targetOrderNo).then(async matched => {
@@ -773,12 +773,12 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
 async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false) {
   if (db.isRocketRoundClosed()) {
-    await replyToLine(replyToken, `⚠️ ปิดรับดวลรอบนี้แล้วค่ะ (ออเดอร์และกดแมตช์หลังประกาศไม่ถูกจับคู่)`, userId);
+    await replyToLine(replyToken, `⚠️ ปิดรับดวลรอบนี้แล้วครับ (ออเดอร์และกดแมตช์หลังประกาศไม่ถูกจับคู่)`, userId);
     return;
   }
   const balance = await db.getPlayerBalance(userId, displayName);
   if (balance < amount) {
-    await replyToLine(replyToken, `⚠️ เครดิตไม่พอ (มี ${balance}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตค่ะ`, userId);
+    await replyToLine(replyToken, `⚠️ เครดิตไม่พอ (มี ${balance}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ`, userId);
     return;
   }
 
@@ -788,14 +788,14 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   // Deduct balance (with strict return check)
   const success = await db.adjustPlayerBalance(userId, -amount, displayName);
   if (!success) {
-    await replyToLine(replyToken, `⚠️ เครดิตไม่พอ (มี ${balance}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตค่ะ`, userId);
+    await replyToLine(replyToken, `⚠️ เครดิตไม่พอ (มี ${balance}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ`, userId);
     return;
   }
   
   // Save open bet
   const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal);
   if (!saved) {
-    await replyToLine(replyToken, `⚠️ ไม่สามารถบันทึกแผลดวลได้ เครดิตไม่พอค่ะ`, userId);
+    await replyToLine(replyToken, `⚠️ ไม่สามารถบันทึกแผลดวลได้ เครดิตไม่พอครับ`, userId);
     return;
   }
   
