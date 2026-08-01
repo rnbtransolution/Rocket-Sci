@@ -2045,7 +2045,7 @@ export default function App() {
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block font-heading">⚡ คำสั่งลัดบรอดแคสต์หน้าร้าน (Admin Quick Broadcasts):</span>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs font-bold">
                     <button onClick={() => {
-                      runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🔒 ปิดรับดวล ➔ ${rocketName || 'ช่างบั้งไฟสด'}\n⛔ 3-2-GO! หมดเวลาแทงก่อนจุดบั้งไฟ`]);
+                      runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🔒 ปิดรับดวล ➔ ${rocketName || 'ช่างบั้งไฟสด'}\n⛔ 3-2-GO! หมดเวลาท้าดวลก่อนปล่อยบั้งไฟ\n⚠️ ออเดอร์และกดแมตช์หลังจากนี้จะไม่ถูกจับคู่ทุกกรณีค่ะ`]);
                       addToast(`🔒 ล็อคปิดรับดวลรอบ [${rocketName || 'ช่างบั้งไฟสด'}] (1 นาที ก่อนจุด) เรียบร้อย!`, 'warning');
                     }} className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">🔒 ปิดรับดวล (1 นาที ก่อนจุด)</button>
                     <button onClick={() => {

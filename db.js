@@ -376,14 +376,7 @@ export function saveOpenBet(
   rMax
 ) {
   const searchId = cleanUserId(userId);
-  const player = players.find((p) => cleanUserId(p.id) === searchId);
-  const currentBal = player ? player.balance : 0;
   const betAmount = Number(amount) || 0;
-
-  if (currentBal < betAmount) {
-    console.warn(`[BET BLOCK] Refused saveOpenBet for ${searchId}: balance ${currentBal} < betAmount ${betAmount}`);
-    return false;
-  }
 
   const now = new Date();
   const lowId = side === 'low' ? searchId : '';

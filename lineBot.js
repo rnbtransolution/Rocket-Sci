@@ -8,16 +8,31 @@ const APP_URL = process.env.APP_URL || 'http://localhost:3001';
 
 // --- LINE OA COMMUNICATIONS HELPERS ---
 
+const profileCache = new Map();
+
 export async function getLineUserProfile(userId) {
+  if (!userId) return null;
+  if (profileCache.has(userId)) return profileCache.get(userId);
+
   const url = `https://api.line.me/v2/bot/profile/${userId}`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 1500);
+
   try {
     const res = await fetch(url, {
-      headers: { "Authorization": "Bearer " + LINE_CHANNEL_ACCESS_TOKEN }
+      headers: { "Authorization": "Bearer " + LINE_CHANNEL_ACCESS_TOKEN },
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
     if (!res.ok) return null;
-    return await res.json();
+    const profile = await res.json();
+    if (profile && profile.displayName) {
+      profileCache.set(userId, profile);
+    }
+    return profile;
   } catch (e) {
-    console.error("Error getLineUserProfile:", e);
+    clearTimeout(timeoutId);
+    console.error("Error getLineUserProfile (or timeout):", e.message);
     return null;
   }
 }
@@ -172,6 +187,13 @@ export async function sendAdminMessageToLine(targetId, messageText) {
     } else {
       payload = constructMainMenuFlex();
     }
+  }
+
+  // Update round lock status automatically if broadcast contains round open/close keywords
+  if (clean.includes('ปิดรับดวล') || clean.includes('ปิดรอบ') || clean.includes('3-2-go') || clean.includes('หมดเวลา')) {
+    db.setRocketRoundStatus('CLOSED');
+  } else if (clean.includes('เปิดรอบ') || clean.includes('เปิดรับดวล')) {
+    db.setRocketRoundStatus('ACTIVE');
   }
   
   await pushToLine(destinationId, payload);
@@ -657,7 +679,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
   if (keywordsAccept.includes(clean) || targetOrderNo) {
     if (db.isRocketRoundClosed()) {
-      await replyToLine(replyToken, `⚠️ ปิดรับดวลรอบนี้แล้วค่ะ (หมดเวลาแทงก่อนปล่อยบั้งไฟ)`, userId);
+      await replyToLine(replyToken, `⚠️ ปิดรับดวลรอบนี้แล้วค่ะ (ออเดอร์และกดแมตช์หลังประกาศไม่ถูกจับคู่)`, userId);
       return true;
     }
     db.matchExistingOpenBet(userId, displayName, targetOrderNo).then(async matched => {
@@ -667,23 +689,35 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
       }
 
       if (matched && matched.orderNumber) {
-        // Send Private 1-on-1 Flex Notification DM to Creator
-        const creatorName = matched.playerLowName || matched.playerHighName;
-        const creatorBal = await db.getPlayerBalance(matched.creatorId, creatorName);
-        const flexCreator = constructMatchNotificationFlex(matched.orderNumber, matched.amount, displayName, 'creator', creatorBal);
-        await pushToLine(matched.creatorId, flexCreator);
-
-        // Send Private 1-on-1 Flex Notification DM to Matcher
-        const matcherBal = await db.getPlayerBalance(matched.matcherId, displayName);
+        // Parallelize push notifications (Group notice + Private 1-on-1 DMs) concurrently!
         const flexMatcher = constructMatchNotificationFlex(matched.orderNumber, matched.amount, matched.playerLowName, matched.playerHighName, matched.rangeInfo, matched.isChotoy, matched.rocketName);
-        await pushToLine(matched.matcherId, flexMatcher);
 
-        // Reply in group or chat
-        if (groupId) {
-          await pushToLine(groupId, `☄️ [#${matched.orderNumber} แมตช์!] @${matched.playerLowName} (ต่ำ) 🆚 @${matched.playerHighName} (สูง) | ${matched.amount}pt 🚀`);
-        } else {
-          await replyToLine(replyToken, flexMatcher, userId);
-        }
+        const groupPush = groupId
+          ? pushToLine(groupId, `☄️ [#${matched.orderNumber} แมตช์!] @${matched.playerLowName} (ต่ำ) 🆚 @${matched.playerHighName} (สูง) | ${matched.amount}pt 🚀`)
+          : replyToLine(replyToken, flexMatcher, userId);
+
+        const creatorPush = (async () => {
+          try {
+            const creatorName = matched.playerLowName || matched.playerHighName;
+            const creatorBal = await db.getPlayerBalance(matched.creatorId, creatorName);
+            const flexCreator = constructMatchNotificationFlex(matched.orderNumber, matched.amount, displayName, 'creator', creatorBal);
+            await pushToLine(matched.creatorId, flexCreator);
+          } catch (e) {
+            console.error('[Match DM Creator Push Error]', e);
+          }
+        })();
+
+        const matcherPush = (async () => {
+          try {
+            if (!groupId) return;
+            const matcherBal = await db.getPlayerBalance(matched.matcherId, displayName);
+            await pushToLine(matched.matcherId, flexMatcher);
+          } catch (e) {
+            console.error('[Match DM Matcher Push Error]', e);
+          }
+        })();
+
+        await Promise.allSettled([groupPush, creatorPush, matcherPush]);
       } else {
         const notFoundText = targetOrderNo
           ? `❌ ไม่พบแผล Order #${targetOrderNo} ที่เปิดรอคู่ครับ`
@@ -710,7 +744,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     else if (keywordsHigh.includes(cmd)) side = 'high';
     
     if (side && amount >= 10) {
-      processOpenBetRequest(side, amount, 'normal', null, null, userId, displayName, replyToken, isChotoy);
+      await processOpenBetRequest(side, amount, 'normal', null, null, userId, displayName, replyToken, isChotoy);
       return true;
     }
   }
@@ -729,7 +763,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     else if (keywordsHigh.includes(cmd)) side = 'high';
     
     if (side && amount >= 10 && minVal < maxVal) {
-      processOpenBetRequest(side, amount, 'range', minVal, maxVal, userId, displayName, replyToken, isChotoy);
+      await processOpenBetRequest(side, amount, 'range', minVal, maxVal, userId, displayName, replyToken, isChotoy);
       return true;
     }
   }
@@ -739,7 +773,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
 async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false) {
   if (db.isRocketRoundClosed()) {
-    await replyToLine(replyToken, `⚠️ ปิดรับดวลรอบนี้แล้วค่ะ (หมดเวลาแทงก่อนปล่อยบั้งไฟ)`, userId);
+    await replyToLine(replyToken, `⚠️ ปิดรับดวลรอบนี้แล้วค่ะ (ออเดอร์และกดแมตช์หลังประกาศไม่ถูกจับคู่)`, userId);
     return;
   }
   const balance = await db.getPlayerBalance(userId, displayName);
