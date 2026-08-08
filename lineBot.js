@@ -430,7 +430,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   const depositTextRegex = /^(ฝาก|ฝากเงิน|เติม|เติมเงิน)(\d+)$/;
   let depositAmt = null;
 
-  if (pureNumRegex.test(clean)) {
+  if (!groupId && pureNumRegex.test(clean)) {
     depositAmt = parseInt(clean);
   } else if (depositTextRegex.test(clean)) {
     depositAmt = parseInt(clean.match(depositTextRegex)[2]);
@@ -662,8 +662,8 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   const clean = text.replace(/\s+/g, '').toLowerCase();
   
   // Keywords definition
-  const keywordsLow = ['ชล', 'ล', 'ไล่', '+5ชล', '+5ล', 'ช่างไล่'];
-  const keywordsHigh = ['ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', '+5ชย', '+5ชถ', '+5ย', '+5ถ', 'ช่างยั่ง', 'ช่างถอย'];
+  const keywordsLow = ['ชล', 'ล', 'ไล่', 'ต่ำ', 'ชต่ำ', 'ช่างต่ำ', '+5ชล', '+5ล', 'ช่างไล่', 'ต'];
+  const keywordsHigh = ['ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'สูง', 'ชสูง', 'ช่างสูง', '+5ชย', '+5ชถ', '+5ย', '+5ถ', 'ช่างยั่ง', 'ช่างถอย', 'ส'];
   const keywordsAccept = ['ต', 'ติด', 'ครับ', 'เค', 'จ้า', 'ยอมรับ', 'ดีล'];
   
   // 0. Pending Deals Board Command ("กระดานดวล", "แผลค้าง", "เปิดรอคู่")
@@ -783,25 +783,8 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   const isChotoy = clean.includes('ชตย') || text.includes('ชตย');
   const cleanBetText = clean.replace(/ชตย/g, '').trim();
 
-  // Format 1: [keywords][amount] (e.g. "ล200", "ถ500")
-  const betRegex = /^(\+?5?[a-zA-Z\u0e00-\u0e7f]+)(\d+)$/;
-  if (betRegex.test(cleanBetText)) {
-    const match = cleanBetText.match(betRegex);
-    const cmd = match[1];
-    const amount = parseInt(match[2]);
-    
-    let side = '';
-    if (keywordsLow.includes(cmd)) side = 'low';
-    else if (keywordsHigh.includes(cmd)) side = 'high';
-    
-    if (side && amount >= 10) {
-      await processOpenBetRequest(side, amount, 'normal', null, null, userId, displayName, replyToken, isChotoy, groupId);
-      return true;
-    }
-  }
-
-  // Format 2: [Min]-[Max][keywords][amount?] (e.g. "300-340ล", "300-340ถ", "300-340ล1000", "345-385ล500 ชตย")
-  const rangeBetRegex = /^(\d+)-(\d+)([a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
+  // Format 1: [Min][- or /][Max][keywords][amount?] (e.g. "300-340ล", "300-340ถ", "300-340ล1000", "345-385ล500 ชตย")
+  const rangeBetRegex = /^(\d+)[-/](\d+)([a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
   if (rangeBetRegex.test(cleanBetText)) {
     const match = cleanBetText.match(rangeBetRegex);
     const minVal = parseInt(match[1]);
@@ -815,6 +798,29 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     
     if (side && amount >= 10 && minVal < maxVal) {
       await processOpenBetRequest(side, amount, 'range', minVal, maxVal, userId, displayName, replyToken, isChotoy, groupId);
+      return true;
+    }
+  }
+
+  // Format 2: [keywords][amount?] (e.g. "ล200", "ถ500", "ชล", "ชถ500")
+  const betRegex = /^(\+?5?[a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
+  if (betRegex.test(cleanBetText)) {
+    const match = cleanBetText.match(betRegex);
+    const cmd = match[1];
+    const amount = match[2] ? parseInt(match[2]) : 500;
+    
+    let side = '';
+    if (keywordsLow.includes(cmd)) side = 'low';
+    else if (keywordsHigh.includes(cmd)) side = 'high';
+    
+    if (side && amount >= 10) {
+      const activeMin = db.getTargetMin ? db.getTargetMin() : null;
+      const activeMax = db.getTargetMax ? db.getTargetMax() : null;
+      if (activeMin && activeMax) {
+        await processOpenBetRequest(side, amount, 'range', activeMin, activeMax, userId, displayName, replyToken, isChotoy, groupId);
+      } else {
+        await processOpenBetRequest(side, amount, 'normal', null, null, userId, displayName, replyToken, isChotoy, groupId);
+      }
       return true;
     }
   }
