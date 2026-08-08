@@ -1528,34 +1528,70 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "margin": "xs",
           "contents": [
             {
-              "type": "button",
-              "style": "primary",
-              "color": "#1E88E5",
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": "#1E88E5",
+              "cornerRadius": "md",
+              "paddingAll": "xs",
               "action": {
                 "type": "message",
                 "label": "ต 100",
                 "text": `ต${orderNo} 100`
-              }
+              },
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "ต 100",
+                  "color": "#FFFFFF",
+                  "weight": "bold",
+                  "size": "xs",
+                  "align": "center"
+                }
+              ]
             },
             {
-              "type": "button",
-              "style": "primary",
-              "color": "#1E88E5",
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": "#1E88E5",
+              "cornerRadius": "md",
+              "paddingAll": "xs",
               "action": {
                 "type": "message",
                 "label": "ต 200",
                 "text": `ต${orderNo} 200`
-              }
+              },
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "ต 200",
+                  "color": "#FFFFFF",
+                  "weight": "bold",
+                  "size": "xs",
+                  "align": "center"
+                }
+              ]
             },
             {
-              "type": "button",
-              "style": "primary",
-              "color": "#1E88E5",
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": "#1E88E5",
+              "cornerRadius": "md",
+              "paddingAll": "xs",
               "action": {
                 "type": "message",
                 "label": "ต 300",
                 "text": `ต${orderNo} 300`
-              }
+              },
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "ต 300",
+                  "color": "#FFFFFF",
+                  "weight": "bold",
+                  "size": "xs",
+                  "align": "center"
+                }
+              ]
             }
           ]
         },
@@ -1566,24 +1602,48 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "margin": "xs",
           "contents": [
             {
-              "type": "button",
-              "style": "primary",
-              "color": "#00796B",
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": "#00796B",
+              "cornerRadius": "md",
+              "paddingAll": "xs",
               "action": {
                 "type": "message",
                 "label": "ต ทั้งหมด",
                 "text": `ต ${orderNo}`
-              }
+              },
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "ต ทั้งหมด",
+                  "color": "#FFFFFF",
+                  "weight": "bold",
+                  "size": "xs",
+                  "align": "center"
+                }
+              ]
             },
             {
-              "type": "button",
-              "style": "primary",
-              "color": "#D32F2F",
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": "#D32F2F",
+              "cornerRadius": "md",
+              "paddingAll": "xs",
               "action": {
                 "type": "message",
                 "label": "ยกเลิก",
                 "text": `ยกเลิก ${orderNo}`
-              }
+              },
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "ยกเลิก",
+                  "color": "#FFFFFF",
+                  "weight": "bold",
+                  "size": "xs",
+                  "align": "center"
+                }
+              ]
             }
           ]
         }
