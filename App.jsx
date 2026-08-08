@@ -1308,6 +1308,20 @@ export default function App() {
 
     setBets(prev => [newBet, ...prev]);
 
+    // Save open bet to backend database and push Order Flex Card into target LINE group!
+    const targetGroup = broadcastTargetGroup !== 'ALL' ? broadcastTargetGroup : activeGroupId;
+    runBackendFunction('saveOpenBet', [
+      orderNo,
+      user?.id || 'user',
+      user?.name || 'คุณ (You)',
+      side,
+      amount,
+      betType,
+      rangeMin,
+      rangeMax,
+      targetGroup
+    ]);
+
     // Opponent match simulation (Sandbox only)
     setTimeout(() => {
       const opponents = players.filter(p => !p.isUser);
@@ -2303,7 +2317,7 @@ export default function App() {
                               </div>
                             </div>
                           ) : (
-                            renderSlipCard(null, tx.playerId === 'user' ? useCustomSlip : false, tx.actualAmount)
+                            renderSlipCard(tx.presetId, !tx.presetId, (tx.actualAmount && tx.actualAmount > 0) ? tx.actualAmount : (tx.requestedAmount || 100))
                           )}
                         </div>
 
@@ -2356,7 +2370,7 @@ export default function App() {
                               className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[11px] rounded-xl flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm shadow-emerald-500/10"
                             >
                               <CheckCircle size={13} />
-                              {isWithdrawal ? `ยืนยันว่าโอนแล้ว & อนุมัติถอนเงิน (${tx.requestedAmount} THB)` : `อนุมัติและอัพแต้ม (${tx.actualAmount} pt)`}
+                              {isWithdrawal ? `ยืนยันว่าโอนแล้ว & อนุมัติถอนเงิน (${tx.requestedAmount} THB)` : `อนุมัติและอัพแต้ม (${(tx.actualAmount && tx.actualAmount > 0) ? tx.actualAmount : (tx.requestedAmount || 0)} pt)`}
                             </button>
                             <button
                               onClick={() => handleAdminRejectReview(tx.id, isWithdrawal ? 'ปฏิเสธคำขอและส่งแต้มคืนเข้าบัญชี' : 'ปฏิเสธเนื่องจากไม่มียอดโอนจริง')}
