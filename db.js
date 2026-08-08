@@ -152,10 +152,19 @@ export function recordGroupActivity(groupId, groupName, userId, displayName, tex
   activeGroupId = groupId;
   let group = lineGroups.find(g => g.id === groupId);
   const nowStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+
+  const existingIdx = lineGroups.findIndex(g => g.id === groupId);
+  const groupNumber = existingIdx !== -1 ? (existingIdx + 1) : (lineGroups.length + 1);
+
+  let cleanName = groupName;
+  if (!cleanName || cleanName.startsWith('C') || cleanName.includes(groupId) || !isNaN(cleanName)) {
+    cleanName = `🚀 กลุ่มดวลสด #${groupNumber}`;
+  }
+
   if (!group) {
     group = {
       id: groupId,
-      name: groupName || `กลุ่มดวลสด LINE (#${groupId.slice(-4)})`,
+      name: cleanName,
       lastMessage: text || 'มีการเคลื่อนไหวในกลุ่ม',
       timestamp: nowStr,
       msgCount: 1
@@ -165,7 +174,7 @@ export function recordGroupActivity(groupId, groupName, userId, displayName, tex
     group.lastMessage = text || group.lastMessage;
     group.timestamp = nowStr;
     group.msgCount = (group.msgCount || 0) + 1;
-    if (groupName && groupName !== group.name) {
+    if (groupName && !groupName.startsWith('C') && !groupName.includes(groupId) && isNaN(groupName)) {
       group.name = groupName;
     }
   }

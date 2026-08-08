@@ -156,6 +156,27 @@ export async function pushToLine(targetId, text) {
   }
 }
 
+export async function fetchLINEGroupName(groupId) {
+  if (!groupId || typeof groupId !== 'string' || !groupId.startsWith('C')) return null;
+  try {
+    const url = `https://api.line.me/v2/bot/group/${groupId}/summary`;
+    const res = await fetch(url, {
+      headers: {
+        'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN
+      }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.groupName) {
+        return data.groupName;
+      }
+    }
+  } catch (err) {
+    console.error(`[LINE Group Summary Error for ${groupId}]:`, err);
+  }
+  return null;
+}
+
 // Intercept admin sending message to Line to log it properly and convert keywords
 export async function sendAdminMessageToLine(targetId, messageText) {
   const clean = (messageText || '').toString().replace(/\s+/g, '').toLowerCase();
@@ -239,6 +260,14 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   userId = await db.getOrCreateShortUserId(userId, displayName);
   db.logLineChatMessage(userId, displayName, 'player', text, 'text');
   
+  if (groupId) {
+    let groupName = null;
+    try {
+      groupName = await fetchLINEGroupName(groupId);
+    } catch (_) {}
+    db.recordGroupActivity(groupId, groupName, userId, displayName, text);
+  }
+
   // Anti-spam deduplication for high-velocity group chats
   if (groupId && db.isDuplicateGroupMessage(userId, text)) {
     console.log(`[DEDUPLICATION] Suppressed duplicate group message from ${displayName}: ${text}`);

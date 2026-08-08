@@ -1937,7 +1937,11 @@ export default function App() {
                   </span>
                   {activeGroupId ? (
                     <span className="px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md text-[10px] font-mono font-bold flex items-center gap-1">
-                      💬 Connected Group: {activeGroupId.slice(0, 12)}...
+                      💬 Connected Group: {(() => {
+                        const activeObj = lineGroups.find(g => g.id === activeGroupId);
+                        const isRaw = !activeObj || !activeObj.name || activeObj.name.startsWith('C') || activeObj.name.includes(activeGroupId) || !isNaN(activeObj.name);
+                        return !isRaw ? activeObj.name : `🚀 กลุ่มดวลสด (#${activeGroupId.slice(-4)})`;
+                      })()}
                     </span>
                   ) : (
                     <span className="px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-md text-[10px] font-mono font-semibold">
@@ -2067,11 +2071,15 @@ export default function App() {
                     className="w-full bg-slate-50 border border-slate-200 text-slate-900 font-bold px-3 py-2 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                   >
                     <option value="ALL">🌐 กระจายทุกกลุ่มดวลสดพร้อมกัน (Broadcast All Groups - One Shot)</option>
-                    {lineGroups.map((g, idx) => (
-                      <option key={g.id} value={g.id}>
-                        🎯 เฉพาะกลุ่ม: {g.name || `กลุ่มดวลสด #${idx + 1}`} ({g.id})
-                      </option>
-                    ))}
+                    {lineGroups.map((g, idx) => {
+                      const isRawId = !g.name || g.name.startsWith('C') || g.name.includes(g.id) || !isNaN(g.name);
+                      const displayName = !isRawId ? g.name : `🚀 กลุ่มดวลสด #${idx + 1} (${g.id.slice(-4)})`;
+                      return (
+                        <option key={g.id} value={g.id}>
+                          🎯 เฉพาะกลุ่ม: {displayName}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
 
