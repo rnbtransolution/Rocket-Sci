@@ -1504,7 +1504,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "text": formulaTitle,
           "weight": "bold",
           "color": "#111111",
-          "size": "2xl",
+          "size": "xxl",
           "align": "center"
         },
         {
