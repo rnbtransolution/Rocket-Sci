@@ -113,6 +113,14 @@ app.post('/api/run', async (req, res) => {
         result = db.getDashboardData();
         break;
         
+      case 'adminOpenRound':
+        result = db.setActiveRocketRound(args[0]);
+        break;
+        
+      case 'setRocketRoundStatus':
+        result = db.setRocketRoundStatus(args[0]);
+        break;
+        
       default:
         return res.status(404).json({ error: `Function "${functionName}" is not implemented on Node.js server.` });
     }

@@ -158,13 +158,22 @@ export async function pushToLine(targetId, text) {
 
 // Intercept admin sending message to Line to log it properly and convert keywords
 export async function sendAdminMessageToLine(targetId, messageText) {
-  const destinationId = targetId || db.getActiveGroupId();
-  if (!destinationId) {
-    console.error("[LINE Push] No target userId or activeGroupId available.");
-    return false;
+  const clean = (messageText || '').toString().replace(/\s+/g, '').toLowerCase();
+
+  // Update round lock status automatically if broadcast contains round open/close keywords
+  if (clean.includes('ปิดรับดวล') || clean.includes('ปิดรอบ') || clean.includes('3-2-go') || clean.includes('หมดเวลา')) {
+    db.setRocketRoundStatus('CLOSED');
+  } else if (clean.includes('เปิดรอบ') || clean.includes('เปิดรับดวล')) {
+    db.setActiveRocketRound('ดวลสด');
+    db.setRocketRoundStatus('ACTIVE');
   }
 
-  const clean = messageText.replace(/\s+/g, '').toLowerCase();
+  const destinationId = targetId || db.getActiveGroupId();
+  if (!destinationId) {
+    console.log("[LINE Push] Round status updated, but no active group ID available for broadcast push.");
+    return true;
+  }
+
   let payload = messageText;
   
   if (clean === 'เช็คยอด' || clean === 'คงเหลือ' || clean === 'balance') {
@@ -188,18 +197,25 @@ export async function sendAdminMessageToLine(targetId, messageText) {
       payload = constructMainMenuFlex();
     }
   }
-
-  // Update round lock status automatically if broadcast contains round open/close keywords
-  if (clean.includes('ปิดรับดวล') || clean.includes('ปิดรอบ') || clean.includes('3-2-go') || clean.includes('หมดเวลา')) {
-    db.setRocketRoundStatus('CLOSED');
-  } else if (clean.includes('เปิดรอบ') || clean.includes('เปิดรับดวล')) {
-    db.setRocketRoundStatus('ACTIVE');
-  }
   
   await pushToLine(destinationId, payload);
   
   const logText = typeof payload === 'object' ? `[Flex Message: ${messageText}]` : messageText;
   db.logLineChatMessage(destinationId, 'ผู้เล่น', 'admin', logText, typeof payload === 'object' ? 'flex' : 'text');
+  return true;
+}
+
+export async function broadcastToAllGroups(messageTextOrFlex) {
+  const dashData = db.getDashboardData();
+  const groups = dashData?.lineGroups || [];
+  const activeId = db.getActiveGroupId();
+
+  const targetIds = new Set();
+  groups.forEach(g => { if (g.id) targetIds.add(g.id); });
+  if (activeId) targetIds.add(activeId);
+
+  const pushes = Array.from(targetIds).map(gId => pushToLine(gId, messageTextOrFlex));
+  await Promise.allSettled(pushes);
   return true;
 }
 
@@ -744,7 +760,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     else if (keywordsHigh.includes(cmd)) side = 'high';
     
     if (side && amount >= 10) {
-      await processOpenBetRequest(side, amount, 'normal', null, null, userId, displayName, replyToken, isChotoy);
+      await processOpenBetRequest(side, amount, 'normal', null, null, userId, displayName, replyToken, isChotoy, groupId);
       return true;
     }
   }
@@ -763,7 +779,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     else if (keywordsHigh.includes(cmd)) side = 'high';
     
     if (side && amount >= 10 && minVal < maxVal) {
-      await processOpenBetRequest(side, amount, 'range', minVal, maxVal, userId, displayName, replyToken, isChotoy);
+      await processOpenBetRequest(side, amount, 'range', minVal, maxVal, userId, displayName, replyToken, isChotoy, groupId);
       return true;
     }
   }
@@ -771,7 +787,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   return false;
 }
 
-async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false) {
+async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false, groupId = null) {
   if (db.isRocketRoundClosed()) {
     await replyToLine(replyToken, `⚠️ ปิดรับดวลรอบนี้แล้วครับ (ออเดอร์และกดแมตช์หลังประกาศไม่ถูกจับคู่)`, userId);
     return;
@@ -792,8 +808,8 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
     return;
   }
   
-  // Save open bet
-  const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal);
+  // Save open bet with groupId for multi-group tracking
+  const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal, groupId);
   if (!saved) {
     await replyToLine(replyToken, `⚠️ ไม่สามารถบันทึกแผลดวลได้ เครดิตไม่พอครับ`, userId);
     return;

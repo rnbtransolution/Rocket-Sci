@@ -148,10 +148,10 @@ export default function App() {
   
   // LINE billing session states
   const [billingStep, setBillingStep] = useState('idle');
-  const [depositAmount, setDepositAmount] = useState(100);
+  const [depositAmount, setDepositAmount] = useState(0);
   const [activeTxId, setActiveTxId] = useState(null);
   const [selectedPresetId, setSelectedPresetId] = useState(SLIP_PRESETS[0].id);
-  const [customSlipAmount, setCustomSlipAmount] = useState(100);
+  const [customSlipAmount, setCustomSlipAmount] = useState(0);
   const [useCustomSlip, setUseCustomSlip] = useState(false);
   const [scannerLogs, setScannerLogs] = useState([]);
   const [billingResult, setBillingResult] = useState(null);
@@ -202,8 +202,17 @@ export default function App() {
     const chotoyTag = isChotoy ? ' (ชตย)' : '';
     const quoteMsg = `🚀 เปิดรอบ ➔ ${name}\n⏱️  ราคาช่าง ${min}-${max}s\n💰 เครดิต ${amt}pt${chotoyTag}`;
 
-    runBackendFunction('sendAdminMessageToLine', [activeGroupId, quoteMsg]);
-    addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) เข้ากลุ่ม LINE เรียบร้อย!`, 'success');
+    runBackendFunction('adminOpenRound', [name]);
+    
+    if (lineGroups && lineGroups.length > 0) {
+      lineGroups.forEach(g => {
+        runBackendFunction('sendAdminMessageToLine', [g.id, quoteMsg]);
+      });
+      addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) กระจาย ${lineGroups.length} กลุ่มดวลสดเรียบร้อย!`, 'success');
+    } else {
+      runBackendFunction('sendAdminMessageToLine', [activeGroupId, quoteMsg]);
+      addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) เข้ากลุ่ม LINE เรียบร้อย!`, 'success');
+    }
   };
   const [customRocketTime, setCustomRocketTime] = useState(''); // Manual entry by admin (blank default)
   const [flightLogs, setFlightLogs] = useState([]);
@@ -211,6 +220,8 @@ export default function App() {
   const [activeGroupId, setActiveGroupId] = useState(null); // Active connected LINE Group ID
   const [lineGroups, setLineGroups] = useState([]); // List of active connected LINE Groups
   const [chatTypeMode, setChatTypeMode] = useState('group'); // 'group' or 'private'
+  const [selectedGroupFilter, setSelectedGroupFilter] = useState('ALL'); // Multi-group filter
+  const [broadcastTargetGroup, setBroadcastTargetGroup] = useState('ALL'); // Multi-group broadcast target
   
   const privateChatEndRef = useRef(null);
   const groupChatEndRef = useRef(null);
@@ -1353,24 +1364,26 @@ export default function App() {
       addToast('⚠️ รายการนี้ถูกดำเนินการไปแล้วหรือไม่อยู่ในสถานะรอตรวจสอบ', 'warning');
       return;
     }
+    const approvedAmount = (targetTx.actualAmount && targetTx.actualAmount > 0) ? targetTx.actualAmount : (targetTx.requestedAmount || 0);
+
     if (isGAS) {
       window.google.script.run
         .withSuccessHandler(() => {
-          setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'success', reviewReason: 'Manually approved by admin', actualAmount: t.id.startsWith('WD') ? t.requestedAmount : t.actualAmount } : t));
-          addToast(txId.startsWith('WD') ? 'อนุมัติการถอนเงินเรียบร้อย' : 'อนุมัติการฝากเงินสลิปนี้เรียบร้อย', 'success');
+          setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'success', reviewReason: 'Manually approved by admin', actualAmount: approvedAmount } : t));
+          if (!txId.startsWith('WD')) {
+            setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) + approvedAmount } : p));
+          }
+          addToast(txId.startsWith('WD') ? 'อนุมัติการถอนเงินเรียบร้อย' : `อนุมัติและอัพแต้ม +${approvedAmount} pt เรียบร้อย`, 'success');
         })
         .adminApproveTransaction(txId);
     } else {
-      const tx = transactions.find(t => t.id === txId);
-      if (tx) {
-        if (txId.startsWith('WD')) {
-          setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'success', actualAmount: tx.requestedAmount, reviewReason: 'Approved manually by admin' } : t));
-          addToast(`แอดมินอนุมัติคำขอถอนเงินยอด ${tx.requestedAmount} THB โอนเงินแล้วเรียบร้อย`, 'success');
-        } else {
-          setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'success', reviewReason: 'Approved manually by admin' } : t));
-          setPlayers(prev => prev.map(p => p.id === tx.playerId ? { ...p, balance: p.balance + tx.actualAmount } : p));
-          addToast(`แอดมินอนุมัติเครดิตเติมเงินยอด ${tx.actualAmount} THB แมนนวลเรียบร้อย`, 'success');
-        }
+      if (txId.startsWith('WD')) {
+        setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'success', actualAmount: targetTx.requestedAmount, reviewReason: 'Approved manually by admin' } : t));
+        addToast(`แอดมินอนุมัติคำขอถอนเงินยอด ${targetTx.requestedAmount} THB โอนเงินแล้วเรียบร้อย`, 'success');
+      } else {
+        setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'success', actualAmount: approvedAmount, reviewReason: 'Approved manually by admin' } : t));
+        setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) + approvedAmount } : p));
+        addToast(`แอดมินอนุมัติเครดิตเติมเงินยอด ${approvedAmount} THB แมนนวลเรียบร้อย`, 'success');
       }
     }
   };

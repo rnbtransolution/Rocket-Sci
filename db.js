@@ -373,7 +373,9 @@ export function saveOpenBet(
   amount,
   type,
   rMin,
-  rMax
+  rMax,
+  targetGroupId = null,
+  targetGroupName = null
 ) {
   const searchId = cleanUserId(userId);
   const betAmount = Number(amount) || 0;
@@ -383,6 +385,9 @@ export function saveOpenBet(
   const lowName = side === 'low' ? displayName : '';
   const highId = side === 'high' ? searchId : '';
   const highName = side === 'high' ? displayName : '';
+
+  const assignedGroupId = targetGroupId || activeGroupId || '';
+  const assignedGroupName = targetGroupName || (lineGroups.find(g => g.id === assignedGroupId)?.name || 'กลุ่มดวลสด');
 
   const newBet = {
     id: 'bet_' + orderNo,
@@ -398,6 +403,8 @@ export function saveOpenBet(
     status: 'pending_match',
     winnerName: '',
     timestamp: formatTime(now),
+    groupId: assignedGroupId,
+    groupName: assignedGroupName
   };
   bets.unshift(newBet); // Add to beginning of memory list
 
@@ -413,6 +420,12 @@ export function saveOpenBet(
     rMax ? rMax.toString() : '',
     'pending_match',
     '',
+    assignedGroupId,
+    assignedGroupName
+  ]);
+
+  return newBet;
+}
     now.toISOString(),
   ]);
   
@@ -683,9 +696,11 @@ export async function adminApproveTransaction(txId) {
   if (tx && tx.status !== 'success') {
     tx.status = 'success';
     tx.reviewReason = 'Manually approved by supervisor';
-    updateRowInSheet('Transactions', txId, { 6: 'success', 7: tx.reviewReason });
 
-    let amountToAdd = tx.actualAmount;
+    let amountToAdd = (tx.actualAmount && tx.actualAmount > 0) ? tx.actualAmount : (tx.requestedAmount || 0);
+    tx.actualAmount = amountToAdd;
+    updateRowInSheet('Transactions', txId, { 5: amountToAdd, 6: 'success', 7: tx.reviewReason });
+
     const isWithdrawal = txId.startsWith('WD');
     
     if (isWithdrawal) {
@@ -707,7 +722,7 @@ export async function adminApproveTransaction(txId) {
         const flex = lineBot.constructBankingFlex("withdraw", tx.requestedAmount, details, null, tx.playerId);
         await lineBot.pushToLine(tx.playerId, flex);
       } else {
-        const flex = lineBot.constructBankingFlex("deposit", tx.actualAmount, "เติมเงินสำเร็จ (แอดมินอนุมัติแมนนวล)", null, tx.playerId);
+        const flex = lineBot.constructBankingFlex("deposit", amountToAdd, "เติมเงินสำเร็จ (แอดมินอนุมัติแมนนวล)", null, tx.playerId);
         await lineBot.pushToLine(tx.playerId, flex);
       }
     } catch (err) {
@@ -829,13 +844,17 @@ export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxPara
     }
   }
 
-  if (activeGroupId) {
+  const targetGroups = lineGroups.length > 0 ? lineGroups : (activeGroupId ? [{ id: activeGroupId }] : []);
+  if (targetGroups.length > 0) {
     try {
       const lineBot = await import('./lineBot.js');
       const outcomeText = finalTime < targetMin ? 'ต่ำ (ชล) 🔵' : finalTime > targetMax ? 'สูง (ชถ) 🔴' : 'ในราคาช่าง 🎯';
-      await lineBot.pushToLine(activeGroupId, `🏆 [ผลรอบ]: ${finalTime}s (ราคา ${targetMin}-${targetMax}s) | ฝั่งชนะ: ${outcomeText} 🚀`);
+      const roundNotice = `🏆 [ประกาศผลสรุปดวล]: ${finalTime}s (ราคาช่าง ${targetMin}-${targetMax}s) | ฝั่งชนะ: ${outcomeText} 🚀`;
+      for (const g of targetGroups) {
+        await lineBot.pushToLine(g.id, roundNotice);
+      }
     } catch (e) {
-      console.error("[DB] Error broadcasting round result to group:", e);
+      console.error("[DB] Error broadcasting round result to groups:", e);
     }
   }
 
@@ -1150,7 +1169,9 @@ export function setActiveRocketRound(roundName) {
 }
 
 export function setRocketRoundStatus(status) {
-  if (activeRocketRound) {
+  if (!activeRocketRound) {
+    activeRocketRound = { name: 'ทั่วไป', status: status, startTime: new Date() };
+  } else {
     activeRocketRound.status = status;
   }
   return activeRocketRound;
