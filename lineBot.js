@@ -48,10 +48,13 @@ export async function replyToLine(replyToken, text, userId) {
   let messageObj;
   
   if (typeof text === 'object' && text !== null) {
+    const flexContents = text.type === 'bubble'
+      ? { type: 'carousel', contents: [text] }
+      : text;
     messageObj = {
       type: 'flex',
       altText: 'ระบบบริการ Rocket Science 🚀',
-      contents: text
+      contents: flexContents
     };
   } else {
     let outText = String(text);
@@ -129,12 +132,16 @@ export async function pushToLine(targetId, text) {
   
   if (typeof text === 'object' && text !== null) {
     // 1. Try pushing Flex Message Card first
+    const flexContents = text.type === 'bubble'
+      ? { type: 'carousel', contents: [text] }
+      : text;
+
     const flexPayload = {
       to: rawLineId,
       messages: [{
         type: 'flex',
         altText: 'ระบบบริการ Rocket Science 🚀',
-        contents: text
+        contents: flexContents
       }]
     };
     try {
