@@ -722,7 +722,7 @@ export default function App() {
       setPrivateMessages(prev => [...prev, {
         id: botMsgId,
         sender: 'bot',
-        text: `🤖 ไม่เข้าใจคำสั่ง พิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้ได้ครับ`,
+        text: `🤖 ไม่เข้าใจคำสั่ง บันทึกข้อมูลแล้ว แอดมินจะติดต่อกลับครับ 💬 (พิมพ์ "เมนู" ดูคำสั่ง 🚀)`,
         time: botTime
       }]);
 

@@ -836,11 +836,11 @@ export async function adminApproveTransaction(txId) {
         }
         const flex = lineBot.constructBankingFlex("withdraw", tx.requestedAmount, details, null, tx.playerId);
         await lineBot.pushToLine(tx.playerId, flex);
-        logLineChatMessage(tx.playerId, tx.playerName || 'ผู้เล่น', 'bot', `💸 [อนุมัติการถอนเงิน] จำนวน ${tx.requestedAmount.toLocaleString()} THB โอนเข้าบัญชีสำเร็จแล้วครับ 🚀`, 'text');
+        logLineChatMessage(tx.playerId, tx.playerName || 'ผู้เล่น', 'bot', `💸 [ถอนเงินสำเร็จ]: ${tx.requestedAmount.toLocaleString()} THB โอนเข้าบัญชีแล้ว 🚀`, 'text');
       } else {
         const flex = lineBot.constructBankingFlex("deposit", amountToAdd, "เติมเงินสำเร็จ (แอดมินอนุมัติเรียบร้อย)", null, tx.playerId);
         await lineBot.pushToLine(tx.playerId, flex);
-        logLineChatMessage(tx.playerId, tx.playerName || 'ผู้เล่น', 'bot', `🟢 [อนุมัติการเติมเงิน] จำนวน ${amountToAdd.toLocaleString()} pt เติมเข้าบัญชีสำเร็จเรียบร้อยครับ 🚀`, 'text');
+        logLineChatMessage(tx.playerId, tx.playerName || 'ผู้เล่น', 'bot', `🟢 [เติมเงินสำเร็จ]: +${amountToAdd.toLocaleString()}pt เข้าบัญชีเรียบร้อย 🚀`, 'text');
       }
     } catch (err) {
       console.error("[DB] Error sending Line approval notification:", err);
@@ -869,11 +869,11 @@ export async function adminRejectTransaction(txId, reason) {
       if (isWithdrawal) {
         const flex = lineBot.constructRejectionFlex("WD", tx.requestedAmount, reason || 'ข้อมูลไม่ถูกต้อง', currentBalance, tx.playerId);
         await lineBot.pushToLine(tx.playerId, flex);
-        logLineChatMessage(tx.playerId, tx.playerName || 'ผู้เล่น', 'bot', `❌ [ปฏิเสธการถอนเงิน] ยอด ${tx.requestedAmount.toLocaleString()} THB (คืนแต้มเข้าบัญชีแล้ว | สาเหตุ: ${reason || 'ข้อมูลไม่ถูกต้อง'})`, 'text');
+        logLineChatMessage(tx.playerId, tx.playerName || 'ผู้เล่น', 'bot', `❌ [ปฏิเสธถอนเงิน]: ยอด ${tx.requestedAmount.toLocaleString()} THB (คืนแต้มเข้าบัญชีแล้ว)`, 'text');
       } else {
         const flex = lineBot.constructRejectionFlex("DP", tx.requestedAmount, reason || 'สลิปไม่ผ่านเกณฑ์ตรวจสอบ', currentBalance, tx.playerId);
         await lineBot.pushToLine(tx.playerId, flex);
-        logLineChatMessage(tx.playerId, tx.playerName || 'ผู้เล่น', 'bot', `❌ [ปฏิเสธสลิปฝากเงิน] ยอด ${tx.requestedAmount.toLocaleString()} THB (สาเหตุ: ${reason || 'สลิปไม่ผ่านเกณฑ์'})`, 'text');
+        logLineChatMessage(tx.playerId, tx.playerName || 'ผู้เล่น', 'bot', `❌ [ปฏิเสธฝากเงิน]: ยอด ${tx.requestedAmount.toLocaleString()} THB (สาเหตุ: ${reason || 'สลิปไม่ผ่านเกณฑ์'})`, 'text');
       }
     } catch (err) {
       console.error("[DB] Error sending Line rejection notification:", err);
@@ -1224,7 +1224,7 @@ export async function handleCancelBetRequest(userId, orderNo) {
     bet.status = 'cancelled';
     updateRowInSheet('Bets', orderStr, { 9: 'cancelled' });
     await adjustPlayerBalance(searchId, bet.amount);
-    return `🚫 ยกเลิกแผล Order #${orderNo} สำเร็จ!\nคืนแต้ม ${bet.amount}pt เรียบร้อยครับ 🚀`;
+    return `🚫 ยกเลิกแผล Order #${orderNo} คืนแต้ม ${bet.amount}pt เรียบร้อยครับ 🚀`;
   }
 
   if (bet.status === 'matched') {

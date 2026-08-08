@@ -62,7 +62,7 @@ export async function replyToLine(replyToken, text, userId) {
     const tagStr = `@${pName}`;
     
     if (userId && !outText.includes('@') && !outText.includes('ถึงคุณ')) {
-      outText = `👤 [ถึงคุณ ${tagStr}]:\n` + outText;
+      outText = `👤 [ถึงคุณ ${tagStr}]: ` + outText;
     }
     
     messageObj = { type: 'text', text: outText };
@@ -505,8 +505,10 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
     return;
   }
 
-  // J. FALLBACK: Unrecognized message -> Reassure user that admin will be in touch shortly!
-  const fallbackNotice = `🤖 ไม่เข้าใจคำสั่งครับ ข้อมูลได้รับการบันทึกแล้ว แอดมินจะติดต่อกลับคุณในไม่ช้าครับ 💬\n(หรือพิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้งานได้ครับ 🚀)`;
+  // J. FALLBACK: Differentiate DM (rich helpful notice) vs Group (ultra-short 1-line notice)
+  const fallbackNotice = groupId
+    ? `🤖 ไม่เข้าใจคำสั่ง บันทึกแล้ว แอดมินจะติดต่อกลับครับ 💬`
+    : `🤖 ไม่เข้าใจคำสั่งครับ ข้อมูลได้รับการบันทึกแล้ว แอดมินจะติดต่อกลับคุณในไม่ช้าครับ 💬\n(หรือพิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้งานได้ครับ 🚀)`;
   await replyToLine(replyToken, fallbackNotice, userId);
 }
 
@@ -733,11 +735,10 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
     db.cancelOpenBet(userId, targetOrderNo).then(async res => {
       if (res.success) {
-        const msg = `🚫 ยกเลิกแผล Order #${res.orderNumber} สำเร็จ!\nคืนแต้ม ${res.amount}pt ให้คุณเรียบร้อยครับ 🚀`;
         if (groupId) {
-          await pushToLine(groupId, msg);
+          await pushToLine(groupId, `🚫 ยกเลิก Order #${res.orderNumber} คืนแต้ม ${res.amount}pt เรียบร้อย 🚀`);
         } else {
-          await replyToLine(replyToken, msg, userId);
+          await replyToLine(replyToken, `🚫 ยกเลิกแผล Order #${res.orderNumber} สำเร็จ!\nคืนแต้ม ${res.amount}pt ให้คุณเรียบร้อยครับ 🚀`, userId);
         }
       } else if (res.error === 'UNAUTHORIZED') {
         await replyToLine(replyToken, `⚠️ เฉพาะเจ้าของแผล (@${res.creatorName}) หรือแอดมินเท่านั้นที่ยกเลิกได้ครับ`, userId);
@@ -890,14 +891,22 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   if (!isAdminUser) {
     const balance = await db.getPlayerBalance(userId, displayName);
     if (balance < amount) {
-      await replyToLine(replyToken, `⚠️ เครดิตไม่พอ (มี ${balance}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ`, userId);
+      const needed = amount - balance;
+      const msg = groupId
+        ? `⚠️ แต้มไม่พอ (มี ${balance}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`
+        : `⚠️ เครดิตไม่พอ (มี ${balance}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ`;
+      await replyToLine(replyToken, msg, userId);
       return;
     }
 
     // Deduct balance for regular players
     const success = await db.adjustPlayerBalance(userId, -amount, displayName);
     if (!success) {
-      await replyToLine(replyToken, `⚠️ เครดิตไม่พอ (มี ${balance}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ`, userId);
+      const needed = amount - balance;
+      const msg = groupId
+        ? `⚠️ แต้มไม่พอ (มี ${balance}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`
+        : `⚠️ เครดิตไม่พอ (มี ${balance}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ`;
+      await replyToLine(replyToken, msg, userId);
       return;
     }
   }
@@ -909,7 +918,11 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal, groupId);
   if (!saved || saved.error) {
     const bal = saved?.current || 0;
-    await replyToLine(replyToken, `⚠️ เครดิตไม่เพียงพอครับ (คงเหลือ: ${bal.toLocaleString()} pt | ต้องการ: ${amount.toLocaleString()} pt)`, userId);
+    const needed = amount - bal;
+    const msg = groupId
+      ? `⚠️ แต้มไม่พอ (มี ${bal}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`
+      : `⚠️ เครดิตไม่พอ (มี ${bal}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ`;
+    await replyToLine(replyToken, msg, userId);
     return;
   }
   
