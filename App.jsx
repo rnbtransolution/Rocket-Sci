@@ -204,14 +204,21 @@ export default function App() {
 
     runBackendFunction('adminOpenRound', [name]);
     
-    if (lineGroups && lineGroups.length > 0) {
-      lineGroups.forEach(g => {
-        runBackendFunction('sendAdminMessageToLine', [g.id, quoteMsg]);
-      });
-      addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) กระจาย ${lineGroups.length} กลุ่มดวลสดเรียบร้อย!`, 'success');
+    if (broadcastTargetGroup === 'ALL') {
+      if (lineGroups && lineGroups.length > 0) {
+        lineGroups.forEach(g => {
+          runBackendFunction('sendAdminMessageToLine', [g.id, quoteMsg]);
+        });
+        addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) กระจายทุกกลุ่ม (${lineGroups.length} กลุ่ม) เรียบร้อย!`, 'success');
+      } else {
+        runBackendFunction('sendAdminMessageToLine', [activeGroupId, quoteMsg]);
+        addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) เข้ากลุ่ม LINE เรียบร้อย!`, 'success');
+      }
     } else {
-      runBackendFunction('sendAdminMessageToLine', [activeGroupId, quoteMsg]);
-      addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) เข้ากลุ่ม LINE เรียบร้อย!`, 'success');
+      const targetObj = lineGroups.find(g => g.id === broadcastTargetGroup);
+      const targetName = targetObj ? targetObj.name : `กลุ่ม (#${broadcastTargetGroup.slice(-4)})`;
+      runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, quoteMsg]);
+      addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) เข้า [${targetName}] เรียบร้อย!`, 'success');
     }
   };
   const [customRocketTime, setCustomRocketTime] = useState(''); // Manual entry by admin (blank default)
@@ -2043,12 +2050,37 @@ export default function App() {
                   </label>
                 </div>
 
+                {/* Target Group Broadcast Selector */}
+                <div className="bg-white p-2.5 rounded-xl border border-emerald-200 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1 font-heading">
+                      <Users size={13} className="text-emerald-600" />
+                      กลุ่มเป้าหมายที่จะบรอดแคสต์ (Broadcast Target Group):
+                    </label>
+                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                      {broadcastTargetGroup === 'ALL' ? '🌐 ทุกกลุ่มดวลสด (All)' : '🎯 เฉพาะกลุ่มที่เลือก'}
+                    </span>
+                  </div>
+                  <select
+                    value={broadcastTargetGroup}
+                    onChange={(e) => setBroadcastTargetGroup(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 text-slate-900 font-bold px-3 py-2 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  >
+                    <option value="ALL">🌐 กระจายทุกกลุ่มดวลสดพร้อมกัน (Broadcast All Groups - One Shot)</option>
+                    {lineGroups.map((g, idx) => (
+                      <option key={g.id} value={g.id}>
+                        🎯 เฉพาะกลุ่ม: {g.name || `กลุ่มดวลสด #${idx + 1}`} ({g.id})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* Broadcast Quote Primary Button */}
                 <button
                   onClick={() => handleBroadcastFastQuote()}
                   className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 font-heading tracking-wide"
                 >
-                  🚀 ประกาศออกราคาช่าง {targetMin && targetMax ? `${targetMin}-${targetMax}` : '(ระบุช่วงราคา)'} วินาที ลงกลุ่มดวลสด (Broadcast Quote)
+                  🚀 ประกาศออกราคาช่าง {targetMin && targetMax ? `${targetMin}-${targetMax}` : '(ระบุช่วงราคา)'} วินาที ลง{broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่มดวลสด' : 'กลุ่มที่เลือก'} (Broadcast Quote)
                 </button>
 
                 {/* Quick Action Commands */}
@@ -2056,7 +2088,13 @@ export default function App() {
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block font-heading">⚡ คำสั่งลัดบรอดแคสต์หน้าร้าน (Admin Quick Broadcasts):</span>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs font-bold">
                     <button onClick={() => {
-                      runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🔒 ปิดรับดวล ➔ ${rocketName || 'ช่างบั้งไฟสด'}\n⛔ 3-2-GO! หมดเวลาท้าดวลก่อนปล่อยบั้งไฟ\n⚠️ ออเดอร์และกดแมตช์หลังจากนี้จะไม่ถูกจับคู่ทุกกรณีครับ`]);
+                      const msg = `🔒 ปิดรับดวล ➔ ${rocketName || 'ช่างบั้งไฟสด'}\n⛔ 3-2-GO! หมดเวลาท้าดวลก่อนปล่อยบั้งไฟ\n⚠️ ออเดอร์และกดแมตช์หลังจากนี้จะไม่ถูกจับคู่ทุกกรณีครับ`;
+                      if (broadcastTargetGroup === 'ALL') {
+                        const targets = lineGroups.length > 0 ? lineGroups.map(g => g.id) : [activeGroupId];
+                        targets.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, msg]));
+                      } else {
+                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, msg]);
+                      }
                       addToast(`🔒 ล็อคปิดรับดวลรอบ [${rocketName || 'ช่างบั้งไฟสด'}] (1 นาที ก่อนจุด) เรียบร้อย!`, 'warning');
                     }} className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">🔒 ปิดรับดวล (1 นาที ก่อนจุด)</button>
                     <button onClick={() => {
@@ -2073,10 +2111,25 @@ export default function App() {
                         }));
                         setBets(prev => prev.map(b => (b.status === 'matched' || b.status === 'pending_match') ? { ...b, status: 'cancelled' } : b));
                       }
-                      runBackendFunction('sendAdminMessageToLine', [activeGroupId, `⛔ [โมฆะ] รอบ ${rocketName || 'ช่างบั้งไฟสด'} | ช่าง ⛔ คืนแต้ม 100% ครับ`]);
+                      const msg = `⛔ [โมฆะ] รอบ ${rocketName || 'ช่างบั้งไฟสด'} | ช่าง ⛔ คืนแต้ม 100% ครับ`;
+                      if (broadcastTargetGroup === 'ALL') {
+                        const targets = lineGroups.length > 0 ? lineGroups.map(g => g.id) : [activeGroupId];
+                        targets.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, msg]));
+                      } else {
+                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, msg]);
+                      }
                       addToast(`⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ) และคืนแต้มผู้เล่น ${activeBets.length} แผลเรียบร้อย!`, 'danger');
                     }} className="py-2.5 px-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ)</button>
-                    <button onClick={() => { runBackendFunction('sendAdminMessageToLine', [activeGroupId, `🚨 [เตือนภัย] ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA เท่านั้นครับ ❌`]); addToast(`🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพไปยัง LINE เรียบร้อย!`, 'info'); }} className="py-2.5 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">🚨 เตือนมิจฉาชีพ</button>
+                    <button onClick={() => {
+                      const msg = `🚨 [เตือนภัย] ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA เท่านั้นครับ ❌`;
+                      if (broadcastTargetGroup === 'ALL') {
+                        const targets = lineGroups.length > 0 ? lineGroups.map(g => g.id) : [activeGroupId];
+                        targets.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, msg]));
+                      } else {
+                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, msg]);
+                      }
+                      addToast(`🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพไปยัง LINE เรียบร้อย!`, 'info');
+                    }} className="py-2.5 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">🚨 เตือนมิจฉาชีพ</button>
                   </div>
                 </div>
               </div>
