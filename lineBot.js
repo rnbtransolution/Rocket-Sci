@@ -902,13 +902,11 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
     rangeInfo = '(ชตย: ช่างไม่ต่อย)';
   }
   
-  const betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfo);
-  await replyToLine(replyToken, betCard, userId);
-
-  // Always push Order Card Flex to LINE group chat so all members see the newly created order!
-  const groupTarget = groupId || db.getActiveGroupId();
-  if (groupTarget) {
-    await pushToLine(groupTarget, betCard);
+  // If user sent command in 1-on-1 DM, reply to user directly.
+  // Note: db.saveOpenBet already broadcasts the Order Flex Card to the target LINE group(s).
+  if (!groupId) {
+    const betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfo);
+    await replyToLine(replyToken, betCard, userId);
   }
 }
 
@@ -917,7 +915,7 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
 export function constructMainMenuFlex() {
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "giga",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1022,7 +1020,7 @@ export function constructBalanceFlex(displayName, balance) {
   const formattedBal = Number(balance || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "giga",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1120,7 +1118,7 @@ export function constructBalanceFlex(displayName, balance) {
 export function constructDepositFlex() {
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "giga",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1225,7 +1223,7 @@ export function constructDepositInvoiceFlex(depositAmt) {
   const formattedAmt = Number(depositAmt || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "giga",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1309,7 +1307,7 @@ export function constructDepositInvoiceFlex(depositAmt) {
 export function constructBankRegistrationFlex() {
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "giga",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1367,7 +1365,7 @@ export function constructWithdrawalFlex(bankName, accountNumber, accountName, ba
   const formattedBal = Number(balance || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "giga",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1479,7 +1477,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
 
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "giga",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1618,7 +1616,7 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
 
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "giga",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1753,7 +1751,7 @@ export function constructBankingFlex(type, amount, accountDetails, targetUrl, us
 
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "giga",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1822,7 +1820,7 @@ export function constructRejectionFlex(type, amount, reason, currentBalance, use
 
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "giga",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1881,7 +1879,7 @@ export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, p
 
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "giga",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1971,7 +1969,7 @@ export function constructRoundCloseFlex(rocketName, timeStr) {
 
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "giga",
     "header": {
       "type": "box",
       "layout": "vertical",
