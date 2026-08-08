@@ -1032,57 +1032,56 @@ export function constructBalanceFlex(displayName, balance) {
   const formattedBal = Number(balance || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return {
     "type": "bubble",
-    "size": "giga",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
+      "backgroundColor": "#1E88E5",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
           "text": "💰 ยอดแต้มของคุณ",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "md",
+          "size": "xs",
           "align": "center"
         }
-      ],
-      "backgroundColor": "#1E88E5",
-      "paddingAll": "md"
+      ]
     },
     "body": {
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "lg",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
           "text": formattedBal,
           "weight": "bold",
           "color": "#1E88E5",
-          "size": "3xl",
-          "align": "center",
-          "margin": "xs"
+          "size": "xl",
+          "align": "center"
         },
         {
           "type": "text",
           "text": "แต้มคงเหลือ",
           "color": "#888888",
-          "size": "xs",
+          "size": "xxs",
           "align": "center"
         },
         {
           "type": "separator",
-          "margin": "md",
+          "margin": "xs",
           "color": "#F0F0F0"
         },
         {
           "type": "box",
           "layout": "horizontal",
-          "margin": "md",
+          "margin": "xs",
           "contents": [
-            { "type": "text", "text": "ชื่อ", "color": "#999999", "size": "xs", "flex": 3 },
-            { "type": "text", "text": displayName || "ผู้เล่น", "weight": "bold", "color": "#333333", "size": "xs", "flex": 7, "align": "end" }
+            { "type": "text", "text": "👤 ชื่อ", "color": "#999999", "size": "xxs", "flex": 4 },
+            { "type": "text", "text": displayName || "ผู้เล่น", "weight": "bold", "color": "#333333", "size": "xxs", "flex": 6, "align": "end" }
           ]
         }
       ]
@@ -1091,7 +1090,7 @@ export function constructBalanceFlex(displayName, balance) {
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "md",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "box",
@@ -1130,47 +1129,47 @@ export function constructBalanceFlex(displayName, balance) {
 export function constructDepositFlex() {
   return {
     "type": "bubble",
-    "size": "giga",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
+      "backgroundColor": "#00796B",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
           "text": "💰 ฝากเครดิต",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "md",
+          "size": "xs",
           "align": "center"
         }
-      ],
-      "backgroundColor": "#00796B",
-      "paddingAll": "md"
+      ]
     },
     "body": {
       "type": "box",
       "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
           "text": "เลือกยอดเงินที่ต้องการฝากครับ",
-          "size": "xs",
+          "size": "xxs",
           "color": "#666666",
           "align": "center",
           "wrap": true
-        }
-      ],
-      "paddingAll": "md"
-    },
-    "footer": {
-      "type": "box",
-      "layout": "vertical",
-      "spacing": "xs",
-      "contents": [
+        },
+        {
+          "type": "separator",
+          "margin": "xs",
+          "color": "#F0F0F0"
+        },
         {
           "type": "box",
           "layout": "horizontal",
           "spacing": "xs",
+          "margin": "xs",
           "contents": [
             {
               "type": "button",
@@ -1200,6 +1199,7 @@ export function constructDepositFlex() {
           "type": "box",
           "layout": "horizontal",
           "spacing": "xs",
+          "margin": "xs",
           "contents": [
             {
               "type": "button",
@@ -1225,8 +1225,7 @@ export function constructDepositFlex() {
             }
           ]
         }
-      ],
-      "paddingAll": "md"
+      ]
     }
   };
 }
