@@ -930,7 +930,7 @@ export function constructMainMenuFlex() {
         }
       ],
       "backgroundColor": "#00796B",
-      "paddingAll": "12px"
+      "paddingAll": "md"
     },
     "body": {
       "type": "box",
@@ -945,7 +945,7 @@ export function constructMainMenuFlex() {
           "wrap": true
         }
       ],
-      "paddingAll": "12px"
+      "paddingAll": "md"
     },
     "footer": {
       "type": "box",
@@ -1011,7 +1011,7 @@ export function constructMainMenuFlex() {
           ]
         }
       ],
-      "paddingAll": "12px"
+      "paddingAll": "md"
     }
   };
 }
@@ -1035,13 +1035,13 @@ export function constructBalanceFlex(displayName, balance) {
         }
       ],
       "backgroundColor": "#1E88E5",
-      "paddingAll": "12px"
+      "paddingAll": "md"
     },
     "body": {
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "14px",
+      "paddingAll": "lg",
       "contents": [
         {
           "type": "text",
@@ -1079,7 +1079,7 @@ export function constructBalanceFlex(displayName, balance) {
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "12px",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "box",
@@ -1133,7 +1133,7 @@ export function constructDepositFlex() {
         }
       ],
       "backgroundColor": "#00796B",
-      "paddingAll": "12px"
+      "paddingAll": "md"
     },
     "body": {
       "type": "box",
@@ -1148,7 +1148,7 @@ export function constructDepositFlex() {
           "wrap": true
         }
       ],
-      "paddingAll": "12px"
+      "paddingAll": "md"
     },
     "footer": {
       "type": "box",
@@ -1214,7 +1214,7 @@ export function constructDepositFlex() {
           ]
         }
       ],
-      "paddingAll": "12px"
+      "paddingAll": "md"
     }
   };
 }
@@ -1238,13 +1238,13 @@ export function constructDepositInvoiceFlex(depositAmt) {
         }
       ],
       "backgroundColor": "#00796B",
-      "paddingAll": "12px"
+      "paddingAll": "md"
     },
     "body": {
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "14px",
+      "paddingAll": "lg",
       "contents": [
         {
           "type": "text",
@@ -1290,7 +1290,7 @@ export function constructDepositInvoiceFlex(depositAmt) {
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "paddingAll": "12px",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
@@ -1322,13 +1322,13 @@ export function constructBankRegistrationFlex() {
         }
       ],
       "backgroundColor": "#00796B",
-      "paddingAll": "12px"
+      "paddingAll": "md"
     },
     "body": {
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "14px",
+      "paddingAll": "lg",
       "contents": [
         {
           "type": "text",
@@ -1343,7 +1343,7 @@ export function constructBankRegistrationFlex() {
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "paddingAll": "12px",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "button",
@@ -1380,13 +1380,13 @@ export function constructWithdrawalFlex(bankName, accountNumber, accountName, ba
         }
       ],
       "backgroundColor": "#455A64",
-      "paddingAll": "12px"
+      "paddingAll": "md"
     },
     "body": {
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "14px",
+      "paddingAll": "lg",
       "contents": [
         {
           "type": "text",
@@ -1433,7 +1433,7 @@ export function constructWithdrawalFlex(bankName, accountNumber, accountName, ba
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "12px",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "box",
@@ -1477,12 +1477,11 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
 
   return {
     "type": "bubble",
-    "size": "giga",
     "header": {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#1E1B4B",
-      "paddingAll": "12px",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
@@ -1498,7 +1497,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "14px",
+      "paddingAll": "lg",
       "contents": [
         {
           "type": "text",
@@ -1621,7 +1620,7 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#4CAF50",
-      "paddingAll": "12px",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
@@ -1637,7 +1636,7 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "14px",
+      "paddingAll": "lg",
       "contents": [
         {
           "type": "text",
@@ -1709,7 +1708,7 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "paddingAll": "12px",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "button",
@@ -1766,7 +1765,7 @@ export function constructBankingFlex(type, amount, accountDetails, targetUrl, us
         }
       ],
       "backgroundColor": headerBgColor,
-      "paddingAll": "10px"
+      "paddingAll": "sm"
     },
     "body": {
       "type": "box",
@@ -1776,7 +1775,7 @@ export function constructBankingFlex(type, amount, accountDetails, targetUrl, us
         { "type": "text", "text": accountDetails, "size": "xs", "color": "#333333", "wrap": true },
         { "type": "text", "text": "🕒 " + dateStr, "size": "xs", "color": "#888888" }
       ],
-      "paddingAll": "12px"
+      "paddingAll": "md"
     },
     "footer": {
       "type": "box",
@@ -1794,7 +1793,7 @@ export function constructBankingFlex(type, amount, accountDetails, targetUrl, us
           }
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "sm"
     }
   };
 }
@@ -1835,7 +1834,7 @@ export function constructRejectionFlex(type, amount, reason, currentBalance, use
         }
       ],
       "backgroundColor": "#D32F2F",
-      "paddingAll": "10px"
+      "paddingAll": "sm"
     },
     "body": {
       "type": "box",
@@ -1844,7 +1843,7 @@ export function constructRejectionFlex(type, amount, reason, currentBalance, use
       "contents": [
         { "type": "text", "text": "เหตุผล: " + (reason || "ข้อมูลไม่ถูกต้อง"), "size": "xs", "color": "#D32F2F", "wrap": true }
       ],
-      "paddingAll": "12px"
+      "paddingAll": "md"
     },
     "footer": {
       "type": "box",
@@ -1862,7 +1861,7 @@ export function constructRejectionFlex(type, amount, reason, currentBalance, use
           }
         }
       ],
-      "paddingAll": "10px"
+      "paddingAll": "sm"
     }
   };
 }
@@ -1884,7 +1883,7 @@ export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, p
       "type": "box",
       "layout": "vertical",
       "backgroundColor": headerBg,
-      "paddingAll": "10px",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
@@ -1900,7 +1899,7 @@ export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, p
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "14px",
+      "paddingAll": "lg",
       "contents": [
         {
           "type": "text",
@@ -1974,7 +1973,7 @@ export function constructRoundCloseFlex(rocketName, timeStr) {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#D32F2F",
-      "paddingAll": "10px",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
@@ -1990,7 +1989,7 @@ export function constructRoundCloseFlex(rocketName, timeStr) {
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "14px",
+      "paddingAll": "lg",
       "contents": [
         {
           "type": "text",
