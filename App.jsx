@@ -1139,11 +1139,9 @@ export default function App() {
     // Process betting command locally (simulation fallback)
     processGroupBetCommand(text);
 
-    // Send command to database webhook if inside GAS
-    if (isGAS) {
-      window.google.script.run.simulateTextMessageFromDashboard(text, 'user', 'คุณ (You)');
-      addToast('ส่งคำสั่งไปที่บิลลิงส์ชีตแล้ว กำลังดำเนินการดวล...', 'info');
-    }
+    // Send command to backend server and sync order card to LINE group chat
+    runBackendFunction('simulateTextMessageFromDashboard', [text, 'user', 'คุณ (You)', activeGroupId]);
+    addToast('ส่งคำสั่งไปที่ระบบบิลลิงส์แล้ว กำลังดำเนินการดวล...', 'info');
   };
 
   // Send admin chat message to LINE user from GAS console

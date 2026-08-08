@@ -770,6 +770,45 @@ export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxPara
     callback = targetMaxParam;
   }
 
+  const numTime = Number(finalTime);
+  const isVoid = isNaN(numTime) || numTime <= 0;
+
+  // Void/False Round Handling: Refund 100% credit to all active bets
+  if (isVoid) {
+    for (const bet of bets) {
+      if (bet.status === 'matched' || bet.status === 'pending_match' || bet.status === 'pending_cancel') {
+        const prevStatus = bet.status;
+        const amount = Number(bet.amount) || 0;
+        bet.status = 'cancelled';
+        updateRowInSheet('Bets', bet.orderNumber, { 9: 'cancelled' });
+
+        if (prevStatus === 'pending_match') {
+          const creatorId = bet.playerLowId ? bet.playerLowId : bet.playerHighId;
+          const creatorName = bet.playerLowName || bet.playerHighName || 'ผู้เล่น';
+          if (creatorId) await adjustPlayerBalance(creatorId, amount, creatorName);
+        } else if (prevStatus === 'matched' || prevStatus === 'pending_cancel') {
+          if (bet.playerLowId) await adjustPlayerBalance(bet.playerLowId, amount, bet.playerLowName);
+          if (bet.playerHighId) await adjustPlayerBalance(bet.playerHighId, amount, bet.playerHighName);
+        }
+      }
+    }
+
+    const targetGroups = lineGroups.length > 0 ? lineGroups : (activeGroupId ? [{ id: activeGroupId }] : []);
+    if (targetGroups.length > 0) {
+      try {
+        const lineBot = await import('./lineBot.js');
+        const roundNotice = `⛔ [ประกาศรอบโมฆะ / ผลช่าง ⛔]: ผลการจุดรอบนี้ไม่มีผล ได้ทำการยกเลิกแผลดวลและคืนแต้มผู้เล่น 100% ทุกแผลเรียบร้อยครับ 🚀`;
+        for (const g of targetGroups) {
+          await lineBot.pushToLine(g.id, roundNotice);
+        }
+      } catch (e) {
+        console.error("[DB] Error broadcasting void round result:", e);
+      }
+    }
+
+    return getDashboardData();
+  }
+
   // 1. Perform automatic matching
   await autoMatchPendingBets();
 
@@ -835,6 +874,22 @@ export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxPara
         } catch (err) {
           console.error('[LINE Push] Error sending match results:', err);
         }
+      }
+    }
+  }
+
+  // 3. Auto-cancel and refund any remaining unmatched pending bets
+  for (const bet of bets) {
+    if (bet.status === 'pending_match' || bet.status === 'pending_cancel') {
+      const creatorId = bet.playerLowId ? cleanUserId(bet.playerLowId) : cleanUserId(bet.playerHighId);
+      const creatorName = bet.playerLowName || bet.playerHighName || 'ผู้เล่น';
+      const amount = Number(bet.amount) || 0;
+
+      bet.status = 'cancelled';
+      updateRowInSheet('Bets', bet.orderNumber, { 9: 'cancelled' });
+
+      if (creatorId) {
+        await adjustPlayerBalance(creatorId, amount, creatorName);
       }
     }
   }

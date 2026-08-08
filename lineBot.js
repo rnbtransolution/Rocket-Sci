@@ -824,6 +824,12 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   
   const betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfo);
   await replyToLine(replyToken, betCard, userId);
+
+  // Always push Order Card Flex to LINE group chat so all members see the newly created order!
+  const groupTarget = groupId || db.getActiveGroupId();
+  if (groupTarget) {
+    await pushToLine(groupTarget, betCard);
+  }
 }
 
 // --- LINE FLEX CONSTRUCTORS ---
