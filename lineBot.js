@@ -426,7 +426,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
       } else {
         const balance = await db.getPlayerBalance(userId, bank.accountName || displayName);
         const withdrawFlex = constructWithdrawalFlex(bank.bankName, bank.accountNumber, bank.accountName, balance);
-        await replyToLine(withdrawFlex ? withdrawFlex : `💸 บัญชี: ${bank.bankName} ${bank.accountNumber} (${balance}pt)\nพิมพ์ "ถอน [จำนวน]" เพื่อเริ่มทำรายการครับ`, userId);
+        await replyToLine(replyToken, withdrawFlex ? withdrawFlex : `💸 บัญชี: ${bank.bankName} ${bank.accountNumber} (${balance}pt)\nพิมพ์ "ถอน [จำนวน]" เพื่อเริ่มทำรายการครับ`, userId);
       }
     }
     return;
@@ -1884,13 +1884,13 @@ export function constructBankingFlex(type, amount, accountDetails, targetUrl, us
 
   const dateStr = new Date().toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
   const isIncome = (type === "Income" || type === "deposit" || type === "เงินเข้า" || type === "ฝากเงิน");
-  const headerBgColor = isIncome ? "#00796B" : "#455A64"; 
+  const headerBgColor = isIncome ? "#00796B" : "#C62828"; 
   const badgeText = isIncome ? "เงินเข้า" : "เงินออก";
   const amountText = (isIncome ? "+" : "-") + formattedAmount + " บาท";
 
   return {
     "type": "bubble",
-    "size": "giga",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1900,7 +1900,7 @@ export function constructBankingFlex(type, amount, accountDetails, targetUrl, us
           "text": "💳 " + badgeText + ": " + amountText,
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "sm",
+          "size": "xs",
           "align": "center"
         }
       ],
@@ -1912,10 +1912,10 @@ export function constructBankingFlex(type, amount, accountDetails, targetUrl, us
       "layout": "vertical",
       "spacing": "xs",
       "contents": [
-        { "type": "text", "text": accountDetails, "size": "xs", "color": "#333333", "wrap": true },
-        { "type": "text", "text": "🕒 " + dateStr, "size": "xs", "color": "#888888" }
+        { "type": "text", "text": accountDetails, "size": "xxs", "color": "#333333", "wrap": true },
+        { "type": "text", "text": "🕒 " + dateStr, "size": "xxs", "color": "#888888" }
       ],
-      "paddingAll": "md"
+      "paddingAll": "sm"
     },
     "footer": {
       "type": "box",
@@ -1959,7 +1959,7 @@ export function constructRejectionFlex(type, amount, reason, currentBalance, use
 
   return {
     "type": "bubble",
-    "size": "giga",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1969,7 +1969,7 @@ export function constructRejectionFlex(type, amount, reason, currentBalance, use
           "text": "❌ " + title + " (" + formattedAmount + "B)",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "sm",
+          "size": "xs",
           "align": "center"
         }
       ],
@@ -1981,9 +1981,9 @@ export function constructRejectionFlex(type, amount, reason, currentBalance, use
       "layout": "vertical",
       "spacing": "xs",
       "contents": [
-        { "type": "text", "text": "เหตุผล: " + (reason || "ข้อมูลไม่ถูกต้อง"), "size": "xs", "color": "#D32F2F", "wrap": true }
+        { "type": "text", "text": "เหตุผล: " + (reason || "ข้อมูลไม่ถูกต้อง"), "size": "xxs", "color": "#D32F2F", "wrap": true }
       ],
-      "paddingAll": "md"
+      "paddingAll": "sm"
     },
     "footer": {
       "type": "box",
