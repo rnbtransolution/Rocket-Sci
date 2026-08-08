@@ -112,13 +112,16 @@ export async function pushToLine(targetId, text) {
     return;
   }
   
-  // Resolve Passport short ID to raw LINE ID if needed, but preserve raw Group IDs (C...) & User IDs (U...)
   let rawLineId = targetId;
-  if (typeof targetId === 'string' && (targetId.startsWith('p') || (!targetId.startsWith('C') && !targetId.startsWith('U')))) {
+  const isGroupId = typeof targetId === 'string' && (targetId.startsWith('C') || /^\d{10,}$/.test(targetId) || db.getDashboardData()?.lineGroups?.some(g => g.id === targetId));
+  const isRawUserId = typeof targetId === 'string' && targetId.startsWith('U');
+
+  if (!isGroupId && !isRawUserId && typeof targetId === 'string' && targetId.startsWith('p')) {
     rawLineId = db.getRawLineUserId(targetId) || targetId;
   }
-  if (!rawLineId || (typeof rawLineId === 'string' && rawLineId.startsWith('p'))) {
-    console.log(`[LINE Push Bypassed]: targetId "${targetId}" is passport simulator account.`);
+
+  if (!rawLineId || (typeof rawLineId === 'string' && rawLineId.startsWith('p') && !isGroupId)) {
+    console.log(`[LINE Push Bypassed]: targetId "${targetId}" is passport simulator account without mapped LINE ID.`);
     return;
   }
 
