@@ -2115,10 +2115,23 @@ export default function App() {
                   🚀 ประกาศออกราคาช่าง {targetMin && targetMax ? `${targetMin}-${targetMax}` : '(ระบุช่วงราคา)'} วินาที ลง{broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่มดวลสด' : 'กลุ่มที่เลือก'} (Broadcast Quote)
                 </button>
 
-                {/* Quick Action Commands */}
-                <div className="pt-2 border-t border-emerald-100 space-y-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block font-heading">⚡ คำสั่งลัดบรอดแคสต์หน้าร้าน (Admin Quick Broadcasts):</span>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs font-bold">
+                {/* Quick Action Commands & Instruction Hot Keys */}
+                <div className="pt-2 border-t border-emerald-100 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block font-heading">⚡ ปุ่มคีย์ลัดแอดมิน & บรอดแคสต์กติกา (Admin Hot Keys & Rule Guide):</span>
+                    <span className="text-[10px] text-emerald-700 font-mono font-bold">💡 ราคาช่างเปิดจากแอดมินไม่ต้องใช้แต้ม</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs font-bold">
+                    <button onClick={() => {
+                      const msg = `📖 [คู่มือคีย์เวิร์ดกติกา]\n🔵 ช่างไล่ (ต่ำ): ชล, a, ไล่, ล, +5ชล, -5ชล\n🔴 ช่างถอย (สูง): ชย, ชถ, ย, ถ, ยั่ง, ถอย, +5ชย, -5ชย\n🎯 เปิดราคาเอง: 300-340ล500, 345-385ถ500 ชตย\n✅ จับคู่แผล: พิมพ์ ต, ตต, ติด, ครับ, เค, จ้า`;
+                      if (broadcastTargetGroup === 'ALL') {
+                        const targets = lineGroups.length > 0 ? lineGroups.map(g => g.id) : [activeGroupId];
+                        targets.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, msg]));
+                      } else {
+                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, msg]);
+                      }
+                      addToast('📖 ประกาศส่งคู่มือคีย์เวิร์ด & กติกาการเล่นลงกลุ่มเรียบร้อย!', 'info');
+                    }} className="py-2.5 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">📖 ประกาศส่งคู่มือคีย์เวิร์ดกติกา</button>
                     <button onClick={() => {
                       const msg = `🔒 ปิดรับดวล ➔ ${rocketName || 'ช่างบั้งไฟสด'}\n⛔ 3-2-GO! หมดเวลาท้าดวลก่อนปล่อยบั้งไฟ\n⚠️ ออเดอร์และกดแมตช์หลังจากนี้จะไม่ถูกจับคู่ทุกกรณีครับ`;
                       if (broadcastTargetGroup === 'ALL') {
