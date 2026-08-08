@@ -126,30 +126,60 @@ export async function pushToLine(targetId, text) {
   }
 
   const url = 'https://api.line.me/v2/bot/message/push';
-  let messages = [];
   
   if (typeof text === 'object' && text !== null) {
-    messages.push({
-      type: 'flex',
-      altText: 'ระบบบริการ Rocket Science 🚀',
-      contents: text
-    });
-    // Extract order summary for text fallback
+    // 1. Try pushing Flex Message Card first
+    const flexPayload = {
+      to: rawLineId,
+      messages: [{
+        type: 'flex',
+        altText: 'ระบบบริการ Rocket Science 🚀',
+        contents: text
+      }]
+    };
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN
+        },
+        body: JSON.stringify(flexPayload)
+      });
+      const resText = await response.text();
+      console.log(`[LINE Push Flex Result to ${rawLineId}]: Status ${response.status} - ${resText}`);
+      if (response.ok) return;
+    } catch (err) {
+      console.error(`[LINE Push Flex Error to ${rawLineId}]:`, err);
+    }
+
+    // 2. Fallback to Text Message if Flex message failed or rejected
     const headerStr = text.header?.contents?.[0]?.text || '';
     const bodyStr = text.body?.contents?.[0]?.text || '';
-    if (headerStr || bodyStr) {
-      messages.push({
-        type: 'text',
-        text: `☄️ [แจ้งเตือนแผลดวลสด]\n${headerStr}\n${bodyStr}\n👉 พิมพ์ "ต" เพื่อจับคู่ดวลสดครับ!`
+    const textFallback = `☄️ [แจ้งเตือนแผลดวลสด]\n${headerStr}\n${bodyStr}\n👉 พิมพ์ "ต" เพื่อจับคู่ดวลสดครับ!`;
+    const textPayload = {
+      to: rawLineId,
+      messages: [{ type: 'text', text: textFallback }]
+    };
+    try {
+      const fbRes = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN
+        },
+        body: JSON.stringify(textPayload)
       });
+      console.log(`[LINE Push Fallback Result to ${rawLineId}]: Status ${fbRes.status}`);
+    } catch (e) {
+      console.error(`[LINE Push Fallback Error to ${rawLineId}]:`, e);
     }
-  } else {
-    messages.push({ type: 'text', text: String(text) });
+    return;
   }
-  
+
   const payload = {
     to: rawLineId,
-    messages: messages
+    messages: [{ type: 'text', text: String(text) }]
   };
 
   try {
@@ -162,7 +192,7 @@ export async function pushToLine(targetId, text) {
       body: JSON.stringify(payload)
     });
     const resText = await response.text();
-    console.log(`[LINE Push Result to ${rawLineId}]: Status ${response.status} - ${resText}`);
+    console.log(`[LINE Push Text Result to ${rawLineId}]: Status ${response.status} - ${resText}`);
   } catch (err) {
     console.error(`[LINE Push Error to ${rawLineId}]:`, err);
   }
@@ -1502,7 +1532,6 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
             {
               "type": "button",
               "style": "primary",
-              "height": "sm",
               "color": "#1E88E5",
               "action": {
                 "type": "message",
@@ -1513,7 +1542,6 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
             {
               "type": "button",
               "style": "primary",
-              "height": "sm",
               "color": "#1E88E5",
               "action": {
                 "type": "message",
@@ -1531,7 +1559,6 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
             {
               "type": "button",
               "style": "primary",
-              "height": "sm",
               "color": "#1E88E5",
               "action": {
                 "type": "message",
@@ -1542,7 +1569,6 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
             {
               "type": "button",
               "style": "primary",
-              "height": "sm",
               "color": "#1E88E5",
               "action": {
                 "type": "message",
@@ -1560,7 +1586,6 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
             {
               "type": "button",
               "style": "primary",
-              "height": "sm",
               "color": "#00796B",
               "action": {
                 "type": "message",
@@ -1571,7 +1596,6 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
             {
               "type": "button",
               "style": "primary",
-              "height": "sm",
               "color": "#D32F2F",
               "action": {
                 "type": "message",
