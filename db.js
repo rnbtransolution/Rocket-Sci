@@ -426,11 +426,6 @@ export function saveOpenBet(
 
   return newBet;
 }
-    now.toISOString(),
-  ]);
-  
-  return true;
-}
 
 // match against an existing open bet (supports optional specific target order number e.g. "12" or "123456")
 export async function matchExistingOpenBet(userId, displayName, targetOrderNo = null) {
