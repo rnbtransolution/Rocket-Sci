@@ -1613,19 +1613,29 @@ export default function App() {
   // Render dynamic visual bank slip card in Light Mode
   const renderSlipCard = (presetId, isCustom, custAmt) => {
     let p = null;
-    if (isCustom) {
+    const effectiveAmt = custAmt || 100;
+    if (isCustom || !presetId) {
       p = {
         bankName: 'ธนาคารไทยพาณิชย์ (SCB)',
-        amount: custAmt,
-        actualAmount: custAmt,
-        refCode: 'CUSTX' + custAmt + '9982',
+        amount: effectiveAmt,
+        actualAmount: effectiveAmt,
+        refCode: 'CUSTX' + effectiveAmt + '9982',
         senderName: 'คุณ (You)',
         bankLogo: '🟣',
         gradient: 'from-purple-50 to-purple-100 border-purple-200 text-purple-950',
         isValidQR: true
       };
     } else {
-      p = SLIP_PRESETS.find(pr => pr.id === presetId) || SLIP_PRESETS[0];
+      p = SLIP_PRESETS.find(pr => pr.id === presetId) || {
+        bankName: 'ธนาคารกสิกรไทย (KBANK)',
+        amount: effectiveAmt,
+        actualAmount: effectiveAmt,
+        refCode: 'KBNK' + effectiveAmt + '8827',
+        senderName: 'คุณ (You)',
+        bankLogo: '🟢',
+        gradient: 'from-emerald-50 to-emerald-100 border-emerald-200 text-emerald-950',
+        isValidQR: true
+      };
     }
 
     return (
@@ -2317,7 +2327,7 @@ export default function App() {
                               </div>
                             </div>
                           ) : (
-                            renderSlipCard(tx.presetId, !tx.presetId, (tx.actualAmount && tx.actualAmount > 0) ? tx.actualAmount : (tx.requestedAmount || 100))
+                            renderSlipCard(tx.presetId, true, (tx.requestedAmount && tx.requestedAmount > 0) ? tx.requestedAmount : (tx.actualAmount || 100))
                           )}
                         </div>
 

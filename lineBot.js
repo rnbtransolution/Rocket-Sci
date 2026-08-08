@@ -126,21 +126,30 @@ export async function pushToLine(targetId, text) {
   }
 
   const url = 'https://api.line.me/v2/bot/message/push';
-  let messageObj;
+  let messages = [];
   
   if (typeof text === 'object' && text !== null) {
-    messageObj = {
+    messages.push({
       type: 'flex',
       altText: 'ระบบบริการ Rocket Science 🚀',
       contents: text
-    };
+    });
+    // Extract order summary for text fallback
+    const headerStr = text.header?.contents?.[0]?.text || '';
+    const bodyStr = text.body?.contents?.[0]?.text || '';
+    if (headerStr || bodyStr) {
+      messages.push({
+        type: 'text',
+        text: `☄️ [แจ้งเตือนแผลดวลสด]\n${headerStr}\n${bodyStr}\n👉 พิมพ์ "ต" เพื่อจับคู่ดวลสดครับ!`
+      });
+    }
   } else {
-    messageObj = { type: 'text', text: String(text) };
+    messages.push({ type: 'text', text: String(text) });
   }
   
   const payload = {
     to: rawLineId,
-    messages: [messageObj]
+    messages: messages
   };
 
   try {
