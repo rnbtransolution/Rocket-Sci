@@ -86,18 +86,28 @@ export async function init(isSilent = false) {
 
     // 2. Transactions Sheet
     if (data.transactions && data.transactions.length > 1) {
-      transactions = data.transactions.slice(1).map((row) => ({
-        id: row[0]?.toString() || '',
-        playerId: row[1]?.toString() || '',
-        playerName: row[2]?.toString() || '',
-        requestedAmount: Number(row[3]) || 0,
-        actualAmount: Number(row[4]) || 0,
-        slipRef: row[5]?.toString() || '',
-        status: row[6]?.toString() || '',
-        reviewReason: row[7]?.toString() || '',
-        timestamp: row[8] ? formatTime(row[8]) : '',
-        logs: [`Verified in Sheets Database`, `Status: ${row[6]}`],
-      })).reverse();
+      transactions = data.transactions.slice(1).map((row) => {
+        let rawId = row[0]?.toString() || '';
+        const refStr = row[5]?.toString().toUpperCase() || '';
+        const reasonStr = row[7]?.toString().toLowerCase() || '';
+        if (refStr.includes('WD') || refStr.includes('WITHDRAW') || reasonStr.includes('withdraw')) {
+          if (rawId.startsWith('TX')) {
+            rawId = 'WD' + rawId.slice(2);
+          }
+        }
+        return {
+          id: rawId,
+          playerId: row[1]?.toString() || '',
+          playerName: row[2]?.toString() || '',
+          requestedAmount: Number(row[3]) || 0,
+          actualAmount: Number(row[4]) || 0,
+          slipRef: row[5]?.toString() || '',
+          status: row[6]?.toString() || '',
+          reviewReason: row[7]?.toString() || '',
+          timestamp: row[8] ? formatTime(row[8]) : '',
+          logs: [`Verified in Sheets Database`, `Status: ${row[6]}`],
+        };
+      }).reverse();
     }
 
     // 3. Bets Sheet
@@ -631,7 +641,11 @@ export function logTransaction(
   reason
 ) {
   const now = new Date();
-  const txId = 'TX' + Math.floor(Math.random() * 89999 + 10000);
+  const refStr = refCode ? refCode.toString().toUpperCase() : '';
+  const reasonStr = reason ? reason.toString().toLowerCase() : '';
+  const isWithdraw = refStr.includes('WD') || refStr.includes('WITHDRAW') || reasonStr.includes('withdraw');
+  const prefix = isWithdraw ? 'WD' : 'TX';
+  const txId = prefix + Math.floor(Math.random() * 89999 + 10000);
 
   const newTx = {
     id: txId,
@@ -772,11 +786,11 @@ export async function adminApproveTransaction(txId) {
     tx.actualAmount = amountToAdd;
     updateRowInSheet('Transactions', txId, { 5: amountToAdd, 6: 'success', 7: tx.reviewReason });
 
-    const isWithdrawal = txId.startsWith('WD');
+    const isWithdrawal = tx.id.startsWith('WD') || (tx.slipRef && tx.slipRef.toString().toUpperCase().includes('WD')) || (tx.reviewReason && tx.reviewReason.toString().toLowerCase().includes('withdraw'));
     
     if (isWithdrawal) {
-      // In withdrawal flow, the requested amount is the negative withdraw amount, and it was already deducted from balance.
-      // So no balance adjustment is needed here (payout approved).
+      // In withdrawal flow, the requested amount was already deducted from user balance upon withdrawal request.
+      // Do NOT add balance back to user (payout approved)!
     } else {
       await adjustPlayerBalance(tx.playerId, amountToAdd, tx.playerName);
     }
@@ -810,7 +824,7 @@ export async function adminRejectTransaction(txId, reason) {
     tx.reviewReason = reason || 'Admin rejected';
     updateRowInSheet('Transactions', txId, { 6: 'rejected', 7: tx.reviewReason });
 
-    const isWithdrawal = txId.startsWith('WD');
+    const isWithdrawal = tx.id.startsWith('WD') || (tx.slipRef && tx.slipRef.toString().toUpperCase().includes('WD')) || (tx.reviewReason && tx.reviewReason.toString().toLowerCase().includes('withdraw'));
     if (isWithdrawal) {
       // Refund the locked balance back to player
       await adjustPlayerBalance(tx.playerId, tx.requestedAmount, tx.playerName);

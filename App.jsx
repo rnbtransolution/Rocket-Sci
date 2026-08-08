@@ -2299,7 +2299,9 @@ export default function App() {
               ) : (
                 <div className="space-y-4">
                   {transactions.filter(t => t.status === 'escalated').map(tx => {
-                    const isWithdrawal = tx.id.startsWith('WD');
+                    const isWithdrawal = tx.id.startsWith('WD') || 
+                      (tx.slipRef && tx.slipRef.toString().toUpperCase().includes('WD')) || 
+                      (tx.reviewReason && tx.reviewReason.toString().toLowerCase().includes('withdraw'));
                     const cardBgStyle = isWithdrawal 
                       ? 'p-4 rounded-2xl bg-gradient-to-br from-rose-50/80 via-white to-red-50/60 border-2 border-rose-300 flex flex-col md:flex-row gap-4 items-stretch shadow-sm'
                       : 'p-4 rounded-2xl bg-gradient-to-br from-emerald-50/80 via-white to-teal-50/60 border-2 border-emerald-300 flex flex-col md:flex-row gap-4 items-stretch shadow-sm';
