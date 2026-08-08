@@ -395,7 +395,16 @@ export function saveOpenBet(
   const highId = side === 'high' ? searchId : '';
   const highName = side === 'high' ? displayName : '';
 
-  const assignedGroupId = targetGroupId || activeGroupId || '';
+  let pushTargets = [];
+  if (targetGroupId && targetGroupId !== 'ALL') {
+    pushTargets = [targetGroupId];
+  } else if (activeGroupId) {
+    pushTargets = [activeGroupId];
+  } else if (lineGroups && lineGroups.length > 0) {
+    pushTargets = lineGroups.map(g => g.id);
+  }
+
+  const assignedGroupId = pushTargets[0] || activeGroupId || '';
   const assignedGroupName = targetGroupName || (lineGroups.find(g => g.id === assignedGroupId)?.name || 'กลุ่มดวลสด');
 
   const newBet = {
@@ -433,12 +442,16 @@ export function saveOpenBet(
     assignedGroupName
   ]);
 
-  if (assignedGroupId) {
+  if (pushTargets.length > 0) {
     import('./lineBot.js').then(lineBot => {
       const rangeInfo = rMin && rMax ? `${rMin}-${rMax}s` : '';
       const betCard = lineBot.constructBetOpenFlex(orderNo, betAmount, side, displayName, rangeInfo);
-      lineBot.pushToLine(assignedGroupId, betCard);
-    }).catch(_ => {});
+      pushTargets.forEach(targetId => {
+        lineBot.pushToLine(targetId, betCard);
+      });
+    }).catch(err => {
+      console.error('Error pushing order flex to LINE groups:', err);
+    });
   }
 
   return newBet;
@@ -927,6 +940,43 @@ export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxPara
 
   // Reset round lock status to ACTIVE for the next round
   setRocketRoundStatus('ACTIVE');
+
+  return getDashboardData();
+}
+
+export async function adminVoidRound() {
+  for (const bet of bets) {
+    if (bet.status === 'matched' || bet.status === 'pending_match' || bet.status === 'pending_cancel') {
+      bet.status = 'cancelled';
+      updateRowInSheet('Bets', bet.orderNumber, { 9: 'cancelled' });
+
+      const lowId = bet.playerLowId ? cleanUserId(bet.playerLowId) : '';
+      const highId = bet.playerHighId ? cleanUserId(bet.playerHighId) : '';
+      const amount = Number(bet.amount) || 0;
+
+      if (lowId) {
+        await adjustPlayerBalance(lowId, amount, bet.playerLowName || 'ผู้เล่น');
+      }
+      if (highId) {
+        await adjustPlayerBalance(highId, amount, bet.playerHighName || 'ผู้เล่น');
+      }
+    }
+  }
+
+  setRocketRoundStatus('ACTIVE');
+
+  const targetGroups = lineGroups.length > 0 ? lineGroups : (activeGroupId ? [{ id: activeGroupId }] : []);
+  if (targetGroups.length > 0) {
+    try {
+      const lineBot = await import('./lineBot.js');
+      const roundNotice = `⛔ [โมฆะรอบ / ช่าง ⛔]: ยกเลิกแผลดวลค้างทั้งหมด และคืนแต้ม 100% เรียบร้อยครับ 🚀`;
+      for (const g of targetGroups) {
+        await lineBot.pushToLine(g.id, roundNotice);
+      }
+    } catch (e) {
+      console.error("[DB] Error broadcasting void round to groups:", e);
+    }
+  }
 
   return getDashboardData();
 }

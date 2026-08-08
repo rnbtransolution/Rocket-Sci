@@ -2131,26 +2131,8 @@ export default function App() {
                     }} className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">🔒 ปิดรับดวล (1 นาที ก่อนจุด)</button>
                     <button onClick={() => {
                       if (!window.confirm("⛔ คุณต้องการประกาศ 'ช่าง ⛔' (โมฆะรอบ) และยกเลิกคืนแต้มแผลดวลทั้งหมดใช่หรือไม่?")) return;
-                      // Refund all bets
-                      const activeBets = bets.filter(b => b.status === 'matched' || b.status === 'pending_match');
-                      if (activeBets.length > 0) {
-                        setPlayers(prev => prev.map(p => {
-                          let refund = 0;
-                          activeBets.forEach(b => {
-                            if (b.playerLowId === p.id || b.playerHighId === p.id) refund += b.amount;
-                          });
-                          return refund > 0 ? { ...p, balance: p.balance + refund } : p;
-                        }));
-                        setBets(prev => prev.map(b => (b.status === 'matched' || b.status === 'pending_match') ? { ...b, status: 'cancelled' } : b));
-                      }
-                      const msg = `⛔ [โมฆะ] รอบ ${rocketName || 'ช่างบั้งไฟสด'} | ช่าง ⛔ คืนแต้ม 100% ครับ`;
-                      if (broadcastTargetGroup === 'ALL') {
-                        const targets = lineGroups.length > 0 ? lineGroups.map(g => g.id) : [activeGroupId];
-                        targets.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, msg]));
-                      } else {
-                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, msg]);
-                      }
-                      addToast(`⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ) และคืนแต้มผู้เล่น ${activeBets.length} แผลเรียบร้อย!`, 'danger');
+                      runBackendFunction('adminVoidRound', []);
+                      addToast(`⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ) และคืนแต้มผู้เล่นเรียบร้อย!`, 'danger');
                     }} className="py-2.5 px-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ)</button>
                     <button onClick={() => {
                       const msg = `🚨 [เตือนภัย] ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA เท่านั้นครับ ❌`;

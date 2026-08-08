@@ -69,6 +69,10 @@ app.post('/api/run', async (req, res) => {
         // args: [finalTime, targetMin, targetMax]
         result = await db.adminResolveBets(args[0], args[1], args[2], lineBot.sendMatchResultPush);
         break;
+
+      case 'adminVoidRound':
+        result = await db.adminVoidRound();
+        break;
         
       case 'adminRequestCancelBet':
         result = await db.adminRequestCancelBet(args[0]);
