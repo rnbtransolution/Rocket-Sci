@@ -927,47 +927,47 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
 export function constructMainMenuFlex() {
   return {
     "type": "bubble",
-    "size": "giga",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
+      "backgroundColor": "#00796B",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
           "text": "🚀 Rocket Science Menu",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "md",
+          "size": "xs",
           "align": "center"
         }
-      ],
-      "backgroundColor": "#00796B",
-      "paddingAll": "md"
+      ]
     },
     "body": {
       "type": "box",
       "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
           "text": "เลือกบริการที่คุณต้องการทำรายการครับ",
-          "size": "xs",
+          "size": "xxs",
           "color": "#666666",
           "align": "center",
           "wrap": true
-        }
-      ],
-      "paddingAll": "md"
-    },
-    "footer": {
-      "type": "box",
-      "layout": "vertical",
-      "spacing": "xs",
-      "contents": [
+        },
+        {
+          "type": "separator",
+          "margin": "xs",
+          "color": "#F0F0F0"
+        },
         {
           "type": "box",
           "layout": "horizontal",
           "spacing": "xs",
+          "margin": "xs",
           "contents": [
             {
               "type": "button",
@@ -997,6 +997,7 @@ export function constructMainMenuFlex() {
           "type": "box",
           "layout": "horizontal",
           "spacing": "xs",
+          "margin": "xs",
           "contents": [
             {
               "type": "button",
@@ -1022,8 +1023,7 @@ export function constructMainMenuFlex() {
             }
           ]
         }
-      ],
-      "paddingAll": "md"
+      ]
     }
   };
 }
