@@ -917,6 +917,9 @@ export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxPara
     }
   }
 
+  // Reset round lock status to ACTIVE for the next round
+  setRocketRoundStatus('ACTIVE');
+
   return getDashboardData();
 }
 

@@ -181,10 +181,13 @@ export async function fetchLINEGroupName(groupId) {
 export async function sendAdminMessageToLine(targetId, messageText) {
   const clean = (messageText || '').toString().replace(/\s+/g, '').toLowerCase();
 
-  // Update round lock status automatically if broadcast contains round open/close keywords
-  if (clean.includes('ปิดรับดวล') || clean.includes('ปิดรอบ') || clean.includes('3-2-go') || clean.includes('หมดเวลา')) {
+  // Update round lock status automatically if broadcast contains explicit round open/close keywords
+  const isExplicitCloseCmd = /^(🔒\s*)?(ปิดรับดวล|ปิดรอบ|ล็อครอบ|3-2-go|32go)$/i.test(clean) || clean.includes('🔒ปิดรับดวล') || clean.includes('หมดเวลาท้าดวลก่อนปล่อยบั้งไฟ');
+  const isExplicitOpenCmd = /^(🚀\s*)?(เปิดรอบ|เปิดรับดวล|เปิด)\b/i.test(clean) || clean.includes('🚀เปิดรอบ');
+
+  if (isExplicitCloseCmd) {
     db.setRocketRoundStatus('CLOSED');
-  } else if (clean.includes('เปิดรอบ') || clean.includes('เปิดรับดวล')) {
+  } else if (isExplicitOpenCmd) {
     db.setActiveRocketRound('ดวลสด');
     db.setRocketRoundStatus('ACTIVE');
   }
