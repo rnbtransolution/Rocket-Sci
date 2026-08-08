@@ -433,6 +433,14 @@ export function saveOpenBet(
     assignedGroupName
   ]);
 
+  if (assignedGroupId) {
+    import('./lineBot.js').then(lineBot => {
+      const rangeInfo = rMin && rMax ? `${rMin}-${rMax}s` : '';
+      const betCard = lineBot.constructBetOpenFlex(orderNo, betAmount, side, displayName, rangeInfo);
+      lineBot.pushToLine(assignedGroupId, betCard);
+    }).catch(_ => {});
+  }
+
   return newBet;
 }
 
