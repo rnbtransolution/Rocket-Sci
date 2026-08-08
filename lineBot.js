@@ -1477,18 +1477,19 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
 
   return {
     "type": "bubble",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#1E1B4B",
-      "paddingAll": "md",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
           "text": `Order #${orderNo} • ${headerTitle}`,
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "sm",
+          "size": "xs",
           "align": "center"
         }
       ]
@@ -1497,14 +1498,14 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "lg",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
           "text": formulaTitle,
           "weight": "bold",
           "color": "#111111",
-          "size": "xxl",
+          "size": "lg",
           "align": "center"
         },
         {
@@ -1512,19 +1513,19 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "text": chotaiLabel,
           "weight": "bold",
           "color": isChotoy ? "#E65100" : "#00796B",
-          "size": "xs",
+          "size": "xxs",
           "align": "center"
         },
         {
           "type": "separator",
-          "margin": "md",
+          "margin": "xs",
           "color": "#F0F0F0"
         },
         {
           "type": "box",
           "layout": "horizontal",
           "spacing": "xs",
-          "margin": "md",
+          "margin": "xs",
           "contents": [
             {
               "type": "button",
@@ -1545,14 +1546,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
                 "label": "ต 200",
                 "text": `ต${orderNo} 200`
               }
-            }
-          ]
-        },
-        {
-          "type": "box",
-          "layout": "horizontal",
-          "spacing": "xs",
-          "contents": [
+            },
             {
               "type": "button",
               "style": "primary",
@@ -1562,16 +1556,6 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
                 "label": "ต 300",
                 "text": `ต${orderNo} 300`
               }
-            },
-            {
-              "type": "button",
-              "style": "primary",
-              "color": "#1E88E5",
-              "action": {
-                "type": "message",
-                "label": "ต 400",
-                "text": `ต${orderNo} 400`
-              }
             }
           ]
         },
@@ -1579,6 +1563,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "type": "box",
           "layout": "horizontal",
           "spacing": "xs",
+          "margin": "xs",
           "contents": [
             {
               "type": "button",
