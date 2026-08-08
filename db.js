@@ -147,7 +147,7 @@ export async function init(isSilent = false) {
       );
     }
   } catch (err) {
-    if (!quiet) {
+    if (!isSilent) {
       console.error('[DB] Initialization error:', err);
     }
     throw err;
@@ -399,6 +399,18 @@ export function saveOpenBet(
   const searchId = cleanUserId(userId);
   const betAmount = Number(amount) || 0;
 
+  // Anti-Overdraft Guard: verify creator has sufficient balance
+  const player = players.find((p) => cleanUserId(p.id) === searchId);
+  const currentBalance = player ? player.balance : 0;
+  if (betAmount > 0 && currentBalance < betAmount) {
+    return { error: 'INSUFFICIENT_BALANCE', required: betAmount, current: currentBalance };
+  }
+  // Lock creator's credit
+  if (betAmount > 0 && player) {
+    player.balance -= betAmount;
+    updateRowInSheet('Players', searchId, { 2: player.balance });
+  }
+
   const now = new Date();
   const lowId = side === 'low' ? searchId : '';
   const lowName = side === 'low' ? displayName : '';
@@ -521,7 +533,16 @@ export async function matchExistingOpenBet(userId, displayName, targetOrderNo = 
     });
 
     // Deduct credit from matcher
-    await adjustPlayerBalance(searchId, -targetBet.amount, displayName);
+    const deducted = await adjustPlayerBalance(searchId, -targetBet.amount, displayName);
+    if (!deducted) {
+      // Rollback match
+      targetBet.status = 'pending_match';
+      if (targetBet.playerLowId === searchId) targetBet.playerLowId = '';
+      if (targetBet.playerHighId === searchId) targetBet.playerHighId = '';
+      // Rollback sheets
+      updateRowInSheet('Bets', targetBet.orderNumber, { 9: 'pending_match' });
+      return { error: 'INSUFFICIENT_BALANCE', required: targetBet.amount, current: 0, orderNumber: targetBet.orderNumber };
+    }
 
     return {
       orderNumber: targetBet.orderNumber,
@@ -563,7 +584,16 @@ export async function matchExistingOpenBet(userId, displayName, targetOrderNo = 
       });
 
       // Deduct credit from matcher
-      await adjustPlayerBalance(searchId, -bet.amount, displayName);
+      const deducted = await adjustPlayerBalance(searchId, -bet.amount, displayName);
+      if (!deducted) {
+        // Rollback match
+        bet.status = 'pending_match';
+        if (bet.playerLowId === searchId) bet.playerLowId = '';
+        if (bet.playerHighId === searchId) bet.playerHighId = '';
+        // Rollback sheets
+        updateRowInSheet('Bets', bet.orderNumber, { 9: 'pending_match' });
+        return { error: 'INSUFFICIENT_BALANCE', required: bet.amount, current: 0, orderNumber: bet.orderNumber };
+      }
 
       return {
         orderNumber: bet.orderNumber,
@@ -795,7 +825,7 @@ export async function adminApproveTransaction(txId) {
       await adjustPlayerBalance(tx.playerId, amountToAdd, tx.playerName);
     }
 
-    // Dynamic import to send LINE notifications
+    // Dynamic import to send LINE notifications and log chat feed
     try {
       const lineBot = await import('./lineBot.js');
       if (isWithdrawal) {
@@ -806,9 +836,11 @@ export async function adminApproveTransaction(txId) {
         }
         const flex = lineBot.constructBankingFlex("withdraw", tx.requestedAmount, details, null, tx.playerId);
         await lineBot.pushToLine(tx.playerId, flex);
+        logLineChatMessage(tx.playerId, tx.playerName || 'ผู้เล่น', 'bot', `💸 [อนุมัติการถอนเงิน] จำนวน ${tx.requestedAmount.toLocaleString()} THB โอนเข้าบัญชีสำเร็จแล้วครับ 🚀`, 'text');
       } else {
-        const flex = lineBot.constructBankingFlex("deposit", amountToAdd, "เติมเงินสำเร็จ (แอดมินอนุมัติแมนนวล)", null, tx.playerId);
+        const flex = lineBot.constructBankingFlex("deposit", amountToAdd, "เติมเงินสำเร็จ (แอดมินอนุมัติเรียบร้อย)", null, tx.playerId);
         await lineBot.pushToLine(tx.playerId, flex);
+        logLineChatMessage(tx.playerId, tx.playerName || 'ผู้เล่น', 'bot', `🟢 [อนุมัติการเติมเงิน] จำนวน ${amountToAdd.toLocaleString()} pt เติมเข้าบัญชีสำเร็จเรียบร้อยครับ 🚀`, 'text');
       }
     } catch (err) {
       console.error("[DB] Error sending Line approval notification:", err);
@@ -830,16 +862,18 @@ export async function adminRejectTransaction(txId, reason) {
       await adjustPlayerBalance(tx.playerId, tx.requestedAmount, tx.playerName);
     }
 
-    // Dynamic import to send LINE notifications
+    // Dynamic import to send LINE notifications and log chat feed
     try {
       const lineBot = await import('./lineBot.js');
       const currentBalance = await getPlayerBalance(tx.playerId, tx.playerName);
       if (isWithdrawal) {
         const flex = lineBot.constructRejectionFlex("WD", tx.requestedAmount, reason || 'ข้อมูลไม่ถูกต้อง', currentBalance, tx.playerId);
         await lineBot.pushToLine(tx.playerId, flex);
+        logLineChatMessage(tx.playerId, tx.playerName || 'ผู้เล่น', 'bot', `❌ [ปฏิเสธการถอนเงิน] ยอด ${tx.requestedAmount.toLocaleString()} THB (คืนแต้มเข้าบัญชีแล้ว | สาเหตุ: ${reason || 'ข้อมูลไม่ถูกต้อง'})`, 'text');
       } else {
         const flex = lineBot.constructRejectionFlex("DP", tx.requestedAmount, reason || 'สลิปไม่ผ่านเกณฑ์ตรวจสอบ', currentBalance, tx.playerId);
         await lineBot.pushToLine(tx.playerId, flex);
+        logLineChatMessage(tx.playerId, tx.playerName || 'ผู้เล่น', 'bot', `❌ [ปฏิเสธสลิปฝากเงิน] ยอด ${tx.requestedAmount.toLocaleString()} THB (สาเหตุ: ${reason || 'สลิปไม่ผ่านเกณฑ์'})`, 'text');
       }
     } catch (err) {
       console.error("[DB] Error sending Line rejection notification:", err);
@@ -891,6 +925,7 @@ export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxPara
         for (const g of targetGroups) {
           await lineBot.pushToLine(g.id, roundNotice);
         }
+        logLineChatMessage('SYSTEM', '🤖 Rocket Bot', 'bot', roundNotice, 'text');
       } catch (e) {
         console.error("[DB] Error broadcasting void round result:", e);
       }
@@ -993,6 +1028,7 @@ export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxPara
       for (const g of targetGroups) {
         await lineBot.pushToLine(g.id, roundNotice);
       }
+      logLineChatMessage('SYSTEM', '🤖 Rocket Bot', 'bot', roundNotice, 'text');
     } catch (e) {
       console.error("[DB] Error broadcasting round result to groups:", e);
     }
@@ -1033,6 +1069,7 @@ export async function adminVoidRound() {
       for (const g of targetGroups) {
         await lineBot.pushToLine(g.id, roundNotice);
       }
+      logLineChatMessage('SYSTEM', '🤖 Rocket Bot', 'bot', roundNotice, 'text');
     } catch (e) {
       console.error("[DB] Error broadcasting void round to groups:", e);
     }
@@ -1164,7 +1201,7 @@ export async function adminRequestCancelBet(betId) {
   return getDashboardData();
 }
 
-export function handleCancelBetRequest(userId, orderNo) {
+export async function handleCancelBetRequest(userId, orderNo) {
   const searchId = cleanUserId(userId);
   if (!searchId || !orderNo) return '🚫 ไม่สามารถทำรายการยกเลิกได้ครับ';
   const orderStr = orderNo.toString().trim();
@@ -1186,7 +1223,7 @@ export function handleCancelBetRequest(userId, orderNo) {
   if (bet.status === 'pending_match') {
     bet.status = 'cancelled';
     updateRowInSheet('Bets', orderStr, { 9: 'cancelled' });
-    adjustPlayerBalance(searchId, bet.amount);
+    await adjustPlayerBalance(searchId, bet.amount);
     return `🚫 ยกเลิกแผล Order #${orderNo} สำเร็จ!\nคืนแต้ม ${bet.amount}pt เรียบร้อยครับ 🚀`;
   }
 

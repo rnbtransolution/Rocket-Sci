@@ -250,7 +250,7 @@ async function startServer() {
       } catch (syncErr) {
         console.error('[Sync] Error synchronizing local database from Google Sheets:', syncErr);
       }
-    }, 2000);
+    }, 5000);
 
     app.listen(PORT, () => {
       console.log(`\n======================================================`);
@@ -264,5 +264,13 @@ async function startServer() {
     process.exit(1);
   }
 }
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Server] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[Server] Uncaught Exception:', err);
+});
 
 startServer();

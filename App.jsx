@@ -109,6 +109,20 @@ const SLIP_PRESETS = [
 const ADMIN_PASSCODE = '1234';
 
 export default function App() {
+  const isGitHubPages = window.location.hostname.includes('github.io');
+  const API_BASE_URL = isGitHubPages ? 'https://rocket-sci.onrender.com' : '';
+
+  const runBackendFunction = async (functionName, args = []) => {
+    const res = await fetch(`${API_BASE_URL}/api/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ functionName, args }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Server error');
+    return json.data;
+  };
+
   // Security and Mode States
   const [playerUserId, setPlayerUserId] = useState(null);
   const [adminAuthenticated, setAdminAuthenticated] = useState(false);
@@ -268,34 +282,6 @@ export default function App() {
       }
     };
 
-    // Determine backend API origin (if loaded from GitHub Pages, point to Render cloud backend)
-    const API_BASE_URL = (typeof window !== 'undefined' && window.location.hostname.includes('github.io'))
-      ? 'https://rocket-sci.onrender.com'
-      : '';
-
-    const runBackendFunction = async (functionName, args = []) => {
-      if (isGAS) {
-        if (window.google && window.google.script && window.google.script.run && window.google.script.run[functionName]) {
-          window.google.script.run[functionName](...args);
-        }
-      } else {
-        try {
-          const res = await fetch(`${API_BASE_URL}/api/run`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ functionName, args })
-          });
-          const data = await res.json();
-          if (data && data.data) {
-            applyData(data.data);
-          }
-          return data;
-        } catch (err) {
-          console.error(`[API Call Error: ${functionName}]`, err);
-        }
-      }
-    };
-
     if (isGAS) {
       // GAS-hosted: use google.script.run RPC (SSE not available in GAS)
       const fetchGAS = () => {
@@ -364,35 +350,6 @@ export default function App() {
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 4000);
-  };
-
-  // Unified runner for backend API actions (works seamlessly in Node.js & GAS)
-  const runBackendFunction = async (functionName, args = []) => {
-    if (isGAS) {
-      if (window.google && window.google.script && window.google.script.run && window.google.script.run[functionName]) {
-        window.google.script.run[functionName](...args);
-      }
-    } else {
-      try {
-        const res = await fetch('/api/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ functionName, args })
-        });
-        const data = await res.json();
-        if (data && data.data) {
-          if (data.data.players) setPlayers(data.data.players);
-          if (data.data.transactions) setTransactions(data.data.transactions);
-          if (data.data.bets) setBets(data.data.bets);
-          if (data.data.chatLogs) setChatLogs(data.data.chatLogs);
-          if (data.data.activeGroupId) setActiveGroupId(data.data.activeGroupId);
-          if (data.data.lineGroups) setLineGroups(data.data.lineGroups);
-        }
-        return data;
-      } catch (err) {
-        console.error(`[API Call Error: ${functionName}]`, err);
-      }
-    }
   };
 
   // Safe portal close & reset function (preserves player data & transaction history)

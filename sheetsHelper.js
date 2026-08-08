@@ -90,7 +90,7 @@ export async function batchFetchSheets() {
   try {
     const response = await sheets.spreadsheets.values.batchGet({
       spreadsheetId,
-      ranges: ['Players!A:G', 'Transactions!A:I', 'Bets!A:L', 'LineChatLogs!A:F'],
+      ranges: ['Players!A:H', 'Transactions!A:I', 'Bets!A:L', 'LineChatLogs!A:F'],
     });
 
     const valueRanges = response.data.valueRanges || [];

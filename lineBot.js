@@ -389,15 +389,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
     return;
   }
 
-  // C. CANCEL DEAL REQUEST
-  const cancelRegex = /^(ยกเลิก|cancel)(?:order|#)?(\d+)$/;
-  if (cancelRegex.test(clean)) {
-    const match = clean.match(cancelRegex);
-    const orderNo = match[2];
-    const result = await db.handleCancelBetRequest(userId, orderNo);
-    await replyToLine(replyToken, result, userId);
-    return;
-  }
+  // C. CANCEL DEAL REQUEST (Removed to allow fall-through to robust cancelBetRegex in parseBetCommand)
   
   // D. INITIATE DEPOSIT
   if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit' || clean === 'เติมเครดิต') {
@@ -513,8 +505,9 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
     return;
   }
 
-  // J. FALLBACK
-  await replyToLine(replyToken, `🤖 ไม่เข้าใจคำสั่ง พิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้ได้ครับ`, userId);
+  // J. FALLBACK: Unrecognized message -> Reassure user that admin will be in touch shortly!
+  const fallbackNotice = `🤖 ไม่เข้าใจคำสั่งครับ ข้อมูลได้รับการบันทึกแล้ว แอดมินจะติดต่อกลับคุณในไม่ช้าครับ 💬\n(หรือพิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้งานได้ครับ 🚀)`;
+  await replyToLine(replyToken, fallbackNotice, userId);
 }
 
 export async function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
@@ -861,7 +854,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   }
 
   // Format 2: [keywords][amount?] (e.g. "ล200", "ถ500", "ชล", "ชถ500")
-  const betRegex = /^(\+?5?[a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
+  const betRegex = /^([+-]?5?[a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
   if (betRegex.test(cleanBetText)) {
     const match = cleanBetText.match(betRegex);
     const cmd = match[1];
@@ -914,8 +907,9 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   
   // Save open bet with groupId for multi-group tracking
   const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal, groupId);
-  if (!saved) {
-    await replyToLine(replyToken, `⚠️ ไม่สามารถบันทึกแผลดวลได้ เครดิตไม่พอครับ`, userId);
+  if (!saved || saved.error) {
+    const bal = saved?.current || 0;
+    await replyToLine(replyToken, `⚠️ เครดิตไม่เพียงพอครับ (คงเหลือ: ${bal.toLocaleString()} pt | ต้องการ: ${amount.toLocaleString()} pt)`, userId);
     return;
   }
   
