@@ -1561,7 +1561,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
             },
             {
               "type": "button",
-              "style": "secondary",
+              "style": "primary",
               "height": "sm",
               "color": "#D32F2F",
               "action": {
@@ -1682,7 +1682,7 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
       "contents": [
         {
           "type": "button",
-          "style": "secondary",
+          "style": "primary",
           "height": "sm",
           "color": "#E53935",
           "action": {
