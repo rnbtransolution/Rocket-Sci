@@ -740,7 +740,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
     db.cancelOpenBet(userId, targetOrderNo).then(async res => {
       if (res.success) {
-        const msg = `❌ [#${res.orderNumber} ยกเลิก] คืน ${res.amount}pt ให้ @${res.creatorName} เรียบร้อยครับ 🚀`;
+        const msg = `🚫 ยกเลิกแผล Order #${res.orderNumber} สำเร็จ!\nคืนแต้ม ${res.amount}pt ให้คุณเรียบร้อยครับ 🚀`;
         if (groupId) {
           await pushToLine(groupId, msg);
         } else {
@@ -750,8 +750,8 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
         await replyToLine(replyToken, `⚠️ เฉพาะเจ้าของแผล (@${res.creatorName}) หรือแอดมินเท่านั้นที่ยกเลิกได้ครับ`, userId);
       } else {
         const notFoundText = targetOrderNo
-          ? `❌ ไม่พบแผล Order #${targetOrderNo} ครับ`
-          : `❌ คุณไม่มีแผลดวลค้างครับ`;
+          ? `🚫 ไม่พบแผล Order #${targetOrderNo} ครับ`
+          : `🚫 คุณไม่มีแผลดวลค้างครับ`;
         await replyToLine(replyToken, notFoundText, userId);
       }
     });
@@ -781,7 +781,19 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     }
     db.matchExistingOpenBet(userId, displayName, targetOrderNo).then(async matched => {
       if (matched && matched.error === 'INSUFFICIENT_BALANCE') {
-        await replyToLine(replyToken, `⚠️ เครดิตไม่พอ (มี ${matched.current}pt ต้องใช้ ${matched.required}pt)`, userId);
+        await replyToLine(replyToken, `❌ เครดิตของคุณไม่พอสำหรับรับแผลนี้ (มี ${matched.current}pt ต้องใช้ ${matched.required}pt)`, userId);
+        return;
+      }
+      if (matched && matched.error === 'ALREADY_MATCHED') {
+        await replyToLine(replyToken, `⚠️ แผล Order #${matched.orderNumber} มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ (กรุณาสร้างแผลใหม่)`, userId);
+        return;
+      }
+      if (matched && matched.error === 'OWN_BET') {
+        await replyToLine(replyToken, `⚠️ คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ`, userId);
+        return;
+      }
+      if (matched && matched.error === 'NOT_FOUND') {
+        await replyToLine(replyToken, `🚫 ไม่พบแผล Order #${matched.targetOrderNo} ในระบบครับ`, userId);
         return;
       }
 
@@ -817,8 +829,8 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
         await Promise.allSettled([groupPush, creatorPush, matcherPush]);
       } else {
         const notFoundText = targetOrderNo
-          ? `❌ ไม่พบแผล Order #${targetOrderNo} ที่เปิดรอคู่ครับ`
-          : `❌ ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ในขณะนี้ครับ`;
+          ? `🚫 ไม่พบแผล Order #${targetOrderNo} ที่เปิดรอคู่ครับ`
+          : `🚫 ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ในขณะนี้ครับ`;
         await replyToLine(replyToken, notFoundText, userId);
       }
     });
@@ -1567,8 +1579,8 @@ export function constructRuleGuideFlex() {
 export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy) {
   const sideShort = side === 'low' ? 'ล' : 'ถ';
   const headerTitle = `${creatorName || 'ผู้เล่น'} ${rangeInfo ? rangeInfo + ' ' : ''}${sideShort}${amount}`;
-  const formulaTitle = `${rangeInfo ? rangeInfo + ' ' : ''}${sideShort} = ${amount}`;
-  const chotaiLabel = isChotoy ? "ชตย (เผื่อช่างไม่ต่อย)" : "แผลดวลสด";
+  const formulaTitle = `${rangeInfo ? rangeInfo + ' ' : ''}${sideShort} = ${amount} pt`;
+  const chotaiLabel = isChotoy ? "ชตย (เผื่อช่างไม่ต่อย) • ล็อกเครดิต" : "แผลดวลสด • ล็อกเครดิต 1:1";
 
   return {
     "type": "bubble",
@@ -1600,7 +1612,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "text": formulaTitle,
           "weight": "bold",
           "color": "#111111",
-          "size": "lg",
+          "size": "md",
           "align": "center"
         },
         {
@@ -1625,92 +1637,18 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
             {
               "type": "box",
               "layout": "vertical",
-              "backgroundColor": "#1E88E5",
+              "backgroundColor": "#2E7D32",
               "cornerRadius": "md",
               "paddingAll": "xs",
               "action": {
                 "type": "message",
-                "label": "ต 100",
-                "text": `ต${orderNo} 100`
-              },
-              "contents": [
-                {
-                  "type": "text",
-                  "text": "ต 100",
-                  "color": "#FFFFFF",
-                  "weight": "bold",
-                  "size": "xs",
-                  "align": "center"
-                }
-              ]
-            },
-            {
-              "type": "box",
-              "layout": "vertical",
-              "backgroundColor": "#1E88E5",
-              "cornerRadius": "md",
-              "paddingAll": "xs",
-              "action": {
-                "type": "message",
-                "label": "ต 200",
-                "text": `ต${orderNo} 200`
-              },
-              "contents": [
-                {
-                  "type": "text",
-                  "text": "ต 200",
-                  "color": "#FFFFFF",
-                  "weight": "bold",
-                  "size": "xs",
-                  "align": "center"
-                }
-              ]
-            },
-            {
-              "type": "box",
-              "layout": "vertical",
-              "backgroundColor": "#1E88E5",
-              "cornerRadius": "md",
-              "paddingAll": "xs",
-              "action": {
-                "type": "message",
-                "label": "ต 300",
-                "text": `ต${orderNo} 300`
-              },
-              "contents": [
-                {
-                  "type": "text",
-                  "text": "ต 300",
-                  "color": "#FFFFFF",
-                  "weight": "bold",
-                  "size": "xs",
-                  "align": "center"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "box",
-          "layout": "horizontal",
-          "spacing": "xs",
-          "margin": "xs",
-          "contents": [
-            {
-              "type": "box",
-              "layout": "vertical",
-              "backgroundColor": "#00796B",
-              "cornerRadius": "md",
-              "paddingAll": "xs",
-              "action": {
-                "type": "message",
-                "label": "ต ทั้งหมด",
+                "label": `ต ${orderNo}`,
                 "text": `ต ${orderNo}`
               },
               "contents": [
                 {
                   "type": "text",
-                  "text": "ต ทั้งหมด",
+                  "text": `⚡ รับแผลดวล (${amount} pt)`,
                   "color": "#FFFFFF",
                   "weight": "bold",
                   "size": "xs",
@@ -1721,18 +1659,18 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
             {
               "type": "box",
               "layout": "vertical",
-              "backgroundColor": "#D32F2F",
+              "backgroundColor": "#C62828",
               "cornerRadius": "md",
               "paddingAll": "xs",
               "action": {
                 "type": "message",
-                "label": "ยกเลิก",
+                "label": `ยกเลิก ${orderNo}`,
                 "text": `ยกเลิก ${orderNo}`
               },
               "contents": [
                 {
                   "type": "text",
-                  "text": "ยกเลิก",
+                  "text": "🚫 ยกเลิกแผล",
                   "color": "#FFFFFF",
                   "weight": "bold",
                   "size": "xs",

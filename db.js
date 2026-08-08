@@ -464,29 +464,74 @@ export async function matchExistingOpenBet(userId, displayName, targetOrderNo = 
   const matcherBal = matcherPlayer ? matcherPlayer.balance : 0;
   const cleanTargetOrder = targetOrderNo ? targetOrderNo.toString().trim().replace(/#/g, '') : null;
 
+  // Search by target order first if specified
+  let targetBet = null;
+  if (cleanTargetOrder) {
+    targetBet = bets.find((b) => {
+      const orderStr = b.orderNumber.toString();
+      return orderStr === cleanTargetOrder || orderStr.endsWith(cleanTargetOrder);
+    });
+  }
+
+  if (cleanTargetOrder && !targetBet) {
+    return { error: 'NOT_FOUND', targetOrderNo: cleanTargetOrder };
+  }
+
+  if (targetBet) {
+    if (targetBet.status === 'matched' || targetBet.status === 'resolved' || targetBet.status === 'cancelled') {
+      return { error: 'ALREADY_MATCHED', orderNumber: targetBet.orderNumber };
+    }
+
+    const creatorId = targetBet.playerLowId ? cleanUserId(targetBet.playerLowId) : cleanUserId(targetBet.playerHighId);
+    if (creatorId === searchId) {
+      return { error: 'OWN_BET', orderNumber: targetBet.orderNumber };
+    }
+
+    if (matcherBal < targetBet.amount) {
+      return { error: 'INSUFFICIENT_BALANCE', required: targetBet.amount, current: matcherBal, orderNumber: targetBet.orderNumber };
+    }
+
+    if (!targetBet.playerLowId) {
+      targetBet.playerLowId = searchId;
+      targetBet.playerLowName = displayName;
+    } else {
+      targetBet.playerHighId = searchId;
+      targetBet.playerHighName = displayName;
+    }
+
+    targetBet.status = 'matched';
+
+    // Update in Google Sheets
+    updateRowInSheet('Bets', targetBet.orderNumber, {
+      1: targetBet.playerLowId,
+      2: targetBet.playerLowName,
+      3: targetBet.playerHighId,
+      4: targetBet.playerHighName,
+      9: 'matched',
+    });
+
+    // Deduct credit from matcher
+    await adjustPlayerBalance(searchId, -targetBet.amount, displayName);
+
+    return {
+      orderNumber: targetBet.orderNumber,
+      amount: targetBet.amount,
+      playerLowName: targetBet.playerLowName,
+      playerHighName: targetBet.playerHighName,
+      creatorId: creatorId,
+      matcherId: searchId,
+    };
+  }
+
+  // If no target specified, match first open pending bet
   for (const bet of bets) {
     if (bet.status === 'pending_match') {
-      if (
-        cleanUserId(bet.playerLowId) === searchId ||
-        cleanUserId(bet.playerHighId) === searchId
-      ) {
-        continue; // Cannot match own bet
-      }
+      const creatorId = bet.playerLowId ? cleanUserId(bet.playerLowId) : cleanUserId(bet.playerHighId);
+      if (creatorId === searchId) continue; // Skip own bet
 
-      // If specific order number target requested, verify match
-      if (cleanTargetOrder) {
-        const orderStr = bet.orderNumber.toString();
-        if (orderStr !== cleanTargetOrder && !orderStr.endsWith(cleanTargetOrder)) {
-          continue;
-        }
-      }
-
-      // Strict Credit Check: Matcher must have enough balance
       if (matcherBal < bet.amount) {
-        return { error: 'INSUFFICIENT_BALANCE', required: bet.amount, current: matcherBal };
+        return { error: 'INSUFFICIENT_BALANCE', required: bet.amount, current: matcherBal, orderNumber: bet.orderNumber };
       }
-
-      const creatorId = bet.playerLowId ? bet.playerLowId : bet.playerHighId;
 
       if (!bet.playerLowId) {
         bet.playerLowId = searchId;
@@ -520,7 +565,8 @@ export async function matchExistingOpenBet(userId, displayName, targetOrderNo = 
       };
     }
   }
-  return null;
+
+  return { error: 'NO_OPEN_BET' };
 }
 
 export function getPendingBetsList() {
@@ -1106,37 +1152,37 @@ export async function adminRequestCancelBet(betId) {
 
 export function handleCancelBetRequest(userId, orderNo) {
   const searchId = cleanUserId(userId);
-  if (!searchId || !orderNo) return '❌ ผิดพลาด: ไม่สามารถทำรายการได้';
+  if (!searchId || !orderNo) return '🚫 ไม่สามารถทำรายการยกเลิกได้ครับ';
   const orderStr = orderNo.toString().trim();
   const bet = bets.find((b) => b.orderNumber === orderStr);
 
-  if (!bet) return `❌ ไม่พบเลขแผลดวล Order #${orderNo} ในระบบ`;
+  if (!bet) return `🚫 ไม่พบแผลดวล Order #${orderNo} ในระบบครับ`;
 
   if (
     cleanUserId(bet.playerLowId) !== searchId &&
     cleanUserId(bet.playerHighId) !== searchId
   ) {
-    return '❌ ขออภัยค่ะ แผลดวลนี้ไม่ใช่แผลของคุณ';
+    return '🚫 ขออภัยครับ แผลดวลนี้ไม่ใช่แผลของคุณ';
   }
 
   if (bet.status === 'resolved' || bet.status === 'cancelled') {
-    return '⚠️ แผลดวลนี้จบหรือถูกยกเลิกไปแล้วเรียบร้อยค่ะ';
+    return `⚠️ แผลดวล Order #${orderNo} จบหรือถูกยกเลิกแล้วครับ`;
   }
 
   if (bet.status === 'pending_match') {
     bet.status = 'cancelled';
     updateRowInSheet('Bets', orderStr, { 9: 'cancelled' });
     adjustPlayerBalance(searchId, bet.amount);
-    return `❌ ยกเลิกแผล Order #${orderNo} สำเร็จ!\nระบบได้ทำการยกเลิกแผลและคืนแต้ม ${bet.amount} เครดิตเข้าบัญชีคุณเรียบร้อยแล้วค่ะ`;
+    return `🚫 ยกเลิกแผล Order #${orderNo} สำเร็จ!\nคืนแต้ม ${bet.amount}pt เรียบร้อยครับ 🚀`;
   }
 
   if (bet.status === 'matched') {
     bet.status = 'pending_cancel';
     updateRowInSheet('Bets', orderStr, { 9: 'pending_cancel' });
-    return `⚠️ ร้องขอยกเลิกแผล Order #${orderNo} สำเร็จ\nเนื่องจากแผลถูกจับคู่แล้ว ต้องรอการยืนยันยกเลิกจากฝั่งคู่ดวลของคุณค่ะ`;
+    return `⛔ ร้องขอยกเลิก Order #${orderNo} (รอคู่ดวลกดยืนยันครับ 🚀)`;
   }
 
-  return '❌ ผิดพลาดในการปรับปรุงสถานะแผล';
+  return '🚫 ผิดพลาดในการปรับปรุงสถานะแผล';
 }
 
 export function verifyMockSlipFromClient(depositAmt, realAmt, ref, isQRValid, isDupe) {
