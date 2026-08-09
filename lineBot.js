@@ -723,12 +723,6 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
   const bankFlex = constructBankingFlex("deposit", finalAmount, `เติมเงินสำเร็จผ่านระบบสแกนสลิปออโต้`, null, userId);
   await replyToLine(replyToken, bankFlex, userId);
 }
-  db.logTransaction(userId, displayName, requestedAmount, actualAmount, refCode, 'success', `Auto approved via SlipCheck API. Ref: ${refCode}`);
-
-  // Send Money In Notification Card
-  const bankFlex = constructBankingFlex("deposit", actualAmount, `เติมเงินสำเร็จผ่าน Slip API`, null, userId);
-  await replyToLine(replyToken, bankFlex, userId);
-}
 
 // --- ROCKET BET COMMAND PARSING LOGIC ---
 
