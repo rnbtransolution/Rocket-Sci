@@ -1534,14 +1534,14 @@ export function constructRuleGuideFlex() {
       "contents": [
         {
           "type": "text",
-          "text": "🔵 ฝั่งทายชนะ (ช่างไล่ / ต่ำ):",
+          "text": "🔵 ช่างไล่ (ต่ำ):",
           "weight": "bold",
           "color": "#1E88E5",
           "size": "xs"
         },
         {
           "type": "text",
-          "text": "พิมพ์: ชล, a, ไล่, ล, +5ชล, -5ชล ตามด้วยจำนวนเงิน (เช่น ชล100)",
+          "text": "ชล, a, ไล่, ล, +5ชล, -5ชล",
           "color": "#555555",
           "size": "xxs",
           "wrap": true
@@ -1552,14 +1552,14 @@ export function constructRuleGuideFlex() {
         },
         {
           "type": "text",
-          "text": "🔴 ฝั่งทายแพ้ (ช่างยั่ง / ถอย / สูง):",
+          "text": "🔴 ช่างถอย (สูง):",
           "weight": "bold",
           "color": "#D32F2F",
           "size": "xs"
         },
         {
           "type": "text",
-          "text": "พิมพ์: ชย, ชถ, ย, ถ, ยั่ง, ถอย, +5ชย, -5ชย (เช่น ชถ200)",
+          "text": "ชย, ชถ, ย, ถ, ยั่ง, ถอย, +5ชย, -5ชย",
           "color": "#555555",
           "size": "xxs",
           "wrap": true
@@ -1570,14 +1570,32 @@ export function constructRuleGuideFlex() {
         },
         {
           "type": "text",
-          "text": "🎯 เปิดราคาเอง & ยอมรับแผล:",
+          "text": "🎯 เปิดราคาเอง:",
           "weight": "bold",
           "color": "#E65100",
           "size": "xs"
         },
         {
           "type": "text",
-          "text": "เปิดราคาเต็ม: 300-340ล500, 345-385ถ500 ชตย\nจับคู่แผล: พิมพ์ ต, ตต, ติด, ครับ, เค, จ้า",
+          "text": "300-340ล500, 345-385ถ500 ชตย",
+          "color": "#555555",
+          "size": "xxs",
+          "wrap": true
+        },
+        {
+          "type": "separator",
+          "margin": "xs"
+        },
+        {
+          "type": "text",
+          "text": "✅ จับคู่แผล:",
+          "weight": "bold",
+          "color": "#2E7D32",
+          "size": "xs"
+        },
+        {
+          "type": "text",
+          "text": "พิมพ์ ต, ตต, ติด, ครับ, เค, จ้า",
           "color": "#555555",
           "size": "xxs",
           "wrap": true
