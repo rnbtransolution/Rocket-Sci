@@ -672,10 +672,52 @@ export function logTransaction(
   status,
   reason
 ) {
+  const searchId = cleanUserId(userId);
   const now = new Date();
   const refStr = refCode ? refCode.toString().toUpperCase() : '';
   const reasonStr = reason ? reason.toString().toLowerCase() : '';
   const isWithdraw = refStr.includes('WD') || refStr.includes('WITHDRAW') || reasonStr.includes('withdraw');
+
+  // Check if there is an existing pending deposit request transaction for this user to update instead of creating a duplicate
+  if (!isWithdraw) {
+    const existingPending = transactions.find(
+      (t) =>
+        cleanUserId(t.playerId) === searchId &&
+        t.status === 'escalated' &&
+        (!t.id.startsWith('WD')) &&
+        (t.slipRef === 'PENDING_SLIP' || (t.reviewReason && t.reviewReason.toString().toLowerCase().includes('waiting for user')))
+    );
+
+    if (existingPending) {
+      if (Number(reqAmt) > 0) {
+        existingPending.requestedAmount = Number(reqAmt);
+      }
+      if (Number(actAmt) >= 0) {
+        existingPending.actualAmount = Number(actAmt);
+      }
+      if (refCode && refCode !== 'PENDING_SLIP') {
+        existingPending.slipRef = refCode;
+      }
+      existingPending.status = status;
+      existingPending.reviewReason = reason;
+      existingPending.timestamp = formatTime(now);
+      if (!existingPending.logs) existingPending.logs = [];
+      existingPending.logs.push(`Updated [${formatTime(now)}]: ${reason}`);
+
+      // Update in Google Sheets
+      updateRowInSheet('Transactions', existingPending.id, {
+        3: existingPending.requestedAmount.toString(),
+        4: existingPending.actualAmount.toString(),
+        5: existingPending.slipRef,
+        6: existingPending.status,
+        7: existingPending.reviewReason,
+        8: now.toISOString(),
+      });
+
+      return existingPending.id;
+    }
+  }
+
   const prefix = isWithdraw ? 'WD' : 'TX';
   const txId = prefix + Math.floor(Math.random() * 89999 + 10000);
 

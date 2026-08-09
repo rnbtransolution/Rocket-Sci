@@ -141,6 +141,12 @@ export default function App() {
   const [adminTab, setAdminTab] = useState('rocket'); // 'rocket' | 'review' | 'players' | 'logs' | 'line'
   const [toasts, setToasts] = useState([]);
 
+  // Transaction filtering & search & detail modal states
+  const [txSearchQuery, setTxSearchQuery] = useState('');
+  const [txStatusFilter, setTxStatusFilter] = useState('all'); // 'all' | 'escalated' | 'success' | 'rejected'
+  const [txTypeFilter, setTxTypeFilter] = useState('all'); // 'all' | 'deposit' | 'withdrawal'
+  const [txDetailModal, setTxDetailModal] = useState(null);
+
   // Player bank edit modal state
   const [bankEditModal, setBankEditModal] = useState(null);
   const [bankEditForm, setBankEditForm] = useState({ bankName: '', bankAccount: '', accountName: '' });
@@ -2229,140 +2235,236 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 2: SLIP REVIEWS */}
-          {adminTab === 'review' && (
-            <div className="glass-panel p-5 space-y-4 relative overflow-hidden group">
-              {/* Watermark Icon */}
-              <FileText size={140} className="absolute -bottom-10 -right-10 text-slate-100/30 group-hover:text-amber-100/40 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
+          {/* TAB 2 & TAB 4: HIGH-DENSITY ENTERPRISE TRANSACTION CONTROL SUITE */}
+          {(adminTab === 'review' || adminTab === 'logs') && (() => {
+            const isReviewOnly = adminTab === 'review';
+            const effectiveStatusFilter = isReviewOnly && txStatusFilter === 'all' ? 'escalated' : txStatusFilter;
+
+            const filteredTxList = transactions.filter(tx => {
+              const isWithdrawal = tx.id.startsWith('WD') || 
+                (tx.slipRef && tx.slipRef.toString().toUpperCase().includes('WD')) || 
+                (tx.reviewReason && tx.reviewReason.toString().toLowerCase().includes('withdraw'));
               
-              <div className="relative z-10">
-                <div className="card-header-ref card-header-dot-amber">
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center justify-center gap-2 font-heading">
-                    <FileText size={14} className="text-amber-600 animate-pulse" />
-                    การทำธุรกรรมรออนุมัติแมนนวล (Escalation & Withdrawal Overseer)
-                  </h3>
+              if (txTypeFilter === 'deposit' && isWithdrawal) return false;
+              if (txTypeFilter === 'withdrawal' && !isWithdrawal) return false;
+
+              if (effectiveStatusFilter === 'escalated' && tx.status !== 'escalated') return false;
+              if (effectiveStatusFilter === 'success' && tx.status !== 'success') return false;
+              if (effectiveStatusFilter === 'rejected' && tx.status !== 'rejected') return false;
+
+              if (txSearchQuery.trim()) {
+                const q = txSearchQuery.trim().toLowerCase();
+                const matchId = tx.id && tx.id.toLowerCase().includes(q);
+                const matchName = tx.playerName && tx.playerName.toLowerCase().includes(q);
+                const matchPlayerId = tx.playerId && tx.playerId.toLowerCase().includes(q);
+                const matchRef = tx.slipRef && tx.slipRef.toString().toLowerCase().includes(q);
+                const matchReason = tx.reviewReason && tx.reviewReason.toString().toLowerCase().includes(q);
+                if (!matchId && !matchName && !matchPlayerId && !matchRef && !matchReason) return false;
+              }
+
+              return true;
+            });
+
+            const escalatedCount = transactions.filter(t => t.status === 'escalated').length;
+            const successCount = transactions.filter(t => t.status === 'success').length;
+            const rejectedCount = transactions.filter(t => t.status === 'rejected').length;
+
+            return (
+              <div className="glass-panel p-5 space-y-4 relative overflow-hidden group">
+                <FileText size={140} className="absolute -bottom-10 -right-10 text-slate-100/30 group-hover:text-amber-100/40 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
+                
+                <div className="relative z-10 space-y-3">
+                  <div className="card-header-ref card-header-dot-amber">
+                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center justify-center gap-2 font-heading">
+                      <FileText size={14} className="text-amber-600 animate-pulse" />
+                      {isReviewOnly ? 'ศูนย์จัดการธุรกรรมรออนุมัติ (Escalation & Withdrawal Overseer)' : 'ประวัติทำรายการฝาก-ถอนของเงินเครดิตระบบ (Credit Transactions Archive)'}
+                    </h3>
+                  </div>
+                  <p className="text-[11px] text-slate-500 text-center font-sans">
+                    {isReviewOnly 
+                      ? 'รายการสลิปโอนที่มีการเอสคาเลท หรือคำขอถอนเงินที่รอแอดมินยืนยัน สามารถค้นหา กรอง และอนุมัติได้ทันที'
+                      : 'ตารางบันทึกประวัติการทำรายการเติมเงิน สแกนสลิป และถอนเครดิตทั้งหมดในระบบ'}
+                  </p>
+
+                  {/* Filter & Search Bar */}
+                  <div className="flex items-center justify-between gap-3 flex-wrap bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <div className="flex items-center gap-2 flex-wrap text-xs font-bold font-sans">
+                      <span className="text-slate-400 text-[11px] uppercase tracking-wider">สถานะ:</span>
+                      <button 
+                        onClick={() => setTxStatusFilter('all')}
+                        className={`px-2.5 py-1 rounded-lg transition-all ${txStatusFilter === 'all' ? 'bg-slate-800 text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}`}
+                      >
+                        ทั้งหมด ({transactions.length})
+                      </button>
+                      <button 
+                        onClick={() => setTxStatusFilter('escalated')}
+                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${txStatusFilter === 'escalated' ? 'bg-amber-600 text-white shadow-xs' : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'}`}
+                      >
+                        <span>⏳ รออนุมัติ</span>
+                        {escalatedCount > 0 && <span className="bg-amber-200 text-amber-900 text-[10px] px-1.5 py-0.2 rounded-full font-black">{escalatedCount}</span>}
+                      </button>
+                      <button 
+                        onClick={() => setTxStatusFilter('success')}
+                        className={`px-2.5 py-1 rounded-lg transition-all ${txStatusFilter === 'success' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'}`}
+                      >
+                        ✅ อนุมัติแล้ว ({successCount})
+                      </button>
+                      <button 
+                        onClick={() => setTxStatusFilter('rejected')}
+                        className={`px-2.5 py-1 rounded-lg transition-all ${txStatusFilter === 'rejected' ? 'bg-rose-600 text-white shadow-xs' : 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100'}`}
+                      >
+                        ❌ ปฏิเสธ ({rejectedCount})
+                      </button>
+
+                      <div className="h-4 w-px bg-slate-200 mx-1 hidden md:block"></div>
+
+                      <span className="text-slate-400 text-[11px] uppercase tracking-wider hidden md:inline">ประเภท:</span>
+                      <button 
+                        onClick={() => setTxTypeFilter('all')}
+                        className={`px-2 py-1 rounded-lg text-[11px] transition-all ${txTypeFilter === 'all' ? 'bg-slate-700 text-white' : 'bg-white text-slate-500 border border-slate-200'}`}
+                      >
+                        ทั้งหมด
+                      </button>
+                      <button 
+                        onClick={() => setTxTypeFilter('deposit')}
+                        className={`px-2 py-1 rounded-lg text-[11px] transition-all ${txTypeFilter === 'deposit' ? 'bg-emerald-700 text-white' : 'bg-white text-emerald-700 border border-emerald-200'}`}
+                      >
+                        📥 ฝากเงิน
+                      </button>
+                      <button 
+                        onClick={() => setTxTypeFilter('withdrawal')}
+                        className={`px-2 py-1 rounded-lg text-[11px] transition-all ${txTypeFilter === 'withdrawal' ? 'bg-rose-700 text-white' : 'bg-white text-rose-700 border border-rose-200'}`}
+                      >
+                        📤 ถอนเงิน
+                      </button>
+                    </div>
+
+                    <div className="relative min-w-[240px] flex-1 md:flex-initial">
+                      <input 
+                        type="text" 
+                        placeholder="🔍 ค้นหา TX ID / ชื่อผู้เล่น / LINE ID / Ref..." 
+                        value={txSearchQuery}
+                        onChange={e => setTxSearchQuery(e.target.value)}
+                        className="w-full pl-3 pr-8 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-sans text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-2xs"
+                      />
+                      {txSearchQuery && (
+                        <button 
+                          onClick={() => setTxSearchQuery('')}
+                          className="absolute right-2.5 top-1.5 text-slate-400 hover:text-slate-600 font-bold text-xs"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-500 text-center font-sans mt-2">
-                  รายการถอนเงินของลูกค้า หรือบิลสลิปโอนที่มีการเอสคาเลท (ยอดไม่ตรง/สลิปซ้ำ/ภาพชำรุด) แอดมินต้องตรวจสอบบัญชีธนาคารปลายทางแล้วกดยืนยัน
-                </p>
-              </div>
 
-              {transactions.filter(t => t.status === 'escalated').length === 0 ? (
-                <div className="py-12 text-center text-slate-400 space-y-2 font-sans">
-                  <CheckCircle size={32} className="mx-auto text-emerald-600" />
-                  <p className="font-bold text-xs">รายการตรวจสอบธุรกรรมเคลียร์หมดแล้ว!</p>
-                  <p className="text-[11px] text-slate-500">สลิปฝากออโต้จะเติมอัตโนมัติ 1:1 ส่วนถอนเงินและเอสคาเลชั่นจะรอตรงนี้</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {transactions.filter(t => t.status === 'escalated').map(tx => {
-                    const isWithdrawal = tx.id.startsWith('WD') || 
-                      (tx.slipRef && tx.slipRef.toString().toUpperCase().includes('WD')) || 
-                      (tx.reviewReason && tx.reviewReason.toString().toLowerCase().includes('withdraw'));
-                    const cardBgStyle = isWithdrawal 
-                      ? 'p-4 rounded-2xl bg-gradient-to-br from-rose-50/80 via-white to-red-50/60 border-2 border-rose-300 flex flex-col md:flex-row gap-4 items-stretch shadow-sm'
-                      : 'p-4 rounded-2xl bg-gradient-to-br from-emerald-50/80 via-white to-teal-50/60 border-2 border-emerald-300 flex flex-col md:flex-row gap-4 items-stretch shadow-sm';
+                {/* High-Density Compact Transaction Table */}
+                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                  <table className="w-full text-left font-sans text-xs border-collapse min-w-[850px]">
+                    <thead className="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider text-[10.5px]">
+                      <tr className="border-b border-slate-200">
+                        <th className="py-2.5 px-3">TX ID / เวลา</th>
+                        <th className="py-2.5 px-3">ผู้เล่น / LINE ID</th>
+                        <th className="py-2.5 px-3 text-center">ประเภท</th>
+                        <th className="py-2.5 px-3 text-right">ยอดสั่ง (THB)</th>
+                        <th className="py-2.5 px-3 text-right">ยอดสแกนจริง</th>
+                        <th className="py-2.5 px-3 text-center">สถานะ</th>
+                        <th className="py-2.5 px-3">เลขอ้างอิง / หมายเหตุ</th>
+                        <th className="py-2.5 px-3 text-center">จัดการ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      {filteredTxList.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="py-10 text-center text-slate-400 font-sans">
+                            <p className="font-bold text-xs">-- ไม่พบรายการธุรกรรมตามเงื่อนไขที่เลือก --</p>
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredTxList.map(tx => {
+                          const isWithdrawal = tx.id.startsWith('WD') || 
+                            (tx.slipRef && tx.slipRef.toString().toUpperCase().includes('WD')) || 
+                            (tx.reviewReason && tx.reviewReason.toString().toLowerCase().includes('withdraw'));
+                          
+                          return (
+                            <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="py-2.5 px-3">
+                                <div className="font-bold font-mono text-slate-900 text-[11px]">{tx.id}</div>
+                                <div className="text-[9.5px] text-slate-400 font-mono">{tx.timestamp}</div>
+                              </td>
 
-                    return (
-                      <div key={tx.id} className={cardBgStyle}>
-                        <div className="shrink-0 flex justify-center">
-                          {isWithdrawal ? (
-                            <div className="w-[180px] h-[240px] bg-gradient-to-b from-rose-100 to-rose-200 border border-rose-300 rounded-2xl p-4 flex flex-col items-center justify-between text-center select-none shadow">
-                              <div className="text-3xl mt-2 animate-bounce">📤</div>
-                              <div className="space-y-1">
-                                <span className="text-[10px] text-rose-800 font-black uppercase tracking-wider bg-rose-200 px-2 py-0.5 rounded-md">📤 รายการถอนเงิน</span>
-                                <h4 className="text-xl font-black text-rose-950 font-mono">-{tx.requestedAmount} pt</h4>
-                              </div>
-                              <div className="w-full bg-white/90 border border-rose-300 rounded-lg p-2 text-[9.5px] text-rose-900 font-bold leading-normal font-sans shadow-xs">
-                                {tx.reviewReason.replace('Withdrawal request to ', '')}
-                              </div>
-                            </div>
-                          ) : (
-                            renderSlipCard(tx.presetId, true, (tx.requestedAmount && tx.requestedAmount > 0) ? tx.requestedAmount : (tx.actualAmount || 100))
-                          )}
-                        </div>
+                              <td className="py-2.5 px-3">
+                                <div className="font-bold text-slate-800">{tx.playerName}</div>
+                                <div className="text-[9.5px] text-slate-400 font-mono">{tx.playerId}</div>
+                              </td>
 
-                        <div className="flex-1 flex flex-col justify-between gap-3 font-sans text-xs">
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: isWithdrawal ? '#FCA5A5' : '#6EE7B7' }}>
-                              <div className="flex items-center gap-2">
+                              <td className="py-2.5 px-3 text-center">
                                 {isWithdrawal ? (
-                                  <span className="px-2.5 py-1 bg-rose-700 text-white font-extrabold rounded-lg text-[10px] font-heading tracking-wide uppercase shadow-xs">
-                                    📤 รายการถอนเงิน (WITHDRAWAL REQUEST)
-                                  </span>
+                                  <span className="px-2 py-0.5 bg-rose-100 text-rose-800 font-black rounded-md text-[10px]">📤 ถอนเงิน</span>
                                 ) : (
-                                  <span className="px-2.5 py-1 bg-emerald-700 text-white font-extrabold rounded-lg text-[10px] font-heading tracking-wide uppercase shadow-xs">
-                                    📥 รายการฝากเงิน (DEPOSIT REQUEST)
-                                  </span>
+                                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-black rounded-md text-[10px]">📥 ฝากเงิน</span>
                                 )}
-                                <span className="px-2 py-0.5 bg-slate-200/80 rounded text-[10px] font-mono text-slate-700 font-bold">{isWithdrawal ? `WITHDRAW: ${tx.id}` : `TX: ${tx.id}`}</span>
-                              </div>
-                              <span className={`font-extrabold text-[11px] flex items-center gap-1 ${isWithdrawal ? 'text-rose-700' : 'text-emerald-800'}`}>
-                                <AlertTriangle size={12} />
-                                {isWithdrawal ? 'คำขอถอนยอด รอโอนเงิน' : `สาเหตุค้าง: ${tx.reviewReason}`}
-                              </span>
-                            </div>
+                              </td>
 
-                            {isWithdrawal ? (
-                              <div className="bg-white p-3 rounded-xl border border-rose-200 space-y-1.5 leading-normal text-slate-700 font-sans shadow-2xs">
-                                <div className="font-bold text-rose-950 flex items-center gap-1 text-xs">
-                                  <span>💸 ช่องทางโอนเงินคืนผู้เล่น:</span>
-                                </div>
-                                <div>• ผู้เล่นที่ทำรายการ: <span className="font-extrabold text-slate-900">{tx.playerName} ({tx.playerId})</span></div>
-                                <div>• ยอดแต้มที่หักออก: <span className="font-black text-rose-700 font-mono text-sm">-{tx.requestedAmount}.00 pt</span></div>
-                                <div>• บัญชีโอนออกแมนนวล: <span className="font-black text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">{tx.reviewReason.replace('Withdrawal request to ', '')}</span></div>
-                                <div className="text-[10px] text-rose-600 font-medium leading-snug pt-1">
-                                  💡 <b>สำคัญ:</b> แอดมินกรุณาโอนเงินจริงไปยังบัญชีธนาคารด้านบนนี้ให้สำเร็จก่อนกดปุ่มอนุมัติ
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="grid grid-cols-2 gap-2 bg-white p-3 rounded-xl border border-emerald-200 font-mono shadow-2xs">
-                                <div>
-                                  <span className="text-[9.5px] text-slate-500 uppercase block font-sans font-bold">ยอดเงินเติมที่ผู้เล่นสั่ง:</span>
-                                  <span className="text-lg font-black text-sky-800">{tx.requestedAmount}.00 THB</span>
-                                </div>
-                                <div className="border-l border-slate-200 pl-3">
-                                  <span className="text-[9.5px] text-slate-500 uppercase block font-sans font-bold">ยอดสแกนจริงจากสลิปโอน:</span>
-                                  <span className="text-lg font-black text-emerald-700">{tx.actualAmount}.00 THB</span>
-                                </div>
-                              </div>
-                            )}
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                                {isWithdrawal ? `-${tx.requestedAmount}` : tx.requestedAmount}.00
+                              </td>
 
-                            {!isWithdrawal && (
-                              <div className="p-2.5 bg-white border border-emerald-100 rounded-xl text-[10px] text-slate-600 space-y-0.5" style={{ maxHeight: '80px', overflowY: 'auto' }}>
-                                <span className="font-bold text-emerald-800 text-[9px] block uppercase font-sans">Scan analysis logs:</span>
-                                {tx.logs.map((l, i) => (
-                                  <div key={i} className="font-mono">➜ {l}</div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-700">
+                                {tx.actualAmount > 0 ? `${tx.actualAmount}.00` : <span className="text-slate-400 italic">0.00</span>}
+                              </td>
 
-                          <div className="flex items-center gap-2 border-t pt-2 font-sans" style={{ borderColor: isWithdrawal ? '#FCA5A5' : '#6EE7B7' }}>
-                            <button
-                              onClick={() => handleAdminApproveReview(tx.id)}
-                              className={`flex-1 py-2.5 text-white font-black text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md ${
-                                isWithdrawal ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/20' : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20'
-                              }`}
-                            >
-                              <CheckCircle size={14} />
-                              {isWithdrawal ? `ยืนยันว่าโอนแล้ว & อนุมัติถอนเงิน (${tx.requestedAmount} THB)` : `อนุมัติฝากเงินและอัพแต้ม (+${(tx.actualAmount && tx.actualAmount > 0) ? tx.actualAmount : (tx.requestedAmount || 0)} pt)`}
-                            </button>
-                            <button
-                              onClick={() => handleAdminRejectReview(tx.id, isWithdrawal ? 'ปฏิเสธคำขอและส่งแต้มคืนเข้าบัญชี' : 'ปฏิเสธเนื่องจากไม่มียอดโอนจริง')}
-                              className="py-2.5 px-4 bg-slate-100 hover:bg-rose-600 text-slate-700 hover:text-white border border-slate-300 hover:border-rose-600 rounded-xl text-xs font-bold transition-all active:scale-95"
-                            >
-                              ปฏิเสธรายการ
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                              <td className="py-2.5 px-3 text-center">
+                                {tx.status === 'success' && <span className="badge-success px-2 py-0.5 rounded-lg text-[10px] font-bold">✓ อนุมัติแล้ว</span>}
+                                {tx.status === 'escalated' && <span className="badge-warning px-2 py-0.5 rounded-lg text-[10px] font-bold animate-pulse">⏳ รออนุมัติ</span>}
+                                {tx.status === 'rejected' && <span className="badge-high px-2 py-0.5 rounded-lg text-[10px] font-bold">✕ ปฏิเสธ</span>}
+                              </td>
+
+                              <td className="py-2.5 px-3 max-w-[220px]">
+                                <div className="font-mono text-[10px] text-slate-700 font-bold truncate" title={tx.slipRef}>{tx.slipRef}</div>
+                                <div className="text-[9.5px] text-slate-500 truncate" title={tx.reviewReason}>{tx.reviewReason}</div>
+                              </td>
+
+                              <td className="py-2.5 px-3 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  {tx.status === 'escalated' && (
+                                    <>
+                                      <button 
+                                        onClick={() => handleAdminApproveReview(tx.id)}
+                                        className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] rounded-lg transition-all shadow-2xs"
+                                        title="อนุมัติรายการ"
+                                      >
+                                        ✓ อนุมัติ
+                                      </button>
+                                      <button 
+                                        onClick={() => handleAdminRejectReview(tx.id, isWithdrawal ? 'ปฏิเสธคำขอและส่งแต้มคืนเข้าบัญชี' : 'ปฏิเสธเนื่องจากไม่มียอดโอนจริง')}
+                                        className="px-2 py-1 bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-200 text-[10px] font-bold rounded-lg transition-all"
+                                        title="ปฏิเสธรายการ"
+                                      >
+                                        ✕ ปฏิเสธ
+                                      </button>
+                                    </>
+                                  )}
+                                  <button 
+                                    onClick={() => setTxDetailModal(tx)}
+                                    className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition-all border border-slate-300"
+                                    title="ดูสลิปและรายละเอียดเต็ม"
+                                  >
+                                    👁️ สลิป
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            );
+          })()}
 
           {/* TAB 3: PLAYERS CREDIT */}
           {adminTab === 'players' && (
@@ -2878,64 +2980,129 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 4: SYSTEM TRANSACTIONS LOGS */}
-          {adminTab === 'logs' && (
-            <div className="glass-panel p-5 space-y-4 relative overflow-hidden group">
-              {/* Watermark Icon */}
-              <Database size={140} className="absolute -bottom-10 -right-10 text-slate-100/30 group-hover:text-teal-100/40 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
-              
-              <div className="relative z-10">
-                <div className="card-header-ref card-header-dot-teal">
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center justify-center gap-2 font-heading">
-                    <Database size={14} className="text-teal-600" />
-                    ประวัติทำรายการฝาก-ถอนของเงินเครดิตระบบ (Credit Transactions Archive)
-                  </h3>
-                </div>
-              </div>
+          {/* ── TRANSACTION DETAIL & SLIP PREVIEW MODAL ── */}
+          {txDetailModal && (() => {
+            const tx = txDetailModal;
+            const isWithdrawal = tx.id.startsWith('WD') || 
+              (tx.slipRef && tx.slipRef.toString().toUpperCase().includes('WD')) || 
+              (tx.reviewReason && tx.reviewReason.toString().toLowerCase().includes('withdraw'));
 
-              <div className="space-y-2">
-                {transactions.length === 0 ? (
-                  <span className="text-slate-400 italic block py-4 text-center">-- ยังไม่มีทรานแซคชันเกิดขึ้นในเซสชันนี้ --</span>
-                ) : (
-                  transactions.map(tx => (
-                    <div key={tx.id} className="p-3 bg-white border border-slate-200 rounded-xl font-mono text-[11px] flex flex-col md:flex-row md:items-center justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-extrabold text-slate-800">ID: {tx.id}</span>
-                          <span className="text-slate-400">[{tx.timestamp}]</span>
-                          <span className="px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded font-bold text-slate-600 font-sans">
-                            {tx.playerName}
-                          </span>
-                        </div>
-                        {tx.id.startsWith('WD') ? (
-                          <div className="text-slate-600 font-sans">
-                            ขอลดถอนแต้ม: <span className="font-bold text-rose-700 font-mono">-{tx.requestedAmount} pt</span> ➜ โอนออกธนาคาร: <span className="font-bold text-slate-700 font-mono">{tx.actualAmount > 0 ? `${tx.actualAmount} THB` : 'รอโอน'}</span>
+            return (
+              <div 
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in font-sans"
+                onClick={e => { if (e.target === e.currentTarget) setTxDetailModal(null); }}
+              >
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 max-h-[90vh] flex flex-col">
+                  {/* Modal Header */}
+                  <div className={`px-6 py-4 flex items-center justify-between text-white ${isWithdrawal ? 'bg-gradient-to-r from-rose-600 to-red-700' : 'bg-gradient-to-r from-emerald-600 to-teal-700'}`}>
+                    <div>
+                      <h3 className="font-extrabold text-base flex items-center gap-2">
+                        {isWithdrawal ? '📤 รายละเอียดคำขอถอนเงิน' : '📥 รายละเอียดการแจ้งสลิปเติมเงิน'}
+                        <span className="bg-white/20 px-2 py-0.5 rounded font-mono text-xs">{tx.id}</span>
+                      </h3>
+                      <p className="text-white/80 text-xs mt-0.5">ผู้เล่น: {tx.playerName} ({tx.playerId})</p>
+                    </div>
+                    <button 
+                      onClick={() => setTxDetailModal(null)}
+                      className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center font-bold text-white transition-all"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {/* Modal Body */}
+                  <div className="p-6 overflow-y-auto space-y-5 flex-1 text-xs text-slate-800">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Left: e-Slip Visual */}
+                      <div className="flex justify-center shrink-0">
+                        {isWithdrawal ? (
+                          <div className="w-full max-w-xs h-[240px] bg-gradient-to-b from-rose-100 to-rose-200 border border-rose-300 rounded-2xl p-4 flex flex-col items-center justify-between text-center select-none shadow-sm">
+                            <div className="text-4xl mt-2">💸</div>
+                            <div className="space-y-1">
+                              <span className="text-[10px] text-rose-800 font-black uppercase tracking-wider bg-rose-200 px-2 py-0.5 rounded-md">คำขอถอนเงิน</span>
+                              <h4 className="text-2xl font-black text-rose-950 font-mono">-{tx.requestedAmount}.00 THB</h4>
+                            </div>
+                            <div className="w-full bg-white/90 border border-rose-300 rounded-lg p-2 text-[10px] text-rose-900 font-bold leading-normal font-sans shadow-2xs">
+                              {tx.reviewReason.replace('Withdrawal request to ', '')}
+                            </div>
                           </div>
                         ) : (
-                          <div className="text-slate-600 font-sans">
-                            แจ้งสลิปเติม: <span className="font-bold text-sky-700 font-mono">{tx.requestedAmount} THB</span> ➜ โอนจริงตามสแกน: <span className="font-bold text-emerald-700 font-mono">{tx.actualAmount} THB</span>
-                          </div>
+                          renderSlipCard(tx.presetId, true, (tx.requestedAmount && tx.requestedAmount > 0) ? tx.requestedAmount : (tx.actualAmount || 100))
                         )}
-                        <div className="text-[10px] text-slate-400 font-sans">
-                          {tx.id.startsWith('WD') ? (
-                            <span>รายละเอียด: {tx.reviewReason}</span>
-                          ) : (
-                            <span>Ref อ้างอิงสลิป: {tx.slipRef} {tx.reviewReason && <span className="text-rose-600/90 font-bold">• หมายเหตุ: {tx.reviewReason}</span>}</span>
-                          )}
-                        </div>
                       </div>
 
-                      <div className="shrink-0 font-sans font-bold">
-                        {tx.status === 'success' && <span className="badge-success px-2 py-0.5 rounded-lg text-[10px]">อนุมัติแล้ว</span>}
-                        {tx.status === 'escalated' && <span className="badge-warning px-2 py-0.5 rounded-lg text-[10px] animate-pulse">รอตรวจ</span>}
-                        {tx.status === 'rejected' && <span className="badge-high px-2 py-0.5 rounded-lg text-[10px]">ปฏิเสธบิล</span>}
+                      {/* Right: Key Info Grid */}
+                      <div className="space-y-3 flex flex-col justify-between">
+                        <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
+                          <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+                            <span className="text-slate-500 font-bold">สถานะทำรายการ:</span>
+                            <span>
+                              {tx.status === 'success' && <span className="badge-success px-2 py-0.5 rounded-lg font-bold">✓ อนุมัติเรียบร้อย</span>}
+                              {tx.status === 'escalated' && <span className="badge-warning px-2 py-0.5 rounded-lg font-bold animate-pulse">⏳ รออนุมัติแมนนวล</span>}
+                              {tx.status === 'rejected' && <span className="badge-high px-2 py-0.5 rounded-lg font-bold">✕ ปฏิเสธบิล</span>}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 font-mono pt-1">
+                            <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                              <span className="text-[9px] text-slate-400 uppercase block font-sans font-bold">ยอดสั่งเติม:</span>
+                              <span className="text-base font-black text-sky-800">{tx.requestedAmount}.00 THB</span>
+                            </div>
+                            <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                              <span className="text-[9px] text-slate-400 uppercase block font-sans font-bold">ยอดสแกนจริง:</span>
+                              <span className="text-base font-black text-emerald-700">{tx.actualAmount}.00 THB</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1 font-mono text-[11px] pt-1">
+                            <div><span className="text-slate-400 font-sans">เลขอ้างอิง Ref:</span> <strong className="text-slate-900">{tx.slipRef || 'N/A'}</strong></div>
+                            <div><span className="text-slate-400 font-sans">เวลาทำรายการ:</span> <strong className="text-slate-900">{tx.timestamp}</strong></div>
+                            <div><span className="text-slate-400 font-sans">สาเหตุ / หมายเหตุ:</span> <strong className="text-rose-700">{tx.reviewReason}</strong></div>
+                          </div>
+                        </div>
+
+                        {/* OCR Logs */}
+                        {tx.logs && tx.logs.length > 0 && (
+                          <div className="p-3 bg-slate-900 text-slate-200 rounded-xl text-[10px] font-mono space-y-1 max-h-[100px] overflow-y-auto">
+                            <span className="text-emerald-400 font-bold block font-sans">🔍 Scan Analysis Logs:</span>
+                            {tx.logs.map((l, i) => (
+                              <div key={i}>➜ {l}</div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ))
-                )}
+                  </div>
+
+                  {/* Modal Footer */}
+                  <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center gap-3">
+                    <button 
+                      onClick={() => setTxDetailModal(null)}
+                      className="px-4 py-2 border border-slate-300 rounded-xl text-slate-700 font-bold text-xs hover:bg-slate-100 transition-all"
+                    >
+                      ปิดหน้าต่าง
+                    </button>
+                    {tx.status === 'escalated' && (
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => { handleAdminRejectReview(tx.id, isWithdrawal ? 'ปฏิเสธคำขอและส่งแต้มคืนเข้าบัญชี' : 'ปฏิเสธเนื่องจากไม่มียอดโอนจริง'); setTxDetailModal(null); }}
+                          className="px-4 py-2 bg-rose-50 border border-rose-200 hover:bg-rose-600 text-rose-700 hover:text-white rounded-xl text-xs font-bold transition-all"
+                        >
+                          ✕ ปฏิเสธรายการ
+                        </button>
+                        <button 
+                          onClick={() => { handleAdminApproveReview(tx.id); setTxDetailModal(null); }}
+                          className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black shadow-md transition-all active:scale-95"
+                        >
+                          ✓ ยืนยันอนุมัติ ({isWithdrawal ? tx.requestedAmount : (tx.actualAmount || tx.requestedAmount)} THB)
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* TAB 5: LINE OA VIRTUAL CHAT */}
           {adminTab === 'line' && (
