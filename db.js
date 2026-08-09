@@ -490,7 +490,7 @@ export async function adjustPlayerBalance(userId, delta, displayName) {
 }
 
 // Save an open bet (with credit verification)
-export function saveOpenBet(orderNo, userId, displayName, side, betAmount, type = 'normal', rMin = null, rMax = null, targetGroupId = null, targetGroupName = null, userTypedCmd = null, isPreQuote = false) {
+export function saveOpenBet(orderNo, userId, displayName, side, betAmount, type = 'normal', rMin = null, rMax = null, targetGroupId = null, userTypedCmd = null, isPreQuote = false, targetGroupName = null) {
   const searchId = cleanUserId(userId);
   const isAdminUser = searchId === 'admin' || searchId === 'user' || (typeof userId === 'string' && (userId.toLowerCase() === 'user' || userId.toLowerCase() === 'admin'));
 

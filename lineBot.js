@@ -1600,8 +1600,8 @@ export function constructRuleGuideFlex() {
 
 export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy, userTypedCmd = null, isPreQuote = false) {
   const sideShort = side === 'high' ? 'ล' : 'ถ';
-  const displayCmd = userTypedCmd || `${sideShort}${amount}`;
-  const cardTitle = displayCmd.includes(amount.toString()) ? displayCmd : `${displayCmd} ${amount}pt`;
+  const cmdStr = (userTypedCmd && typeof userTypedCmd === 'string') ? userTypedCmd : `${sideShort}${amount}`;
+  const cardTitle = (typeof cmdStr === 'string' && cmdStr.includes(amount.toString())) ? cmdStr : `${cmdStr} ${amount}pt`;
 
   return {
     "type": "bubble",
