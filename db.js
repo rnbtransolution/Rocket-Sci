@@ -1224,7 +1224,7 @@ export async function handleCancelBetRequest(userId, orderNo) {
     bet.status = 'cancelled';
     updateRowInSheet('Bets', orderStr, { 9: 'cancelled' });
     await adjustPlayerBalance(searchId, bet.amount);
-    return `🚫 ยกเลิกแผล Order #${orderNo} คืนแต้ม ${bet.amount}pt เรียบร้อยครับ 🚀`;
+    return `❌ ยกเลิกแผล Order #${orderNo} สำเร็จ!`;
   }
 
   if (bet.status === 'matched') {

@@ -736,9 +736,9 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     db.cancelOpenBet(userId, targetOrderNo).then(async res => {
       if (res.success) {
         if (groupId) {
-          await pushToLine(groupId, `🚫 ยกเลิก Order #${res.orderNumber} คืนแต้ม ${res.amount}pt เรียบร้อย 🚀`);
+          await pushToLine(groupId, `❌ ยกเลิก Order #${res.orderNumber} สำเร็จ!`);
         } else {
-          await replyToLine(replyToken, `🚫 ยกเลิกแผล Order #${res.orderNumber} สำเร็จ!\nคืนแต้ม ${res.amount}pt ให้คุณเรียบร้อยครับ 🚀`, userId);
+          await replyToLine(replyToken, `❌ ยกเลิกแผล Order #${res.orderNumber} สำเร็จ!`, userId);
         }
       } else if (res.error === 'UNAUTHORIZED') {
         await replyToLine(replyToken, `⚠️ เฉพาะเจ้าของแผล (@${res.creatorName}) หรือแอดมินเท่านั้นที่ยกเลิกได้ครับ`, userId);
@@ -894,7 +894,7 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
       const needed = amount - balance;
       const msg = groupId
         ? `⚠️ แต้มไม่พอ (มี ${balance}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`
-        : `⚠️ เครดิตไม่พอ (มี ${balance}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ`;
+        : `⚠️ เครดิตไม่พอ กรุณาเติมเครดิตครับ`;
       await replyToLine(replyToken, msg, userId);
       return;
     }
@@ -905,7 +905,7 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
       const needed = amount - balance;
       const msg = groupId
         ? `⚠️ แต้มไม่พอ (มี ${balance}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`
-        : `⚠️ เครดิตไม่พอ (มี ${balance}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ`;
+        : `⚠️ เครดิตไม่พอ กรุณาเติมเครดิตครับ`;
       await replyToLine(replyToken, msg, userId);
       return;
     }
@@ -921,7 +921,7 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
     const needed = amount - bal;
     const msg = groupId
       ? `⚠️ แต้มไม่พอ (มี ${bal}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`
-      : `⚠️ เครดิตไม่พอ (มี ${bal}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ`;
+      : `⚠️ เครดิตไม่พอ กรุณาเติมเครดิตครับ`;
     await replyToLine(replyToken, msg, userId);
     return;
   }
@@ -1600,7 +1600,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
       "contents": [
         {
           "type": "text",
-          "text": `Order #${orderNo} • ${headerTitle}`,
+          "text": `Order #${orderNo}`,
           "weight": "bold",
           "color": "#FFFFFF",
           "size": "xs",
@@ -1622,14 +1622,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "size": "md",
           "align": "center"
         },
-        {
-          "type": "text",
-          "text": chotaiLabel,
-          "weight": "bold",
-          "color": isChotoy ? "#E65100" : "#00796B",
-          "size": "xxs",
-          "align": "center"
-        },
+
         {
           "type": "separator",
           "margin": "xs",
@@ -1655,7 +1648,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               "contents": [
                 {
                   "type": "text",
-                  "text": `⚡ รับแผลดวล (${amount} pt)`,
+                  "text": "⚡ รับแผล",
                   "color": "#FFFFFF",
                   "weight": "bold",
                   "size": "xs",
@@ -1677,7 +1670,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               "contents": [
                 {
                   "type": "text",
-                  "text": "🚫 ยกเลิกแผล",
+                  "text": "🚫 ยกเลิก",
                   "color": "#FFFFFF",
                   "weight": "bold",
                   "size": "xs",
