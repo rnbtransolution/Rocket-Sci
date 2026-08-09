@@ -888,33 +888,10 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   // Check if admin account (Admin quotes do NOT require credit deduction as they serve as guidelines)
   const isAdminUser = userId === 'admin' || userId === 'user' || (typeof userId === 'string' && (userId.toLowerCase() === 'user' || userId.toLowerCase() === 'admin'));
 
-  if (!isAdminUser) {
-    const balance = await db.getPlayerBalance(userId, displayName);
-    if (balance < amount) {
-      const needed = amount - balance;
-      const msg = groupId
-        ? `⚠️ แต้มไม่พอ (มี ${balance}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`
-        : `⚠️ เครดิตไม่พอ กรุณาเติมเครดิตครับ`;
-      await replyToLine(replyToken, msg, userId);
-      return;
-    }
-
-    // Deduct balance for regular players
-    const success = await db.adjustPlayerBalance(userId, -amount, displayName);
-    if (!success) {
-      const needed = amount - balance;
-      const msg = groupId
-        ? `⚠️ แต้มไม่พอ (มี ${balance}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`
-        : `⚠️ เครดิตไม่พอ กรุณาเติมเครดิตครับ`;
-      await replyToLine(replyToken, msg, userId);
-      return;
-    }
-  }
-
   // Generate order number
   const orderNo = Math.floor(Math.random() * 899999 + 100000);
   
-  // Save open bet with groupId for multi-group tracking
+  // Save open bet with groupId for multi-group tracking (credit deduction happens inside db.saveOpenBet)
   const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal, groupId);
   if (!saved || saved.error) {
     const bal = saved?.current || 0;

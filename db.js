@@ -399,14 +399,16 @@ export function saveOpenBet(
   const searchId = cleanUserId(userId);
   const betAmount = Number(amount) || 0;
 
+  const isAdminUser = searchId === 'admin' || searchId === 'user' || (typeof userId === 'string' && (userId.toLowerCase() === 'user' || userId.toLowerCase() === 'admin'));
+
   // Anti-Overdraft Guard: verify creator has sufficient balance
   const player = players.find((p) => cleanUserId(p.id) === searchId);
   const currentBalance = player ? player.balance : 0;
-  if (betAmount > 0 && currentBalance < betAmount) {
+  if (!isAdminUser && betAmount > 0 && currentBalance < betAmount) {
     return { error: 'INSUFFICIENT_BALANCE', required: betAmount, current: currentBalance };
   }
   // Lock creator's credit
-  if (betAmount > 0 && player) {
+  if (!isAdminUser && betAmount > 0 && player) {
     player.balance -= betAmount;
     updateRowInSheet('Players', searchId, { 2: player.balance });
   }
