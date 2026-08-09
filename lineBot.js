@@ -1612,7 +1612,7 @@ export function constructRuleGuideFlex() {
 export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy, userTypedCmd = null, isPreQuote = false) {
   const sideShort = side === 'high' ? 'ล' : 'ถ';
   const cmdStr = (userTypedCmd && typeof userTypedCmd === 'string') ? userTypedCmd : `${sideShort}${amount}`;
-  const cardTitle = (typeof cmdStr === 'string' && cmdStr.includes(amount.toString())) ? cmdStr : `${cmdStr} = ${amount} pt`;
+  const cardTitle = (typeof cmdStr === 'string' && cmdStr.includes(amount.toString())) ? cmdStr : `${cmdStr} ${amount}pt`;
 
   return {
     "type": "bubble",
@@ -1662,51 +1662,74 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               "type": "box",
               "layout": "vertical",
               "backgroundColor": "#2E7D32",
-              "cornerRadius": "md",
+              "cornerRadius": "sm",
               "paddingAll": "xs",
               "action": {
                 "type": "message",
-                "label": `⚡ รับเต็ม ${amount}pt`,
-                "text": `ต ${orderNo} ${amount}`
+                "label": "ต100",
+                "text": `ต ${orderNo} 100`
               },
               "contents": [
-                {
-                  "type": "text",
-                  "text": `⚡ รับเต็ม ${amount}pt`,
-                  "color": "#FFFFFF",
-                  "weight": "bold",
-                  "size": "xxs",
-                  "align": "center"
-                }
+                { "type": "text", "text": "ต100", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
               ]
             },
             {
               "type": "box",
               "layout": "vertical",
-              "backgroundColor": "#1565C0",
-              "cornerRadius": "md",
+              "backgroundColor": "#2E7D32",
+              "cornerRadius": "sm",
               "paddingAll": "xs",
               "action": {
                 "type": "message",
-                "label": "✏️ ดวลระบุแต้ม",
-                "text": `ต ${orderNo} `
+                "label": "ต200",
+                "text": `ต ${orderNo} 200`
               },
               "contents": [
-                {
-                  "type": "text",
-                  "text": "✏️ ดวลระบุแต้ม",
-                  "color": "#FFFFFF",
-                  "weight": "bold",
-                  "size": "xxs",
-                  "align": "center"
-                }
+                { "type": "text", "text": "ต200", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
               ]
             },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": "#2E7D32",
+              "cornerRadius": "sm",
+              "paddingAll": "xs",
+              "action": {
+                "type": "message",
+                "label": "ต300",
+                "text": `ต ${orderNo} 300`
+              },
+              "contents": [
+                { "type": "text", "text": "ต300", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": "#2E7D32",
+              "cornerRadius": "sm",
+              "paddingAll": "xs",
+              "action": {
+                "type": "message",
+                "label": "ตทั้งหมด",
+                "text": `ต ${orderNo} ${amount}`
+              },
+              "contents": [
+                { "type": "text", "text": "ตทั้งหมด", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "xs",
+          "contents": [
             {
               "type": "box",
               "layout": "vertical",
               "backgroundColor": "#C62828",
-              "cornerRadius": "md",
+              "cornerRadius": "sm",
               "paddingAll": "xs",
               "action": {
                 "type": "message",
@@ -1714,14 +1737,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
                 "text": `ยกเลิก ${orderNo}`
               },
               "contents": [
-                {
-                  "type": "text",
-                  "text": "🚫 ยกเลิก",
-                  "color": "#FFFFFF",
-                  "weight": "bold",
-                  "size": "xxs",
-                  "align": "center"
-                }
+                { "type": "text", "text": "🚫 ยกเลิกแผลดวลนี้", "color": "#FFFFFF", "weight": "bold", "size": "xs", "align": "center" }
               ]
             }
           ]
