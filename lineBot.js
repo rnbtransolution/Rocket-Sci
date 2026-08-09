@@ -733,9 +733,9 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
 async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   const clean = text.replace(/\s+/g, '').toLowerCase();
   
-  // Keywords definition (Synced 100% with official infographics S__8462544_0 & S__8462541_0)
-  const keywordsLow = ['ชล', 'a', 'ไล่', 'ล', 'ชต่ำ', 'ช่างต่ำ', 'ช่างไล่', '+5ชล', '+5a', '+5ล', '+5ไล่', '-5ชล', '-5a', '-5ล', '-5ไล่', 'ต'];
-  const keywordsHigh = ['ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'สูง', 'ชสูง', 'ช่างสูง', 'ช่างยั่ง', 'ช่างถอย', '+5ชย', '+5ชถ', '+5ย', '+5ถ', '-5ชย', '-5ชถ', '-5ย', '-5ถ', 'ส'];
+  // Keywords definition (Updated: ชล/ไล่/ล -> HIGH (สูง), ชถ/ถอย/ยั่ง -> LOW (ต่ำ))
+  const keywordsHigh = ['ชล', 'a', 'ไล่', 'ล', 'ชสูง', 'ช่างสูง', 'ช่างไล่', '+5ชล', '+5a', '+5ล', '+5ไล่', '-5ชล', '-5a', '-5ล', '-5ไล่', 'ส'];
+  const keywordsLow = ['ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'ต่ำ', 'ชต่ำ', 'ช่างต่ำ', 'ช่างยั่ง', 'ช่างถอย', '+5ชย', '+5ชถ', '+5ย', '+5ถ', '-5ชย', '-5ชถ', '-5ย', '-5ถ', 'ต'];
   const keywordsAccept = ['ต', 'ตต', 'ติด', 'ครับ', 'เค', 'จ้า', 'ยอมรับ', 'ดีล', 'รับแผล', 'รับ'];
   
   // 0. Pending Deals Board Command ("กระดานดวล", "แผลค้าง", "เปิดรอคู่")
