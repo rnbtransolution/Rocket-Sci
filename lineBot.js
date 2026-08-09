@@ -765,39 +765,50 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     const match = clean.match(cancelBetRegex);
     const targetOrderNo = match[2] || null;
 
-    db.cancelOpenBet(userId, targetOrderNo).then(async res => {
-      if (res.success) {
-        if (groupId) {
-          await pushToLine(groupId, `❌ ยกเลิก Order #${res.orderNumber} สำเร็จ!`);
-        } else {
-          await replyToLine(replyToken, `❌ ยกเลิกแผล Order #${res.orderNumber} สำเร็จ!`, userId);
-        }
-      } else if (res.error === 'UNAUTHORIZED') {
-        await replyToLine(replyToken, `⚠️ เฉพาะเจ้าของแผล (@${res.creatorName}) หรือแอดมินเท่านั้นที่ยกเลิกได้ครับ`, userId);
+    const res = await db.cancelOpenBet(userId, targetOrderNo);
+    const tagPrefix = groupId ? `👤 [ถึงคุณ @${displayName}]: ` : '';
+
+    if (res.success) {
+      if (groupId) {
+        await pushToLine(groupId, `❌ ยกเลิก Order #${res.orderNumber} สำเร็จ!`);
       } else {
-        const notFoundText = targetOrderNo
-          ? `🚫 ไม่พบแผล Order #${targetOrderNo} ครับ`
-          : `🚫 คุณไม่มีแผลดวลค้างครับ`;
-        await replyToLine(replyToken, notFoundText, userId);
+        await replyToLine(replyToken, `❌ ยกเลิกแผล Order #${res.orderNumber} สำเร็จ!`, userId);
       }
-    });
+    } else if (res.error === 'UNAUTHORIZED') {
+      const msg = `${tagPrefix}⚠️ เฉพาะเจ้าของแผล (@${res.creatorName}) หรือแอดมินเท่านั้นที่ยกเลิกได้ครับ`;
+      if (groupId) await pushToLine(groupId, msg); else await replyToLine(replyToken, msg, userId);
+    } else {
+      const notFoundText = targetOrderNo
+        ? `${tagPrefix}🚫 ไม่พบแผล Order #${targetOrderNo} ครับ`
+        : `${tagPrefix}🚫 คุณไม่มีแผลดวลค้างครับ`;
+      if (groupId) await pushToLine(groupId, notFoundText); else await replyToLine(replyToken, notFoundText, userId);
+    }
     return true;
   }
 
   // 1. Check Accept Match Command (e.g. "ต", "ต12", "ต 12", "ต905662 400", "12ต", "ต#12", "ติด", "รับแผล")
-  const specificAcceptRegex = /^(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*#?(\d{2,6})(?:\s*\d+)?$/i;
-  const reverseAcceptRegex = /^#?(\d{2,6})\s*(ต|ติด|รับ)(?:\s*\d+)?$/i;
+  const specificAcceptRegex = /^(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*#?(\d{2,6})(?:\s*(\d+))?$/i;
+  const reverseAcceptRegex = /^#?(\d{2,6})\s*(ต|ติด|รับ)(?:\s*(\d+))?$/i;
   let targetOrderNo = null;
+  let customMatchAmount = null;
 
   const rawTrimmed = text.trim();
   if (specificAcceptRegex.test(rawTrimmed)) {
-    targetOrderNo = rawTrimmed.match(specificAcceptRegex)[2];
+    const m = rawTrimmed.match(specificAcceptRegex);
+    targetOrderNo = m[2];
+    if (m[3]) customMatchAmount = parseInt(m[3]);
   } else if (specificAcceptRegex.test(clean)) {
-    targetOrderNo = clean.match(specificAcceptRegex)[2];
+    const m = clean.match(specificAcceptRegex);
+    targetOrderNo = m[2];
+    if (m[3]) customMatchAmount = parseInt(m[3]);
   } else if (reverseAcceptRegex.test(rawTrimmed)) {
-    targetOrderNo = rawTrimmed.match(reverseAcceptRegex)[1];
+    const m = rawTrimmed.match(reverseAcceptRegex);
+    targetOrderNo = m[1];
+    if (m[3]) customMatchAmount = parseInt(m[3]);
   } else if (reverseAcceptRegex.test(clean)) {
-    targetOrderNo = clean.match(reverseAcceptRegex)[1];
+    const m = clean.match(reverseAcceptRegex);
+    targetOrderNo = m[1];
+    if (m[3]) customMatchAmount = parseInt(m[3]);
   }
 
   if (keywordsAccept.includes(clean) || targetOrderNo) {
@@ -817,68 +828,71 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
         return true;
       }
     }
-    db.matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmount).then(async matched => {
+
+    const matched = await db.matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmount);
+    const tagPrefix = groupId ? `👤 [ถึงคุณ @${displayName}]: ` : '';
+
+    if (matched && matched.error === 'BELOW_MIN_LIMIT') {
+      await sendNotice(`${tagPrefix}⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${matched.provided} pt)`);
+      return true;
+    }
+    if (matched && matched.error === 'INSUFFICIENT_BALANCE') {
+      const needed = matched.required - matched.current;
+      await sendNotice(`${tagPrefix}⚠️ แต้มไม่พอ (มี ${matched.current}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`);
+      return true;
+    }
+    if (matched && matched.error === 'ALREADY_MATCHED') {
+      await sendNotice(`${tagPrefix}⚠️ แผล Order #${matched.orderNumber} มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ`);
+      return true;
+    }
+    if (matched && matched.error === 'OWN_BET') {
+      await sendNotice(`${tagPrefix}⚠️ คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ`);
+      return true;
+    }
+    if (matched && matched.error === 'NOT_FOUND') {
+      await sendNotice(`${tagPrefix}🚫 ไม่พบแผล Order #${matched.targetOrderNo || targetOrderNo} ในระบบครับ`);
+      return true;
+    }
+
+    if (matched && matched.orderNumber) {
+      // Parallelize push notifications (Group notice + Private 1-on-1 DMs) concurrently!
+      const flexMatcher = constructMatchNotificationFlex(matched.orderNumber, matched.amount, matched.playerLowName, matched.playerHighName, matched.rangeInfo, matched.isChotoy, matched.rocketName);
+
+      const groupPush = groupId
+        ? pushToLine(groupId, `☄️ [#${matched.orderNumber} แมตช์!] @${matched.playerLowName} (ต่ำ) 🆚 @${matched.playerHighName} (สูง) | ${matched.amount}pt 🚀`)
+        : replyToLine(replyToken, flexMatcher, userId);
+
+      const creatorPush = (async () => {
+        try {
+          const creatorName = matched.playerLowName || matched.playerHighName;
+          const creatorBal = await db.getPlayerBalance(matched.creatorId, creatorName);
+          const flexCreator = constructMatchNotificationFlex(matched.orderNumber, matched.amount, displayName, 'creator', creatorBal);
+          await pushToLine(matched.creatorId, flexCreator);
+        } catch (e) {
+          console.error('[Match DM Creator Push Error]', e);
+        }
+      })();
+
+      const matcherPush = (async () => {
+        try {
+          if (!groupId) return;
+          const matcherBal = await db.getPlayerBalance(matched.matcherId, displayName);
+          await pushToLine(matched.matcherId, flexMatcher);
+        } catch (e) {
+          console.error('[Match DM Matcher Push Error]', e);
+        }
+      })();
+
+      await Promise.allSettled([groupPush, creatorPush, matcherPush]);
+      return true;
+    } else {
+      const notFoundText = targetOrderNo
+        ? `🚫 ไม่พบแผล Order #${targetOrderNo} ที่เปิดรอคู่ครับ`
+        : `🚫 ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ในขณะนี้ครับ`;
       const tagPrefix = groupId ? `👤 [ถึงคุณ @${displayName}]: ` : '';
-      if (matched && matched.error === 'BELOW_MIN_LIMIT') {
-        await sendNotice(`${tagPrefix}⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${matched.provided} pt)`);
-        return;
-      }
-      if (matched && matched.error === 'INSUFFICIENT_BALANCE') {
-        const needed = matched.required - matched.current;
-        await sendNotice(`${tagPrefix}⚠️ แต้มไม่พอ (มี ${matched.current}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`);
-        return;
-      }
-      if (matched && matched.error === 'ALREADY_MATCHED') {
-        await sendNotice(`${tagPrefix}⚠️ แผล Order #${matched.orderNumber} มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ`);
-        return;
-      }
-      if (matched && matched.error === 'OWN_BET') {
-        await sendNotice(`${tagPrefix}⚠️ คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ`);
-        return;
-      }
-      if (matched && matched.error === 'NOT_FOUND') {
-        await sendNotice(`${tagPrefix}🚫 ไม่พบแผล Order #${matched.targetOrderNo} ในระบบครับ`);
-        return;
-      }
-
-      if (matched && matched.orderNumber) {
-        // Parallelize push notifications (Group notice + Private 1-on-1 DMs) concurrently!
-        const flexMatcher = constructMatchNotificationFlex(matched.orderNumber, matched.amount, matched.playerLowName, matched.playerHighName, matched.rangeInfo, matched.isChotoy, matched.rocketName);
-
-        const groupPush = groupId
-          ? pushToLine(groupId, `☄️ [#${matched.orderNumber} แมตช์!] @${matched.playerLowName} (ต่ำ) 🆚 @${matched.playerHighName} (สูง) | ${matched.amount}pt 🚀`)
-          : replyToLine(replyToken, flexMatcher, userId);
-
-        const creatorPush = (async () => {
-          try {
-            const creatorName = matched.playerLowName || matched.playerHighName;
-            const creatorBal = await db.getPlayerBalance(matched.creatorId, creatorName);
-            const flexCreator = constructMatchNotificationFlex(matched.orderNumber, matched.amount, displayName, 'creator', creatorBal);
-            await pushToLine(matched.creatorId, flexCreator);
-          } catch (e) {
-            console.error('[Match DM Creator Push Error]', e);
-          }
-        })();
-
-        const matcherPush = (async () => {
-          try {
-            if (!groupId) return;
-            const matcherBal = await db.getPlayerBalance(matched.matcherId, displayName);
-            await pushToLine(matched.matcherId, flexMatcher);
-          } catch (e) {
-            console.error('[Match DM Matcher Push Error]', e);
-          }
-        })();
-
-        await Promise.allSettled([groupPush, creatorPush, matcherPush]);
-      } else {
-        const notFoundText = targetOrderNo
-          ? `🚫 ไม่พบแผล Order #${targetOrderNo} ที่เปิดรอคู่ครับ`
-          : `🚫 ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ในขณะนี้ครับ`;
-        await replyToLine(replyToken, notFoundText, userId);
-      }
-    });
-    return true;
+      await sendNotice(`${tagPrefix}${notFoundText}`);
+      return true;
+    }
   }
 
   // 2. Betting commands (e.g., "ล200", "ถ500", "+5ชล200", "300-340ล", "345-385ล500 ชตย")
