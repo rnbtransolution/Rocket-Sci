@@ -187,17 +187,13 @@ export async function pushToLine(targetId, text) {
   const url = 'https://api.line.me/v2/bot/message/push';
   
   if (typeof text === 'object' && text !== null) {
-    // 1. Try pushing Flex Message Card first
-    const flexContents = text.type === 'bubble'
-      ? { type: 'carousel', contents: [text] }
-      : text;
-
+    // 1. Try pushing Flex Message Card directly
     const flexPayload = {
       to: rawLineId,
       messages: [{
         type: 'flex',
-        altText: 'ระบบบริการ Rocket Science 🚀',
-        contents: flexContents
+        altText: text.header?.contents?.[0]?.text || 'ระบบบริการ Rocket Science 🚀',
+        contents: text
       }]
     };
     try {
@@ -284,11 +280,16 @@ export async function fetchLINEGroupName(groupId) {
 
 // Intercept admin sending message to Line to log it properly and convert keywords
 export async function sendAdminMessageToLine(targetId, messageText) {
-  const clean = (messageText || '').toString().replace(/\s+/g, '').toLowerCase();
+  const isObj = typeof messageText === 'object' && messageText !== null;
+  const clean = !isObj ? (messageText || '').toString().replace(/\s+/g, '').toLowerCase() : '';
 
-  // Update round lock status automatically if broadcast contains explicit round open/close keywords
-  const isExplicitCloseCmd = /^(🔒\s*)?(ปิดรับดวล|ปิดรอบ|ล็อครอบ|3-2-go|32go)$/i.test(clean) || clean.includes('🔒ปิดรับดวล') || clean.includes('หมดเวลาท้าดวลก่อนปล่อยบั้งไฟ');
-  const isExplicitOpenCmd = /^(🚀\s*)?(เปิดรอบ|เปิดรับดวล|เปิด)\b/i.test(clean) || clean.includes('🚀เปิดรอบ');
+  // Update round lock status automatically if broadcast contains explicit round open/close keywords or close Flex card
+  const isExplicitCloseCmd = isObj 
+    ? (messageText.header?.contents?.[0]?.text?.includes('ปิดรับดวล'))
+    : (/^(🔒\s*)?(ปิดรับดวล|ปิดรอบ|ล็อครอบ|3-2-go|32go)$/i.test(clean) || clean.includes('🔒ปิดรับดวล') || clean.includes('หมดเวลาท้าดวลก่อนปล่อยบั้งไฟ'));
+  const isExplicitOpenCmd = isObj
+    ? (messageText.header?.contents?.[0]?.text?.includes('เปิดรอบ'))
+    : (/^(🚀\s*)?(เปิดรอบ|เปิดรับดวล|เปิด)\b/i.test(clean) || clean.includes('🚀เปิดรอบ'));
 
   if (isExplicitCloseCmd) {
     db.setRocketRoundStatus('CLOSED');
@@ -391,7 +392,10 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
     const match = text.trim().match(openRoundRegex);
     const roundName = match[2];
     db.setActiveRocketRound(roundName);
-    await replyToLine(replyToken, `🚀 เปิดรอบ ➔ ${roundName}`, userId);
+    const activeMin = db.getTargetMin ? db.getTargetMin() : 380;
+    const activeMax = db.getTargetMax ? db.getTargetMax() : 420;
+    const openFlex = constructOpenRoundQuoteFlex(roundName, activeMin, activeMax);
+    await replyToLine(replyToken, openFlex, userId);
     return;
   }
 
@@ -2032,6 +2036,51 @@ export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, p
             { "type": "text", "text": "คงเหลือ", "color": "#999999", "size": "xs", "flex": 4 },
             { "type": "text", "text": `${Number(currentBalance || 0).toLocaleString('th-TH')} pt`, "weight": "bold", "color": "#2E7D32", "size": "xs", "flex": 6, "align": "end" }
           ]
+        }
+      ]
+    }
+  };
+}
+
+export function constructOpenRoundQuoteFlex(name, min, max, isChotoy = false) {
+  const roundName = name || 'ทดลอง';
+  const minVal = min || 380;
+  const maxVal = max || 420;
+
+  return {
+    "type": "bubble",
+    "size": "micro",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#0288D1",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": `🚀 เปิดรอบ ➔ ${roundName}`,
+          "weight": "bold",
+          "color": "#FFFFFF",
+          "size": "sm",
+          "align": "center",
+          "wrap": true
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": `⏱️  ราคาช่าง ${minVal}-${maxVal}s${isChotoy ? ' (ชตย)' : ''}`,
+          "weight": "bold",
+          "color": "#0288D1",
+          "size": "sm",
+          "align": "center",
+          "wrap": true
         }
       ]
     }

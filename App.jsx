@@ -205,7 +205,6 @@ export default function App() {
   const handleBroadcastFastQuote = (overrideMin = null, overrideMax = null, overrideAmt = null, overrideChotoy = null) => {
     const min = overrideMin !== null ? overrideMin : targetMin;
     const max = overrideMax !== null ? overrideMax : targetMax;
-    const amt = overrideAmt !== null ? overrideAmt : (quoteBetAmount || 500);
     const isChotoy = overrideChotoy !== null ? overrideChotoy : quoteIsChotoy;
     const name = rocketName.trim() || 'ช่างบั้งไฟสด';
 
@@ -214,30 +213,61 @@ export default function App() {
       return;
     }
 
-    if (Number(amt) <= 0) {
-      addToast('⚠️ แต้มเดิมพันเริ่มต้นต้องมากกว่า 0 pt ครับ', 'warning');
-      return;
-    }
-
-    const chotoyTag = isChotoy ? ' (ชตย)' : '';
-    const quoteMsg = `🚀 เปิดรอบ ➔ ${name}\n⏱️  ราคาช่าง ${min}-${max}s\n💰 เครดิต ${amt}pt${chotoyTag}`;
+    const quoteFlex = {
+      "type": "bubble",
+      "size": "micro",
+      "header": {
+        "type": "box",
+        "layout": "vertical",
+        "backgroundColor": "#0288D1",
+        "paddingAll": "sm",
+        "contents": [
+          {
+            "type": "text",
+            "text": `🚀 เปิดรอบ ➔ ${name}`,
+            "weight": "bold",
+            "color": "#FFFFFF",
+            "size": "sm",
+            "align": "center",
+            "wrap": true
+          }
+        ]
+      },
+      "body": {
+        "type": "box",
+        "layout": "vertical",
+        "spacing": "xs",
+        "paddingAll": "sm",
+        "contents": [
+          {
+            "type": "text",
+            "text": `⏱️  ราคาช่าง ${min}-${max}s${isChotoy ? ' (ชตย)' : ''}`,
+            "weight": "bold",
+            "color": "#0288D1",
+            "size": "sm",
+            "align": "center",
+            "wrap": true
+          }
+        ]
+      }
+    };
 
     runBackendFunction('adminOpenRound', [name]);
-    
+
     if (broadcastTargetGroup === 'ALL') {
       if (lineGroups && lineGroups.length > 0) {
         lineGroups.forEach(g => {
-          runBackendFunction('sendAdminMessageToLine', [g.id, quoteMsg]);
+          runBackendFunction('sendAdminMessageToLine', [g.id, quoteFlex]);
         });
         addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) กระจายทุกกลุ่ม (${lineGroups.length} กลุ่ม) เรียบร้อย!`, 'success');
       } else {
-        runBackendFunction('sendAdminMessageToLine', [activeGroupId, quoteMsg]);
+        runBackendFunction('sendAdminMessageToLine', [activeGroupId, quoteFlex]);
         addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) เข้ากลุ่ม LINE เรียบร้อย!`, 'success');
       }
     } else {
       const targetObj = lineGroups.find(g => g.id === broadcastTargetGroup);
       const targetName = targetObj ? targetObj.name : `กลุ่ม (#${broadcastTargetGroup.slice(-4)})`;
-      runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, quoteMsg]);
+      runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, quoteFlex]);
       addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) เข้า [${targetName}] เรียบร้อย!`, 'success');
     }
   };
@@ -2126,9 +2156,14 @@ export default function App() {
                           ]
                         }
                       };
+                      runBackendFunction('setRocketRoundStatus', ['closed']);
                       if (broadcastTargetGroup === 'ALL') {
-                        const targets = lineGroups.length > 0 ? lineGroups.map(g => g.id) : [activeGroupId];
-                        targets.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, closeFlex]));
+                        const validGroups = lineGroups && lineGroups.length > 0 ? lineGroups.map(g => g.id) : (activeGroupId ? [activeGroupId] : []);
+                        if (validGroups.length === 0) {
+                          runBackendFunction('sendAdminMessageToLine', [activeGroupId, closeFlex]);
+                        } else {
+                          validGroups.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, closeFlex]));
+                        }
                       } else {
                         runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, closeFlex]);
                       }

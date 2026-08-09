@@ -119,7 +119,7 @@ app.post('/api/run', async (req, res) => {
         break;
         
       case 'sendAdminMessageToLine':
-        if (args[1]) {
+        if (typeof args[1] === 'string') {
           const rangeMatch = args[1].match(/(\d{3})\s*[-/]\s*(\d{3})/);
           if (rangeMatch) {
             db.setTargetMinMax(Number(rangeMatch[1]), Number(rangeMatch[2]));
