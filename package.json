@@ -17,7 +17,10 @@
     "express": "^5.2.1",
     "form-data": "^4.0.6",
     "googleapis": "^173.0.0",
+    "jpeg-js": "^0.4.4",
+    "jsqr": "^1.4.0",
     "lucide-react": "^1.17.0",
+    "pngjs": "^7.0.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
