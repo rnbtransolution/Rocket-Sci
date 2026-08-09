@@ -11,13 +11,14 @@ let transactions = [];
 let bets = [];
 let chatLogs = [];
 
-let activeTargetMin = 330;
-let activeTargetMax = 380;
+let activeTargetMin = null;
+let activeTargetMax = null;
 
 export function setTargetMinMax(minVal, maxVal) {
   if (minVal && maxVal && Number(minVal) < Number(maxVal)) {
     activeTargetMin = Number(minVal);
     activeTargetMax = Number(maxVal);
+    applyQuoteToPreQuoteBets(activeTargetMin, activeTargetMax);
   }
 }
 
@@ -27,6 +28,93 @@ export function getTargetMin() {
 
 export function getTargetMax() {
   return activeTargetMax;
+}
+
+// Applies official quote range (minVal, maxVal) to all pending pre_quote bets in current round
+export function applyQuoteToPreQuoteBets(minVal, maxVal) {
+  if (!minVal || !maxVal) return;
+  const numMin = Number(minVal);
+  const numMax = Number(maxVal);
+
+  const updatedBets = [];
+  bets.forEach(bet => {
+    if (bet.type === 'pre_quote') {
+      bet.type = 'range';
+      let offsetMin = numMin;
+      let offsetMax = numMax;
+
+      if (bet.userTypedCmd) {
+        if (bet.userTypedCmd.startsWith('+5')) {
+          offsetMin += 5;
+          offsetMax += 5;
+        } else if (bet.userTypedCmd.startsWith('-5')) {
+          offsetMin -= 5;
+          offsetMax -= 5;
+        }
+      }
+
+      bet.rangeMin = offsetMin;
+      bet.rangeMax = offsetMax;
+
+      if (bet.status === 'pre_quote_matched') {
+        bet.status = 'matched';
+        updatedBets.push(bet);
+      }
+      updateRowInSheet('Bets', bet.orderNumber, {
+        6: 'range',
+        7: offsetMin.toString(),
+        8: offsetMax.toString(),
+        9: bet.status
+      });
+    }
+  });
+
+  // Notify players about officially matched orders
+  if (updatedBets.length > 0) {
+    import('./lineBot.js').then(lineBot => {
+      updatedBets.forEach(b => {
+        const creatorId = b.playerLowId || b.playerHighId;
+        const matcherId = b.playerLowId ? b.playerHighId : b.playerLowId;
+        const rangeStr = `${b.rangeMin}-${b.rangeMax}s`;
+        const flex = lineBot.constructMatchNotificationFlex(b.orderNumber, b.amount, b.playerLowName, b.playerHighName, rangeStr, false, activeRocketRound?.name);
+
+        if (b.groupId) lineBot.pushToLine(b.groupId, `☄️ [แผล #${b.orderNumber} ได้รับราคาช่างและแมตช์สัญญาสมบูรณ์!] @${b.playerLowName} (ต่ำ) 🆚 @${b.playerHighName} (สูง) | ${b.amount}pt 🚀`);
+        if (creatorId) lineBot.pushToLine(creatorId, flex);
+        if (matcherId) lineBot.pushToLine(matcherId, flex);
+      });
+    }).catch(err => console.error('Error sending quote confirmation push:', err));
+  }
+}
+
+// Cancels all unquoted pre_quote bets if round closes without admin quote
+export function cancelUnquotedPreQuoteBets() {
+  const cancelledBets = [];
+  bets.forEach(bet => {
+    if (bet.type === 'pre_quote' && (bet.status === 'pending_match' || bet.status === 'pre_quote_matched')) {
+      bet.status = 'cancelled';
+      cancelledBets.push(bet);
+
+      // Refund creator
+      const creatorId = bet.playerLowId || bet.playerHighId;
+      if (creatorId) adjustPlayerBalance(creatorId, bet.amount, 'Refund unquoted bet');
+
+      // Refund matcher if pre_quote_matched
+      if (bet.status === 'pre_quote_matched') {
+        const matcherId = bet.playerLowId ? bet.playerHighId : bet.playerLowId;
+        if (matcherId) adjustPlayerBalance(matcherId, bet.amount, 'Refund unquoted bet');
+      }
+
+      updateRowInSheet('Bets', bet.orderNumber, { 9: 'cancelled' });
+    }
+  });
+
+  if (cancelledBets.length > 0) {
+    import('./lineBot.js').then(lineBot => {
+      cancelledBets.forEach(b => {
+        if (b.groupId) lineBot.pushToLine(b.groupId, `⚠️ แผล Order #${b.orderNumber} ถูกยกเลิกและคืนเครดิตเรียบร้อยแล้ว (เนื่องจากรอบนี้ไม่มีการเปิดราคาช่าง)`);
+      });
+    }).catch(err => console.error('Error pushing pre_quote cancellation:', err));
+  }
 }
 
 // Helper to format dates to dd/MM/yy for visual consistency with GAS
@@ -402,21 +490,8 @@ export async function adjustPlayerBalance(userId, delta, displayName) {
 }
 
 // Save an open bet (with credit verification)
-export function saveOpenBet(
-  orderNo,
-  userId,
-  displayName,
-  side,
-  amount,
-  type,
-  rMin,
-  rMax,
-  targetGroupId = null,
-  targetGroupName = null
-) {
+export function saveOpenBet(orderNo, userId, displayName, side, betAmount, type = 'normal', rMin = null, rMax = null, targetGroupId = null, targetGroupName = null, userTypedCmd = null, isPreQuote = false) {
   const searchId = cleanUserId(userId);
-  const betAmount = Number(amount) || 0;
-
   const isAdminUser = searchId === 'admin' || searchId === 'user' || (typeof userId === 'string' && (userId.toLowerCase() === 'user' || userId.toLowerCase() === 'admin'));
 
   // Anti-Overdraft Guard: verify creator has sufficient balance
@@ -449,6 +524,8 @@ export function saveOpenBet(
   const assignedGroupId = pushTargets[0] || activeGroupId || '';
   const assignedGroupName = targetGroupName || (lineGroups.find(g => g.id === assignedGroupId)?.name || 'กลุ่มดวลสด');
 
+  const betTypeStr = isPreQuote ? 'pre_quote' : type;
+
   const newBet = {
     id: 'bet_' + orderNo,
     orderNumber: orderNo.toString(),
@@ -457,14 +534,15 @@ export function saveOpenBet(
     playerHighId: highId,
     playerHighName: highName,
     amount: betAmount,
-    type: type,
+    type: betTypeStr,
     rangeMin: rMin ? Number(rMin) : null,
     rangeMax: rMax ? Number(rMax) : null,
     status: 'pending_match',
     winnerName: '',
     timestamp: formatTime(now),
     groupId: assignedGroupId,
-    groupName: assignedGroupName
+    groupName: assignedGroupName,
+    userTypedCmd: userTypedCmd
   };
   bets.unshift(newBet); // Add to beginning of memory list
 
@@ -475,7 +553,7 @@ export function saveOpenBet(
     highId,
     highName,
     betAmount.toString(),
-    type,
+    betTypeStr,
     rMin ? rMin.toString() : '',
     rMax ? rMax.toString() : '',
     'pending_match',
@@ -486,8 +564,8 @@ export function saveOpenBet(
 
   if (pushTargets.length > 0) {
     import('./lineBot.js').then(lineBot => {
-      const rangeInfo = rMin && rMax ? `${rMin}-${rMax}s` : '';
-      const betCard = lineBot.constructBetOpenFlex(orderNo, betAmount, side, displayName, rangeInfo);
+      const rangeInfo = rMin && rMax ? `${rMin}-${rMax}s` : (isPreQuote ? '⏳ รอราคาช่าง' : '');
+      const betCard = lineBot.constructBetOpenFlex(orderNo, betAmount, side, displayName, rangeInfo, false, userTypedCmd, isPreQuote);
       pushTargets.forEach(targetId => {
         lineBot.pushToLine(targetId, betCard);
       });
@@ -497,6 +575,12 @@ export function saveOpenBet(
   }
 
   return newBet;
+}
+
+export function getBetByOrderNumber(orderNo) {
+  if (!orderNo) return null;
+  const cleanOrder = orderNo.toString().trim().replace(/#/g, '');
+  return bets.find((b) => b.orderNumber.toString() === cleanOrder || b.orderNumber.toString().endsWith(cleanOrder)) || null;
 }
 
 // match against an existing open bet (supports optional specific target order number e.g. "12" or "123456")
@@ -1444,14 +1528,20 @@ export function setActiveRocketRound(roundName) {
     status: 'ACTIVE',
     startTime: new Date()
   };
+  activeTargetMin = null;
+  activeTargetMax = null;
   return activeRocketRound;
 }
 
 export function setRocketRoundStatus(status) {
+  const normStatus = (status || '').toString().toUpperCase();
   if (!activeRocketRound) {
-    activeRocketRound = { name: 'ทั่วไป', status: status, startTime: new Date() };
+    activeRocketRound = { name: 'ทั่วไป', status: normStatus, startTime: new Date() };
   } else {
-    activeRocketRound.status = status;
+    activeRocketRound.status = normStatus;
+  }
+  if (normStatus === 'CLOSED') {
+    cancelUnquotedPreQuoteBets();
   }
   return activeRocketRound;
 }

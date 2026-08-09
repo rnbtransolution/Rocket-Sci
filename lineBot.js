@@ -175,12 +175,12 @@ export async function pushToLine(targetId, text) {
   const isGroupId = typeof targetId === 'string' && (targetId.startsWith('C') || /^\d{10,}$/.test(targetId) || db.getDashboardData()?.lineGroups?.some(g => g.id === targetId));
   const isRawUserId = typeof targetId === 'string' && targetId.startsWith('U');
 
-  if (!isGroupId && !isRawUserId && typeof targetId === 'string' && targetId.startsWith('p')) {
+  if (!isGroupId && !isRawUserId && typeof targetId === 'string') {
     rawLineId = db.getRawLineUserId(targetId) || targetId;
   }
 
-  if (!rawLineId || (typeof rawLineId === 'string' && rawLineId.startsWith('p') && !isGroupId)) {
-    console.log(`[LINE Push Bypassed]: targetId "${targetId}" is passport simulator account without mapped LINE ID.`);
+  if (!rawLineId || (typeof rawLineId === 'string' && !rawLineId.startsWith('U') && !isGroupId)) {
+    console.log(`[LINE Push Bypassed]: targetId "${targetId}" is simulator/passport account without mapped real LINE User ID.`);
     return;
   }
 
@@ -699,23 +699,20 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     }
   }
 
-  // RULE E: Check Amount Match against Pending Deposit Request
-  let requestedAmount = db.findPendingRequestedAmount(userId);
-  if (!requestedAmount || requestedAmount <= 0) {
-    requestedAmount = actualAmount > 0 ? actualAmount : 100;
-  }
+  // RULE E: Pay-in Slip Amount is the ONLY official transfer authority!
+  let requestedAmount = db.findPendingRequestedAmount(userId) || 0;
 
-  if (actualAmount > 0 && requestedAmount > 0 && requestedAmount !== actualAmount) {
-    db.logTransaction(userId, displayName, requestedAmount, actualAmount, refCode, 'escalated', `Amount Mismatch (Requested ${requestedAmount} vs Slip ${actualAmount})`);
-    await replyToLine(replyToken, `⚠️ ยอดเงินในสลิปไม่ตรงกับคำสั่งเติมเงิน\n(คุณสั่งเติม ${requestedAmount} THB แต่สลิปโอน ${actualAmount} THB)\n📩 ส่งรายการให้แอดมินตรวจสอบแมนนวลแล้วครับ`);
-    return;
-  }
-
-  const finalAmount = actualAmount > 0 ? actualAmount : requestedAmount;
+  // The official deposit amount is STRICTLY the actual amount scanned from the pay-in slip!
+  const finalAmount = actualAmount > 0 ? actualAmount : (requestedAmount > 0 ? requestedAmount : 100);
 
   // RULE F: AUTO CREDIT & SUCCESS (ALL CHECKS PASSED = TRUE)
   await db.adjustPlayerBalance(userId, finalAmount, displayName);
-  db.logTransaction(userId, displayName, requestedAmount, finalAmount, refCode, 'success', `Auto approved via Slip Scanner (${scanEngine}). Ref: ${refCode}`);
+
+  const noteMsg = (requestedAmount > 0 && requestedAmount !== finalAmount)
+    ? `Auto approved via Slip Scanner (${scanEngine}). Note: Marked ${requestedAmount} THB vs Slip ${finalAmount} THB.`
+    : `Auto approved via Slip Scanner (${scanEngine}). Ref: ${refCode}`;
+
+  db.logTransaction(userId, displayName, requestedAmount || finalAmount, finalAmount, refCode, 'success', noteMsg);
 
   // Register Bank Info automatically for the user if they don't have one!
   const existingBank = db.getPlayerBank(userId);
@@ -723,8 +720,12 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     db.updatePlayerBank(userId, senderBank, senderAccount, senderName || displayName);
   }
 
-  // Send Money-In Banking Flex Card (Instant Auto Credit Confirmation)
-  const bankFlex = constructBankingFlex("deposit", finalAmount, `เติมเงินสำเร็จผ่านระบบสแกนสลิปออโต้`, null, userId);
+  // Send Money-In Banking Flex Card (Instant Auto Credit Confirmation for the EXACT slip amount)
+  const depositTextNote = (requestedAmount > 0 && requestedAmount !== finalAmount)
+    ? `เติมเงินสำเร็จ ${finalAmount} pt (สแกนยอดจากสลิปโอนจริง)`
+    : `เติมเงินสำเร็จผ่านระบบสแกนสลิปออโต้`;
+
+  const bankFlex = constructBankingFlex("deposit", finalAmount, depositTextNote, null, userId);
   await replyToLine(replyToken, bankFlex, userId);
 }
 
@@ -801,8 +802,11 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
   if (keywordsAccept.includes(clean) || targetOrderNo) {
     if (db.isRocketRoundClosed()) {
-      await replyToLine(replyToken, `⚠️ ปิดรับดวลรอบนี้แล้วครับ (ออเดอร์และกดแมตช์หลังประกาศไม่ถูกจับคู่)`, userId);
-      return true;
+      const targetBet = targetOrderNo ? db.getBetByOrderNumber(targetOrderNo) : null;
+      if (targetBet && (targetBet.type === 'custom_range' || targetBet.type === 'custom')) {
+        await replyToLine(replyToken, `⚠️ ปิดรับดวลราคาเปิดเองรอบนี้แล้วครับ (ไม่สามารถจับคู่แผลเปิดราคาเองหลังประกาศปิดรับได้)`, userId);
+        return true;
+      }
     }
     db.matchExistingOpenBet(userId, displayName, targetOrderNo).then(async matched => {
       if (matched && matched.error === 'INSUFFICIENT_BALANCE') {
@@ -897,18 +901,21 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     else if (keywordsHigh.includes(cmd)) side = 'high';
     
     if (side && amount >= 10) {
-      let activeMin = db.getTargetMin ? db.getTargetMin() : 330;
-      let activeMax = db.getTargetMax ? db.getTargetMax() : 380;
-      
-      if (cmd.startsWith('+5')) {
-        activeMin += 5;
-        activeMax += 5;
-      } else if (cmd.startsWith('-5')) {
-        activeMin -= 5;
-        activeMax -= 5;
+      let activeMin = db.getTargetMin ? db.getTargetMin() : null;
+      let activeMax = db.getTargetMax ? db.getTargetMax() : null;
+      let isPreQuote = !activeMin || !activeMax;
+
+      if (!isPreQuote) {
+        if (cmd.startsWith('+5')) {
+          activeMin += 5;
+          activeMax += 5;
+        } else if (cmd.startsWith('-5')) {
+          activeMin -= 5;
+          activeMax -= 5;
+        }
       }
-      
-      await processOpenBetRequest(side, amount, 'range', activeMin, activeMax, userId, displayName, replyToken, isChotoy, groupId);
+
+      await processOpenBetRequest(side, amount, isPreQuote ? 'pre_quote' : 'range', activeMin, activeMax, userId, displayName, replyToken, isChotoy, groupId, cmd, isPreQuote);
       return true;
     }
   }
@@ -916,9 +923,9 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   return false;
 }
 
-async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false, groupId = null) {
-  if (db.isRocketRoundClosed()) {
-    await replyToLine(replyToken, `⚠️ ปิดรับดวลรอบนี้แล้วครับ (ออเดอร์และกดแมตช์หลังประกาศไม่ถูกจับคู่)`, userId);
+async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false, groupId = null, userTypedCmd = null, isPreQuote = false) {
+  if (db.isRocketRoundClosed() && (type === 'custom_range' || type === 'custom')) {
+    await replyToLine(replyToken, `⚠️ ปิดรับดวลราคาเปิดเองรอบนี้แล้วครับ (เปิดรับเฉพาะแทงตามราคาช่างแอดมินเท่านั้น)`, userId);
     return;
   }
   // Check if admin account (Admin quotes do NOT require credit deduction as they serve as guidelines)
@@ -928,7 +935,7 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   const orderNo = Math.floor(Math.random() * 899999 + 100000);
   
   // Save open bet with groupId for multi-group tracking (credit deduction happens inside db.saveOpenBet)
-  const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal, groupId);
+  const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal, groupId, userTypedCmd, isPreQuote);
   if (!saved || saved.error) {
     const bal = saved?.current || 0;
     const needed = amount - bal;
@@ -940,16 +947,18 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   }
   
   let rangeInfo = '';
-  if (type === 'range') {
-    rangeInfo = `${minVal}-${maxVal}${isChotoy ? ' (ชตย: ช่างไม่ต่อย)' : ''}`;
+  if (type === 'range' && minVal && maxVal) {
+    rangeInfo = `${minVal}-${maxVal}${isChotoy ? ' (ชตย)' : ''}`;
+  } else if (isPreQuote) {
+    rangeInfo = '⏳ รอราคาช่าง';
   } else if (isChotoy) {
-    rangeInfo = '(ชตย: ช่างไม่ต่อย)';
+    rangeInfo = '(ชตย)';
   }
   
   // If user sent command in 1-on-1 DM, reply to user directly.
   // Note: db.saveOpenBet already broadcasts the Order Flex Card to the target LINE group(s).
   if (!groupId) {
-    const betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfo);
+    const betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfo, isChotoy, userTypedCmd, isPreQuote);
     await replyToLine(replyToken, betCard, userId);
   }
 }
@@ -1585,11 +1594,11 @@ export function constructRuleGuideFlex() {
   };
 }
 
-export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy) {
-  const sideShort = side === 'low' ? 'ล' : 'ถ';
-  const headerTitle = `${creatorName || 'ผู้เล่น'} ${rangeInfo ? rangeInfo + ' ' : ''}${sideShort}${amount}`;
-  const formulaTitle = `${rangeInfo ? rangeInfo + ' ' : ''}${sideShort} = ${amount} pt`;
-  const chotaiLabel = isChotoy ? "ชตย (เผื่อช่างไม่ต่อย) • ล็อกเครดิต" : "แผลดวลสด • ล็อกเครดิต 1:1";
+export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy, userTypedCmd = null, isPreQuote = false) {
+  const sideShort = side === 'high' ? 'ล' : 'ถ';
+  const displayCmd = userTypedCmd || sideShort;
+  const formulaTitle = `${displayCmd} = ${amount} pt`;
+  const badgeText = isPreQuote ? "⏳ รอราคาช่างแอดมิน • ล็อกเครดิต" : (isChotoy ? "ชตย (เผื่อช่างไม่ต่อย) • ล็อกเครดิต" : "แผลดวลสด • ล็อกเครดิต 1:1");
 
   return {
     "type": "bubble",
@@ -1597,7 +1606,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
     "header": {
       "type": "box",
       "layout": "vertical",
-      "backgroundColor": "#1E1B4B",
+      "backgroundColor": isPreQuote ? "#E65100" : "#1E1B4B",
       "paddingAll": "sm",
       "contents": [
         {
@@ -1624,11 +1633,25 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "size": "md",
           "align": "center"
         },
-
+        {
+          "type": "text",
+          "text": badgeText,
+          "color": isPreQuote ? "#E65100" : "#666666",
+          "size": "xxs",
+          "align": "center",
+          "margin": "xs"
+        },
         {
           "type": "separator",
           "margin": "xs",
           "color": "#F0F0F0"
+        },
+        {
+          "type": "text",
+          "text": "⚡ เลือกแต้มเพื่อใส่ข้อความรับแผล:",
+          "size": "xxs",
+          "color": "#888888",
+          "margin": "xs"
         },
         {
           "type": "box",
@@ -1640,44 +1663,82 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               "type": "box",
               "layout": "vertical",
               "backgroundColor": "#2E7D32",
-              "cornerRadius": "md",
+              "cornerRadius": "sm",
               "paddingAll": "xs",
               "action": {
                 "type": "message",
-                "label": `ต ${orderNo}`,
-                "text": `ต ${orderNo}`
+                "label": "ต100",
+                "text": `ต ${orderNo} 100`
               },
               "contents": [
-                {
-                  "type": "text",
-                  "text": "⚡ รับแผล",
-                  "color": "#FFFFFF",
-                  "weight": "bold",
-                  "size": "xs",
-                  "align": "center"
-                }
+                { "type": "text", "text": "ต100", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
               ]
             },
             {
               "type": "box",
               "layout": "vertical",
-              "backgroundColor": "#C62828",
-              "cornerRadius": "md",
+              "backgroundColor": "#2E7D32",
+              "cornerRadius": "sm",
               "paddingAll": "xs",
               "action": {
                 "type": "message",
-                "label": `ยกเลิก ${orderNo}`,
+                "label": "ต200",
+                "text": `ต ${orderNo} 200`
+              },
+              "contents": [
+                { "type": "text", "text": "ต200", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": "#2E7D32",
+              "cornerRadius": "sm",
+              "paddingAll": "xs",
+              "action": {
+                "type": "message",
+                "label": "ต300",
+                "text": `ต ${orderNo} 300`
+              },
+              "contents": [
+                { "type": "text", "text": "ต300", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": "#1565C0",
+              "cornerRadius": "sm",
+              "paddingAll": "xs",
+              "action": {
+                "type": "message",
+                "label": "ตทั้งหมด",
+                "text": `ต ${orderNo} ${amount}`
+              },
+              "contents": [
+                { "type": "text", "text": "ตทั้งหมด", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "xs",
+          "contents": [
+            {
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": "#C62828",
+              "cornerRadius": "sm",
+              "paddingAll": "xs",
+              "action": {
+                "type": "message",
+                "label": "🚫 ยกเลิกแผล",
                 "text": `ยกเลิก ${orderNo}`
               },
               "contents": [
-                {
-                  "type": "text",
-                  "text": "🚫 ยกเลิก",
-                  "color": "#FFFFFF",
-                  "weight": "bold",
-                  "size": "xs",
-                  "align": "center"
-                }
+                { "type": "text", "text": "🚫 ยกเลิกแผลดวลนี้", "color": "#FFFFFF", "weight": "bold", "size": "xs", "align": "center" }
               ]
             }
           ]

@@ -1067,25 +1067,15 @@ export default function App() {
                 }];
               });
 
-            } else if (realAmt !== depositAmount) {
-              const resReason = `ยอดเงินโอนสลิปไม่ตรงบิลแจ้ง (ยอดสั่ง ${depositAmount} pt, ยอดโอนจริง ${realAmt} THB)`;
-              setBillingResult({ status: 'escalate', reason: resReason });
-              setTransactions(prev => prev.map(t => t.id === activeTxId ? { ...t, status: 'escalated', actualAmount: realAmt, slipRef: ref, reviewReason: `Amount Mismatch (${depositAmount} vs ${realAmt})` } : t));
-              addToast('แจ้งเตือนแอดมิน: ยอดเงินไม่ตรงกับสลิปโอน!', 'warning');
-
-              setPrivateMessages(prev => {
-                const filtered = prev.filter(m => !m.isScanning);
-                return [...filtered, {
-                  id: 'bot_escalate_' + Date.now(),
-                  sender: 'bot',
-                  text: `⚠️ ดำเนินการออโต้ล้มเหลว!\n\nสาเหตุ: ${resReason}\n\nรายการได้รับการส่งต่อให้ แอดมิน (Manual Admin Review) เพื่ออนุมัติแมนนวลแล้วหลังจากเช็คธนาคาร\n\nกรุณารอสักครู่ แอดมินจะอัพยอดให้ท่านโดยเร็วที่สุดครับ`,
-                  time: tDoneStr
-                }];
-              });
-
             } else {
               setBillingResult({ status: 'success', amount: realAmt });
-              setTransactions(prev => prev.map(t => t.id === activeTxId ? { ...t, status: 'success', actualAmount: realAmt, slipRef: ref, reviewReason: 'Auto verified 1:1' } : t));
+              setTransactions(prev => prev.map(t => t.id === activeTxId ? { 
+                ...t, 
+                status: 'success', 
+                actualAmount: realAmt, 
+                slipRef: ref, 
+                reviewReason: realAmt !== depositAmount ? `Auto verified from slip (${realAmt} THB)` : 'Auto verified 1:1' 
+              } : t));
               setPlayers(prev => prev.map(p => p.isUser ? { 
                 ...p, 
                 balance: p.balance + realAmt,
@@ -1093,14 +1083,18 @@ export default function App() {
                 bankAccount: presetAccountNo,
                 accountName: p.name
               } : p));
-              addToast('เติมเงินสำเร็จ! เครดิตอัพเดท 1:1 เรียบร้อย', 'success');
+
+              const toastMsg = realAmt !== depositAmount
+                ? `เติมเงินสำเร็จ ${realAmt} pt! (ระบบยึดตามยอดสลิปโอนจริง)`
+                : 'เติมเงินสำเร็จ! เครดิตอัพเดท 1:1 เรียบร้อย';
+              addToast(toastMsg, 'success');
 
               setPrivateMessages(prev => {
                 const filtered = prev.filter(m => !m.isScanning);
                 return [...filtered, {
                   id: 'bot_success_' + Date.now(),
                   sender: 'bot',
-                  text: `🎉 อัปโหลดสำเร็จ!\n\nระบบสแกนสลิป ตรวจสอบ API พบยอดเงินโอน ${realAmt}.00 บาท ตรงกับบัญชีธนาคาร\n\n💰 บัญชีเครดิตของท่านได้รับการเติมเครดิต 1:1 เรียบร้อยแล้ว!\nเครดิตคงเหลือ: ${(players.find(p => p.isUser)?.balance || 0) + realAmt} แต้ม`,
+                  text: `🎉 อัปโหลดสำเร็จ!\n\nระบบสแกนสลิป ตรวจสอบ API พบยอดเงินโอน ${realAmt}.00 บาท ตรงกับสลิปโอนเงินจริง\n\n💰 บัญชีเครดิตของท่านได้รับการเติมเครดิต 1:1 ตามยอดสลิปเรียบร้อยแล้ว!\nเครดิตคงเหลือ: ${(players.find(p => p.isUser)?.balance || 0) + realAmt} แต้ม`,
                   time: tDoneStr
                 }];
               });
