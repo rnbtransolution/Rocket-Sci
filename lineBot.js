@@ -809,24 +809,26 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
       }
     }
     db.matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmount).then(async matched => {
+      const tagPrefix = groupId ? `👤 [ถึงคุณ @${displayName}]: ` : '';
       if (matched && matched.error === 'BELOW_MIN_LIMIT') {
-        await replyToLine(replyToken, `⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${matched.provided} pt)`, userId);
+        await replyToLine(replyToken, `${tagPrefix}⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${matched.provided} pt)`, userId);
         return;
       }
       if (matched && matched.error === 'INSUFFICIENT_BALANCE') {
-        await replyToLine(replyToken, `❌ เครดิตของคุณไม่พอสำหรับรับแผลนี้ (มี ${matched.current}pt ต้องใช้ ${matched.required}pt)`, userId);
+        const needed = matched.required - matched.current;
+        await replyToLine(replyToken, `${tagPrefix}⚠️ แต้มไม่พอ (มี ${matched.current}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`, userId);
         return;
       }
       if (matched && matched.error === 'ALREADY_MATCHED') {
-        await replyToLine(replyToken, `⚠️ แผล Order #${matched.orderNumber} มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ (กรุณาสร้างแผลใหม่)`, userId);
+        await replyToLine(replyToken, `${tagPrefix}⚠️ แผล Order #${matched.orderNumber} มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ`, userId);
         return;
       }
       if (matched && matched.error === 'OWN_BET') {
-        await replyToLine(replyToken, `⚠️ คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ`, userId);
+        await replyToLine(replyToken, `${tagPrefix}⚠️ คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ`, userId);
         return;
       }
       if (matched && matched.error === 'NOT_FOUND') {
-        await replyToLine(replyToken, `🚫 ไม่พบแผล Order #${matched.targetOrderNo} ในระบบครับ`, userId);
+        await replyToLine(replyToken, `${tagPrefix}🚫 ไม่พบแผล Order #${matched.targetOrderNo} ในระบบครับ`, userId);
         return;
       }
 
@@ -1656,7 +1658,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               "action": {
                 "type": "message",
                 "label": "⚡ ดวลแผล",
-                "text": `ต ${orderNo} `
+                "text": `ต ${orderNo} ${amount}`
               },
               "contents": [
                 {
