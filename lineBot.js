@@ -801,34 +801,43 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   }
 
   if (keywordsAccept.includes(clean) || targetOrderNo) {
+    const sendNotice = async (msg) => {
+      if (groupId) {
+        await pushToLine(groupId, msg);
+      } else {
+        await replyToLine(replyToken, msg, userId);
+      }
+    };
+
     if (db.isRocketRoundClosed()) {
       const targetBet = targetOrderNo ? db.getBetByOrderNumber(targetOrderNo) : null;
       if (targetBet && (targetBet.type === 'custom_range' || targetBet.type === 'custom')) {
-        await replyToLine(replyToken, `⚠️ ปิดรับดวลราคาเปิดเองรอบนี้แล้วครับ (ไม่สามารถจับคู่แผลเปิดราคาเองหลังประกาศปิดรับได้)`, userId);
+        const tagPrefix = groupId ? `👤 [ถึงคุณ @${displayName}]: ` : '';
+        await sendNotice(`${tagPrefix}⚠️ ปิดรับดวลราคาเปิดเองรอบนี้แล้วครับ (ไม่สามารถจับคู่แผลเปิดราคาเองหลังประกาศปิดรับได้)`);
         return true;
       }
     }
     db.matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmount).then(async matched => {
       const tagPrefix = groupId ? `👤 [ถึงคุณ @${displayName}]: ` : '';
       if (matched && matched.error === 'BELOW_MIN_LIMIT') {
-        await replyToLine(replyToken, `${tagPrefix}⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${matched.provided} pt)`, userId);
+        await sendNotice(`${tagPrefix}⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${matched.provided} pt)`);
         return;
       }
       if (matched && matched.error === 'INSUFFICIENT_BALANCE') {
         const needed = matched.required - matched.current;
-        await replyToLine(replyToken, `${tagPrefix}⚠️ แต้มไม่พอ (มี ${matched.current}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`, userId);
+        await sendNotice(`${tagPrefix}⚠️ แต้มไม่พอ (มี ${matched.current}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`);
         return;
       }
       if (matched && matched.error === 'ALREADY_MATCHED') {
-        await replyToLine(replyToken, `${tagPrefix}⚠️ แผล Order #${matched.orderNumber} มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ`, userId);
+        await sendNotice(`${tagPrefix}⚠️ แผล Order #${matched.orderNumber} มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ`);
         return;
       }
       if (matched && matched.error === 'OWN_BET') {
-        await replyToLine(replyToken, `${tagPrefix}⚠️ คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ`, userId);
+        await sendNotice(`${tagPrefix}⚠️ คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ`);
         return;
       }
       if (matched && matched.error === 'NOT_FOUND') {
-        await replyToLine(replyToken, `${tagPrefix}🚫 ไม่พบแผล Order #${matched.targetOrderNo} ในระบบครับ`, userId);
+        await sendNotice(`${tagPrefix}🚫 ไม่พบแผล Order #${matched.targetOrderNo} ในระบบครับ`);
         return;
       }
 
@@ -1657,16 +1666,38 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               "paddingAll": "xs",
               "action": {
                 "type": "message",
-                "label": "⚡ ดวลแผล",
+                "label": `⚡ รับเต็ม ${amount}pt`,
                 "text": `ต ${orderNo} ${amount}`
               },
               "contents": [
                 {
                   "type": "text",
-                  "text": "⚡ ดวลแผล",
+                  "text": `⚡ รับเต็ม ${amount}pt`,
                   "color": "#FFFFFF",
                   "weight": "bold",
-                  "size": "xs",
+                  "size": "xxs",
+                  "align": "center"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": "#1565C0",
+              "cornerRadius": "md",
+              "paddingAll": "xs",
+              "action": {
+                "type": "message",
+                "label": "✏️ ดวลระบุแต้ม",
+                "text": `ต ${orderNo} `
+              },
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "✏️ ดวลระบุแต้ม",
+                  "color": "#FFFFFF",
+                  "weight": "bold",
+                  "size": "xxs",
                   "align": "center"
                 }
               ]
@@ -1688,7 +1719,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
                   "text": "🚫 ยกเลิก",
                   "color": "#FFFFFF",
                   "weight": "bold",
-                  "size": "xs",
+                  "size": "xxs",
                   "align": "center"
                 }
               ]
