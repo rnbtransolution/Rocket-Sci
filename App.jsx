@@ -109,6 +109,20 @@ const SLIP_PRESETS = [
 const ADMIN_PASSCODE = '1234';
 
 export default function App() {
+  const isGitHubPages = window.location.hostname.includes('github.io');
+  const API_BASE_URL = isGitHubPages ? 'https://rocket-sci.onrender.com' : '';
+
+  const runBackendFunction = async (functionName, args = []) => {
+    const res = await fetch(`${API_BASE_URL}/api/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ functionName, args }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Server error');
+    return json.data;
+  };
+
   // Security and Mode States
   const [playerUserId, setPlayerUserId] = useState(null);
   const [adminAuthenticated, setAdminAuthenticated] = useState(false);
@@ -268,34 +282,6 @@ export default function App() {
       }
     };
 
-    // Determine backend API origin (if loaded from GitHub Pages, point to Render cloud backend)
-    const API_BASE_URL = (typeof window !== 'undefined' && window.location.hostname.includes('github.io'))
-      ? 'https://rocket-sci.onrender.com'
-      : '';
-
-    const runBackendFunction = async (functionName, args = []) => {
-      if (isGAS) {
-        if (window.google && window.google.script && window.google.script.run && window.google.script.run[functionName]) {
-          window.google.script.run[functionName](...args);
-        }
-      } else {
-        try {
-          const res = await fetch(`${API_BASE_URL}/api/run`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ functionName, args })
-          });
-          const data = await res.json();
-          if (data && data.data) {
-            applyData(data.data);
-          }
-          return data;
-        } catch (err) {
-          console.error(`[API Call Error: ${functionName}]`, err);
-        }
-      }
-    };
-
     if (isGAS) {
       // GAS-hosted: use google.script.run RPC (SSE not available in GAS)
       const fetchGAS = () => {
@@ -364,35 +350,6 @@ export default function App() {
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 4000);
-  };
-
-  // Unified runner for backend API actions (works seamlessly in Node.js & GAS)
-  const runBackendFunction = async (functionName, args = []) => {
-    if (isGAS) {
-      if (window.google && window.google.script && window.google.script.run && window.google.script.run[functionName]) {
-        window.google.script.run[functionName](...args);
-      }
-    } else {
-      try {
-        const res = await fetch('/api/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ functionName, args })
-        });
-        const data = await res.json();
-        if (data && data.data) {
-          if (data.data.players) setPlayers(data.data.players);
-          if (data.data.transactions) setTransactions(data.data.transactions);
-          if (data.data.bets) setBets(data.data.bets);
-          if (data.data.chatLogs) setChatLogs(data.data.chatLogs);
-          if (data.data.activeGroupId) setActiveGroupId(data.data.activeGroupId);
-          if (data.data.lineGroups) setLineGroups(data.data.lineGroups);
-        }
-        return data;
-      } catch (err) {
-        console.error(`[API Call Error: ${functionName}]`, err);
-      }
-    }
   };
 
   // Safe portal close & reset function (preserves player data & transaction history)
@@ -1377,7 +1334,7 @@ export default function App() {
   };
 
   // Admin Manual Slip Reviews
-  const handleAdminApproveReview = (txId) => {
+  const handleAdminApproveReview = async (txId) => {
     const targetTx = transactions.find(t => t.id === txId);
     if (!targetTx || targetTx.status !== 'escalated') {
       addToast('⚠️ รายการนี้ถูกดำเนินการไปแล้วหรือไม่อยู่ในสถานะรอตรวจสอบ', 'warning');
@@ -1392,22 +1349,20 @@ export default function App() {
           if (!txId.startsWith('WD')) {
             setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) + approvedAmount } : p));
           }
-          addToast(txId.startsWith('WD') ? 'อนุมัติการถอนเงินเรียบร้อย' : `อนุมัติและอัพแต้ม +${approvedAmount} pt เรียบร้อย`, 'success');
+          addToast(txId.startsWith('WD') ? 'อนุมัติการถอนเงินเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)' : `อนุมัติและอัพแต้ม +${approvedAmount} pt เรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)`, 'success');
         })
         .adminApproveTransaction(txId);
     } else {
-      if (txId.startsWith('WD')) {
-        setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'success', actualAmount: targetTx.requestedAmount, reviewReason: 'Approved manually by admin' } : t));
-        addToast(`แอดมินอนุมัติคำขอถอนเงินยอด ${targetTx.requestedAmount} THB โอนเงินแล้วเรียบร้อย`, 'success');
-      } else {
-        setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'success', actualAmount: approvedAmount, reviewReason: 'Approved manually by admin' } : t));
+      await runBackendFunction('adminApproveTransaction', [txId]);
+      setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'success', actualAmount: approvedAmount, reviewReason: 'Approved manually by admin' } : t));
+      if (!txId.startsWith('WD')) {
         setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) + approvedAmount } : p));
-        addToast(`แอดมินอนุมัติเครดิตเติมเงินยอด ${approvedAmount} THB แมนนวลเรียบร้อย`, 'success');
       }
+      addToast(txId.startsWith('WD') ? `แอดมินอนุมัติคำขอถอนเงินยอด ${targetTx.requestedAmount} THB โอนเงินแล้วเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)` : `แอดมินอนุมัติเครดิตเติมเงินยอด ${approvedAmount} THB แมนนวลเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)`, 'success');
     }
   };
 
-  const handleAdminRejectReview = (txId, reason) => {
+  const handleAdminRejectReview = async (txId, reason) => {
     const targetTx = transactions.find(t => t.id === txId);
     if (!targetTx || targetTx.status !== 'escalated') {
       addToast('⚠️ รายการนี้ถูกดำเนินการไปแล้วหรือไม่อยู่ในสถานะรอตรวจสอบ', 'warning');
@@ -1418,27 +1373,22 @@ export default function App() {
         .withSuccessHandler(() => {
           setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'rejected', reviewReason: reason } : t));
           if (txId.startsWith('WD')) {
-            const tx = transactions.find(t => t.id === txId);
-            if (tx) {
-              setPlayers(prev => prev.map(p => p.isUser ? { ...p, balance: p.balance + tx.requestedAmount } : p));
-            }
+            setPlayers(prev => prev.map(p => p.isUser ? { ...p, balance: p.balance + targetTx.requestedAmount } : p));
           }
-          addToast(txId.startsWith('WD') ? 'ปฏิเสธคำขอถอนเงินเรียบร้อย คืนเครดิตแล้ว' : 'ปฏิเสธการโอนสลิปเรียบร้อย', 'info');
+          addToast(txId.startsWith('WD') ? 'ปฏิเสธคำขอถอนเงินเรียบร้อย คืนเครดิตแล้ว (ส่งข้อความ LINE บอกผู้เล่นแล้ว)' : 'ปฏิเสธการโอนสลิปเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)', 'info');
         })
         .adminRejectTransaction(txId, reason);
     } else {
+      await runBackendFunction('adminRejectTransaction', [txId, reason]);
       setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'rejected', reviewReason: reason } : t));
-      const tx = transactions.find(t => t.id === txId);
-      if (tx) {
-        if (txId.startsWith('WD')) {
-          setPlayers(prev => prev.map(p => p.id === tx.playerId ? { ...p, balance: p.balance + tx.requestedAmount } : p));
-          addToast(`ปฏิเสธคำขอถอนเงินยอด ${tx.requestedAmount} THB และคืนเครดิตให้ผู้เล่นเรียบร้อย`, 'info');
-        } else {
-          if (tx.playerId === 'user') {
-            setBillingResult({ status: 'rejected', reason });
-          }
-          addToast('ปฏิเสธการโอนสลิปเรียบร้อย', 'info');
+      if (txId.startsWith('WD')) {
+        setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: p.balance + targetTx.requestedAmount } : p));
+        addToast(`ปฏิเสธคำขอถอนเงินยอด ${targetTx.requestedAmount} THB และคืนเครดิตให้ผู้เล่นเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)`, 'info');
+      } else {
+        if (targetTx.playerId === 'user') {
+          setBillingResult({ status: 'rejected', reason });
         }
+        addToast('ปฏิเสธการโอนสลิปเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)', 'info');
       }
     }
   };
@@ -2309,17 +2259,21 @@ export default function App() {
                     const isWithdrawal = tx.id.startsWith('WD') || 
                       (tx.slipRef && tx.slipRef.toString().toUpperCase().includes('WD')) || 
                       (tx.reviewReason && tx.reviewReason.toString().toLowerCase().includes('withdraw'));
+                    const cardBgStyle = isWithdrawal 
+                      ? 'p-4 rounded-2xl bg-gradient-to-br from-rose-50/80 via-white to-red-50/60 border-2 border-rose-300 flex flex-col md:flex-row gap-4 items-stretch shadow-sm'
+                      : 'p-4 rounded-2xl bg-gradient-to-br from-emerald-50/80 via-white to-teal-50/60 border-2 border-emerald-300 flex flex-col md:flex-row gap-4 items-stretch shadow-sm';
+
                     return (
-                      <div key={tx.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col md:flex-row gap-4 items-stretch">
+                      <div key={tx.id} className={cardBgStyle}>
                         <div className="shrink-0 flex justify-center">
                           {isWithdrawal ? (
-                            <div className="w-[180px] h-[240px] bg-gradient-to-b from-rose-50 to-rose-100 border border-rose-200 rounded-2xl p-4 flex flex-col items-center justify-between text-center select-none shadow">
-                              <div className="text-3xl mt-2 animate-bounce">💸</div>
+                            <div className="w-[180px] h-[240px] bg-gradient-to-b from-rose-100 to-rose-200 border border-rose-300 rounded-2xl p-4 flex flex-col items-center justify-between text-center select-none shadow">
+                              <div className="text-3xl mt-2 animate-bounce">📤</div>
                               <div className="space-y-1">
-                                <span className="text-[10px] text-rose-600 font-extrabold uppercase tracking-wide">คำขอถอนเงิน</span>
+                                <span className="text-[10px] text-rose-800 font-black uppercase tracking-wider bg-rose-200 px-2 py-0.5 rounded-md">📤 รายการถอนเงิน</span>
                                 <h4 className="text-xl font-black text-rose-950 font-mono">-{tx.requestedAmount} pt</h4>
                               </div>
-                              <div className="w-full bg-white/70 border border-rose-200 rounded-lg p-2 text-[9.5px] text-rose-800 font-bold leading-normal font-sans">
+                              <div className="w-full bg-white/90 border border-rose-300 rounded-lg p-2 text-[9.5px] text-rose-900 font-bold leading-normal font-sans shadow-xs">
                                 {tx.reviewReason.replace('Withdrawal request to ', '')}
                               </div>
                             </div>
@@ -2330,40 +2284,53 @@ export default function App() {
 
                         <div className="flex-1 flex flex-col justify-between gap-3 font-sans text-xs">
                           <div className="space-y-2">
-                            <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
-                              <span className="px-2 py-0.5 bg-slate-200/60 rounded text-[10px] font-mono text-slate-600">{isWithdrawal ? `WITHDRAW: ${tx.id}` : `TX: ${tx.id}`}</span>
-                              <span className={`font-extrabold text-[11px] flex items-center gap-1 ${isWithdrawal ? 'text-rose-600' : 'text-amber-600'}`}>
+                            <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: isWithdrawal ? '#FCA5A5' : '#6EE7B7' }}>
+                              <div className="flex items-center gap-2">
+                                {isWithdrawal ? (
+                                  <span className="px-2.5 py-1 bg-rose-700 text-white font-extrabold rounded-lg text-[10px] font-heading tracking-wide uppercase shadow-xs">
+                                    📤 รายการถอนเงิน (WITHDRAWAL REQUEST)
+                                  </span>
+                                ) : (
+                                  <span className="px-2.5 py-1 bg-emerald-700 text-white font-extrabold rounded-lg text-[10px] font-heading tracking-wide uppercase shadow-xs">
+                                    📥 รายการฝากเงิน (DEPOSIT REQUEST)
+                                  </span>
+                                )}
+                                <span className="px-2 py-0.5 bg-slate-200/80 rounded text-[10px] font-mono text-slate-700 font-bold">{isWithdrawal ? `WITHDRAW: ${tx.id}` : `TX: ${tx.id}`}</span>
+                              </div>
+                              <span className={`font-extrabold text-[11px] flex items-center gap-1 ${isWithdrawal ? 'text-rose-700' : 'text-emerald-800'}`}>
                                 <AlertTriangle size={12} />
                                 {isWithdrawal ? 'คำขอถอนยอด รอโอนเงิน' : `สาเหตุค้าง: ${tx.reviewReason}`}
                               </span>
                             </div>
 
                             {isWithdrawal ? (
-                              <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-1.5 leading-normal text-slate-700 font-sans">
-                                <div className="font-bold text-slate-800">รายละเอียดช่องทางจ่ายเงินคืน:</div>
-                                <div>• ผู้เล่นที่ทำรายการ: <span className="font-bold text-slate-900">{tx.playerName} ({tx.playerId})</span></div>
-                                <div>• ยอดแต้มหักออก: <span className="font-extrabold text-rose-700 font-mono">{tx.requestedAmount}.00 pt</span></div>
-                                <div>• บัญชีโอนออกแมนนวล: <span className="font-bold text-emerald-700">{tx.reviewReason.replace('Withdrawal request to ', '')}</span></div>
-                                <div className="text-[10px] text-slate-400 leading-snug">
-                                  💡 <b>สำคัญ:</b> กรุณาโอนเงินจริงไปยังบัญชีธนาคารด้านบนนี้ให้สำเร็จก่อนกดปุ่มอนุมัติ
+                              <div className="bg-white p-3 rounded-xl border border-rose-200 space-y-1.5 leading-normal text-slate-700 font-sans shadow-2xs">
+                                <div className="font-bold text-rose-950 flex items-center gap-1 text-xs">
+                                  <span>💸 ช่องทางโอนเงินคืนผู้เล่น:</span>
+                                </div>
+                                <div>• ผู้เล่นที่ทำรายการ: <span className="font-extrabold text-slate-900">{tx.playerName} ({tx.playerId})</span></div>
+                                <div>• ยอดแต้มที่หักออก: <span className="font-black text-rose-700 font-mono text-sm">-{tx.requestedAmount}.00 pt</span></div>
+                                <div>• บัญชีโอนออกแมนนวล: <span className="font-black text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">{tx.reviewReason.replace('Withdrawal request to ', '')}</span></div>
+                                <div className="text-[10px] text-rose-600 font-medium leading-snug pt-1">
+                                  💡 <b>สำคัญ:</b> แอดมินกรุณาโอนเงินจริงไปยังบัญชีธนาคารด้านบนนี้ให้สำเร็จก่อนกดปุ่มอนุมัติ
                                 </div>
                               </div>
                             ) : (
-                              <div className="grid grid-cols-2 gap-2 bg-white p-2.5 rounded-xl border border-slate-200 font-mono">
+                              <div className="grid grid-cols-2 gap-2 bg-white p-3 rounded-xl border border-emerald-200 font-mono shadow-2xs">
                                 <div>
-                                  <span className="text-[9px] text-slate-400 uppercase block font-sans">ยอดเงินเติมที่ผู้เล่นสั่ง:</span>
-                                  <span className="text-base font-extrabold text-sky-700">{tx.requestedAmount}.00 THB</span>
+                                  <span className="text-[9.5px] text-slate-500 uppercase block font-sans font-bold">ยอดเงินเติมที่ผู้เล่นสั่ง:</span>
+                                  <span className="text-lg font-black text-sky-800">{tx.requestedAmount}.00 THB</span>
                                 </div>
                                 <div className="border-l border-slate-200 pl-3">
-                                  <span className="text-[9px] text-slate-400 uppercase block font-sans">ยอดสแกนจริงจากสลิปโอน:</span>
-                                  <span className="text-base font-extrabold text-emerald-700">{tx.actualAmount}.00 THB</span>
+                                  <span className="text-[9.5px] text-slate-500 uppercase block font-sans font-bold">ยอดสแกนจริงจากสลิปโอน:</span>
+                                  <span className="text-lg font-black text-emerald-700">{tx.actualAmount}.00 THB</span>
                                 </div>
                               </div>
                             )}
 
                             {!isWithdrawal && (
-                              <div className="p-2.5 bg-white border border-slate-200 rounded-xl text-[10px] text-slate-500 space-y-0.5" style={{ maxHeight: '80px', overflowY: 'auto' }}>
-                                <span className="font-bold text-slate-400 text-[9px] block uppercase font-sans">Scan analysis logs:</span>
+                              <div className="p-2.5 bg-white border border-emerald-100 rounded-xl text-[10px] text-slate-600 space-y-0.5" style={{ maxHeight: '80px', overflowY: 'auto' }}>
+                                <span className="font-bold text-emerald-800 text-[9px] block uppercase font-sans">Scan analysis logs:</span>
                                 {tx.logs.map((l, i) => (
                                   <div key={i} className="font-mono">➜ {l}</div>
                                 ))}
@@ -2371,17 +2338,19 @@ export default function App() {
                             )}
                           </div>
 
-                          <div className="flex items-center gap-2 border-t border-slate-200 pt-2 font-sans">
+                          <div className="flex items-center gap-2 border-t pt-2 font-sans" style={{ borderColor: isWithdrawal ? '#FCA5A5' : '#6EE7B7' }}>
                             <button
                               onClick={() => handleAdminApproveReview(tx.id)}
-                              className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[11px] rounded-xl flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm shadow-emerald-500/10"
+                              className={`flex-1 py-2.5 text-white font-black text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md ${
+                                isWithdrawal ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/20' : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20'
+                              }`}
                             >
-                              <CheckCircle size={13} />
-                              {isWithdrawal ? `ยืนยันว่าโอนแล้ว & อนุมัติถอนเงิน (${tx.requestedAmount} THB)` : `อนุมัติและอัพแต้ม (${(tx.actualAmount && tx.actualAmount > 0) ? tx.actualAmount : (tx.requestedAmount || 0)} pt)`}
+                              <CheckCircle size={14} />
+                              {isWithdrawal ? `ยืนยันว่าโอนแล้ว & อนุมัติถอนเงิน (${tx.requestedAmount} THB)` : `อนุมัติฝากเงินและอัพแต้ม (+${(tx.actualAmount && tx.actualAmount > 0) ? tx.actualAmount : (tx.requestedAmount || 0)} pt)`}
                             </button>
                             <button
                               onClick={() => handleAdminRejectReview(tx.id, isWithdrawal ? 'ปฏิเสธคำขอและส่งแต้มคืนเข้าบัญชี' : 'ปฏิเสธเนื่องจากไม่มียอดโอนจริง')}
-                              className="py-2 px-3 bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-200 rounded-xl text-[11px] font-bold transition-all active:scale-95"
+                              className="py-2.5 px-4 bg-slate-100 hover:bg-rose-600 text-slate-700 hover:text-white border border-slate-300 hover:border-rose-600 rounded-xl text-xs font-bold transition-all active:scale-95"
                             >
                               ปฏิเสธรายการ
                             </button>
