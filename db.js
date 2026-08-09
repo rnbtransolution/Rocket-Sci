@@ -584,7 +584,7 @@ export function getBetByOrderNumber(orderNo) {
 }
 
 // match against an existing open bet (supports optional specific target order number e.g. "12" or "123456")
-export async function matchExistingOpenBet(userId, displayName, targetOrderNo = null) {
+export async function matchExistingOpenBet(userId, displayName, targetOrderNo = null, customMatchAmount = null) {
   const searchId = cleanUserId(userId);
   const matcherPlayer = players.find((p) => cleanUserId(p.id) === searchId);
   const matcherBal = matcherPlayer ? matcherPlayer.balance : 0;
@@ -613,8 +613,65 @@ export async function matchExistingOpenBet(userId, displayName, targetOrderNo = 
       return { error: 'OWN_BET', orderNumber: targetBet.orderNumber };
     }
 
-    if (matcherBal < targetBet.amount) {
-      return { error: 'INSUFFICIENT_BALANCE', required: targetBet.amount, current: matcherBal, orderNumber: targetBet.orderNumber };
+    let matchAmt = targetBet.amount;
+    if (customMatchAmount !== null && customMatchAmount !== undefined) {
+      const parsedAmt = Number(customMatchAmount);
+      if (!isNaN(parsedAmt) && parsedAmt > 0) {
+        if (parsedAmt < 100) {
+          return { error: 'BELOW_MIN_LIMIT', required: 100, provided: parsedAmt, orderNumber: targetBet.orderNumber };
+        }
+        // Cap maximum match amount at targetBet.amount (initial creator order amount)
+        matchAmt = Math.min(parsedAmt, targetBet.amount);
+      }
+    }
+
+    if (matcherBal < matchAmt) {
+      return { error: 'INSUFFICIENT_BALANCE', required: matchAmt, current: matcherBal, orderNumber: targetBet.orderNumber };
+    }
+
+    if (matchAmt < targetBet.amount) {
+      const remainingAmt = targetBet.amount - matchAmt;
+      targetBet.amount = matchAmt;
+
+      if (!targetBet.playerLowId) {
+        targetBet.playerLowId = searchId;
+        targetBet.playerLowName = displayName;
+      } else {
+        targetBet.playerHighId = searchId;
+        targetBet.playerHighName = displayName;
+      }
+      targetBet.status = 'matched';
+
+      updateRowInSheet('Bets', targetBet.orderNumber, {
+        1: targetBet.playerLowId,
+        2: targetBet.playerLowName,
+        3: targetBet.playerHighId,
+        4: targetBet.playerHighName,
+        5: matchAmt.toString(),
+        9: 'matched',
+      });
+
+      await adjustPlayerBalance(searchId, -matchAmt, displayName);
+
+      if (remainingAmt >= 100) {
+        const splitOrderNo = Math.floor(Math.random() * 899999 + 100000);
+        const creatorSide = targetBet.playerLowId === searchId ? 'high' : 'low';
+        const creatorName = targetBet.playerLowId === searchId ? targetBet.playerHighName : targetBet.playerLowName;
+        saveOpenBet(splitOrderNo, creatorId, creatorName, creatorSide, remainingAmt, targetBet.type, targetBet.rangeMin, targetBet.rangeMax, targetBet.groupId, targetBet.groupName, targetBet.userTypedCmd, targetBet.type === 'pre_quote');
+      } else {
+        await adjustPlayerBalance(creatorId, remainingAmt, 'Partial match credit refund');
+      }
+
+      return {
+        orderNumber: targetBet.orderNumber,
+        amount: matchAmt,
+        playerLowName: targetBet.playerLowName,
+        playerHighName: targetBet.playerHighName,
+        creatorId: creatorId,
+        matcherId: searchId,
+        rangeInfo: targetBet.rangeMin && targetBet.rangeMax ? `${targetBet.rangeMin}-${targetBet.rangeMax}s` : '',
+        rocketName: activeRocketRound?.name
+      };
     }
 
     if (!targetBet.playerLowId) {
@@ -655,6 +712,8 @@ export async function matchExistingOpenBet(userId, displayName, targetOrderNo = 
       playerHighName: targetBet.playerHighName,
       creatorId: creatorId,
       matcherId: searchId,
+      rangeInfo: targetBet.rangeMin && targetBet.rangeMax ? `${targetBet.rangeMin}-${targetBet.rangeMax}s` : '',
+      rocketName: activeRocketRound?.name
     };
   }
 

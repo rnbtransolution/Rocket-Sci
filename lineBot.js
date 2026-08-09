@@ -808,7 +808,11 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
         return true;
       }
     }
-    db.matchExistingOpenBet(userId, displayName, targetOrderNo).then(async matched => {
+    db.matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmount).then(async matched => {
+      if (matched && matched.error === 'BELOW_MIN_LIMIT') {
+        await replyToLine(replyToken, `⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${matched.provided} pt)`, userId);
+        return;
+      }
       if (matched && matched.error === 'INSUFFICIENT_BALANCE') {
         await replyToLine(replyToken, `❌ เครดิตของคุณไม่พอสำหรับรับแผลนี้ (มี ${matched.current}pt ต้องใช้ ${matched.required}pt)`, userId);
         return;
@@ -1596,9 +1600,8 @@ export function constructRuleGuideFlex() {
 
 export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy, userTypedCmd = null, isPreQuote = false) {
   const sideShort = side === 'high' ? 'ล' : 'ถ';
-  const displayCmd = userTypedCmd || sideShort;
-  const formulaTitle = `${displayCmd} = ${amount} pt`;
-  const badgeText = isPreQuote ? "⏳ รอราคาช่างแอดมิน • ล็อกเครดิต" : (isChotoy ? "ชตย (เผื่อช่างไม่ต่อย) • ล็อกเครดิต" : "แผลดวลสด • ล็อกเครดิต 1:1");
+  const displayCmd = userTypedCmd || `${sideShort}${amount}`;
+  const cardTitle = displayCmd.includes(amount.toString()) ? displayCmd : `${displayCmd} ${amount}pt`;
 
   return {
     "type": "bubble",
@@ -1627,19 +1630,11 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
       "contents": [
         {
           "type": "text",
-          "text": formulaTitle,
+          "text": cardTitle,
           "weight": "bold",
           "color": "#111111",
           "size": "md",
           "align": "center"
-        },
-        {
-          "type": "text",
-          "text": badgeText,
-          "color": isPreQuote ? "#E65100" : "#666666",
-          "size": "xxs",
-          "align": "center",
-          "margin": "xs"
         },
         {
           "type": "separator",
@@ -1647,11 +1642,33 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "color": "#F0F0F0"
         },
         {
-          "type": "text",
-          "text": "⚡ เลือกแต้มเพื่อใส่ข้อความรับแผล:",
-          "size": "xxs",
-          "color": "#888888",
-          "margin": "xs"
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "xs",
+          "contents": [
+            {
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": "#1565C0",
+              "cornerRadius": "sm",
+              "paddingAll": "xs",
+              "action": {
+                "type": "message",
+                "label": `⚡ ใส่แต้มรับแผล (ต ${orderNo})`,
+                "text": `ต ${orderNo} `
+              },
+              "contents": [
+                {
+                  "type": "text",
+                  "text": `⚡ ใส่แต้มรับแผล (ต ${orderNo})`,
+                  "color": "#FFFFFF",
+                  "weight": "bold",
+                  "size": "xs",
+                  "align": "center"
+                }
+              ]
+            }
+          ]
         },
         {
           "type": "box",
@@ -1707,7 +1724,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
             {
               "type": "box",
               "layout": "vertical",
-              "backgroundColor": "#1565C0",
+              "backgroundColor": "#2E7D32",
               "cornerRadius": "sm",
               "paddingAll": "xs",
               "action": {
