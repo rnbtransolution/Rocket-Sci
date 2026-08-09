@@ -1654,7 +1654,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               "paddingAll": "xs",
               "action": {
                 "type": "message",
-                "label": `⚡ ใส่แต้มรับแผล (ต ${orderNo})`,
+                "label": "⚡ ใส่แต้มรับแผล",
                 "text": `ต ${orderNo} `
               },
               "contents": [
