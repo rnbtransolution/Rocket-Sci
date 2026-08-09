@@ -2038,13 +2038,10 @@ export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, p
   };
 }
 
-export function constructRoundCloseFlex(rocketName, timeStr) {
-  const rocketTitle = rocketName || "ช่างบั้งไฟสด";
-  const time = timeStr || new Date().toLocaleTimeString("th-TH", { hour: '2-digit', minute: '2-digit' });
-
+export function constructRoundCloseFlex() {
   return {
     "type": "bubble",
-    "size": "giga",
+    "size": "micro",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -2053,10 +2050,10 @@ export function constructRoundCloseFlex(rocketName, timeStr) {
       "contents": [
         {
           "type": "text",
-          "text": "❌ ปิดรับดวลรอบนี้ ❌",
+          "text": "⛔ ปิดรับดวล",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "md",
+          "size": "sm",
           "align": "center"
         }
       ]
@@ -2065,40 +2062,16 @@ export function constructRoundCloseFlex(rocketName, timeStr) {
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "lg",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": `ทีม: ${rocketTitle}`,
-          "weight": "bold",
-          "color": "#111111",
-          "size": "sm",
-          "align": "center"
-        },
-        {
-          "type": "text",
-          "text": "3-2-GO! 🚀",
+          "text": "⚠️ ออเดอร์หลังจากนี้จะไม่ถูกจับคู่",
           "weight": "bold",
           "color": "#D32F2F",
-          "size": "md",
-          "align": "center",
-          "margin": "xs"
-        },
-        {
-          "type": "text",
-          "text": "⛔️ หลังปิด ไม่ติดทุกกรณี ⛔️",
-          "color": "#999999",
-          "size": "xs",
-          "align": "center",
-          "margin": "xs"
-        },
-        {
-          "type": "text",
-          "text": time,
-          "color": "#CCCCCC",
           "size": "xxs",
           "align": "center",
-          "margin": "xs"
+          "wrap": true
         }
       ]
     }

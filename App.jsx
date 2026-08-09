@@ -2089,15 +2089,51 @@ export default function App() {
                       addToast('📖 ประกาศส่งคู่มือคีย์เวิร์ด & กติกาการเล่นลงกลุ่มเรียบร้อย!', 'info');
                     }} className="py-2.5 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">📖 ประกาศส่งคู่มือคีย์เวิร์ดกติกา</button>
                     <button onClick={() => {
-                      const msg = `🔒 ปิดรับดวล ➔ ${rocketName || 'ช่างบั้งไฟสด'}\n⛔ 3-2-GO! หมดเวลาท้าดวลก่อนปล่อยบั้งไฟ\n⚠️ ออเดอร์และกดแมตช์หลังจากนี้จะไม่ถูกจับคู่ทุกกรณีครับ`;
+                      const closeFlex = {
+                        "type": "bubble",
+                        "size": "micro",
+                        "header": {
+                          "type": "box",
+                          "layout": "vertical",
+                          "backgroundColor": "#D32F2F",
+                          "paddingAll": "sm",
+                          "contents": [
+                            {
+                              "type": "text",
+                              "text": "⛔ ปิดรับดวล",
+                              "weight": "bold",
+                              "color": "#FFFFFF",
+                              "size": "sm",
+                              "align": "center"
+                            }
+                          ]
+                        },
+                        "body": {
+                          "type": "box",
+                          "layout": "vertical",
+                          "spacing": "xs",
+                          "paddingAll": "sm",
+                          "contents": [
+                            {
+                              "type": "text",
+                              "text": "⚠️ ออเดอร์หลังจากนี้จะไม่ถูกจับคู่",
+                              "weight": "bold",
+                              "color": "#D32F2F",
+                              "size": "xxs",
+                              "align": "center",
+                              "wrap": true
+                            }
+                          ]
+                        }
+                      };
                       if (broadcastTargetGroup === 'ALL') {
                         const targets = lineGroups.length > 0 ? lineGroups.map(g => g.id) : [activeGroupId];
-                        targets.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, msg]));
+                        targets.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, closeFlex]));
                       } else {
-                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, msg]);
+                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, closeFlex]);
                       }
-                      addToast(`🔒 ล็อคปิดรับดวลรอบ [${rocketName || 'ช่างบั้งไฟสด'}] (1 นาที ก่อนจุด) เรียบร้อย!`, 'warning');
-                    }} className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">🔒 ปิดรับดวล (1 นาที ก่อนจุด)</button>
+                      addToast(`⛔ ประกาศปิดรับดวล (Mini Flex Card) เรียบร้อย!`, 'warning');
+                    }} className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">⛔ ปิดรับดวล (1 นาที ก่อนจุด)</button>
                     <button onClick={() => {
                       if (!window.confirm("⛔ คุณต้องการประกาศ 'ช่าง ⛔' (โมฆะรอบ) และยกเลิกคืนแต้มแผลดวลทั้งหมดใช่หรือไม่?")) return;
                       runBackendFunction('adminVoidRound', []);
