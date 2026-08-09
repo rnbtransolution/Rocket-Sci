@@ -119,6 +119,12 @@ app.post('/api/run', async (req, res) => {
         break;
         
       case 'sendAdminMessageToLine':
+        if (args[1]) {
+          const rangeMatch = args[1].match(/(\d{3})\s*[-/]\s*(\d{3})/);
+          if (rangeMatch) {
+            db.setTargetMinMax(Number(rangeMatch[1]), Number(rangeMatch[2]));
+          }
+        }
         await lineBot.sendAdminMessageToLine(args[0], args[1]);
         result = db.getDashboardData();
         break;

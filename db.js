@@ -11,6 +11,24 @@ let transactions = [];
 let bets = [];
 let chatLogs = [];
 
+let activeTargetMin = 330;
+let activeTargetMax = 380;
+
+export function setTargetMinMax(minVal, maxVal) {
+  if (minVal && maxVal && Number(minVal) < Number(maxVal)) {
+    activeTargetMin = Number(minVal);
+    activeTargetMax = Number(maxVal);
+  }
+}
+
+export function getTargetMin() {
+  return activeTargetMin;
+}
+
+export function getTargetMax() {
+  return activeTargetMax;
+}
+
 // Helper to format dates to dd/MM/yy for visual consistency with GAS
 function formatDate(dateVal) {
   if (!dateVal) return '-';

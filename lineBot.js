@@ -881,7 +881,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     }
   }
 
-  // Format 2: [keywords][amount?] (e.g. "ล200", "ถ500", "ชล", "ชถ500")
+  // Format 2: Rule 1 Bet commands (e.g. "ชล100", "ชถ1000", "+5ชล500", "-5ชถ200", "ล100", "ถ500")
   const betRegex = /^([+-]?5?[a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
   if (betRegex.test(cleanBetText)) {
     const match = cleanBetText.match(betRegex);
@@ -893,13 +893,18 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     else if (keywordsHigh.includes(cmd)) side = 'high';
     
     if (side && amount >= 10) {
-      const activeMin = db.getTargetMin ? db.getTargetMin() : null;
-      const activeMax = db.getTargetMax ? db.getTargetMax() : null;
-      if (activeMin && activeMax) {
-        await processOpenBetRequest(side, amount, 'range', activeMin, activeMax, userId, displayName, replyToken, isChotoy, groupId);
-      } else {
-        await processOpenBetRequest(side, amount, 'normal', null, null, userId, displayName, replyToken, isChotoy, groupId);
+      let activeMin = db.getTargetMin ? db.getTargetMin() : 330;
+      let activeMax = db.getTargetMax ? db.getTargetMax() : 380;
+      
+      if (cmd.startsWith('+5')) {
+        activeMin += 5;
+        activeMax += 5;
+      } else if (cmd.startsWith('-5')) {
+        activeMin -= 5;
+        activeMax -= 5;
       }
+      
+      await processOpenBetRequest(side, amount, 'range', activeMin, activeMax, userId, displayName, replyToken, isChotoy, groupId);
       return true;
     }
   }
@@ -1534,15 +1539,22 @@ export function constructRuleGuideFlex() {
       "contents": [
         {
           "type": "text",
-          "text": "🔵 ช่างไล่ (ต่ำ):",
+          "text": "📌 Rule 1: แทงตามราคาช่างแอดมิน",
           "weight": "bold",
-          "color": "#1E88E5",
+          "color": "#0D47A1",
           "size": "xs"
         },
         {
           "type": "text",
-          "text": "ชล, a, ไล่, ล, +5ชล, -5ชล",
-          "color": "#555555",
+          "text": "🎉 ทายว่าชนะ (ต่ำ):\n• ช่างไล่ / ชล / ไล่ / ล\n• +5ชล / +5ล / +5ไล่\n• -5ชล / -5ล / -5ไล่\n💵 จำนวนเงินตัวเลขเท่านั้น (เช่น ชล100, ชล1000)",
+          "color": "#1565C0",
+          "size": "xxs",
+          "wrap": true
+        },
+        {
+          "type": "text",
+          "text": "👊 ทายว่าแพ้ (สูง):\n• ช่างยั่ง / ช่างถอย / ชย / ชถ / ย / ถ\n• +5ชย / +5ชถ / +5ย / +5ถ\n• -5ชย / -5ชถ / -5ย / -5ถ\n(เช่น ชถ100, ชถ1000)",
+          "color": "#C62828",
           "size": "xxs",
           "wrap": true
         },
@@ -1552,51 +1564,15 @@ export function constructRuleGuideFlex() {
         },
         {
           "type": "text",
-          "text": "🔴 ช่างถอย (สูง):",
-          "weight": "bold",
-          "color": "#D32F2F",
-          "size": "xs"
-        },
-        {
-          "type": "text",
-          "text": "ชย, ชถ, ย, ถ, ยั่ง, ถอย, +5ชย, -5ชย",
-          "color": "#555555",
-          "size": "xxs",
-          "wrap": true
-        },
-        {
-          "type": "separator",
-          "margin": "xs"
-        },
-        {
-          "type": "text",
-          "text": "🎯 เปิดราคาเอง:",
+          "text": "📌 Rule 2: การเปิดราคาเอง",
           "weight": "bold",
           "color": "#E65100",
           "size": "xs"
         },
         {
           "type": "text",
-          "text": "300-340ล500, 345-385ถ500 ชตย",
-          "color": "#555555",
-          "size": "xxs",
-          "wrap": true
-        },
-        {
-          "type": "separator",
-          "margin": "xs"
-        },
-        {
-          "type": "text",
-          "text": "✅ จับคู่แผล:",
-          "weight": "bold",
-          "color": "#2E7D32",
-          "size": "xs"
-        },
-        {
-          "type": "text",
-          "text": "พิมพ์ ต, ตต, ติด, ครับ, เค, จ้า",
-          "color": "#555555",
+          "text": "💰 เปิดราคาเต็มเท่านั้น เช่น:\n• 300-340ล500 | 300-340ถ500\n• 310-355ล500 | 310-355ถ500\n\n⬆️ ช่างต่อยก (ชตย - เผื่อช่างไม่ต่อย):\nใส่ ชตย หลังจำนวนเงิน เช่น\n• 345-385ล500 ชตย\n• 345-385ถ500 ชตย",
+          "color": "#333333",
           "size": "xxs",
           "wrap": true
         }
