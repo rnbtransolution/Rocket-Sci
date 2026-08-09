@@ -3580,30 +3580,31 @@ function AdminLockScreen({ passcodeInput, setPasscodeInput, passcodeError, setPa
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-slate-900 px-4 font-sans">
-      <div className="w-full max-w-md bg-slate-800/80 border border-slate-700/50 backdrop-blur-xl p-8 rounded-2xl shadow-2xl space-y-6 text-white">
-        <div className="text-center space-y-2">
-          <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/30 rounded-full flex items-center justify-center mx-auto text-emerald-400">
+    <div className="min-h-screen w-full flex items-center justify-center bg-slate-900 px-4 font-sans" style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="w-full max-w-md bg-slate-800 border border-slate-700 p-8 rounded-2xl shadow-2xl space-y-6 text-white" style={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#ffffff', borderRadius: '1rem', padding: '2rem', maxWidth: '28rem', width: '100%' }}>
+        <div className="text-center space-y-2" style={{ textAlign: 'center' }}>
+          <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/30 rounded-full flex items-center justify-center mx-auto text-emerald-400" style={{ width: '4rem', height: '4rem', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)', borderRadius: '9999px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto', color: '#34d399' }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-lock"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
           </div>
-          <h2 className="text-2xl font-black font-heading tracking-tight">เข้าสู่ระบบแอดมิน</h2>
-          <p className="text-xs text-slate-400">ระบบควบคุมจรวดและธนาคารจำลอง (Rocket Science Admin Console)</p>
+          <h2 className="text-2xl font-black font-heading tracking-tight" style={{ color: '#ffffff', fontSize: '1.5rem', fontWeight: 900 }}>เข้าสู่ระบบแอดมิน</h2>
+          <p className="text-xs text-slate-400" style={{ color: '#94a3b8', fontSize: '0.75rem' }}>ระบบควบคุมจรวดและธนาคารจำลอง (Rocket Science Admin Console)</p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-300 block">รหัสผ่านแอดมิน (Admin Passcode)</label>
+        <form onSubmit={handleLogin} className="space-y-4" style={{ marginTop: '1.5rem' }}>
+          <div className="space-y-1" style={{ marginBottom: '1rem' }}>
+            <label className="text-xs font-bold text-slate-300 block" style={{ color: '#cbd5e1', fontSize: '0.75rem', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>รหัสผ่านแอดมิน (Admin Passcode)</label>
             <input 
               type="password"
               placeholder="ป้อนรหัสผ่าน..."
               value={passcodeInput}
               onChange={(e) => setPasscodeInput(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-950/50 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-white font-mono text-center tracking-widest text-lg"
+              className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-white font-mono text-center tracking-widest text-lg"
+              style={{ width: '100%', padding: '0.75rem 1rem', backgroundColor: '#020617', color: '#ffffff', borderColor: '#334155', borderRadius: '0.75rem', textAlign: 'center', fontSize: '1.125rem' }}
             />
           </div>
 
           {passcodeError && (
-            <p className="text-xs font-semibold text-rose-400 text-center">
+            <p className="text-xs font-semibold text-rose-400 text-center" style={{ color: '#fb7185', fontSize: '0.75rem', textAlign: 'center' }}>
               ⚠️ {passcodeError}
             </p>
           )}
@@ -3611,6 +3612,7 @@ function AdminLockScreen({ passcodeInput, setPasscodeInput, passcodeError, setPa
           <button
             type="submit"
             className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 active:scale-98 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/20 transition-all flex items-center justify-center gap-2"
+            style={{ width: '100%', padding: '0.75rem', backgroundColor: '#059669', color: '#ffffff', border: 'none', borderRadius: '0.75rem', fontSize: '0.875rem', fontWeight: 700, cursor: 'pointer' }}
           >
             ยืนยันรหัสผ่าน
           </button>
