@@ -255,15 +255,8 @@ export default function App() {
     runBackendFunction('adminOpenRound', [name]);
 
     if (broadcastTargetGroup === 'ALL') {
-      if (lineGroups && lineGroups.length > 0) {
-        lineGroups.forEach(g => {
-          runBackendFunction('sendAdminMessageToLine', [g.id, quoteFlex]);
-        });
-        addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) กระจายทุกกลุ่ม (${lineGroups.length} กลุ่ม) เรียบร้อย!`, 'success');
-      } else {
-        runBackendFunction('sendAdminMessageToLine', [activeGroupId, quoteFlex]);
-        addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) เข้ากลุ่ม LINE เรียบร้อย!`, 'success');
-      }
+      runBackendFunction('sendAdminMessageToLine', ['ALL', quoteFlex]);
+      addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) กระจายทุกกลุ่มเรียบร้อย!`, 'success');
     } else {
       const targetObj = lineGroups.find(g => g.id === broadcastTargetGroup);
       const targetName = targetObj ? targetObj.name : `กลุ่ม (#${broadcastTargetGroup.slice(-4)})`;
@@ -2102,13 +2095,8 @@ export default function App() {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs font-bold">
                     <button onClick={() => {
-                      const msg = `📖 [คู่มือคีย์เวิร์ดกติกาการเล่น]\n\n📌 กฏที่ 1: แทงตามราคาช่างแอดมิน\n\n🎉 ทายว่าชนะ (สูง):\n• ช่างไล่ / ชล / ไล่ / ล\n• +5ชล / +5ล / +5ไล่\n• -5ชล / -5ล / -5ไล่\n💵 พิมพ์คีย์เวิร์ดตามด้วยจำนวนเงิน (ตัวเลขเท่านั้น)\nเช่น ชล100 , ชล1000 , ชล10000\n\n👊 ทายว่าแพ้ (ต่ำ):\n• ช่างยั่ง / ช่างถอย / ชย\n• ชถ / ยั่ง / ย / ถอย / ถ\n• +5ชย / +5ชถ / +5ย / +5ถ\n• -5ชย / -5ชถ / -5ย / -5ถ\nเช่น ชถ100 , ชถ1000\n\n-----------------------------\n\n📌 กฏที่ 2: การเปิดราคาเอง\n\n💰 การเปิดราคาเอง (เปิดแผลสดใหม่):\n⚠️ เปิดราคาเต็มเท่านั้น เช่น\n• 300-340ล500 | 300-340ถ500\n• 310-355ล500 | 310-355ถ500\n\n⬆️ ช่างต่อยก (ชตย - เผื่อช่างไม่ต่อย):\nใส่ ชตย หลังจำนวนเงิน เช่น\n• 345-385ล500 ชตย\n• 345-385ถ500 ชตย`;
-                      if (broadcastTargetGroup === 'ALL') {
-                        const targets = lineGroups.length > 0 ? lineGroups.map(g => g.id) : [activeGroupId];
-                        targets.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, msg]));
-                      } else {
-                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, msg]);
-                      }
+                      const msg = `📖 [คู่มือคีย์เวิร์ดกติกาการเล่น]\n\n📌 กฏที่ 1: แทงตามราคาช่างแอดมิน\n\n🎉 ทายว่าชนะ (สูง):\n• ช่างไล่ / ชล / ไล่ / ล\n• +5ชล / +5ล / +5ไล่\n• +10ชล / -10ชล\n• -5ชล / -5ล / -5ไล่\n💵 พิมพ์คีย์เวิร์ดตามด้วยจำนวนเงิน (ตัวเลขเท่านั้น)\nเช่น ชล100 , ชล1000 , ชล10000\n\n👊 ทายว่าแพ้ (ต่ำ):\n• ช่างยั่ง / ช่างถอย / ชย\n• ชถ / ยั่ง / ย / ถอย / ถ\n• +5ชถ / +10ชถ / -10ชถ\nเช่น ชถ100 , ชถ1000\n\n-----------------------------\n\n📌 กฏที่ 2: การเปิดราคาเอง\n\n💰 การเปิดราคาเอง (เปิดแผลสดใหม่):\n⚠️ ระบุช่วงเวลาต่ำไปสูง (ช่วงห่าง 80 วิพอดี) เช่น\n• 300-380ล500 | 300-380ถ500\n• 350-430ล500 | 350-430ถ500\n\n⬆️ ช่างต่อยก (ชตย - เผื่อช่างไม่ต่อย):\nใส่ ชตย หลังจำนวนเงิน เช่น\n• 300-380ล500 ชตย`;
+                      runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, msg]);
                       addToast('📖 ประกาศส่งคู่มือคีย์เวิร์ด & กติกาการเล่นลงกลุ่มเรียบร้อย!', 'info');
                     }} className="py-2.5 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">📖 ประกาศส่งคู่มือคีย์เวิร์ดกติกา</button>
                     <button onClick={() => {
@@ -2150,16 +2138,7 @@ export default function App() {
                         }
                       };
                       runBackendFunction('setRocketRoundStatus', ['closed']);
-                      if (broadcastTargetGroup === 'ALL') {
-                        const validGroups = lineGroups && lineGroups.length > 0 ? lineGroups.map(g => g.id) : (activeGroupId ? [activeGroupId] : []);
-                        if (validGroups.length === 0) {
-                          runBackendFunction('sendAdminMessageToLine', [activeGroupId, closeFlex]);
-                        } else {
-                          validGroups.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, closeFlex]));
-                        }
-                      } else {
-                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, closeFlex]);
-                      }
+                      runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, closeFlex]);
                       addToast(`⛔ ประกาศปิดรับดวล (Mini Flex Card) เรียบร้อย!`, 'warning');
                     }} className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">⛔ ปิดรับดวล (1 นาที ก่อนจุด)</button>
                     <button onClick={() => {
@@ -2169,12 +2148,7 @@ export default function App() {
                     }} className="py-2.5 px-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ)</button>
                     <button onClick={() => {
                       const msg = `🚨 [เตือนภัย] ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA เท่านั้นครับ ❌`;
-                      if (broadcastTargetGroup === 'ALL') {
-                        const targets = lineGroups.length > 0 ? lineGroups.map(g => g.id) : [activeGroupId];
-                        targets.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, msg]));
-                      } else {
-                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, msg]);
-                      }
+                      runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, msg]);
                       addToast(`🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพไปยัง LINE เรียบร้อย!`, 'info');
                     }} className="py-2.5 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">🚨 เตือนมิจฉาชีพ</button>
                   </div>

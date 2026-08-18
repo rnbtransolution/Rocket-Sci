@@ -298,6 +298,11 @@ export async function sendAdminMessageToLine(targetId, messageText) {
     db.setRocketRoundStatus('ACTIVE');
   }
 
+  // Handle multi-group / global broadcast
+  if (!targetId || targetId === 'ALL') {
+    return await broadcastToAllGroups(messageText);
+  }
+
   const destinationId = targetId || db.getActiveGroupId();
   if (!destinationId) {
     console.log("[LINE Push] Round status updated, but no active group ID available for broadcast push.");
