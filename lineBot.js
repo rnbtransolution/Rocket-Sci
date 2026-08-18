@@ -876,19 +876,18 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     }
 
     if (matched && matched.orderNumber) {
-      // Parallelize push notifications (Group notice + Private 1-on-1 DMs) concurrently!
-      const flexMatcher = constructMatchNotificationFlex(matched.orderNumber, matched.amount, matched.playerLowName, matched.playerHighName, matched.rangeInfo, matched.isChotoy, matched.rocketName);
+      // Parallelize push notifications (Group Flex card + Private 1-on-1 DMs) concurrently!
+      const flexMatch = constructMatchNotificationFlex(matched.orderNumber, matched.amount, matched.playerLowName, matched.playerHighName, matched.rangeInfo, matched.isChotoy, matched.rocketName);
 
       const groupPush = groupId
-        ? pushToLine(groupId, `☄️ [#${matched.orderNumber} แมตช์!] @${matched.playerLowName} (ต่ำ) 🆚 @${matched.playerHighName} (สูง) | ${matched.amount}pt 🚀`)
-        : replyToLine(replyToken, flexMatcher, userId);
+        ? pushToLine(groupId, flexMatch)
+        : replyToLine(replyToken, flexMatch, userId);
 
       const creatorPush = (async () => {
         try {
-          const creatorName = matched.playerLowName || matched.playerHighName;
-          const creatorBal = await db.getPlayerBalance(matched.creatorId, creatorName);
-          const flexCreator = constructMatchNotificationFlex(matched.orderNumber, matched.amount, displayName, 'creator', creatorBal);
-          await pushToLine(matched.creatorId, flexCreator);
+          if (matched.creatorId) {
+            await pushToLine(matched.creatorId, flexMatch);
+          }
         } catch (e) {
           console.error('[Match DM Creator Push Error]', e);
         }
@@ -896,9 +895,9 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
       const matcherPush = (async () => {
         try {
-          if (!groupId) return;
-          const matcherBal = await db.getPlayerBalance(matched.matcherId, displayName);
-          await pushToLine(matched.matcherId, flexMatcher);
+          if (groupId && matched.matcherId && matched.matcherId !== matched.creatorId) {
+            await pushToLine(matched.matcherId, flexMatch);
+          }
         } catch (e) {
           console.error('[Match DM Matcher Push Error]', e);
         }
@@ -1772,9 +1771,11 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
   let cleanCmd = (userTypedCmd && typeof userTypedCmd === 'string') ? userTypedCmd.trim() : `${sideShort}${amount}`;
   // Strip any leading range numbers like "350-450" or "300/380" in front of the betting command
   cleanCmd = cleanCmd.replace(/^\d+[-/]\d+/, '').trim();
+  // Strip trailing "pt" if present
+  cleanCmd = cleanCmd.replace(/pt$/i, '').trim();
   if (!cleanCmd) cleanCmd = `${sideShort}${amount}`;
 
-  const cardTitle = cleanCmd.includes(amount.toString()) ? cleanCmd : `${cleanCmd} ${amount}pt`;
+  const cardTitle = cleanCmd.includes(amount.toString()) ? cleanCmd : `${cleanCmd} ${amount}`;
 
   return {
     "type": "bubble",
@@ -1828,11 +1829,11 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               "paddingAll": "xs",
               "action": {
                 "type": "message",
-                "label": "ต100",
+                "label": "100",
                 "text": `ต ${orderNo} 100`
               },
               "contents": [
-                { "type": "text", "text": "ต100", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
+                { "type": "text", "text": "100", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
               ]
             },
             {
@@ -1843,11 +1844,11 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               "paddingAll": "xs",
               "action": {
                 "type": "message",
-                "label": "ต200",
+                "label": "200",
                 "text": `ต ${orderNo} 200`
               },
               "contents": [
-                { "type": "text", "text": "ต200", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
+                { "type": "text", "text": "200", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
               ]
             },
             {
@@ -1858,11 +1859,11 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               "paddingAll": "xs",
               "action": {
                 "type": "message",
-                "label": "ต300",
+                "label": "300",
                 "text": `ต ${orderNo} 300`
               },
               "contents": [
-                { "type": "text", "text": "ต300", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
+                { "type": "text", "text": "300", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
               ]
             },
             {
@@ -1873,45 +1874,63 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               "paddingAll": "xs",
               "action": {
                 "type": "message",
-                "label": "ตทั้งหมด",
+                "label": "500",
+                "text": `ต ${orderNo} 500`
+              },
+              "contents": [
+                { "type": "text", "text": "500", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "spacing": "xs",
+          "margin": "xs",
+          "contents": [
+            {
+              "type": "box",
+              "layout": "vertical",
+              "flex": 1,
+              "backgroundColor": "#2E7D32",
+              "cornerRadius": "sm",
+              "paddingAll": "xs",
+              "action": {
+                "type": "message",
+                "label": "ต ทั้งหมด",
                 "text": `ต ${orderNo} ${amount}`
               },
               "contents": [
-                { "type": "text", "text": "ตทั้งหมด", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
+                { "type": "text", "text": "ต ทั้งหมด", "color": "#FFFFFF", "weight": "bold", "size": "xs", "align": "center" }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "flex": 1,
+              "backgroundColor": "#C62828",
+              "cornerRadius": "sm",
+              "paddingAll": "xs",
+              "action": {
+                "type": "message",
+                "label": "⛔️ ยกเลิก",
+                "text": `ยกเลิก ${orderNo}`
+              },
+              "contents": [
+                { "type": "text", "text": "⛔️ ยกเลิก", "color": "#FFFFFF", "weight": "bold", "size": "xs", "align": "center" }
               ]
             }
           ]
         },
         {
           "type": "text",
-          "text": `💡 หรือพิมพ์: ${orderNo} [จำนวนเงิน]`,
+          "text": `หรือพิมพ์: ${orderNo} [จำนวนเงิน]`,
           "size": "xxs",
           "color": "#1D4ED8",
           "weight": "bold",
           "align": "center",
           "margin": "xs"
-        },
-        {
-          "type": "box",
-          "layout": "horizontal",
-          "margin": "xs",
-          "contents": [
-            {
-              "type": "box",
-              "layout": "vertical",
-              "backgroundColor": "#C62828",
-              "cornerRadius": "sm",
-              "paddingAll": "xs",
-              "action": {
-                "type": "message",
-                "label": "🚫 ยกเลิกแผล",
-                "text": `ยกเลิก ${orderNo}`
-              },
-              "contents": [
-                { "type": "text", "text": "🚫 ยกเลิกแผล", "color": "#FFFFFF", "weight": "bold", "size": "xs", "align": "center" }
-              ]
-            }
-          ]
         }
       ]
     }
@@ -1921,24 +1940,23 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
 export function constructMatchNotificationFlex(orderNo, amount, playerLowName, playerHighName, rangeInfo, isChotoy, rocketName) {
   const lowText = playerLowName || "ผู้เล่น";
   const highText = playerHighName || "คู่ดวล";
-  const formattedAmt = Number(amount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const dateStr = new Date().toLocaleDateString("en-GB", { day: '2-digit', month: 'short', year: '2-digit' }) + " " + new Date().toLocaleTimeString("th-TH", { hour: '2-digit', minute: '2-digit' });
+  const cleanAmt = typeof amount === 'number' ? amount : (parseInt(amount) || amount);
 
   return {
     "type": "bubble",
-    "size": "kilo",
+    "size": "micro",
     "header": {
       "type": "box",
       "layout": "vertical",
-      "backgroundColor": "#10B981",
+      "backgroundColor": "#1E1B4B",
       "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": "✓ จับคู่สำเร็จ",
+          "text": `🚀 แมตช์สำเร็จ #${orderNo}`,
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "md",
+          "size": "xs",
           "align": "center"
         }
       ]
@@ -1947,44 +1965,28 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "lg",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": `Order #${orderNo}`,
-          "color": "#94A3B8",
-          "size": "xs",
+          "text": `${cleanAmt} pt`,
+          "weight": "bold",
+          "color": "#059669",
+          "size": "lg",
           "align": "center"
         },
         {
-          "type": "text",
-          "text": formattedAmt,
-          "weight": "bold",
-          "color": "#1E293B",
-          "size": "3xl",
-          "align": "center",
-          "margin": "xs"
-        },
-        {
-          "type": "text",
-          "text": dateStr,
-          "color": "#94A3B8",
-          "size": "xs",
-          "align": "center",
-          "margin": "xs"
-        },
-        {
           "type": "separator",
-          "margin": "md",
-          "color": "#F1F5F9"
+          "margin": "xs",
+          "color": "#F0F0F0"
         },
         {
           "type": "box",
           "layout": "horizontal",
-          "margin": "md",
+          "margin": "xs",
           "contents": [
-            { "type": "text", "text": `${lowText} 🎈`, "weight": "bold", "color": "#334155", "size": "xs", "flex": 5 },
-            { "type": "text", "text": "ทายต่ำ (Low)", "weight": "bold", "color": "#0284C7", "size": "xs", "flex": 5, "align": "end" }
+            { "type": "text", "text": "🔻 ต่ำ (Low):", "color": "#0284C7", "size": "xxs", "weight": "bold", "flex": 4 },
+            { "type": "text", "text": `@${lowText}`, "color": "#1E293B", "size": "xxs", "weight": "bold", "flex": 6, "align": "end" }
           ]
         },
         {
@@ -1992,46 +1994,18 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
           "layout": "horizontal",
           "margin": "xs",
           "contents": [
-            { "type": "text", "text": highText, "weight": "bold", "color": "#334155", "size": "xs", "flex": 5 },
-            { "type": "text", "text": "ทายสูง (High)", "weight": "bold", "color": "#F43F5E", "size": "xs", "flex": 5, "align": "end" }
+            { "type": "text", "text": "🔺 สูง (High):", "color": "#E11D48", "size": "xxs", "weight": "bold", "flex": 4 },
+            { "type": "text", "text": `@${highText}`, "color": "#1E293B", "size": "xxs", "weight": "bold", "flex": 6, "align": "end" }
           ]
         },
-        {
-          "type": "box",
-          "layout": "horizontal",
-          "margin": "xs",
-          "contents": [
-            { "type": "text", "text": "ทีม", "color": "#94A3B8", "size": "xs", "flex": 4 },
-            { "type": "text", "text": rocketName || "ช่างบั้งไฟสด", "weight": "bold", "color": "#334155", "size": "xs", "flex": 6, "align": "end" }
-          ]
-        },
-        {
-          "type": "box",
-          "layout": "horizontal",
-          "margin": "xs",
-          "contents": [
-            { "type": "text", "text": "สถานะ", "color": "#94A3B8", "size": "xs", "flex": 4 },
-            { "type": "text", "text": "✓ ยืนยันแล้ว", "weight": "bold", "color": "#10B981", "size": "xs", "flex": 6, "align": "end" }
-          ]
-        }
-      ]
-    },
-    "footer": {
-      "type": "box",
-      "layout": "vertical",
-      "paddingAll": "md",
-      "contents": [
-        {
-          "type": "button",
-          "style": "primary",
-          "height": "sm",
-          "color": "#EF4444",
-          "action": {
-            "type": "message",
-            "label": "แตะเพื่อยกเลิก",
-            "text": `ยกเลิก ${orderNo}`
-          }
-        }
+        ...(rangeInfo ? [{
+          "type": "text",
+          "text": `ช่วงราคา: ${rangeInfo}`,
+          "color": "#64748B",
+          "size": "xxs",
+          "align": "center",
+          "margin": "xs"
+        }] : [])
       ]
     }
   };
