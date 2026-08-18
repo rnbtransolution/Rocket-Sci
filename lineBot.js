@@ -874,6 +874,10 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
       await sendNotice(`${tagPrefix}🚫 ไม่พบแผล Order #${matched.targetOrderNo || targetOrderNo} ในระบบครับ`);
       return true;
     }
+    if (matched && matched.error === 'EXCEEDS_ORDER_AMOUNT') {
+      await sendNotice(`${tagPrefix}⚠️ ยอดรับดวล (${matched.provided} pt) เกินยอดของ Order #${matched.orderNumber} (รับได้สูงสุด ${matched.maxAllowed} pt ครับ)`);
+      return true;
+    }
 
     if (matched && matched.orderNumber) {
       // Parallelize push notifications (Group Flex card + Private 1-on-1 DMs) concurrently!
@@ -1776,6 +1780,108 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
   if (!cleanCmd) cleanCmd = `${sideShort}${amount}`;
 
   const cardTitle = cleanCmd.includes(amount.toString()) ? cleanCmd : `${cleanCmd} ${amount}`;
+  const numAmount = Number(amount) || 100;
+
+  // Filter quick amount buttons so no button exceeds the initial order amount!
+  const presetAmounts = [100, 200, 300, 500];
+  let validAmounts = presetAmounts.filter(v => v <= numAmount);
+  if (validAmounts.length === 0 && numAmount >= 100) {
+    validAmounts = [numAmount];
+  }
+
+  const quickButtons = validAmounts.map(val => ({
+    "type": "box",
+    "layout": "vertical",
+    "flex": 1,
+    "backgroundColor": "#0284C7",
+    "cornerRadius": "sm",
+    "paddingAll": "xs",
+    "action": {
+      "type": "message",
+      "label": val.toString(),
+      "text": `ต ${orderNo} ${val}`
+    },
+    "contents": [
+      { "type": "text", "text": val.toString(), "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
+    ]
+  }));
+
+  const bodyContents = [
+    {
+      "type": "text",
+      "text": cardTitle,
+      "weight": "bold",
+      "color": "#111111",
+      "size": "md",
+      "align": "center"
+    },
+    {
+      "type": "separator",
+      "margin": "xs",
+      "color": "#F0F0F0"
+    }
+  ];
+
+  if (quickButtons.length > 0) {
+    bodyContents.push({
+      "type": "box",
+      "layout": "horizontal",
+      "spacing": "xs",
+      "margin": "xs",
+      "contents": quickButtons
+    });
+  }
+
+  bodyContents.push({
+    "type": "box",
+    "layout": "horizontal",
+    "spacing": "xs",
+    "margin": "xs",
+    "contents": [
+      {
+        "type": "box",
+        "layout": "vertical",
+        "flex": 1,
+        "backgroundColor": "#16A34A",
+        "cornerRadius": "sm",
+        "paddingAll": "xs",
+        "action": {
+          "type": "message",
+          "label": "ต ทั้งหมด",
+          "text": `ต ${orderNo} ${amount}`
+        },
+        "contents": [
+          { "type": "text", "text": "ต ทั้งหมด", "color": "#FFFFFF", "weight": "bold", "size": "xs", "align": "center" }
+        ]
+      },
+      {
+        "type": "box",
+        "layout": "vertical",
+        "flex": 1,
+        "backgroundColor": "#DC2626",
+        "cornerRadius": "sm",
+        "paddingAll": "xs",
+        "action": {
+          "type": "message",
+          "label": "⛔️ ยกเลิก",
+          "text": `ยกเลิก ${orderNo}`
+        },
+        "contents": [
+          { "type": "text", "text": "⛔️ ยกเลิก", "color": "#FFFFFF", "weight": "bold", "size": "xs", "align": "center" }
+        ]
+      }
+    ]
+  });
+
+  bodyContents.push({
+    "type": "text",
+    "text": `หรือพิมพ์: ${orderNo} [จำนวนเงิน]`,
+    "size": "xxs",
+    "color": "#1D4ED8",
+    "weight": "bold",
+    "align": "center",
+    "margin": "xs"
+  });
 
   return {
     "type": "bubble",
@@ -1801,138 +1907,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
       "layout": "vertical",
       "spacing": "xs",
       "paddingAll": "sm",
-      "contents": [
-        {
-          "type": "text",
-          "text": cardTitle,
-          "weight": "bold",
-          "color": "#111111",
-          "size": "md",
-          "align": "center"
-        },
-        {
-          "type": "separator",
-          "margin": "xs",
-          "color": "#F0F0F0"
-        },
-        {
-          "type": "box",
-          "layout": "horizontal",
-          "spacing": "xs",
-          "margin": "xs",
-          "contents": [
-            {
-              "type": "box",
-              "layout": "vertical",
-              "backgroundColor": "#0284C7",
-              "cornerRadius": "sm",
-              "paddingAll": "xs",
-              "action": {
-                "type": "message",
-                "label": "100",
-                "text": `ต ${orderNo} 100`
-              },
-              "contents": [
-                { "type": "text", "text": "100", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
-              ]
-            },
-            {
-              "type": "box",
-              "layout": "vertical",
-              "backgroundColor": "#0284C7",
-              "cornerRadius": "sm",
-              "paddingAll": "xs",
-              "action": {
-                "type": "message",
-                "label": "200",
-                "text": `ต ${orderNo} 200`
-              },
-              "contents": [
-                { "type": "text", "text": "200", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
-              ]
-            },
-            {
-              "type": "box",
-              "layout": "vertical",
-              "backgroundColor": "#0284C7",
-              "cornerRadius": "sm",
-              "paddingAll": "xs",
-              "action": {
-                "type": "message",
-                "label": "300",
-                "text": `ต ${orderNo} 300`
-              },
-              "contents": [
-                { "type": "text", "text": "300", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
-              ]
-            },
-            {
-              "type": "box",
-              "layout": "vertical",
-              "backgroundColor": "#0284C7",
-              "cornerRadius": "sm",
-              "paddingAll": "xs",
-              "action": {
-                "type": "message",
-                "label": "500",
-                "text": `ต ${orderNo} 500`
-              },
-              "contents": [
-                { "type": "text", "text": "500", "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "box",
-          "layout": "horizontal",
-          "spacing": "xs",
-          "margin": "xs",
-          "contents": [
-            {
-              "type": "box",
-              "layout": "vertical",
-              "flex": 1,
-              "backgroundColor": "#16A34A",
-              "cornerRadius": "sm",
-              "paddingAll": "xs",
-              "action": {
-                "type": "message",
-                "label": "ต ทั้งหมด",
-                "text": `ต ${orderNo} ${amount}`
-              },
-              "contents": [
-                { "type": "text", "text": "ต ทั้งหมด", "color": "#FFFFFF", "weight": "bold", "size": "xs", "align": "center" }
-              ]
-            },
-            {
-              "type": "box",
-              "layout": "vertical",
-              "flex": 1,
-              "backgroundColor": "#DC2626",
-              "cornerRadius": "sm",
-              "paddingAll": "xs",
-              "action": {
-                "type": "message",
-                "label": "⛔️ ยกเลิก",
-                "text": `ยกเลิก ${orderNo}`
-              },
-              "contents": [
-                { "type": "text", "text": "⛔️ ยกเลิก", "color": "#FFFFFF", "weight": "bold", "size": "xs", "align": "center" }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "text",
-          "text": `หรือพิมพ์: ${orderNo} [จำนวนเงิน]`,
-          "size": "xxs",
-          "color": "#1D4ED8",
-          "weight": "bold",
-          "align": "center",
-          "margin": "xs"
-        }
-      ]
+      "contents": bodyContents
     }
   };
 }
@@ -2007,6 +1982,95 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
           "margin": "sm"
         }] : [])
       ]
+    }
+  };
+}
+
+export function constructRoundSummaryFlex(finalTime, targetMin, targetMax, rocketName) {
+  const isLowWin = finalTime < targetMin;
+  const isHighWin = finalTime > targetMax;
+  const outcomeTitle = isLowWin ? "🔻 ฝั่งต่ำ (ชล)" : (isHighWin ? "🔺 ฝั่งสูง (ชถ)" : "🎯 ในราคาช่าง (คืนแต้ม)");
+  const outcomeColor = isLowWin ? "#DC2626" : (isHighWin ? "#16A34A" : "#D97706");
+
+  const bodyContents = [
+    {
+      "type": "text",
+      "text": `${finalTime}s`,
+      "weight": "bold",
+      "color": "#1E1B4B",
+      "size": "3xl",
+      "align": "center"
+    },
+    {
+      "type": "text",
+      "text": "เวลาบั้งไฟจริง",
+      "size": "xxs",
+      "color": "#64748B",
+      "align": "center",
+      "margin": "none"
+    },
+    {
+      "type": "separator",
+      "margin": "sm",
+      "color": "#F0F0F0"
+    },
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "margin": "sm",
+      "contents": [
+        { "type": "text", "text": "🎯 ราคาช่าง:", "color": "#64748B", "size": "xs", "flex": 4 },
+        { "type": "text", "text": `${targetMin} - ${targetMax} s`, "color": "#1E293B", "weight": "bold", "size": "xs", "align": "end", "flex": 6 }
+      ]
+    },
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "margin": "xs",
+      "contents": [
+        { "type": "text", "text": "👑 ฝั่งชนะ:", "color": "#64748B", "size": "xs", "flex": 4 },
+        { "type": "text", "text": outcomeTitle, "color": outcomeColor, "weight": "bold", "size": "xs", "align": "end", "flex": 6 }
+      ]
+    }
+  ];
+
+  if (rocketName) {
+    bodyContents.push({
+      "type": "box",
+      "layout": "horizontal",
+      "margin": "xs",
+      "contents": [
+        { "type": "text", "text": "🚀 บั้งไฟ:", "color": "#64748B", "size": "xs", "flex": 4 },
+        { "type": "text", "text": rocketName, "color": "#334155", "weight": "bold", "size": "xs", "align": "end", "flex": 6 }
+      ]
+    });
+  }
+
+  return {
+    "type": "bubble",
+    "size": "kilo",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#1E1B4B",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "🏆 ประกาศผลสรุปดวล",
+          "weight": "bold",
+          "color": "#FFFFFF",
+          "size": "sm",
+          "align": "center"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "md",
+      "contents": bodyContents
     }
   };
 }

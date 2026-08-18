@@ -627,8 +627,10 @@ export async function matchExistingOpenBet(userId, displayName, targetOrderNo = 
         if (parsedAmt < 100) {
           return { error: 'BELOW_MIN_LIMIT', required: 100, provided: parsedAmt, orderNumber: targetBet.orderNumber };
         }
-        // Cap maximum match amount at targetBet.amount (initial creator order amount)
-        matchAmt = Math.min(parsedAmt, targetBet.amount);
+        if (parsedAmt > targetBet.amount) {
+          return { error: 'EXCEEDS_ORDER_AMOUNT', maxAllowed: targetBet.amount, provided: parsedAmt, orderNumber: targetBet.orderNumber };
+        }
+        matchAmt = parsedAmt;
       }
     }
 
@@ -1237,12 +1239,11 @@ export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxPara
   if (targetGroups.length > 0) {
     try {
       const lineBot = await import('./lineBot.js');
-      const outcomeText = finalTime < targetMin ? 'ต่ำ (ชล) 🔵' : finalTime > targetMax ? 'สูง (ชถ) 🔴' : 'ในราคาช่าง 🎯';
-      const roundNotice = `🏆 [ประกาศผลสรุปดวล]: ${finalTime}s (ราคาช่าง ${targetMin}-${targetMax}s) | ฝั่งชนะ: ${outcomeText} 🚀`;
+      const roundFlex = lineBot.constructRoundSummaryFlex(finalTime, targetMin, targetMax, activeRocketRound?.name);
       for (const g of targetGroups) {
-        await lineBot.pushToLine(g.id, roundNotice);
+        await lineBot.pushToLine(g.id, roundFlex);
       }
-      logLineChatMessage('SYSTEM', '🤖 Rocket Bot', 'bot', roundNotice, 'text');
+      logLineChatMessage('SYSTEM', '🤖 Rocket Bot', 'bot', `🏆 ประกาศผลสรุปดวล: ${finalTime}s`, 'flex');
     } catch (e) {
       console.error("[DB] Error broadcasting round result to groups:", e);
     }
