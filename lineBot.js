@@ -554,6 +554,13 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   const isMatchCommand = await parseBetCommand(text, userId, displayName, replyToken, groupId);
   if (isMatchCommand) return;
 
+  // I.1 RULE / GUIDE COMMAND ("กติกา", "rule", "rules", "วิธีเล่น", "คู่มือ")
+  if (clean === 'กติกา' || clean === 'rule' || clean === 'rules' || clean === 'วิธีเล่น' || clean === 'คู่มือ') {
+    const ruleFlex = constructRuleGuideFlex();
+    await replyToLine(replyToken, ruleFlex, userId);
+    return;
+  }
+
   // I. HELP MENU
   if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start' || clean === 'ช่วยเหลือ') {
     if (groupId) {
@@ -771,8 +778,13 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     if (res.success) {
       if (groupId) {
         await pushToLine(groupId, `❌ ยกเลิก Order #${res.orderNumber} สำเร็จ!`);
+        const userBal = db.getPlayerBalance(userId);
+        const miniFlex = constructCancelOrderMiniFlex(res.orderNumber, res.amount, userBal);
+        await pushToLine(userId, miniFlex);
       } else {
-        await replyToLine(replyToken, `❌ ยกเลิกแผล Order #${res.orderNumber} สำเร็จ!`, userId);
+        const userBal = db.getPlayerBalance(userId);
+        const miniFlex = constructCancelOrderMiniFlex(res.orderNumber, res.amount, userBal);
+        await replyToLine(replyToken, miniFlex, userId);
       }
     } else if (res.error === 'UNAUTHORIZED') {
       const msg = `${tagPrefix}⚠️ เฉพาะเจ้าของแผล (@${res.creatorName}) หรือแอดมินเท่านั้นที่ยกเลิกได้ครับ`;
@@ -913,7 +925,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     else if (keywordsHigh.includes(cmd)) side = 'high';
     
     if (side && amount >= 10 && minVal < maxVal) {
-      await processOpenBetRequest(side, amount, 'range', minVal, maxVal, userId, displayName, replyToken, isChotoy, groupId);
+      await processOpenBetRequest(side, amount, 'custom_range', minVal, maxVal, userId, displayName, replyToken, isChotoy, groupId, cleanBetText);
       return true;
     }
   }
@@ -954,14 +966,17 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
 async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false, groupId = null, userTypedCmd = null, isPreQuote = false) {
   if (db.isRocketRoundClosed() && (type === 'custom_range' || type === 'custom')) {
-    await replyToLine(replyToken, `⚠️ ปิดรับดวลราคาเปิดเองรอบนี้แล้วครับ (เปิดรับเฉพาะแทงตามราคาช่างแอดมินเท่านั้น)`, userId);
+    const msg = groupId
+      ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ปิดรับดวลราคาเปิดเองรอบนี้แล้วครับ (เปิดรับเฉพาะแทงตามราคาช่างแอดมินเท่านั้น)`
+      : `⚠️ ปิดรับดวลราคาเปิดเองรอบนี้แล้วครับ (เปิดรับเฉพาะแทงตามราคาช่างแอดมินเท่านั้น)`;
+    if (groupId) await pushToLine(groupId, msg); else await replyToLine(replyToken, msg, userId);
     return;
   }
   // Check if admin account (Admin quotes do NOT require credit deduction as they serve as guidelines)
   const isAdminUser = userId === 'admin' || userId === 'user' || (typeof userId === 'string' && (userId.toLowerCase() === 'user' || userId.toLowerCase() === 'admin'));
 
-  // Generate order number
-  const orderNo = Math.floor(Math.random() * 899999 + 100000);
+  // Generate 4-digit order number (1000 - 9999)
+  const orderNo = Math.floor(Math.random() * 9000 + 1000);
   
   // Save open bet with groupId for multi-group tracking (credit deduction happens inside db.saveOpenBet)
   const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal, groupId, userTypedCmd, isPreQuote);
@@ -1553,6 +1568,79 @@ export function constructWithdrawalFlex(bankName, accountNumber, accountName, ba
   };
 }
 
+export function constructCancelOrderMiniFlex(orderNo, amount, newBalance = null) {
+  const formattedAmt = Number(amount || 0).toLocaleString('th-TH');
+  const formattedBal = newBalance !== null ? Number(newBalance || 0).toLocaleString('th-TH') : null;
+
+  return {
+    "type": "bubble",
+    "size": "micro",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#1E1B4B",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "🚀 ROCKET SCIENCE",
+          "weight": "bold",
+          "color": "#38BDF8",
+          "size": "xxs",
+          "align": "center"
+        },
+        {
+          "type": "text",
+          "text": `⛔️ ยกเลิก Order #${orderNo}`,
+          "weight": "bold",
+          "color": "#EF4444",
+          "size": "xs",
+          "align": "center",
+          "margin": "xs"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "paddingAll": "sm",
+      "spacing": "xs",
+      "contents": [
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            { "type": "text", "text": "คืนแต้ม", "size": "xxs", "color": "#64748B", "flex": 5 },
+            { "type": "text", "text": `+${formattedAmt} pt`, "size": "xxs", "weight": "bold", "color": "#10B981", "align": "end", "flex": 5 }
+          ]
+        },
+        ...(formattedBal !== null ? [{
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            { "type": "text", "text": "คงเหลือ", "size": "xxs", "color": "#64748B", "flex": 5 },
+            { "type": "text", "text": `${formattedBal} pt`, "size": "xxs", "weight": "bold", "color": "#F59E0B", "align": "end", "flex": 5 }
+          ]
+        }] : []),
+        {
+          "type": "separator",
+          "margin": "xs",
+          "color": "#E2E8F0"
+        },
+        {
+          "type": "text",
+          "text": "✅ ถอนแผลและคืนแต้มเรียบร้อย",
+          "size": "xxs",
+          "color": "#10B981",
+          "weight": "bold",
+          "align": "center",
+          "margin": "xs"
+        }
+      ]
+    }
+  };
+}
+
 export function constructRuleGuideFlex() {
   return {
     "type": "bubble",
@@ -1560,63 +1648,147 @@ export function constructRuleGuideFlex() {
     "header": {
       "type": "box",
       "layout": "vertical",
-      "backgroundColor": "#00796B",
-      "paddingAll": "sm",
+      "backgroundColor": "#0F172A",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
-          "text": "📖 คู่มือคีย์เวิร์ด และกติกาการเล่นบั้งไฟ",
+          "text": "🚀 ROCKET SCIENCE",
+          "weight": "bold",
+          "color": "#38BDF8",
+          "size": "xxs",
+          "align": "center"
+        },
+        {
+          "type": "text",
+          "text": "📖 กติกา & วิธีการเล่นบั้งไฟ",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "xs",
-          "align": "center"
+          "size": "md",
+          "align": "center",
+          "margin": "xs"
         }
       ]
     },
     "body": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "xs",
+      "spacing": "sm",
+      "paddingAll": "md",
+      "contents": [
+        {
+          "type": "box",
+          "layout": "vertical",
+          "backgroundColor": "#F8FAFC",
+          "cornerRadius": "md",
+          "paddingAll": "sm",
+          "contents": [
+            {
+              "type": "text",
+              "text": "1️⃣ แทงตามราคาช่าง (แอดมินเปิด)",
+              "weight": "bold",
+              "color": "#1E293B",
+              "size": "xs"
+            },
+            {
+              "type": "text",
+              "text": "• ทายเวลาต่ำ: พิมพ์ ชล [แต้ม] (เช่น ชล200, +5ชล500)\n• ทายเวลาสูง: พิมพ์ ชถ [แต้ม] (เช่น ชถ200, +5ชถ500)",
+              "color": "#475569",
+              "size": "xxs",
+              "wrap": true,
+              "margin": "xs"
+            }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "vertical",
+          "backgroundColor": "#F8FAFC",
+          "cornerRadius": "md",
+          "paddingAll": "sm",
+          "contents": [
+            {
+              "type": "text",
+              "text": "2️⃣ การเปิดราคาดวลเอง (Custom Range)",
+              "weight": "bold",
+              "color": "#1E293B",
+              "size": "xs"
+            },
+            {
+              "type": "text",
+              "text": "• ระบุช่วงวินาที + ล/ถ + แต้ม เช่น 330-380ล500 หรือ 330-380ถ500\n• เผื่อช่างไม่ต่อย (ชตย): ใส่ ชตย เช่น 330-380ล500 ชตย",
+              "color": "#475569",
+              "size": "xxs",
+              "wrap": true,
+              "margin": "xs"
+            }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "vertical",
+          "backgroundColor": "#F8FAFC",
+          "cornerRadius": "md",
+          "paddingAll": "sm",
+          "contents": [
+            {
+              "type": "text",
+              "text": "3️⃣ การรับคำท้า & จับคู่ดวล",
+              "weight": "bold",
+              "color": "#1E293B",
+              "size": "xs"
+            },
+            {
+              "type": "text",
+              "text": "• แตะปุ่มบนการ์ด หรือพิมพ์: [เลขบิล] [แต้ม] เช่น 4812 500 หรือ ต4812",
+              "color": "#475569",
+              "size": "xxs",
+              "wrap": true,
+              "margin": "xs"
+            }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "vertical",
+          "backgroundColor": "#FEF2F2",
+          "cornerRadius": "md",
+          "paddingAll": "sm",
+          "contents": [
+            {
+              "type": "text",
+              "text": "4️⃣ การยกเลิกแผลดวล",
+              "weight": "bold",
+              "color": "#991B1B",
+              "size": "xs"
+            },
+            {
+              "type": "text",
+              "text": "• พิมพ์ ยกเลิก [เลขบิล] เช่น ยกเลิก 4812 (ก่อนมีคู่ดวลเท่านั้น)",
+              "color": "#B91C1C",
+              "size": "xxs",
+              "wrap": true,
+              "margin": "xs"
+            }
+          ]
+        }
+      ]
+    },
+    "footer": {
+      "type": "box",
+      "layout": "horizontal",
       "paddingAll": "sm",
       "contents": [
         {
-          "type": "text",
-          "text": "📌 Rule 1: แทงตามราคาช่างแอดมิน",
-          "weight": "bold",
-          "color": "#0D47A1",
-          "size": "xs"
-        },
-        {
-          "type": "text",
-          "text": "🎉 ทายว่าชนะ (ต่ำ):\n• ช่างไล่ / ชล / ไล่ / ล\n• +5ชล / +5ล / +5ไล่\n• -5ชล / -5ล / -5ไล่\n💵 จำนวนเงินตัวเลขเท่านั้น (เช่น ชล100, ชล1000)",
-          "color": "#1565C0",
-          "size": "xxs",
-          "wrap": true
-        },
-        {
-          "type": "text",
-          "text": "👊 ทายว่าแพ้ (สูง):\n• ช่างยั่ง / ช่างถอย / ชย / ชถ / ย / ถ\n• +5ชย / +5ชถ / +5ย / +5ถ\n• -5ชย / -5ชถ / -5ย / -5ถ\n(เช่น ชถ100, ชถ1000)",
-          "color": "#C62828",
-          "size": "xxs",
-          "wrap": true
-        },
-        {
-          "type": "separator",
-          "margin": "xs"
-        },
-        {
-          "type": "text",
-          "text": "📌 Rule 2: การเปิดราคาเอง",
-          "weight": "bold",
-          "color": "#E65100",
-          "size": "xs"
-        },
-        {
-          "type": "text",
-          "text": "💰 เปิดราคาเต็มเท่านั้น เช่น:\n• 300-340ล500 | 300-340ถ500\n• 310-355ล500 | 310-355ถ500\n\n⬆️ ช่างต่อยก (ชตย - เผื่อช่างไม่ต่อย):\nใส่ ชตย หลังจำนวนเงิน เช่น\n• 345-385ล500 ชตย\n• 345-385ถ500 ชตย",
-          "color": "#333333",
-          "size": "xxs",
-          "wrap": true
+          "type": "button",
+          "action": {
+            "type": "message",
+            "label": "📋 ดูกระดานดวลสด",
+            "text": "กระดานดวล"
+          },
+          "style": "primary",
+          "color": "#0F172A",
+          "height": "sm"
         }
       ]
     }
@@ -1733,6 +1905,14 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               ]
             }
           ]
+        },
+        {
+          "type": "text",
+          "text": `💡 หรือพิมพ์: ${orderNo} [จำนวนเงิน]`,
+          "size": "xxs",
+          "color": "#64748B",
+          "align": "center",
+          "margin": "xs"
         },
         {
           "type": "box",

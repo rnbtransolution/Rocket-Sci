@@ -1271,9 +1271,8 @@ export default function App() {
       return;
     }
 
-    setPlayers(prev => prev.map(p => p.isUser ? { ...p, balance: p.balance - amount } : p));
-
-    const orderNo = Math.floor(Math.random() * 89999 + 10000).toString();
+    // Generate 4-digit order number (1000 - 9999)
+    const orderNo = Math.floor(Math.random() * 9000 + 1000).toString();
     const newBet = {
       id: 'bet_' + orderNo,
       orderNumber: orderNo,

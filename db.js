@@ -654,7 +654,7 @@ export async function matchExistingOpenBet(userId, displayName, targetOrderNo = 
       await adjustPlayerBalance(searchId, -matchAmt, displayName);
 
       if (remainingAmt >= 100) {
-        const splitOrderNo = Math.floor(Math.random() * 899999 + 100000);
+        const splitOrderNo = Math.floor(Math.random() * 9000 + 1000);
         const creatorSide = targetBet.playerLowId === searchId ? 'high' : 'low';
         const creatorName = targetBet.playerLowId === searchId ? targetBet.playerHighName : targetBet.playerLowName;
         saveOpenBet(splitOrderNo, creatorId, creatorName, creatorSide, remainingAmt, targetBet.type, targetBet.rangeMin, targetBet.rangeMax, targetBet.groupId, targetBet.groupName, targetBet.userTypedCmd, targetBet.type === 'pre_quote');
