@@ -1824,7 +1824,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
             {
               "type": "box",
               "layout": "vertical",
-              "backgroundColor": "#2E7D32",
+              "backgroundColor": "#0284C7",
               "cornerRadius": "sm",
               "paddingAll": "xs",
               "action": {
@@ -1839,7 +1839,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
             {
               "type": "box",
               "layout": "vertical",
-              "backgroundColor": "#2E7D32",
+              "backgroundColor": "#0284C7",
               "cornerRadius": "sm",
               "paddingAll": "xs",
               "action": {
@@ -1854,7 +1854,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
             {
               "type": "box",
               "layout": "vertical",
-              "backgroundColor": "#2E7D32",
+              "backgroundColor": "#0284C7",
               "cornerRadius": "sm",
               "paddingAll": "xs",
               "action": {
@@ -1869,7 +1869,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
             {
               "type": "box",
               "layout": "vertical",
-              "backgroundColor": "#2E7D32",
+              "backgroundColor": "#0284C7",
               "cornerRadius": "sm",
               "paddingAll": "xs",
               "action": {
@@ -1893,7 +1893,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               "type": "box",
               "layout": "vertical",
               "flex": 1,
-              "backgroundColor": "#2E7D32",
+              "backgroundColor": "#16A34A",
               "cornerRadius": "sm",
               "paddingAll": "xs",
               "action": {
@@ -1909,7 +1909,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               "type": "box",
               "layout": "vertical",
               "flex": 1,
-              "backgroundColor": "#C62828",
+              "backgroundColor": "#DC2626",
               "cornerRadius": "sm",
               "paddingAll": "xs",
               "action": {
@@ -1944,7 +1944,7 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
 
   return {
     "type": "bubble",
-    "size": "micro",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -1956,7 +1956,7 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
           "text": `🚀 แมตช์สำเร็จ #${orderNo}`,
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "xs",
+          "size": "sm",
           "align": "center"
         }
       ]
@@ -1965,28 +1965,28 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
       "type": "box",
       "layout": "vertical",
       "spacing": "xs",
-      "paddingAll": "sm",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
           "text": `${cleanAmt} pt`,
           "weight": "bold",
           "color": "#059669",
-          "size": "lg",
+          "size": "xl",
           "align": "center"
         },
         {
           "type": "separator",
-          "margin": "xs",
+          "margin": "sm",
           "color": "#F0F0F0"
         },
         {
           "type": "box",
           "layout": "horizontal",
-          "margin": "xs",
+          "margin": "sm",
           "contents": [
-            { "type": "text", "text": "🔻 ต่ำ (Low):", "color": "#0284C7", "size": "xxs", "weight": "bold", "flex": 4 },
-            { "type": "text", "text": `@${lowText}`, "color": "#1E293B", "size": "xxs", "weight": "bold", "flex": 6, "align": "end" }
+            { "type": "text", "text": "🔻 ต่ำ (Low):", "color": "#DC2626", "size": "xs", "weight": "bold", "flex": 4 },
+            { "type": "text", "text": `@${lowText}`, "color": "#1E293B", "size": "xs", "weight": "bold", "flex": 6, "align": "end" }
           ]
         },
         {
@@ -1994,8 +1994,8 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
           "layout": "horizontal",
           "margin": "xs",
           "contents": [
-            { "type": "text", "text": "🔺 สูง (High):", "color": "#E11D48", "size": "xxs", "weight": "bold", "flex": 4 },
-            { "type": "text", "text": `@${highText}`, "color": "#1E293B", "size": "xxs", "weight": "bold", "flex": 6, "align": "end" }
+            { "type": "text", "text": "🔺 สูง (High):", "color": "#16A34A", "size": "xs", "weight": "bold", "flex": 4 },
+            { "type": "text", "text": `@${highText}`, "color": "#1E293B", "size": "xs", "weight": "bold", "flex": 6, "align": "end" }
           ]
         },
         ...(rangeInfo ? [{
@@ -2004,7 +2004,7 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
           "color": "#64748B",
           "size": "xxs",
           "align": "center",
-          "margin": "xs"
+          "margin": "sm"
         }] : [])
       ]
     }
