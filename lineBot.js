@@ -919,11 +919,11 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     }
   }
 
-  // 2. Betting commands (e.g., "ล200", "ถ500", "+5ชล200", "300-340ล", "345-385ล500 ชตย")
+  // 2. Betting commands (e.g., "ล200", "ถ500", "+5ชล200", "+10ชล100", "-10ชถ500", "300-380ล", "300-380ล500 ชตย")
   const isChotoy = clean.includes('ชตย') || text.includes('ชตย');
   const cleanBetText = clean.replace(/ชตย/g, '').trim();
 
-  // Format 1: [Min][- or /][Max][keywords][amount?] (e.g. "300-340ล", "300-340ถ", "300-340ล1000", "345-385ล500 ชตย")
+  // Format 1: Custom Range [Min][- or /][Max][keywords][amount?] (e.g. "300-380ล", "300-380ถ", "300-380ล1000", "300-380ล500 ชตย")
   const rangeBetRegex = /^(\d+)[-/](\d+)([a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
   if (rangeBetRegex.test(cleanBetText)) {
     const match = cleanBetText.match(rangeBetRegex);
@@ -936,16 +936,57 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     if (keywordsLow.includes(cmd)) side = 'low';
     else if (keywordsHigh.includes(cmd)) side = 'high';
     
-    if (side && amount >= 10 && minVal < maxVal) {
+    if (side) {
+      // 1. Check low-to-high order (minVal must be strictly less than maxVal)
+      if (minVal >= maxVal) {
+        const orderErrMsg = groupId
+          ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-380${cmd} (คุณระบุ ${minVal}-${maxVal})`
+          : `⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-380${cmd} (คุณระบุ ${minVal}-${maxVal})`;
+        if (groupId) await pushToLine(groupId, orderErrMsg);
+        else await replyToLine(replyToken, orderErrMsg, userId);
+        return true;
+      }
+
+      // 2. Check strict 80-second range window
+      if (maxVal - minVal !== 80) {
+        const diff = maxVal - minVal;
+        const windowErrMsg = groupId
+          ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ช่วงราคาต้องห่างกัน 80 วินาทีพอดีครับ เช่น 300-380${cmd} (คุณระบุ ${minVal}-${maxVal} ห่าง ${diff} วิ)`
+          : `⚠️ ช่วงราคาต้องห่างกัน 80 วินาทีพอดีครับ เช่น 300-380${cmd} (คุณระบุ ${minVal}-${maxVal} ห่าง ${diff} วิ)`;
+        if (groupId) await pushToLine(groupId, windowErrMsg);
+        else await replyToLine(replyToken, windowErrMsg, userId);
+        return true;
+      }
+
+      // 3. Minimum amount check
+      if (amount < 100) {
+        const minAmtMsg = groupId
+          ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`
+          : `⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`;
+        if (groupId) await pushToLine(groupId, minAmtMsg);
+        else await replyToLine(replyToken, minAmtMsg, userId);
+        return true;
+      }
+
       await processOpenBetRequest(side, amount, 'custom_range', minVal, maxVal, userId, displayName, replyToken, isChotoy, groupId, cleanBetText);
       return true;
     }
   }
 
-  // Format 2: Rule 1 Bet commands (e.g. "ชล100", "ชถ1000", "+5ชล500", "-5ชถ200", "ล100", "ถ500")
-  const betRegex = /^([+-]?5?[a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
-  if (betRegex.test(cleanBetText)) {
-    const match = cleanBetText.match(betRegex);
+  // Format 2: Rule 1 Bet commands (e.g. "ชล100", "ชถ1000", "+5ชล500", "-5ชถ200", "+10ชล100", "-10ชถ500", "ล100", "ถ500")
+  let offsetDelta = 0;
+  let strippedCmdText = cleanBetText;
+  if (/^[+\-]10/.test(strippedCmdText)) {
+    offsetDelta = strippedCmdText.charAt(0) === '-' ? -10 : 10;
+    strippedCmdText = strippedCmdText.slice(3);
+  } else if (/^[+\-]5/.test(strippedCmdText)) {
+    offsetDelta = strippedCmdText.charAt(0) === '-' ? -5 : 5;
+    strippedCmdText = strippedCmdText.slice(2);
+  }
+
+  const betRegex = /^([a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
+  if (betRegex.test(strippedCmdText)) {
+    const match = strippedCmdText.match(betRegex);
     const cmd = match[1];
     const amount = match[2] ? parseInt(match[2]) : 500;
     
@@ -953,22 +994,26 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     if (keywordsLow.includes(cmd)) side = 'low';
     else if (keywordsHigh.includes(cmd)) side = 'high';
     
-    if (side && amount >= 10) {
+    if (side) {
+      if (amount < 100) {
+        const minAmtMsg = groupId
+          ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`
+          : `⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`;
+        if (groupId) await pushToLine(groupId, minAmtMsg);
+        else await replyToLine(replyToken, minAmtMsg, userId);
+        return true;
+      }
+
       let activeMin = db.getTargetMin ? db.getTargetMin() : null;
       let activeMax = db.getTargetMax ? db.getTargetMax() : null;
       let isPreQuote = !activeMin || !activeMax;
 
       if (!isPreQuote) {
-        if (cmd.startsWith('+5')) {
-          activeMin += 5;
-          activeMax += 5;
-        } else if (cmd.startsWith('-5')) {
-          activeMin -= 5;
-          activeMax -= 5;
-        }
+        activeMin += offsetDelta;
+        activeMax += offsetDelta;
       }
 
-      await processOpenBetRequest(side, amount, isPreQuote ? 'pre_quote' : 'range', activeMin, activeMax, userId, displayName, replyToken, isChotoy, groupId, cmd, isPreQuote);
+      await processOpenBetRequest(side, amount, isPreQuote ? 'pre_quote' : 'range', activeMin, activeMax, userId, displayName, replyToken, isChotoy, groupId, cleanBetText, isPreQuote);
       return true;
     }
   }
@@ -1667,7 +1712,7 @@ export function constructRuleGuideFlex() {
             },
             {
               "type": "text",
-              "text": "• ทายเวลาต่ำ: พิมพ์ ชล [แต้ม] (เช่น ชล200, +5ชล500)\n• ทายเวลาสูง: พิมพ์ ชถ [แต้ม] (เช่น ชถ200, +5ชถ500)",
+              "text": "• ทายเวลาต่ำ: พิมพ์ ชล [แต้ม] (เช่น ชล200, +5ชล500, +10ชล500, -10ชล500)\n• ทายเวลาสูง: พิมพ์ ชถ [แต้ม] (เช่น ชถ200, +5ชถ500, +10ชถ500, -10ชถ500)",
               "color": "#475569",
               "size": "xxs",
               "wrap": true,
@@ -1691,7 +1736,7 @@ export function constructRuleGuideFlex() {
             },
             {
               "type": "text",
-              "text": "• ระบุช่วงวินาที + ล/ถ + แต้ม เช่น 330-380ล500 หรือ 330-380ถ500\n• เผื่อช่างไม่ต่อย (ชตย): ใส่ ชตย เช่น 330-380ล500 ชตย",
+              "text": "• ระบุช่วงเวลาต่ำไปสูง (ช่วงห่าง 80 วิพอดี) เช่น 300-380ล500 หรือ 300-380ถ500\n• เผื่อช่างไม่ต่อย (ชตย): ใส่ ชตย เช่น 300-380ล500 ชตย",
               "color": "#475569",
               "size": "xxs",
               "wrap": true,
