@@ -604,13 +604,20 @@ export async function matchExistingOpenBet(userId, displayName, targetOrderNo = 
   }
 
   if (targetBet) {
-    if (targetBet.status === 'matched' || targetBet.status === 'resolved' || targetBet.status === 'cancelled') {
-      return { error: 'ALREADY_MATCHED', orderNumber: targetBet.orderNumber };
+    const creatorId = targetBet.playerLowId ? cleanUserId(targetBet.playerLowId) : cleanUserId(targetBet.playerHighId);
+    const creatorName = targetBet.playerLowName || targetBet.playerHighName || '';
+
+    // 1. OWN_BET GUARD: Check ID, raw ID, and display name
+    if (creatorId === searchId || creatorId === cleanUserId(userId) || (creatorName && displayName && creatorName === displayName)) {
+      return { error: 'OWN_BET', orderNumber: targetBet.orderNumber };
     }
 
-    const creatorId = targetBet.playerLowId ? cleanUserId(targetBet.playerLowId) : cleanUserId(targetBet.playerHighId);
-    if (creatorId === searchId) {
-      return { error: 'OWN_BET', orderNumber: targetBet.orderNumber };
+    // 2. STATUS GUARDS: Distinguish cancelled from matched
+    if (targetBet.status === 'cancelled' || targetBet.status === 'void') {
+      return { error: 'CANCELLED', orderNumber: targetBet.orderNumber };
+    }
+    if (targetBet.status === 'matched' || targetBet.status === 'resolved') {
+      return { error: 'ALREADY_MATCHED', orderNumber: targetBet.orderNumber };
     }
 
     let matchAmt = targetBet.amount;
@@ -777,7 +784,7 @@ export function getPendingBetsList() {
 }
 
 // Cancel an open pending bet and refund credit to the creator (supports optional specific target order number e.g. "70572")
-export async function cancelOpenBet(userId, targetOrderNo = null, isAdmin = false) {
+export async function cancelOpenBet(userId, targetOrderNo = null, isAdmin = false, displayName = null) {
   const searchId = cleanUserId(userId);
   const cleanTargetOrder = targetOrderNo ? targetOrderNo.toString().trim().replace(/#/g, '') : null;
 
@@ -795,7 +802,8 @@ export async function cancelOpenBet(userId, targetOrderNo = null, isAdmin = fals
       }
 
       // Authorization Guard: Only bet creator or admin can cancel an open bet
-      if (creatorId !== searchId && !isAdmin) {
+      const isCreator = (creatorId === searchId || creatorId === cleanUserId(userId) || (displayName && creatorName === displayName));
+      if (!isCreator && !isAdmin) {
         return { error: 'UNAUTHORIZED', creatorName: creatorName, orderNumber: bet.orderNumber };
       }
 
@@ -816,6 +824,7 @@ export async function cancelOpenBet(userId, targetOrderNo = null, isAdmin = fals
         amount: bet.amount,
         creatorId: creatorId,
         creatorName: creatorName,
+        groupId: bet.groupId,
       };
     }
   }

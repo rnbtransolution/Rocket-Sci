@@ -772,7 +772,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     const match = clean.match(cancelBetRegex);
     const targetOrderNo = match[2] || null;
 
-    const res = await db.cancelOpenBet(userId, targetOrderNo);
+    const res = await db.cancelOpenBet(userId, targetOrderNo, false, displayName);
     const tagPrefix = groupId ? `👤 [ถึงคุณ @${displayName}]: ` : '';
 
     if (res.success) {
@@ -785,6 +785,11 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
         }
       } else {
         await replyToLine(replyToken, miniFlex, userId);
+        // CRITICAL: When cancelled from 1-on-1 private chat, also notify the LINE group where the open bet was posted!
+        const targetGroup = res.groupId || db.getActiveGroupId();
+        if (targetGroup) {
+          await pushToLine(targetGroup, miniFlex);
+        }
       }
     } else if (res.error === 'UNAUTHORIZED') {
       const msg = `${tagPrefix}⚠️ เฉพาะเจ้าของแผล (@${res.creatorName}) หรือแอดมินเท่านั้นที่ยกเลิกได้ครับ`;
@@ -853,12 +858,16 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
       await sendNotice(`${tagPrefix}⚠️ แต้มไม่พอ (มี ${matched.current}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`);
       return true;
     }
-    if (matched && matched.error === 'ALREADY_MATCHED') {
-      await sendNotice(`${tagPrefix}⚠️ แผล Order #${matched.orderNumber} มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ`);
-      return true;
-    }
     if (matched && matched.error === 'OWN_BET') {
       await sendNotice(`${tagPrefix}⚠️ คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ`);
+      return true;
+    }
+    if (matched && matched.error === 'CANCELLED') {
+      await sendNotice(`${tagPrefix}🚫 แผล Order #${matched.orderNumber} ถูกยกเลิกไปแล้วครับ`);
+      return true;
+    }
+    if (matched && matched.error === 'ALREADY_MATCHED') {
+      await sendNotice(`${tagPrefix}⚠️ แผล Order #${matched.orderNumber} มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ`);
       return true;
     }
     if (matched && matched.error === 'NOT_FOUND') {
