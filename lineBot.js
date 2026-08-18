@@ -776,14 +776,10 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     const tagPrefix = groupId ? `👤 [ถึงคุณ @${displayName}]: ` : '';
 
     if (res.success) {
+      const miniFlex = constructCancelOrderMiniFlex(res.orderNumber);
       if (groupId) {
-        await pushToLine(groupId, `❌ ยกเลิก Order #${res.orderNumber} สำเร็จ!`);
-        const userBal = db.getPlayerBalance(userId);
-        const miniFlex = constructCancelOrderMiniFlex(res.orderNumber, res.amount, userBal);
-        await pushToLine(userId, miniFlex);
+        await pushToLine(groupId, miniFlex);
       } else {
-        const userBal = db.getPlayerBalance(userId);
-        const miniFlex = constructCancelOrderMiniFlex(res.orderNumber, res.amount, userBal);
         await replyToLine(replyToken, miniFlex, userId);
       }
     } else if (res.error === 'UNAUTHORIZED') {
@@ -1568,71 +1564,31 @@ export function constructWithdrawalFlex(bankName, accountNumber, accountName, ba
   };
 }
 
-export function constructCancelOrderMiniFlex(orderNo, amount, newBalance = null) {
-  const formattedAmt = Number(amount || 0).toLocaleString('th-TH');
-  const formattedBal = newBalance !== null ? Number(newBalance || 0).toLocaleString('th-TH') : null;
-
+export function constructCancelOrderMiniFlex(orderNo) {
   return {
     "type": "bubble",
-    "size": "micro",
-    "header": {
+    "size": "nano",
+    "body": {
       "type": "box",
       "layout": "vertical",
+      "paddingAll": "10px",
       "backgroundColor": "#1E1B4B",
-      "paddingAll": "sm",
+      "cornerRadius": "md",
       "contents": [
         {
           "type": "text",
-          "text": "🚀 ROCKET SCIENCE",
+          "text": "⛔️ ยกเลิกสำเร็จ ⛔️",
           "weight": "bold",
-          "color": "#38BDF8",
-          "size": "xxs",
+          "color": "#EF4444",
+          "size": "xs",
           "align": "center"
         },
         {
           "type": "text",
-          "text": `⛔️ ยกเลิก Order #${orderNo}`,
+          "text": `Order #${orderNo}`,
           "weight": "bold",
-          "color": "#EF4444",
-          "size": "xs",
-          "align": "center",
-          "margin": "xs"
-        }
-      ]
-    },
-    "body": {
-      "type": "box",
-      "layout": "vertical",
-      "paddingAll": "sm",
-      "spacing": "xs",
-      "contents": [
-        {
-          "type": "box",
-          "layout": "horizontal",
-          "contents": [
-            { "type": "text", "text": "คืนแต้ม", "size": "xxs", "color": "#64748B", "flex": 5 },
-            { "type": "text", "text": `+${formattedAmt} pt`, "size": "xxs", "weight": "bold", "color": "#10B981", "align": "end", "flex": 5 }
-          ]
-        },
-        ...(formattedBal !== null ? [{
-          "type": "box",
-          "layout": "horizontal",
-          "contents": [
-            { "type": "text", "text": "คงเหลือ", "size": "xxs", "color": "#64748B", "flex": 5 },
-            { "type": "text", "text": `${formattedBal} pt`, "size": "xxs", "weight": "bold", "color": "#F59E0B", "align": "end", "flex": 5 }
-          ]
-        }] : []),
-        {
-          "type": "separator",
-          "margin": "xs",
-          "color": "#E2E8F0"
-        },
-        {
-          "type": "text",
-          "text": "✅ ถอนแผลและคืนแต้มเรียบร้อย",
-          "size": "xxs",
-          "color": "#10B981",
-          "weight": "bold",
+          "color": "#FFFFFF",
+          "size": "sm",
           "align": "center",
           "margin": "xs"
         }
@@ -1797,8 +1753,12 @@ export function constructRuleGuideFlex() {
 
 export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy, userTypedCmd = null, isPreQuote = false) {
   const sideShort = side === 'high' ? 'ล' : 'ถ';
-  const cmdStr = (userTypedCmd && typeof userTypedCmd === 'string') ? userTypedCmd : `${sideShort}${amount}`;
-  const cardTitle = (typeof cmdStr === 'string' && cmdStr.includes(amount.toString())) ? cmdStr : `${cmdStr} ${amount}pt`;
+  let cleanCmd = (userTypedCmd && typeof userTypedCmd === 'string') ? userTypedCmd.trim() : `${sideShort}${amount}`;
+  // Strip any leading range numbers like "350-450" or "300/380" in front of the betting command
+  cleanCmd = cleanCmd.replace(/^\d+[-/]\d+/, '').trim();
+  if (!cleanCmd) cleanCmd = `${sideShort}${amount}`;
+
+  const cardTitle = cleanCmd.includes(amount.toString()) ? cleanCmd : `${cleanCmd} ${amount}pt`;
 
   return {
     "type": "bubble",
@@ -1910,7 +1870,8 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "type": "text",
           "text": `💡 หรือพิมพ์: ${orderNo} [จำนวนเงิน]`,
           "size": "xxs",
-          "color": "#64748B",
+          "color": "#1D4ED8",
+          "weight": "bold",
           "align": "center",
           "margin": "xs"
         },
@@ -1927,11 +1888,11 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
               "paddingAll": "xs",
               "action": {
                 "type": "message",
-                "label": "🚫 ยกเลิก",
+                "label": "🚫 ยกเลิกแผล",
                 "text": `ยกเลิก ${orderNo}`
               },
               "contents": [
-                { "type": "text", "text": "🚫 ยกเลิกแผลดวลนี้", "color": "#FFFFFF", "weight": "bold", "size": "xs", "align": "center" }
+                { "type": "text", "text": "🚫 ยกเลิกแผล", "color": "#FFFFFF", "weight": "bold", "size": "xs", "align": "center" }
               ]
             }
           ]
