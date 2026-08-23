@@ -2045,6 +2045,67 @@ export default function App() {
                   </label>
                 </div>
 
+                {/* ─── Group ID Setup Widget ─── */}
+                {!activeGroupId && (
+                  <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-amber-600 text-base">⚠️</span>
+                      <span className="text-xs font-black text-amber-800 font-heading">ยังไม่มี Group ID — ต้องตั้งค่าก่อนบรอดแคสต์</span>
+                    </div>
+                    <p className="text-[10px] text-amber-700">บอทยังไม่เคยรับ webhook จากกลุ่ม LINE ใด ๆ เลย หรือ ScriptProperties ถูก reset ไป ให้ทดลอง <strong>Discover</strong> จากข้อมูลที่เคยบันทึกไว้ หรือ <strong>Paste Group ID</strong> โดยตรง</p>
+                    <div className="flex gap-2">
+                      <button onClick={async () => {
+                        try {
+                          const res = await runBackendFunction('adminDiscoverGroupIds', []);
+                          if (res && res.discovered && res.discovered.length > 0) {
+                            const first = res.discovered[0];
+                            addToast(`🔍 พบ Group ID: ${first.id.slice(-8)} (${first.source}) — กำลังตั้งค่า...`, 'info');
+                            await runBackendFunction('adminSetActiveGroupId', [first.id]);
+                            const dash = await runBackendFunction('getDashboardData', []);
+                            if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
+                            addToast(`✅ ตั้งค่า Group ID สำเร็จ: ...${first.id.slice(-8)}`, 'success');
+                          } else {
+                            addToast('❌ ไม่พบ Group ID ในระบบ — กรุณา Paste Group ID ด้วยตนเองครับ', 'warning');
+                          }
+                        } catch(e) { addToast('❌ Discover Error: ' + e.message, 'danger'); }
+                      }} className="py-1.5 px-3 bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold rounded-lg transition-all active:scale-95">
+                        🔍 Auto Discover
+                      </button>
+                      <input
+                        type="text"
+                        placeholder="Paste LINE Group ID (Cxxx...)"
+                        className="flex-1 bg-white border border-amber-200 text-slate-700 px-2.5 py-1.5 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter' && e.target.value.trim().length > 5) {
+                            const gid = e.target.value.trim();
+                            try {
+                              await runBackendFunction('adminSetActiveGroupId', [gid]);
+                              const dash = await runBackendFunction('getDashboardData', []);
+                              if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
+                              addToast(`✅ ตั้งค่า Group ID สำเร็จ: ...${gid.slice(-8)}`, 'success');
+                              e.target.value = '';
+                            } catch(err) { addToast('❌ Error: ' + err.message, 'danger'); }
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+                {activeGroupId && (
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-emerald-800">✅ Active Group ID: <span className="font-mono text-[10px]">...{activeGroupId.slice(-10)}</span></span>
+                    <button onClick={async () => {
+                      const gid = window.prompt('เปลี่ยน Group ID (วาง LINE Group ID ใหม่):');
+                      if (gid && gid.trim().length > 5) {
+                        await runBackendFunction('adminSetActiveGroupId', [gid.trim()]);
+                        const dash = await runBackendFunction('getDashboardData', []);
+                        if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
+                        addToast(`✅ เปลี่ยน Group ID เป็น ...${gid.trim().slice(-8)}`, 'success');
+                      }
+                    }} className="text-[10px] text-emerald-600 hover:text-emerald-800 font-bold underline">เปลี่ยน</button>
+                  </div>
+                )}
+
                 {/* Target Group Broadcast Selector */}
                 <div className="bg-white p-2.5 rounded-xl border border-emerald-200 space-y-1">
                   <div className="flex items-center justify-between">

@@ -3480,6 +3480,79 @@ function getLineChatLogs() {
 // to avoid sending large Flex objects through the GAS bridge.
 // ============================================================
 
+/**
+ * Manually set the active group ID from the admin portal.
+ * This is the fallback for when the bot hasn't received any webhook yet.
+ */
+function adminSetActiveGroupId(groupId) {
+  if (!groupId || typeof groupId !== 'string' || groupId.trim().length < 5) {
+    return { success: false, error: 'Invalid group ID' };
+  }
+  var gid = groupId.trim();
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('ACTIVE_GROUP_ID', gid);
+  recordGroupActivity(gid, null, null, null, 'Set manually by Admin');
+  Logger.log('[adminSetActiveGroupId] Set ACTIVE_GROUP_ID = ' + gid);
+  return { success: true, groupId: gid };
+}
+
+/**
+ * Scan all sheets to discover known group IDs.
+ * Returns { activeGroupId, lineGroups, discovered } for the frontend to display.
+ */
+function adminDiscoverGroupIds() {
+  var props = PropertiesService.getScriptProperties();
+  var activeId = props.getProperty('ACTIVE_GROUP_ID') || '';
+  var lineGroupsJson = props.getProperty('LINE_GROUPS') || '[]';
+  var discovered = {};
+
+  // From ScriptProperties
+  if (activeId) discovered[activeId] = 'ScriptProperty';
+
+  // From LINE_GROUPS
+  try {
+    var groups = JSON.parse(lineGroupsJson);
+    groups.forEach(function(g) { if (g.id) discovered[g.id] = g.name || 'กลุ่มที่รู้จัก'; });
+  } catch(e) {}
+
+  // Scan Bets sheet col 12 (targetGroupId)
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var bSheet = ss.getSheetByName('Bets');
+    if (bSheet) {
+      var bData = bSheet.getDataRange().getValues();
+      for (var bi = 1; bi < bData.length; bi++) {
+        var gv = (bData[bi][12] || '').toString().trim();
+        if (gv && gv.length > 5 && !discovered[gv]) discovered[gv] = 'จาก Bets sheet';
+      }
+    }
+    // Scan LineChatLogs sheet (userId col may contain group IDs starting with C/R)
+    var cSheet = ss.getSheetByName('LineChatLogs');
+    if (cSheet) {
+      var cData = cSheet.getDataRange().getValues();
+      for (var ci = 1; ci < cData.length; ci++) {
+        var uid = (cData[ci][1] || '').toString().trim();
+        if (uid && (uid.startsWith('C') || uid.startsWith('R')) && uid.length > 10 && !discovered[uid]) {
+          discovered[uid] = 'จาก LineChatLogs';
+        }
+      }
+    }
+  } catch(e) {
+    Logger.log('[adminDiscoverGroupIds] Error: ' + e.toString());
+  }
+
+  var discoveredList = Object.keys(discovered).map(function(id) {
+    return { id: id, source: discovered[id] };
+  });
+
+  Logger.log('[adminDiscoverGroupIds] Found: ' + JSON.stringify(discoveredList));
+  return {
+    activeGroupId: activeId,
+    lineGroups: JSON.parse(lineGroupsJson),
+    discovered: discoveredList
+  };
+}
+
 function adminBroadcastQuote(targetId, name, minVal, maxVal, isChotoy) {
   var quoteFlex = {
     "type": "bubble",
