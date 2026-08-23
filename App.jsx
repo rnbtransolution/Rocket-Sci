@@ -2031,52 +2031,6 @@ export default function App() {
                   </label>
                 </div>
 
-                {/* ─── LINE OA Quota & Status Monitoring Banner ─── */}
-                <div className={`rounded-xl p-3 border transition-all ${lineQuota?.isExhausted ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-base">{lineQuota?.isExhausted ? '⚠️' : '📡'}</span>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-black text-slate-800 font-heading">
-                            LINE OA Push Message Quota:
-                          </span>
-                          <span className={`text-[11px] font-mono font-black px-2 py-0.5 rounded-md ${lineQuota?.isExhausted ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-emerald-100 text-emerald-800'}`}>
-                            {lineQuota ? `${lineQuota.totalUsage} / ${lineQuota.limit} ข้อความ (เต็ม 100%)` : 'กำลังตรวจสอบ...'}
-                          </span>
-                        </div>
-                        {lineQuota?.isExhausted && (
-                          <p className="text-[10px] text-amber-800 mt-1 leading-relaxed">
-                            ⚠️ <strong>โควตา Push Message รายเดือนของ LINE OA ฟรี 300 ข้อความเต็มแล้ว</strong><br />
-                            • บอทตอบกลับในกลุ่มยังทำงานได้ฟรี 100% (ผ่าน Reply API ไม่เสียโควตา)<br />
-                            • การบรอดแคสต์/กดปุ่มส่งข้อความจากหน้า Web App จะถูก LINE ปฏิเสธ (HTTP 429 Limit Exceeded)<br />
-                            • 💡 <strong>วิธีแก้ไข:</strong> อัปเกรดแพ็กเกจเป็น Basic/Pro ที่ <a href="https://manager.line.biz" target="_blank" rel="noreferrer" className="text-blue-600 font-bold underline">manager.line.biz</a> เพื่อปลดล็อค 15,000 ข้อความ/เดือนครับ
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        addToast('🔄 กำลังตรวจสอบโควตา LINE OA ล่าสุด...', 'info');
-                        try {
-                          const q = await runBackendFunction('adminGetLineQuota', []);
-                          if (q && !q.error) {
-                            setLineQuota(q);
-                            addToast(`📊 โควตา LINE: ใช้งานไปแล้ว ${q.totalUsage}/${q.limit} ข้อความ`, q.isExhausted ? 'warning' : 'success');
-                          } else {
-                            addToast(`⚠️ ตรวจสอบโควตาไม่สำเร็จ: ${q?.error || 'Unknown'}`, 'warning');
-                          }
-                        } catch(err) {
-                          const errStr = err?.message || (typeof err === 'string' ? err : JSON.stringify(err)) || 'Error';
-                          addToast(`❌ Error: ${errStr}`, 'danger');
-                        }
-                      }}
-                      className="py-1 px-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 text-[10px] font-bold rounded-lg transition-all active:scale-95"
-                    >
-                      🔄 รีเฟรชโควตา
-                    </button>
-                  </div>
-                </div>
 
                 {/* ─── Group ID Setup Widget ─── */}
                 {!activeGroupId && (
