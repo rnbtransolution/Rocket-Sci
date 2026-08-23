@@ -219,14 +219,14 @@ export default function App() {
       "header": {
         "type": "box",
         "layout": "vertical",
-        "backgroundColor": "#0288D1",
+        "backgroundColor": "#BAE6FD",
         "paddingAll": "sm",
         "contents": [
           {
             "type": "text",
-            "text": `🚀 เปิดรอบ ➔ ${name}`,
+            "text": `🚀 ราคาช่างเปิด ➔ ${name}`,
             "weight": "bold",
-            "color": "#FFFFFF",
+            "color": "#0369A1",
             "size": "sm",
             "align": "center",
             "wrap": true
@@ -236,17 +236,25 @@ export default function App() {
       "body": {
         "type": "box",
         "layout": "vertical",
+        "backgroundColor": "#F0F9FF",
         "spacing": "xs",
         "paddingAll": "sm",
         "contents": [
           {
             "type": "text",
-            "text": `⏱️  ราคาช่าง ${min}-${max}s${isChotoy ? ' (ชตย)' : ''}`,
+            "text": `⏱️ ช่วงราคา: ${min}-${max} วิ${isChotoy ? ' (ชตย)' : ''}`,
             "weight": "bold",
-            "color": "#0288D1",
-            "size": "sm",
+            "color": "#0284C7",
+            "size": "xs",
             "align": "center",
             "wrap": true
+          },
+          {
+            "type": "text",
+            "text": "⚡ พิมพ์ ชล / ชถ (±5, ±10) ได้ทันที",
+            "color": "#64748B",
+            "size": "xxs",
+            "align": "center"
           }
         ]
       }
@@ -2095,9 +2103,102 @@ export default function App() {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs font-bold">
                     <button onClick={() => {
-                      const msg = `📖 [คู่มือคีย์เวิร์ดกติกาการเล่น]\n\n📌 กฏที่ 1: แทงตามราคาช่างแอดมิน\n\n🎉 ทายว่าชนะ (สูง):\n• ช่างไล่ / ชล / ไล่ / ล\n• +5ชล / +5ล / +5ไล่\n• +10ชล / -10ชล\n• -5ชล / -5ล / -5ไล่\n💵 พิมพ์คีย์เวิร์ดตามด้วยจำนวนเงิน (ตัวเลขเท่านั้น)\nเช่น ชล100 , ชล1000 , ชล10000\n\n👊 ทายว่าแพ้ (ต่ำ):\n• ช่างยั่ง / ช่างถอย / ชย\n• ชถ / ยั่ง / ย / ถอย / ถ\n• +5ชถ / +10ชถ / -10ชถ\nเช่น ชถ100 , ชถ1000\n\n-----------------------------\n\n📌 กฏที่ 2: การเปิดราคาเอง\n\n💰 การเปิดราคาเอง (เปิดแผลสดใหม่):\n⚠️ ระบุช่วงเวลาต่ำไปสูง (ช่วงห่าง 80 วิพอดี) เช่น\n• 300-380ล500 | 300-380ถ500\n• 350-430ล500 | 350-430ถ500\n\n⬆️ ช่างต่อยก (ชตย - เผื่อช่างไม่ต่อย):\nใส่ ชตย หลังจำนวนเงิน เช่น\n• 300-380ล500 ชตย`;
-                      runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, msg]);
-                      addToast('📖 ประกาศส่งคู่มือคีย์เวิร์ด & กติกาการเล่นลงกลุ่มเรียบร้อย!', 'info');
+                      const ruleGuideFlex = {
+                        "type": "bubble",
+                        "size": "kilo",
+                        "header": {
+                          "type": "box",
+                          "layout": "vertical",
+                          "backgroundColor": "#E0E7FF",
+                          "paddingAll": "sm",
+                          "contents": [
+                            {
+                              "type": "text",
+                              "text": "🚀 ROCKET SCIENCE",
+                              "weight": "bold",
+                              "color": "#4338CA",
+                              "size": "xxs",
+                              "align": "center"
+                            },
+                            {
+                              "type": "text",
+                              "text": "📖 กติกา & วิธีการเล่นบั้งไฟ",
+                              "weight": "bold",
+                              "color": "#1E1B4B",
+                              "size": "sm",
+                              "align": "center",
+                              "margin": "xs"
+                            }
+                          ]
+                        },
+                        "body": {
+                          "type": "box",
+                          "layout": "vertical",
+                          "spacing": "sm",
+                          "paddingAll": "sm",
+                          "contents": [
+                            {
+                              "type": "box",
+                              "layout": "vertical",
+                              "backgroundColor": "#DCFCE7",
+                              "cornerRadius": "md",
+                              "paddingAll": "sm",
+                              "contents": [
+                                { "type": "text", "text": "1️⃣ แทงตามราคาช่าง (ปรับได้ ±5 / ±10)", "weight": "bold", "color": "#166534", "size": "xs" },
+                                { "type": "text", "text": "• ทายชนะ (สูง): ชล, +5ชล, -5ชล, +10ชล, -10ชล\n• ทายแพ้ (ต่ำ): ชถ, +5ชถ, -5ชถ, +10ชถ, -10ชถ\nเช่น ชล500, +5ชล1000, -10ชถ200", "color": "#14532D", "size": "xxs", "wrap": true, "margin": "xs" }
+                              ]
+                            },
+                            {
+                              "type": "box",
+                              "layout": "vertical",
+                              "backgroundColor": "#E0F2FE",
+                              "cornerRadius": "md",
+                              "paddingAll": "sm",
+                              "contents": [
+                                { "type": "text", "text": "2️⃣ เปิดราคาเอง (ช่วงห่าง 80 วิพอดี)", "weight": "bold", "color": "#0369A1", "size": "xs" },
+                                { "type": "text", "text": "• ช่วงเวลาห่าง 80 วิ: 300-380ล500 หรือ 350-430ถ1000\n• เผื่อช่างไม่ต่อย: ใส่ ชตย เช่น 300-380ล500 ชตย", "color": "#0C4A6E", "size": "xxs", "wrap": true, "margin": "xs" }
+                              ]
+                            },
+                            {
+                              "type": "box",
+                              "layout": "vertical",
+                              "backgroundColor": "#F3E8FF",
+                              "cornerRadius": "md",
+                              "paddingAll": "sm",
+                              "contents": [
+                                { "type": "text", "text": "3️⃣ การรับแผลดวล & ขั้นต่ำ 20%", "weight": "bold", "color": "#6B21A8", "size": "xs" },
+                                { "type": "text", "text": "• แตะปุ่มเปอร์เซ็นต์ [20%] [40%] [80%] [100%]\n• หรือพิมพ์: [เลขบิล] [แต้ม] เช่น 4812 200 หรือ ต4812\n• ขั้นต่ำการรับแผลคือ 20% ของยอดแผล", "color": "#581C87", "size": "xxs", "wrap": true, "margin": "xs" }
+                              ]
+                            },
+                            {
+                              "type": "box",
+                              "layout": "vertical",
+                              "backgroundColor": "#FFE4E6",
+                              "cornerRadius": "md",
+                              "paddingAll": "sm",
+                              "contents": [
+                                { "type": "text", "text": "4️⃣ การยกเลิกแผลดวล", "weight": "bold", "color": "#9F1239", "size": "xs" },
+                                { "type": "text", "text": "• พิมพ์ ยกเลิก [เลขบิล] เช่น ยกเลิก 4812 (ก่อนมีคู่รับ)", "color": "#881337", "size": "xxs", "wrap": true, "margin": "xs" }
+                              ]
+                            }
+                          ]
+                        },
+                        "footer": {
+                          "type": "box",
+                          "layout": "horizontal",
+                          "paddingAll": "xs",
+                          "contents": [
+                            { "type": "button", "action": { "type": "message", "label": "📋 ดูกระดานดวลสด", "text": "กระดานดวล" }, "style": "primary", "color": "#334155", "height": "sm" }
+                          ]
+                        }
+                      };
+                      if (broadcastTargetGroup === 'ALL') {
+                        const targets = lineGroups.length > 0 ? lineGroups.map(g => g.id) : [activeGroupId];
+                        targets.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, ruleGuideFlex]));
+                      } else {
+                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, ruleGuideFlex]);
+                      }
+                      addToast('📖 ประกาศส่งคู่มือคีย์เวิร์ด & กติกาการเล่น (Colorful Flex Card) เรียบร้อย!', 'info');
                     }} className="py-2.5 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">📖 ประกาศส่งคู่มือคีย์เวิร์ดกติกา</button>
                     <button onClick={() => {
                       const closeFlex = {
@@ -2106,14 +2207,14 @@ export default function App() {
                         "header": {
                           "type": "box",
                           "layout": "vertical",
-                          "backgroundColor": "#D32F2F",
+                          "backgroundColor": "#FECDD3",
                           "paddingAll": "sm",
                           "contents": [
                             {
                               "type": "text",
-                              "text": "⛔ ปิดรับดวล",
+                              "text": "⛔ FINAL CALL · ปิดรับดวล",
                               "weight": "bold",
-                              "color": "#FFFFFF",
+                              "color": "#9F1239",
                               "size": "sm",
                               "align": "center"
                             }
@@ -2122,14 +2223,75 @@ export default function App() {
                         "body": {
                           "type": "box",
                           "layout": "vertical",
+                          "backgroundColor": "#FFF1F2",
                           "spacing": "xs",
                           "paddingAll": "sm",
                           "contents": [
                             {
                               "type": "text",
-                              "text": "⚠️ ออเดอร์หลังจากนี้จะไม่ถูกจับคู่",
+                              "text": "⚠️ ปิดรับการเปิดราคาเองรอบนี้แล้ว",
                               "weight": "bold",
-                              "color": "#D32F2F",
+                              "color": "#BE123C",
+                              "size": "xxs",
+                              "align": "center",
+                              "wrap": true
+                            },
+                            {
+                              "type": "text",
+                              "text": "(จับคู่เฉพาะแผลที่เปิดค้างอยู่เท่านั้น)",
+                              "color": "#64748B",
+                              "size": "xxs",
+                              "align": "center"
+                            }
+                          ]
+                        }
+                      };
+                      runBackendFunction('setRocketRoundStatus', ['closed']);
+                      if (broadcastTargetGroup === 'ALL') {
+                        const validGroups = lineGroups && lineGroups.length > 0 ? lineGroups.map(g => g.id) : (activeGroupId ? [activeGroupId] : []);
+                        if (validGroups.length === 0) {
+                          runBackendFunction('sendAdminMessageToLine', [activeGroupId, closeFlex]);
+                        } else {
+                          validGroups.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, closeFlex]));
+                        }
+                      } else {
+                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, closeFlex]);
+                      }
+                      addToast(`⛔ ประกาศปิดรับดวล (Final Call Pastel Flex Card) เรียบร้อย!`, 'warning');
+                    }} className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">⛔ ปิดรับดวล (Final Call)</button>
+                    <button onClick={() => {
+                      if (!window.confirm("⛔ คุณต้องการประกาศ 'ช่าง ⛔' (โมฆะรอบ) และยกเลิกคืนแต้มแผลดวลทั้งหมดใช่หรือไม่?")) return;
+                      const voidFlex = {
+                        "type": "bubble",
+                        "size": "micro",
+                        "header": {
+                          "type": "box",
+                          "layout": "vertical",
+                          "backgroundColor": "#FECDD3",
+                          "paddingAll": "sm",
+                          "contents": [
+                            {
+                              "type": "text",
+                              "text": "⛔ ช่าง ⛔ (โมฆะรอบ)",
+                              "weight": "bold",
+                              "color": "#9F1239",
+                              "size": "sm",
+                              "align": "center"
+                            }
+                          ]
+                        },
+                        "body": {
+                          "type": "box",
+                          "layout": "vertical",
+                          "backgroundColor": "#FFF1F2",
+                          "spacing": "xs",
+                          "paddingAll": "sm",
+                          "contents": [
+                            {
+                              "type": "text",
+                              "text": "ยกเลิกและคืนแต้มทุกแผลดวล 100% เรียบร้อยครับ",
+                              "weight": "bold",
+                              "color": "#BE123C",
                               "size": "xxs",
                               "align": "center",
                               "wrap": true
@@ -2137,19 +2299,61 @@ export default function App() {
                           ]
                         }
                       };
-                      runBackendFunction('setRocketRoundStatus', ['closed']);
-                      runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, closeFlex]);
-                      addToast(`⛔ ประกาศปิดรับดวล (Mini Flex Card) เรียบร้อย!`, 'warning');
-                    }} className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">⛔ ปิดรับดวล (1 นาที ก่อนจุด)</button>
-                    <button onClick={() => {
-                      if (!window.confirm("⛔ คุณต้องการประกาศ 'ช่าง ⛔' (โมฆะรอบ) และยกเลิกคืนแต้มแผลดวลทั้งหมดใช่หรือไม่?")) return;
                       runBackendFunction('adminVoidRound', []);
+                      if (broadcastTargetGroup === 'ALL') {
+                        const validGroups = lineGroups && lineGroups.length > 0 ? lineGroups.map(g => g.id) : (activeGroupId ? [activeGroupId] : []);
+                        validGroups.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, voidFlex]));
+                      } else {
+                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, voidFlex]);
+                      }
                       addToast(`⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ) และคืนแต้มผู้เล่นเรียบร้อย!`, 'danger');
                     }} className="py-2.5 px-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ)</button>
                     <button onClick={() => {
-                      const msg = `🚨 [เตือนภัย] ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA เท่านั้นครับ ❌`;
-                      runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, msg]);
-                      addToast(`🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพไปยัง LINE เรียบร้อย!`, 'info');
+                      const warnFlex = {
+                        "type": "bubble",
+                        "size": "micro",
+                        "header": {
+                          "type": "box",
+                          "layout": "vertical",
+                          "backgroundColor": "#FDE68A",
+                          "paddingAll": "sm",
+                          "contents": [
+                            {
+                              "type": "text",
+                              "text": "🚨 เตือนความปลอดภัย",
+                              "weight": "bold",
+                              "color": "#92400E",
+                              "size": "sm",
+                              "align": "center"
+                            }
+                          ]
+                        },
+                        "body": {
+                          "type": "box",
+                          "layout": "vertical",
+                          "backgroundColor": "#FEFCE8",
+                          "spacing": "xs",
+                          "paddingAll": "sm",
+                          "contents": [
+                            {
+                              "type": "text",
+                              "text": "ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1-on-1 เท่านั้นครับ ❌",
+                              "weight": "bold",
+                              "color": "#B45309",
+                              "size": "xxs",
+                              "align": "center",
+                              "wrap": true
+                            }
+                          ]
+                        }
+                      };
+                      if (broadcastTargetGroup === 'ALL') {
+                        const targets = lineGroups.length > 0 ? lineGroups.map(g => g.id) : [activeGroupId];
+                        targets.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, warnFlex]));
+                      } else {
+                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, warnFlex]);
+                      }
+                      addToast(`🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพ (Pastel Flex Card) เรียบร้อย!`, 'info');
                     }} className="py-2.5 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">🚨 เตือนมิจฉาชีพ</button>
                   </div>
                 </div>

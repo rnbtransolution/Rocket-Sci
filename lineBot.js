@@ -808,9 +808,9 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     return true;
   }
 
-  // 1. Check Accept Match Command (e.g. "ต", "ต12", "ต 12", "ต905662 400", "12ต", "ต#12", "ติด", "รับแผล")
-  const specificAcceptRegex = /^(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*#?(\d{2,6})(?:\s*(\d+))?$/i;
-  const reverseAcceptRegex = /^#?(\d{2,6})\s*(ต|ติด|รับ)(?:\s*(\d+))?$/i;
+  // 1. Check Accept Match Command (e.g. "ต", "ต12", "ต 12", "4812 500", "ต905662 400", "12ต", "ต#12", "ติด", "รับแผล")
+  const specificAcceptRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*)?#?(\d{2,6})(?:\s*(ต|ติด|รับ))?(?:\s+(\d+))?$/i;
+  const reverseAcceptRegex = /^#?(\d{2,6})\s*(ต|ติด|รับ)?(?:\s*(\d+))?$/i;
   let targetOrderNo = null;
   let customMatchAmount = null;
 
@@ -818,11 +818,13 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   if (specificAcceptRegex.test(rawTrimmed)) {
     const m = rawTrimmed.match(specificAcceptRegex);
     targetOrderNo = m[2];
-    if (m[3]) customMatchAmount = parseInt(m[3]);
+    if (m[4]) customMatchAmount = parseInt(m[4]);
+    else if (m[3] && /^\d+$/.test(m[3])) customMatchAmount = parseInt(m[3]);
   } else if (specificAcceptRegex.test(clean)) {
     const m = clean.match(specificAcceptRegex);
     targetOrderNo = m[2];
-    if (m[3]) customMatchAmount = parseInt(m[3]);
+    if (m[4]) customMatchAmount = parseInt(m[4]);
+    else if (m[3] && /^\d+$/.test(m[3])) customMatchAmount = parseInt(m[3]);
   } else if (reverseAcceptRegex.test(rawTrimmed)) {
     const m = rawTrimmed.match(reverseAcceptRegex);
     targetOrderNo = m[1];
@@ -842,18 +844,13 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
       }
     };
 
-    if (db.isRocketRoundClosed()) {
-      const targetBet = targetOrderNo ? db.getBetByOrderNumber(targetOrderNo) : null;
-      if (targetBet && (targetBet.type === 'custom_range' || targetBet.type === 'custom')) {
-        const tagPrefix = groupId ? `👤 [ถึงคุณ @${displayName}]: ` : '';
-        await sendNotice(`${tagPrefix}⚠️ ปิดรับดวลราคาเปิดเองรอบนี้แล้วครับ (ไม่สามารถจับคู่แผลเปิดราคาเองหลังประกาศปิดรับได้)`);
-        return true;
-      }
-    }
-
     const matched = await db.matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmount);
     const tagPrefix = groupId ? `👤 [ถึงคุณ @${displayName}]: ` : '';
 
+    if (matched && matched.error === 'BELOW_MIN_PERCENT_LIMIT') {
+      await sendNotice(`${tagPrefix}⚠️ ยอดดวลขั้นต่ำคือ 20% (${matched.minAllowed} pt) ของ Order #${matched.orderNumber} ครับ (คุณระบุ ${matched.provided} pt)`);
+      return true;
+    }
     if (matched && matched.error === 'BELOW_MIN_LIMIT') {
       await sendNotice(`${tagPrefix}⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${matched.provided} pt)`);
       return true;
@@ -981,12 +978,19 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   // Format 2: Rule 1 Bet commands (e.g. "ชล100", "ชถ1000", "+5ชล500", "-5ชถ200", "+10ชล100", "-10ชถ500", "ล100", "ถ500")
   let offsetDelta = 0;
   let strippedCmdText = cleanBetText;
-  if (/^[+\-]10/.test(strippedCmdText)) {
-    offsetDelta = strippedCmdText.charAt(0) === '-' ? -10 : 10;
-    strippedCmdText = strippedCmdText.slice(3);
-  } else if (/^[+\-]5/.test(strippedCmdText)) {
-    offsetDelta = strippedCmdText.charAt(0) === '-' ? -5 : 5;
-    strippedCmdText = strippedCmdText.slice(2);
+  if (/^[+\-]\d+/.test(strippedCmdText)) {
+    const deltaMatch = strippedCmdText.match(/^([+\-]\d+)/);
+    const deltaVal = parseInt(deltaMatch[1]);
+    if (deltaVal !== 5 && deltaVal !== -5 && deltaVal !== 10 && deltaVal !== -10) {
+      const deltaErrMsg = groupId
+        ? `👤 [ถึงคุณ @${displayName}]: ⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)`
+        : `⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)`;
+      if (groupId) await pushToLine(groupId, deltaErrMsg);
+      else await replyToLine(replyToken, deltaErrMsg, userId);
+      return true;
+    }
+    offsetDelta = deltaVal;
+    strippedCmdText = strippedCmdText.replace(/^[+\-]\d+/, '').trim();
   }
 
   const betRegex = /^([a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
@@ -1016,9 +1020,13 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
       if (!isPreQuote) {
         activeMin += offsetDelta;
         activeMax += offsetDelta;
+      } else {
+        // Record offset delta for pre-quote calculation
+        activeMin = offsetDelta;
+        activeMax = null;
       }
 
-      await processOpenBetRequest(side, amount, isPreQuote ? 'pre_quote' : 'range', activeMin, activeMax, userId, displayName, replyToken, isChotoy, groupId, cleanBetText, isPreQuote);
+      await processOpenBetRequest(side, amount, isPreQuote ? 'pre_quote' : 'range', activeMin, activeMax, userId, displayName, replyToken, isChotoy, groupId, cleanBetText, isPreQuote, offsetDelta);
       return true;
     }
   }
@@ -1026,11 +1034,11 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   return false;
 }
 
-async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false, groupId = null, userTypedCmd = null, isPreQuote = false) {
-  if (db.isRocketRoundClosed() && (type === 'custom_range' || type === 'custom')) {
+async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false, groupId = null, userTypedCmd = null, isPreQuote = false, offsetDelta = 0) {
+  if (db.isRocketRoundClosed() && (type === 'custom_range' || type === 'custom' || isPreQuote || offsetDelta !== 0)) {
     const msg = groupId
-      ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ปิดรับดวลราคาเปิดเองรอบนี้แล้วครับ (เปิดรับเฉพาะแทงตามราคาช่างแอดมินเท่านั้น)`
-      : `⚠️ ปิดรับดวลราคาเปิดเองรอบนี้แล้วครับ (เปิดรับเฉพาะแทงตามราคาช่างแอดมินเท่านั้น)`;
+      ? `👤 [ถึงคุณ @${displayName}]: ⛔ ปิดรับการเปิดราคาเองแล้ว (Final Call) กรุณารอจับคู่แผลที่เปิดค้างอยู่หรือรอรอบถัดไปครับ`
+      : `⛔ ปิดรับการเปิดราคาเองแล้ว (Final Call) กรุณารอจับคู่แผลที่เปิดค้างอยู่หรือรอรอบถัดไปครับ`;
     if (groupId) await pushToLine(groupId, msg); else await replyToLine(replyToken, msg, userId);
     return;
   }
@@ -1673,14 +1681,14 @@ export function constructRuleGuideFlex() {
     "header": {
       "type": "box",
       "layout": "vertical",
-      "backgroundColor": "#334155",
-      "paddingAll": "md",
+      "backgroundColor": "#E0E7FF",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
           "text": "🚀 ROCKET SCIENCE",
           "weight": "bold",
-          "color": "#38BDF8",
+          "color": "#4338CA",
           "size": "xxs",
           "align": "center"
         },
@@ -1688,8 +1696,8 @@ export function constructRuleGuideFlex() {
           "type": "text",
           "text": "📖 กติกา & วิธีการเล่นบั้งไฟ",
           "weight": "bold",
-          "color": "#FFFFFF",
-          "size": "md",
+          "color": "#1E1B4B",
+          "size": "sm",
           "align": "center",
           "margin": "xs"
         }
@@ -1699,26 +1707,26 @@ export function constructRuleGuideFlex() {
       "type": "box",
       "layout": "vertical",
       "spacing": "sm",
-      "paddingAll": "md",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "box",
           "layout": "vertical",
-          "backgroundColor": "#F0FDF4",
+          "backgroundColor": "#DCFCE7",
           "cornerRadius": "md",
           "paddingAll": "sm",
           "contents": [
             {
               "type": "text",
-              "text": "1️⃣ แทงตามราคาช่าง (แอดมินเปิด)",
+              "text": "1️⃣ แทงตามราคาช่าง (ปรับได้ ±5 / ±10)",
               "weight": "bold",
-              "color": "#059669",
+              "color": "#166534",
               "size": "xs"
             },
             {
               "type": "text",
-              "text": "• ทายเวลาต่ำ: พิมพ์ ชล [แต้ม] (เช่น ชล200, +5ชล500, +10ชล500, -10ชล500)\n• ทายเวลาสูง: พิมพ์ ชถ [แต้ม] (เช่น ชถ200, +5ชถ500, +10ชถ500, -10ชถ500)",
-              "color": "#475569",
+              "text": "• ทายชนะ (สูง): ชล, +5ชล, -5ชล, +10ชล, -10ชล\n• ทายแพ้ (ต่ำ): ชถ, +5ชถ, -5ชถ, +10ชถ, -10ชถ\nเช่น ชล500, +5ชล1000, -10ชถ200",
+              "color": "#14532D",
               "size": "xxs",
               "wrap": true,
               "margin": "xs"
@@ -1728,21 +1736,21 @@ export function constructRuleGuideFlex() {
         {
           "type": "box",
           "layout": "vertical",
-          "backgroundColor": "#F0F9FF",
+          "backgroundColor": "#E0F2FE",
           "cornerRadius": "md",
           "paddingAll": "sm",
           "contents": [
             {
               "type": "text",
-              "text": "2️⃣ การเปิดราคาดวลเอง (Custom Range)",
+              "text": "2️⃣ เปิดราคาเอง (ช่วงห่าง 80 วิพอดี)",
               "weight": "bold",
-              "color": "#0284C7",
+              "color": "#0369A1",
               "size": "xs"
             },
             {
               "type": "text",
-              "text": "• ระบุช่วงเวลาต่ำไปสูง (ช่วงห่าง 80 วิพอดี) เช่น 300-380ล500 หรือ 300-380ถ500\n• เผื่อช่างไม่ต่อย (ชตย): ใส่ ชตย เช่น 300-380ล500 ชตย",
-              "color": "#475569",
+              "text": "• ช่วงเวลาห่าง 80 วิ: 300-380ล500 หรือ 350-430ถ1000\n• เผื่อช่างไม่ต่อย: ใส่ ชตย เช่น 300-380ล500 ชตย",
+              "color": "#0C4A6E",
               "size": "xxs",
               "wrap": true,
               "margin": "xs"
@@ -1752,21 +1760,21 @@ export function constructRuleGuideFlex() {
         {
           "type": "box",
           "layout": "vertical",
-          "backgroundColor": "#FAF5FF",
+          "backgroundColor": "#F3E8FF",
           "cornerRadius": "md",
           "paddingAll": "sm",
           "contents": [
             {
               "type": "text",
-              "text": "3️⃣ การรับคำท้า & จับคู่ดวล",
+              "text": "3️⃣ การรับแผลดวล & ขั้นต่ำ 20%",
               "weight": "bold",
-              "color": "#7C3AED",
+              "color": "#6B21A8",
               "size": "xs"
             },
             {
               "type": "text",
-              "text": "• แตะปุ่มบนการ์ด หรือพิมพ์: [เลขบิล] [แต้ม] เช่น 4812 500 หรือ ต4812",
-              "color": "#475569",
+              "text": "• แตะปุ่มเปอร์เซ็นต์ [20%] [40%] [80%] [100%]\n• หรือพิมพ์: [เลขบิล] [แต้ม] เช่น 4812 200 หรือ ต4812\n• ขั้นต่ำการรับแผลคือ 20% ของยอดแผล",
+              "color": "#581C87",
               "size": "xxs",
               "wrap": true,
               "margin": "xs"
@@ -1776,7 +1784,7 @@ export function constructRuleGuideFlex() {
         {
           "type": "box",
           "layout": "vertical",
-          "backgroundColor": "#FFF1F2",
+          "backgroundColor": "#FFE4E6",
           "cornerRadius": "md",
           "paddingAll": "sm",
           "contents": [
@@ -1784,13 +1792,13 @@ export function constructRuleGuideFlex() {
               "type": "text",
               "text": "4️⃣ การยกเลิกแผลดวล",
               "weight": "bold",
-              "color": "#E11D48",
+              "color": "#9F1239",
               "size": "xs"
             },
             {
               "type": "text",
-              "text": "• พิมพ์ ยกเลิก [เลขบิล] เช่น ยกเลิก 4812 (ก่อนมีคู่ดวลเท่านั้น)",
-              "color": "#BE123C",
+              "text": "• พิมพ์ ยกเลิก [เลขบิล] เช่น ยกเลิก 4812 (ก่อนมีคู่รับ)",
+              "color": "#881337",
               "size": "xxs",
               "wrap": true,
               "margin": "xs"
@@ -1802,7 +1810,7 @@ export function constructRuleGuideFlex() {
     "footer": {
       "type": "box",
       "layout": "horizontal",
-      "paddingAll": "sm",
+      "paddingAll": "xs",
       "contents": [
         {
           "type": "button",
@@ -1832,106 +1840,107 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
   const cardTitle = cleanCmd.includes(amount.toString()) ? cleanCmd : `${cleanCmd} ${amount}`;
   const numAmount = Number(amount) || 100;
 
-  // Filter quick amount buttons so no button exceeds the initial order amount!
-  const presetAmounts = [100, 200, 300, 500];
-  let validAmounts = presetAmounts.filter(v => v <= numAmount);
-  if (validAmounts.length === 0 && numAmount >= 100) {
-    validAmounts = [numAmount];
-  }
+  const amt20 = Math.max(1, Math.round(numAmount * 0.20));
+  const amt40 = Math.max(1, Math.round(numAmount * 0.40));
+  const amt80 = Math.max(1, Math.round(numAmount * 0.80));
+  const amt100 = numAmount;
 
-  const quickButtons = validAmounts.map(val => ({
+  // Row 1: [20] [40] [80] (Pastel Blue)
+  const row1Buttons = [
+    { label: `20% (${amt20})`, val: amt20 },
+    { label: `40% (${amt40})`, val: amt40 },
+    { label: `80% (${amt80})`, val: amt80 }
+  ].map(item => ({
     "type": "box",
     "layout": "vertical",
     "flex": 1,
-    "backgroundColor": "#0284C7",
+    "backgroundColor": "#BAE6FD",
     "cornerRadius": "sm",
     "paddingAll": "xs",
     "action": {
       "type": "message",
-      "label": val.toString(),
-      "text": `ต ${orderNo} ${val}`
+      "label": item.label,
+      "text": `ต ${orderNo} ${item.val}`
     },
     "contents": [
-      { "type": "text", "text": val.toString(), "color": "#FFFFFF", "weight": "bold", "size": "xxs", "align": "center" }
+      { "type": "text", "text": item.label, "color": "#0369A1", "weight": "bold", "size": "xxs", "align": "center" }
     ]
   }));
+
+  // Row 2: [100] [Cancel] (Pastel Green & Pastel Red)
+  const row2Buttons = [
+    {
+      "type": "box",
+      "layout": "vertical",
+      "flex": 1,
+      "backgroundColor": "#BBF7D0",
+      "cornerRadius": "sm",
+      "paddingAll": "xs",
+      "action": {
+        "type": "message",
+        "label": `100% (${amt100})`,
+        "text": `ต ${orderNo} ${amt100}`
+      },
+      "contents": [
+        { "type": "text", "text": `100% (${amt100})`, "color": "#15803D", "weight": "bold", "size": "xs", "align": "center" }
+      ]
+    },
+    {
+      "type": "box",
+      "layout": "vertical",
+      "flex": 1,
+      "backgroundColor": "#FECDD3",
+      "cornerRadius": "sm",
+      "paddingAll": "xs",
+      "action": {
+        "type": "message",
+        "label": "⛔ ยกเลิก",
+        "text": `ยกเลิก ${orderNo}`
+      },
+      "contents": [
+        { "type": "text", "text": "⛔ ยกเลิก", "color": "#9F1239", "weight": "bold", "size": "xs", "align": "center" }
+      ]
+    }
+  ];
 
   const bodyContents = [
     {
       "type": "text",
-      "text": cardTitle,
+      "text": `${cardTitle}${isChotoy ? ' (ชตย)' : ''}`,
       "weight": "bold",
-      "color": "#111111",
+      "color": "#1E293B",
       "size": "md",
       "align": "center"
     },
     {
       "type": "separator",
       "margin": "xs",
-      "color": "#F0F0F0"
-    }
-  ];
-
-  if (quickButtons.length > 0) {
-    bodyContents.push({
+      "color": "#F1F5F9"
+    },
+    {
       "type": "box",
       "layout": "horizontal",
       "spacing": "xs",
       "margin": "xs",
-      "contents": quickButtons
-    });
-  }
-
-  bodyContents.push({
-    "type": "box",
-    "layout": "horizontal",
-    "spacing": "xs",
-    "margin": "xs",
-    "contents": [
-      {
-        "type": "box",
-        "layout": "vertical",
-        "flex": 1,
-        "backgroundColor": "#16A34A",
-        "cornerRadius": "sm",
-        "paddingAll": "xs",
-        "action": {
-          "type": "message",
-          "label": "ต ทั้งหมด",
-          "text": `ต ${orderNo} ${amount}`
-        },
-        "contents": [
-          { "type": "text", "text": "ต ทั้งหมด", "color": "#FFFFFF", "weight": "bold", "size": "xs", "align": "center" }
-        ]
-      },
-      {
-        "type": "box",
-        "layout": "vertical",
-        "flex": 1,
-        "backgroundColor": "#DC2626",
-        "cornerRadius": "sm",
-        "paddingAll": "xs",
-        "action": {
-          "type": "message",
-          "label": "⛔️ ยกเลิก",
-          "text": `ยกเลิก ${orderNo}`
-        },
-        "contents": [
-          { "type": "text", "text": "⛔️ ยกเลิก", "color": "#FFFFFF", "weight": "bold", "size": "xs", "align": "center" }
-        ]
-      }
-    ]
-  });
-
-  bodyContents.push({
-    "type": "text",
-    "text": `หรือพิมพ์: ${orderNo} [จำนวนเงิน]`,
-    "size": "xxs",
-    "color": "#1D4ED8",
-    "weight": "bold",
-    "align": "center",
-    "margin": "xs"
-  });
+      "contents": row1Buttons
+    },
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "spacing": "xs",
+      "margin": "xs",
+      "contents": row2Buttons
+    },
+    {
+      "type": "text",
+      "text": `หรือพิมพ์: ${orderNo} [จำนวนเงิน]`,
+      "size": "xxs",
+      "color": "#2563EB",
+      "weight": "bold",
+      "align": "center",
+      "margin": "xs"
+    }
+  ];
 
   return {
     "type": "bubble",
@@ -1939,14 +1948,14 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
     "header": {
       "type": "box",
       "layout": "vertical",
-      "backgroundColor": "#1E1B4B",
+      "backgroundColor": "#334155",
       "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": `Order #${orderNo}`,
+          "text": `Order #${orderNo}${isPreQuote ? ' (รอราคาช่าง)' : ''}`,
           "weight": "bold",
-          "color": "#FFFFFF",
+          "color": "#F8FAFC",
           "size": "xs",
           "align": "center"
         }
@@ -2362,9 +2371,9 @@ export function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, p
 }
 
 export function constructOpenRoundQuoteFlex(name, min, max, isChotoy = false) {
-  const roundName = name || 'ทดลอง';
-  const minVal = min || 380;
-  const maxVal = max || 420;
+  const roundName = name || 'บั้งไฟสด';
+  const minVal = min || 330;
+  const maxVal = max || 380;
 
   return {
     "type": "bubble",
@@ -2372,14 +2381,14 @@ export function constructOpenRoundQuoteFlex(name, min, max, isChotoy = false) {
     "header": {
       "type": "box",
       "layout": "vertical",
-      "backgroundColor": "#0EA5E9",
+      "backgroundColor": "#BAE6FD",
       "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": `🚀 เปิดรอบ ➔ ${roundName}`,
+          "text": `🚀 ราคาช่างเปิด ➔ ${roundName}`,
           "weight": "bold",
-          "color": "#FFFFFF",
+          "color": "#0369A1",
           "size": "sm",
           "align": "center",
           "wrap": true
@@ -2389,17 +2398,25 @@ export function constructOpenRoundQuoteFlex(name, min, max, isChotoy = false) {
     "body": {
       "type": "box",
       "layout": "vertical",
+      "backgroundColor": "#F0F9FF",
       "spacing": "xs",
       "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": `⏱️  ราคาช่าง ${minVal}-${maxVal}s${isChotoy ? ' (ชตย)' : ''}`,
+          "text": `⏱️ ช่วงราคา: ${minVal}-${maxVal} วิ${isChotoy ? ' (ชตย)' : ''}`,
           "weight": "bold",
           "color": "#0284C7",
-          "size": "sm",
+          "size": "xs",
           "align": "center",
           "wrap": true
+        },
+        {
+          "type": "text",
+          "text": "⚡ พิมพ์ ชล / ชถ (±5, ±10) ได้ทันที",
+          "color": "#64748B",
+          "size": "xxs",
+          "align": "center"
         }
       ]
     }
@@ -2413,14 +2430,14 @@ export function constructRoundCloseFlex() {
     "header": {
       "type": "box",
       "layout": "vertical",
-      "backgroundColor": "#F43F5E",
+      "backgroundColor": "#FECDD3",
       "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": "⛔ ปิดรับดวล",
+          "text": "⛔ FINAL CALL · ปิดรับดวล",
           "weight": "bold",
-          "color": "#FFFFFF",
+          "color": "#9F1239",
           "size": "sm",
           "align": "center"
         }
@@ -2429,14 +2446,104 @@ export function constructRoundCloseFlex() {
     "body": {
       "type": "box",
       "layout": "vertical",
+      "backgroundColor": "#FFF1F2",
       "spacing": "xs",
       "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": "⚠️ ออเดอร์หลังจากนี้จะไม่ถูกจับคู่",
+          "text": "⚠️ ปิดรับการเปิดราคาเองรอบนี้แล้ว",
           "weight": "bold",
-          "color": "#E11D48",
+          "color": "#BE123C",
+          "size": "xxs",
+          "align": "center",
+          "wrap": true
+        },
+        {
+          "type": "text",
+          "text": "(จับคู่เฉพาะแผลที่เปิดค้างอยู่เท่านั้น)",
+          "color": "#64748B",
+          "size": "xxs",
+          "align": "center"
+        }
+      ]
+    }
+  };
+}
+
+export function constructVoidRoundFlex() {
+  return {
+    "type": "bubble",
+    "size": "micro",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FECDD3",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "⛔ ช่าง ⛔ (โมฆะรอบ)",
+          "weight": "bold",
+          "color": "#9F1239",
+          "size": "sm",
+          "align": "center"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FFF1F2",
+      "spacing": "xs",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "ยกเลิกและคืนแต้มทุกแผลดวล 100% เรียบร้อยครับ",
+          "weight": "bold",
+          "color": "#BE123C",
+          "size": "xxs",
+          "align": "center",
+          "wrap": true
+        }
+      ]
+    }
+  };
+}
+
+export function constructSecurityWarningFlex() {
+  return {
+    "type": "bubble",
+    "size": "micro",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FDE68A",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "🚨 เตือนความปลอดภัย",
+          "weight": "bold",
+          "color": "#92400E",
+          "size": "sm",
+          "align": "center"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FEFCE8",
+      "spacing": "xs",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1-on-1 เท่านั้นครับ ❌",
+          "weight": "bold",
+          "color": "#B45309",
           "size": "xxs",
           "align": "center",
           "wrap": true

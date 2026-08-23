@@ -44,7 +44,13 @@ export function applyQuoteToPreQuoteBets(minVal, maxVal) {
       let offsetMax = numMax;
 
       if (bet.userTypedCmd) {
-        if (bet.userTypedCmd.startsWith('+5')) {
+        if (bet.userTypedCmd.startsWith('+10')) {
+          offsetMin += 10;
+          offsetMax += 10;
+        } else if (bet.userTypedCmd.startsWith('-10')) {
+          offsetMin -= 10;
+          offsetMax -= 10;
+        } else if (bet.userTypedCmd.startsWith('+5')) {
           offsetMin += 5;
           offsetMax += 5;
         } else if (bet.userTypedCmd.startsWith('-5')) {
@@ -59,6 +65,8 @@ export function applyQuoteToPreQuoteBets(minVal, maxVal) {
       if (bet.status === 'pre_quote_matched') {
         bet.status = 'matched';
         updatedBets.push(bet);
+      } else if (bet.status === 'pending_match') {
+        bet.status = 'open';
       }
       updateRowInSheet('Bets', bet.orderNumber, {
         6: 'range',
@@ -91,6 +99,7 @@ export function cancelUnquotedPreQuoteBets() {
   const cancelledBets = [];
   bets.forEach(bet => {
     if (bet.type === 'pre_quote' && (bet.status === 'pending_match' || bet.status === 'pre_quote_matched')) {
+      const priorStatus = bet.status;
       bet.status = 'cancelled';
       cancelledBets.push(bet);
 
@@ -99,7 +108,7 @@ export function cancelUnquotedPreQuoteBets() {
       if (creatorId) adjustPlayerBalance(creatorId, bet.amount, 'Refund unquoted bet');
 
       // Refund matcher if pre_quote_matched
-      if (bet.status === 'pre_quote_matched') {
+      if (priorStatus === 'pre_quote_matched') {
         const matcherId = bet.playerLowId ? bet.playerHighId : bet.playerLowId;
         if (matcherId) adjustPlayerBalance(matcherId, bet.amount, 'Refund unquoted bet');
       }
@@ -624,8 +633,9 @@ export async function matchExistingOpenBet(userId, displayName, targetOrderNo = 
     if (customMatchAmount !== null && customMatchAmount !== undefined) {
       const parsedAmt = Number(customMatchAmount);
       if (!isNaN(parsedAmt) && parsedAmt > 0) {
-        if (parsedAmt < 100) {
-          return { error: 'BELOW_MIN_LIMIT', required: 100, provided: parsedAmt, orderNumber: targetBet.orderNumber };
+        const min20Percent = Math.max(1, Math.round(targetBet.amount * 0.20));
+        if (parsedAmt < min20Percent) {
+          return { error: 'BELOW_MIN_PERCENT_LIMIT', minAllowed: min20Percent, percent: 20, provided: parsedAmt, orderNumber: targetBet.orderNumber };
         }
         if (parsedAmt > targetBet.amount) {
           return { error: 'EXCEEDS_ORDER_AMOUNT', maxAllowed: targetBet.amount, provided: parsedAmt, orderNumber: targetBet.orderNumber };

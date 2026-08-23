@@ -11,8 +11,117 @@ let SHEET_ID = '';
 try {
   SHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
 } catch (err) {
-  // If standalone script, sheet ID can be hardcoded here or set via settings
   console.warn("SpreadsheetApp.getActiveSpreadsheet() failed. Standalone mode assumed.");
+}
+
+/**
+ * Group tracking & active group management backed by PropertiesService.
+ */
+function getActiveGroupId() {
+  var props = PropertiesService.getScriptProperties();
+  return props.getProperty('ACTIVE_GROUP_ID') || '';
+}
+
+function saveActiveGroupId(groupId) {
+  if (groupId && typeof groupId === 'string' && groupId.length > 5) {
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('ACTIVE_GROUP_ID', groupId);
+    recordGroupActivity(groupId, null, null, null, 'เชื่อมต่อแล้ว');
+  }
+}
+
+function recordGroupActivity(groupId, groupName, userId, displayName, text) {
+  if (!groupId || typeof groupId !== 'string' || groupId.length <= 5) return;
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('ACTIVE_GROUP_ID', groupId);
+
+  var groupsJson = props.getProperty('LINE_GROUPS') || '[]';
+  var groups = [];
+  try {
+    groups = JSON.parse(groupsJson);
+  } catch (e) {
+    groups = [];
+  }
+  var now = new Date();
+  var nowStr = Utilities.formatDate(now, 'GMT+7', 'HH:mm');
+
+  var group = null;
+  var groupIdx = -1;
+  for (var i = 0; i < groups.length; i++) {
+    if (groups[i].id === groupId) {
+      group = groups[i];
+      groupIdx = i;
+      break;
+    }
+  }
+
+  var groupNumber = groupIdx !== -1 ? (groupIdx + 1) : (groups.length + 1);
+  var cleanName = groupName;
+  if (!cleanName || cleanName.startsWith('C') || cleanName.indexOf(groupId) !== -1) {
+    cleanName = '🚀 กลุ่มดวลสด #' + groupNumber;
+  }
+
+  if (!group) {
+    group = {
+      id: groupId,
+      name: cleanName,
+      lastMessage: text || 'มีการเคลื่อนไหวในกลุ่ม',
+      timestamp: nowStr,
+      msgCount: 1
+    };
+    groups.push(group);
+  } else {
+    group.lastMessage = text || group.lastMessage;
+    group.timestamp = nowStr;
+    group.msgCount = (group.msgCount || 0) + 1;
+    if (groupName && !groupName.startsWith('C') && groupName.indexOf(groupId) === -1) {
+      group.name = groupName;
+    }
+  }
+
+  props.setProperty('LINE_GROUPS', JSON.stringify(groups));
+}
+
+function getLineGroups() {
+  var props = PropertiesService.getScriptProperties();
+  var groupsJson = props.getProperty('LINE_GROUPS') || '[]';
+  try {
+    var list = JSON.parse(groupsJson);
+    if (Array.isArray(list) && list.length > 0) return list;
+  } catch (e) {}
+  var activeId = getActiveGroupId();
+  if (activeId) {
+    return [{
+      id: activeId,
+      name: '🚀 กลุ่มดวลสด #' + activeId.slice(-4),
+      lastMessage: 'เชื่อมต่อแล้ว',
+      timestamp: 'Live',
+      msgCount: 1
+    }];
+  }
+  return [];
+}
+
+function adminOpenRound(name) {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var rSheet = ss.getSheetByName('Rockets');
+  if (rSheet) {
+    var rData = rSheet.getDataRange().getValues();
+    var found = false;
+    for (var i = 1; i < rData.length; i++) {
+      if (rData[i][0] === name) {
+        rSheet.getRange(i + 1, 4).setValue('ACTIVE');
+        found = true;
+      } else if (rData[i][3] === 'ACTIVE') {
+        rSheet.getRange(i + 1, 4).setValue('LOCKED');
+      }
+    }
+    if (!found) {
+      rSheet.appendRow([name, 330, 380, 'ACTIVE']);
+    }
+  }
+  setRocketRoundStatus('ACTIVE');
+  return getDashboardData();
 }
 
 /**
@@ -49,9 +158,11 @@ function doPost(e) {
       
       if (event.type === 'message') {
         const message = event.message;
-        
+        const groupId = event.source.groupId || event.source.roomId || null;
+        if (groupId) {
+          recordGroupActivity(groupId, null, userId, displayName, message.text || '');
+        }
         if (message.type === 'text') {
-          const groupId = event.source.groupId || event.source.roomId || null;
           handleTextMessage(message.text, userId, displayName, replyToken, groupId);
         } else if (message.type === 'image') {
           handleImageSlipMessage(message.id, userId, displayName, replyToken);
@@ -281,27 +392,35 @@ function getPlayerActiveBets(userId) {
 /**
  * Helper to request bet cancellation or direct cancel.
  */
-function handleCancelBetRequest(userId, orderNo) {
+/**
+ * Helper to request bet cancellation or direct cancel.
+ */
+function handleCancelBetRequest(userId, orderNo, displayName) {
   var searchId = cleanUserId(userId);
-  if (!searchId || !orderNo) return "❌ ผิดพลาด: ไม่สามารถทำรายการได้";
+  if (!searchId || !orderNo) return "🚫 ไม่สามารถทำรายการยกเลิกได้ครับ";
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Bets');
   const data = sheet.getDataRange().getValues();
-  const searchOrder = orderNo.toString().trim();
+  const searchOrder = orderNo.toString().trim().replace(/#/g, '');
   
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    if (row[0].toString().trim() === searchOrder) {
+    if (row[0].toString().trim() === searchOrder || row[0].toString().trim().endsWith(searchOrder)) {
       const status = row[9];
       const playerLowId = row[1] ? row[1].toString().trim() : '';
+      const playerLowName = row[2] ? row[2].toString().trim() : '';
       const playerHighId = row[3] ? row[3].toString().trim() : '';
+      const playerHighName = row[4] ? row[4].toString().trim() : '';
       const amount = Number(row[5]) || 0;
       
-      if (playerLowId !== searchId && playerHighId !== searchId) {
-        return "❌ ขออภัยค่ะ แผลดวลนี้ไม่ใช่แผลของคุณ";
+      const isCreator = (playerLowId === searchId || playerHighId === searchId || 
+                         playerLowId === cleanUserId(userId) || playerHighId === cleanUserId(userId) ||
+                         (displayName && (playerLowName === displayName || playerHighName === displayName)));
+      if (!isCreator && searchId !== 'admin') {
+        return "🚫 ขออภัยครับ แผลดวลนี้ไม่ใช่แผลของคุณ";
       }
       
-      if (status === 'resolved' || status === 'cancelled') {
-        return "⚠️ แผลดวลนี้จบหรือถูกยกเลิกไปแล้วเรียบร้อยค่ะ";
+      if (status === 'resolved' || status === 'cancelled' || status === 'void') {
+        return `⚠️ แผลดวล Order #${orderNo} จบหรือถูกยกเลิกแล้วครับ`;
       }
       
       if (status === 'pending_match') {
@@ -309,17 +428,23 @@ function handleCancelBetRequest(userId, orderNo) {
         sheet.getRange(i + 1, 10).setValue('cancelled');
         // Refund credit to the creator
         adjustPlayerBalance(userId, amount);
-        return `❌ ยกเลิกแผล Order #${orderNo} สำเร็จ!\nระบบได้ทำการยกเลิกแผลและคืนแต้ม ${amount} เครดิตเข้าบัญชีคุณเรียบร้อยแล้วค่ะ`;
+        var targetGroupId = (row[12] && row[12].toString().trim()) || (row[7] && row[7].toString().trim()) || getActiveGroupId();
+        return {
+          success: true,
+          flex: constructCancelOrderMiniFlex(row[0].toString().trim()),
+          orderNo: row[0].toString().trim(),
+          targetGroupId: targetGroupId
+        };
       }
       
       if (status === 'matched') {
         // Request cancel
         sheet.getRange(i + 1, 10).setValue('pending_cancel');
-        return `⚠️ ร้องขอยกเลิกแผล Order #${orderNo} สำเร็จ\nเนื่องจากแผลถูกจับคู่แล้ว ต้องรอการยืนยันยกเลิกจากฝั่งคู่ดวลของคุณค่ะ`;
+        return `⛔ ร้องขอยกเลิก Order #${orderNo} (รอคู่ดวลกดยืนยันครับ 🚀)`;
       }
     }
   }
-  return `❌ ไม่พบเลขแผลดวล Order #${orderNo} ในระบบ`;
+  return `🚫 ไม่พบแผลดวล Order #${orderNo} ในระบบครับ`;
 }
 
 /**
@@ -338,9 +463,13 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
   
   // A. CHECK BALANCE ("เช็คยอด", "คงเหลือ", "balance")
   if (clean === 'เช็คยอด' || clean === 'คงเหลือ' || clean === 'balance') {
-    const balance = getPlayerBalance(userId, displayName);
-    const balanceFlex = constructBalanceFlex(displayName, balance);
-    replyToLine(replyToken, balanceFlex, userId);
+    if (groupId) {
+      replyToLine(replyToken, `💡 [เมนูส่วนตัว] รายการเช็คยอด เติมเงิน ถอนเงิน เป็นข้อมูลส่วนบุคคลส่วนตัว กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ 🚀`, userId);
+    } else {
+      const balance = getPlayerBalance(userId, displayName);
+      const balanceFlex = constructBalanceFlex(displayName, balance);
+      replyToLine(replyToken, balanceFlex, userId);
+    }
     return;
   }
   
@@ -348,7 +477,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
   if (clean === 'รายการจับคู่' || clean === 'matched' || clean === 'รายการดวล') {
     const matchedBets = getPlayerActiveBets(userId);
     if (matchedBets.length === 0) {
-      replyToLine(replyToken, `📝 รายการดวลของคุณ:\n\n❌ ปัจจุบันไม่มีแผลดวลค้างหรือรอคู่ในระบบค่ะ`, userId);
+      replyToLine(replyToken, `📝 รายการดวลของคุณ:\n\n❌ ปัจจุบันไม่มีแผลดวลค้างหรือรอคู่ในระบบครับ`, userId);
     } else {
       let replyMsg = `📝 รายการดวลของคุณ (${matchedBets.length} รายการ):\n`;
       matchedBets.forEach(b => {
@@ -361,55 +490,88 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
     return;
   }
 
-  // C. CANCEL DEAL REQUEST ("ยกเลิก [orderNo]")
-  const cancelRegex = /^(ยกเลิก|cancel)(?:order|#)?(\d+)$/;
+  // C. CANCEL DEAL REQUEST ("ยกเลิก [orderNo]" or "ยกเลิก[orderNo]" with or without space)
+  var cancelRegex = /^(ยกเลิก|cancel)\s*#?(\d{2,6})?$/;
   if (cancelRegex.test(clean)) {
-    const match = clean.match(cancelRegex);
-    const orderNo = match[2];
-    const result = handleCancelBetRequest(userId, orderNo);
-    replyToLine(replyToken, result, userId);
+    var cancelMatch = clean.match(cancelRegex);
+    var cancelOrderNo = cancelMatch[2] || null;
+    var cancelResult = handleCancelBetRequest(userId, cancelOrderNo, displayName);
+    var cancelTagPrefix = groupId ? ('👤 [ถึงคุณ @' + displayName + ']: ') : '';
+    if (groupId) {
+      if (typeof cancelResult === 'object' && cancelResult.success) {
+        pushToLine(groupId, cancelResult.flex);
+        if (userId && userId !== groupId) {
+          pushToLine(userId, cancelResult.flex);
+        }
+      } else if (typeof cancelResult === 'object') {
+        pushToLine(groupId, cancelResult);
+        if (userId && userId !== groupId) {
+          pushToLine(userId, cancelResult);
+        }
+      } else {
+        pushToLine(groupId, cancelTagPrefix + cancelResult);
+        if (userId && userId !== groupId) {
+          pushToLine(userId, cancelResult);
+        }
+      }
+    } else {
+      // 1:1 Private Chat cancellation
+      if (typeof cancelResult === 'object' && cancelResult.success) {
+        replyToLine(replyToken, cancelResult.flex, userId);
+        // CRITICAL: Also notify the LINE group where the bet was created!
+        var groupToNotify = cancelResult.targetGroupId || getActiveGroupId();
+        if (groupToNotify) {
+          pushLineGroupMessage(groupToNotify, cancelResult.flex);
+        }
+      } else {
+        replyToLine(replyToken, cancelResult, userId);
+      }
+    }
     return;
   }
   
   // D. INITIATE DEPOSIT ("ฝากเงิน", "เติมเงิน", "deposit", "เติมเครดิต")
   if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit' || clean === 'เติมเครดิต') {
-    const depositFlex = constructDepositFlex();
-    replyToLine(replyToken, depositFlex, userId);
+    if (groupId) {
+      replyToLine(replyToken, `💡 [เมนูส่วนตัว] รายการเช็คยอด เติมเงิน ถอนเงิน เป็นข้อมูลส่วนบุคคลส่วนตัว กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ 🚀`, userId);
+    } else {
+      const depositFlex = constructDepositFlex();
+      replyToLine(replyToken, depositFlex, userId);
+    }
     return;
   }
 
   // E. INITIATE WITHDRAWAL ("ถอนเงิน", "ถอนยอด", "withdraw")
   if (clean === 'ถอนเงิน' || clean === 'ถอนยอด' || clean === 'withdraw') {
-    const bank = getPlayerBank(userId);
-    if (!bank) {
-      // Check if they have deposited at all (may have been approved manually without bank data captured)
-      if (hasSuccessfulDeposit(userId)) {
-        // They have a real deposit but no bank registered — prompt them to register
-        const regFlex = constructBankRegistrationFlex();
-        replyToLine(replyToken, regFlex, userId);
-      } else {
-        replyToLine(replyToken, `❌ ไม่พบประวัติการฝากเงินผ่านระบบ!\n\nเพื่อความปลอดภัยสูงสุด กรุณาฝากเงินเข้ามาก่อนค่ะ`, userId);
-      }
+    if (groupId) {
+      replyToLine(replyToken, `💡 [เมนูส่วนตัว] รายการเช็คยอด เติมเงิน ถอนเงิน เป็นข้อมูลส่วนบุคคลส่วนตัว กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ 🚀`, userId);
     } else {
-      const balance = getPlayerBalance(userId, displayName);
-      const withdrawFlex = constructWithdrawalFlex(bank.bankName, bank.accountNumber, bank.accountName, balance);
-      replyToLine(replyToken, withdrawFlex, userId);
+      const bank = getPlayerBank(userId);
+      if (!bank) {
+        if (hasSuccessfulDeposit(userId)) {
+          const regFlex = constructBankRegistrationFlex();
+          replyToLine(replyToken, regFlex, userId);
+        } else {
+          replyToLine(replyToken, `❌ ไม่พบประวัติการฝากเงินผ่านระบบ!\n\nเพื่อความปลอดภัยสูงสุด กรุณาฝากเงินเข้ามาก่อนครับ`, userId);
+        }
+      } else {
+        const balance = getPlayerBalance(userId, displayName);
+        const withdrawFlex = constructWithdrawalFlex(bank.bankName, bank.accountNumber, bank.accountName, balance);
+        replyToLine(replyToken, withdrawFlex, userId);
+      }
     }
     return;
   }
 
   // F1. BANK ACCOUNT REGISTRATION - DISABLED FOR SECURITY
-  // Players cannot self-register bank accounts. Admin must verify and set from the dashboard.
-  // This prevents players from registering arbitrary/fake account numbers.
   const bankRegRegex = /^(บัญชี|ลงทะเบียนบัญชี|สมัครบัญชี)\s+(\S+)\s+([\d\-\.]+)\s+(.+)$/;
   if (bankRegRegex.test(normalized)) {
-    // Player typed a bank registration command — redirect them to send passbook photo instead
     replyToLine(replyToken,
-      `📋 การลงทะเบียนบัญชีธนาคารต้องผ่านการยืนยันจากทีมงานค่ะ\n\n` +
+      `📋 การลงทะเบียนบัญชีธนาคารต้องผ่านการยืนยันจากทีมงานครับ\n\n` +
       `📸 กรุณาถ่ายรูปหน้าสมุดบัญชี หรือสกรีนช็อตแอปธนาคาร ที่แสดง\n` +
       `  • ชื่อ-นามสกุลเจ้าของบัญชี\n` +
       `  • เลขบัญชีที่ใช้โอนเงินเข้ามาครั้งแรก\n\n` +
-      `แล้วส่งรูปมาในแชทนี้เลยค่ะ ทีมงานจะดำเนินการลงทะเบียนให้ภายใน 24 ชั่วโมง\n\n` +
+      `แล้วส่งรูปมาในแชทนี้เลยครับ ทีมงานจะดำเนินการลงทะเบียนให้ภายใน 24 ชั่วโมง\n\n` +
       `📞 สอบถาม: 089-104-1992`,
       userId
     );
@@ -419,18 +581,21 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
   // F2. PROCESS WITHDRAWAL REQUEST ("ถอน [amount]")
   const withdrawRegex = /^(ถอน|withdraw)(\d+)$/;
   if (withdrawRegex.test(clean)) {
+    if (groupId) {
+      replyToLine(replyToken, `💡 [เมนูส่วนตัว] รายการเช็คยอด เติมเงิน ถอนเงิน เป็นข้อมูลส่วนบุคคลส่วนตัว กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ 🚀`, userId);
+      return;
+    }
     const match = clean.match(withdrawRegex);
     const withdrawAmt = parseInt(match[2]);
     const bank = getPlayerBank(userId);
     if (!bank) {
-      // Bank must be set by admin — ask player to submit their bank passbook photo
       replyToLine(replyToken,
-        `🏦 ยังไม่มีข้อมูลบัญชีธนาคารในระบบของท่านค่ะ\n\n` +
+        `🏦 ยังไม่มีข้อมูลบัญชีธนาคารในระบบของท่านครับ\n\n` +
         `📸 กรุณาส่งรูปถ่าย หรือสกรีนช็อต หน้าสมุดบัญชีธนาคารที่แสดง:\n` +
         `  • ชื่อ-นามสกุล เจ้าของบัญชี\n` +
-        `  • เลขบัญชีที่ตรงกับบัญชีที่โอนเงินเข้ามาค่ะ\n\n` +
+        `  • เลขบัญชีที่ตรงกับบัญชีที่โอนเงินเข้ามาครับ\n\n` +
         `⚠️ ต้องเป็นบัญชีเดียวกับที่ใช้โอนเงินฝากเข้ามาเท่านั้น\n\n` +
-        `ทีมงานจะตรวจสอบและลงทะเบียนให้ภายใน 24 ชั่วโมงค่ะ\n` +
+        `ทีมงานจะตรวจสอบและลงทะเบียนให้ภายใน 24 ชั่วโมงครับ\n` +
         `📞 ติดต่อด่วน: 089-104-1992`,
         userId
       );
@@ -438,7 +603,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
     }
     const balance = getPlayerBalance(userId, displayName);
     if (withdrawAmt <= 0) {
-      replyToLine(replyToken, `❌ จำนวนเงินถอนต้องมากกว่า 0 แต้มค่ะ`, userId);
+      replyToLine(replyToken, `❌ จำนวนเงินถอนต้องมากกว่า 0 แต้มครับ`, userId);
       return;
     }
     if (balance < withdrawAmt) {
@@ -452,7 +617,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
     // Log withdrawal transaction with WD prefix
     logTransaction(userId, displayName, withdrawAmt, 0, 'PENDING_WITHDRAW', 'escalated', `Withdrawal request to ${bank.bankName} ${bank.accountNumber} ${bank.accountName}`);
     
-    replyToLine(replyToken, `📥 ได้รับคำขอถอนเงินจำนวน ${withdrawAmt} แต้ม เรียบร้อยแล้วค่ะ!\n\nระบบกำลังส่งต่อข้อมูลให้แอดมินพิจารณาอนุมัติโอนเงินแบบแมนนวลเข้าบัญชีธนาคาร ${bank.bankName} เลขบัญชี ${bank.accountNumber} ของคุณค่ะ\n\nยอดคงเหลือหลังทำรายการ: ${balance - withdrawAmt} แต้ม`, userId);
+    replyToLine(replyToken, `📥 ได้รับคำขอถอนเงินจำนวน ${withdrawAmt} แต้ม เรียบร้อยแล้วครับ!\n\nระบบกำลังส่งต่อข้อมูลให้แอดมินพิจารณาอนุมัติโอนเงินแบบแมนนวลเข้าบัญชีธนาคาร ${bank.bankName} เลขบัญชี ${bank.accountNumber} ของคุณครับ\n\nยอดคงเหลือหลังทำรายการ: ${balance - withdrawAmt} แต้ม`, userId);
     return;
   }
 
@@ -469,7 +634,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
   
   if (depositAmt !== null) {
     if (depositAmt < 100 || depositAmt > 10000) {
-      replyToLine(replyToken, `⚠️ ขออภัยค่ะ ระบบรองรับการฝากยอดขั้นต่ำ 100 THB และสูงสุดไม่เกิน 10,000 THB ต่อครั้งค่ะ`, userId);
+      replyToLine(replyToken, `⚠️ ขออภัยครับ ระบบรองรับการฝากยอดขั้นต่ำ 100 THB และสูงสุดไม่เกิน 10,000 THB ต่อครั้งครับ`, userId);
       return;
     }
     
@@ -481,82 +646,233 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
     return;
   }
 
-  // 1. MECHANIC STATUS QUERY / ANNOUNCEMENT
-  if (['ช่างต่อย', 'ช่างมีราคา', 'ช่างตีราคา'].indexOf(clean) !== -1) {
-    replyToLine(replyToken, `🔧 [สถานะราคาช่าง]\n\n✅ ช่างต่อย (ช่างมีราคา / ช่างตีราคาแล้ว)\nเปิดรับแทงราคาช่างเรียบร้อยค่ะ 🚀`, userId);
-    return;
-  }
-  if (['ช่างไม่ต่อย', 'ช่างไม่มีราคา', 'ช่างไม่ตีราคา', 'ช่างไม่เปิดราคา'].indexOf(clean) !== -1) {
-    replyToLine(replyToken, `🔧 [สถานะราคาช่าง]\n\n⚠️ ช่างไม่ต่อย (ช่างไม่มีราคา / ช่างไม่ตีราคา / ช่างไม่เปิดราคา)\nให้ผู้เล่นเจรจาเสนอเปิดราคาเป็นตัวเลขได้เลยค่ะ 🚀`, userId);
+  // Admin Command: Lock / Close Betting for Round
+  var closeRoundRegex = /^(ปิดรอบ|ปิดรับดวล|ล็อครอบ|3-2-go|32go)$/i;
+  if (closeRoundRegex.test(clean)) {
+    var currentRound = getActiveRocketRound();
+    setRocketRoundStatus('CLOSED');
+    replyToLine(replyToken, '❌ ปิดรับดวลรอบ ' + (currentRound ? currentRound.name : '') + ' เรียบร้อยแล้วครับ', userId);
     return;
   }
 
-  // 2. MATCH ACTION: ACCEPT / LOCK DEALS ("ต", "ติด", "ครับ", "เค", "จ้า", "ยอมรับ", "ดีล", "รับแผล", "รับ")
-  if (['ต', 'ติด', 'ครับ', 'เค', 'จ้า', 'ยอมรับ', 'ดีล', 'รับแผล', 'รับ'].indexOf(clean) !== -1) {
-    const matchedBet = matchExistingOpenBet(userId, displayName);
-    if (matchedBet) {
-      replyToLine(replyToken, `✅ จับคู่สำเร็จ! (Order #${matchedBet.orderNumber})\nยอดดวล: ${matchedBet.amount} แต้ม\nฝั่งต่ำ (Low): ${matchedBet.playerLowName}\nฝั่งสูง (High): ${matchedBet.playerHighName}\n\nระบบล็อกเครดิตทั้งคู่แล้ว รอการสรุปผลจรวดครับ 🚀`, userId);
+  // Admin Command: Open Betting Round
+  var openRoundRegex = /^(เปิดรอบ|เปิดรับดวล)$/i;
+  if (openRoundRegex.test(clean)) {
+    setRocketRoundStatus('ACTIVE');
+    var activeProps = PropertiesService.getScriptProperties();
+    var activeMin = Number(activeProps.getProperty('ACTIVE_MIN')) || 800;
+    var activeMax = Number(activeProps.getProperty('ACTIVE_MAX')) || 880;
+    replyToLine(replyToken, '🚀 เปิดรับดวลแล้วครับ | ราคาปัจจุบัน: ' + (activeMin / 10) + '-' + (activeMax / 10) + 'วิ (window=' + (activeMax - activeMin) + 'cs)', userId);
+    return;
+  }
+
+  // Admin Command: Set Admin Quote Range  e.g. "ราคา800-880" or "ราคย80.0-88.0"
+  // Business Rule: window (rMax - rMin) MUST be exactly 80 centiseconds = 8.0s flight time window
+  var adminQuoteRegex = /^(ราคา|quote|setquote)\s*(\d{2,5})[-\/](\d{2,5})$/i;
+  if (adminQuoteRegex.test(clean)) {
+    var qm = clean.match(adminQuoteRegex);
+    var qMin = parseInt(qm[2]);
+    var qMax = parseInt(qm[3]);
+    var qWindow = qMax - qMin;
+    if (qWindow !== 80) {
+      replyToLine(replyToken,
+        '⚠️ ราคาไม่ถูกต้อง! window = ' + qWindow + 'cs\n\nกฤษฎสำคัญ: rMax − rMin ต้อง = 80cs (8.0วิ)\nตัวอย่าง: ราคา800-880 (ช่วง 80.0-88.0วิ)\nหรือ ราคา760-840 (ช่วง 76.0-84.0วิ)',
+        userId
+      );
+      return;
+    }
+    PropertiesService.getScriptProperties().setProperties({
+      'ACTIVE_MIN': String(qMin),
+      'ACTIVE_MAX': String(qMax)
+    });
+    // Broadcast to group so everyone sees the new quote
+    var quoteNotice = '📍 [ราคาช่างประกาศ]: ' + (qMin / 10) + 'วิ – ' + (qMax / 10) + 'วิ (window ' + qWindow + 'cs = 8.0s)\n\nตัวเลือกความเสี่ยง:\n• -10: ' + ((qMin - 10) / 10) + '-' + ((qMax - 10) / 10) + 'วิ  → ก่อนราคา − 1.0วิ\n• -5:  ' + ((qMin - 5) / 10) + '-' + ((qMax - 5) / 10) + 'วิ  → ก่อนราคา − 0.5วิ\n• ปกติ: ' + (qMin / 10) + '-' + (qMax / 10) + 'วิ  → ราคาช่าง\n• +5:  ' + ((qMin + 5) / 10) + '-' + ((qMax + 5) / 10) + 'วิ  → หลังราคา +0.5วิ\n• +10: ' + ((qMin + 10) / 10) + '-' + ((qMax + 10) / 10) + 'วิ  → หลังราคา +1.0วิ';
+    var groupTargetQ = groupId || getActiveGroupId();
+    if (groupTargetQ) pushLineGroupMessage(groupTargetQ, quoteNotice);
+    replyToLine(replyToken, '✅ ตั้งราคาช่าง: ' + (qMin / 10) + '-' + (qMax / 10) + 'วิ เรียบร้อยครับ', userId);
+    return;
+  }
+
+
+  // 1. MATCH ACTION: ACCEPT / LOCK DEALS
+  // Regex group 2 = orderNo, group 4 = custom match amount (or group 3 if numeric)
+  var specificAcceptRegex = /^(?:(\u0e15|\u0e15\u0e34\u0e14|\u0e04\u0e23\u0e31\u0e1a|\u0e40\u0e04|\u0e08\u0e49\u0e32|\u0e22\u0e2d\u0e21\u0e23\u0e31\u0e1a|\u0e14\u0e35\u0e25|\u0e23\u0e31\u0e1a\u0e41\u0e1c\u0e25|\u0e23\u0e31\u0e1a)\s*)?#?(\d{2,6})(?:\s*(\u0e15|\u0e15\u0e34\u0e14|\u0e23\u0e31\u0e1a))?(?:\s+(\d+))?$/i;
+  var reverseAcceptRegex = /^#?(\d{2,6})\s*(\u0e15|\u0e15\u0e34\u0e14|\u0e23\u0e31\u0e1a)?(?:\s*(\d+))?$/i;
+  var rawText = (text || '').trim();
+  var acceptMatchResult = rawText.match(specificAcceptRegex) || clean.match(specificAcceptRegex)
+    || rawText.match(reverseAcceptRegex) || clean.match(reverseAcceptRegex);
+  var isReverseMatch = !!(rawText.match(reverseAcceptRegex) || clean.match(reverseAcceptRegex));
+
+  var targetOrderNo = null;
+  var customMatchAmount = null;
+  if (acceptMatchResult) {
+    if (isReverseMatch) {
+      targetOrderNo = acceptMatchResult[1] || null;
+      if (acceptMatchResult[3]) customMatchAmount = parseInt(acceptMatchResult[3]);
     } else {
-      replyToLine(replyToken, `❌ ไม่มีแผลดวลเปิดรับอยู่ในขณะนี้`, userId);
+      targetOrderNo = acceptMatchResult[2] || null;
+      if (acceptMatchResult[4]) customMatchAmount = parseInt(acceptMatchResult[4]);
+      else if (acceptMatchResult[3] && /^\d+$/.test(acceptMatchResult[3])) customMatchAmount = parseInt(acceptMatchResult[3]);
+    }
+  }
+
+  var isAcceptCmd = !!acceptMatchResult || ['\u0e15', '\u0e15\u0e34\u0e14', '\u0e04\u0e23\u0e31\u0e1a', '\u0e40\u0e04', '\u0e08\u0e49\u0e32'].indexOf(clean) !== -1;
+  if (isAcceptCmd) {
+    var tagPrefix = groupId ? ('\ud83d\udc64 [\u0e16\u0e36\u0e07\u0e04\u0e38\u0e13 @' + displayName + ']: ') : '';
+
+    var matchedBet = matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmount);
+
+    if (matchedBet && matchedBet.error === 'BELOW_MIN_PERCENT_LIMIT') {
+      var minMsg = tagPrefix + '⚠️ ยอดดวลขั้นต่ำคือ 20% (' + (matchedBet.minAllowed || 0) + ' pt) ของ Order #' + (matchedBet.orderNumber || targetOrderNo) + ' ครับ (คุณระบุ ' + (matchedBet.provided || 0) + ' pt)';
+      if (groupId) { pushToLine(groupId, minMsg); } else { replyToLine(replyToken, minMsg, userId); }
+    } else if (matchedBet && matchedBet.error === 'OWN_BET') {
+      var ownBetMsg = tagPrefix + '⚠️ คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ';
+      if (groupId) { pushToLine(groupId, ownBetMsg); } else { replyToLine(replyToken, ownBetMsg, userId); }
+    } else if (matchedBet && matchedBet.error === 'CANCELLED') {
+      var cancelMsg = tagPrefix + '🚫 แผล Order #' + matchedBet.orderNumber + ' ถูกยกเลิกไปแล้วครับ';
+      if (groupId) { pushToLine(groupId, cancelMsg); } else { replyToLine(replyToken, cancelMsg, userId); }
+    } else if (matchedBet && matchedBet.error === 'ALREADY_MATCHED') {
+      var alreadyMsg = tagPrefix + '⚠️ แผล Order #' + matchedBet.orderNumber + ' มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ';
+      if (groupId) { pushToLine(groupId, alreadyMsg); } else { replyToLine(replyToken, alreadyMsg, userId); }
+    } else if (matchedBet && matchedBet.error === 'INSUFFICIENT_BALANCE') {
+      var needed = (matchedBet.required || 0) - (matchedBet.current || 0);
+      var insuffMsg = tagPrefix + '⚠️ แต้มไม่พอ (มี ' + (matchedBet.current || 0) + 'pt | ขาด ' + needed + 'pt) พิมพ์ "ฝากเงิน"';
+      if (groupId) { pushToLine(groupId, insuffMsg); } else { replyToLine(replyToken, insuffMsg, userId); }
+    } else if (matchedBet && matchedBet.error === 'BELOW_MIN_LIMIT') {
+      var minMsg = tagPrefix + '⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + (matchedBet.provided || 0) + ' pt)';
+      if (groupId) { pushToLine(groupId, minMsg); } else { replyToLine(replyToken, minMsg, userId); }
+    } else if (matchedBet && matchedBet.error === 'NOT_FOUND') {
+      var notFoundMsg = tagPrefix + '🚫 ไม่พบแผล Order #' + targetOrderNo + ' ในระบบครับ';
+      if (groupId) { pushToLine(groupId, notFoundMsg); } else { replyToLine(replyToken, notFoundMsg, userId); }
+    } else if (matchedBet && matchedBet.error === 'EXCEEDS_ORDER_AMOUNT') {
+      var exceedsMsg = tagPrefix + '⚠️ ยอดรับดวล (' + (matchedBet.provided || 0) + ' pt) เกินยอดของ Order #' + (matchedBet.orderNumber || targetOrderNo) + ' (รับได้สูงสุด ' + (matchedBet.maxAllowed || 0) + ' pt ครับ)';
+      if (groupId) { pushToLine(groupId, exceedsMsg); } else { replyToLine(replyToken, exceedsMsg, userId); }
+    } else if (matchedBet && matchedBet.orderNumber) {
+      var matchFlex = constructMatchNotificationFlex(matchedBet.orderNumber, matchedBet.amount, matchedBet.playerLowName, matchedBet.playerHighName, matchedBet.rangeInfo, false, null);
+      var groupTarget = groupId || getActiveGroupId();
+      if (groupTarget) {
+        pushLineGroupMessage(groupTarget, matchFlex);
+      }
+      // Also push to both players in 1-on-1 private chat
+      if (matchedBet.creatorId) {
+        pushToLine(matchedBet.creatorId, matchFlex);
+      }
+      if (matchedBet.matcherId && matchedBet.matcherId !== matchedBet.creatorId) {
+        pushToLine(matchedBet.matcherId, matchFlex);
+      }
+      if (!groupTarget) {
+        replyToLine(replyToken, matchFlex, userId);
+      }
+    } else {
+      var noOpenMsg = tagPrefix + '\ud83d\udeab \u0e44\u0e21\u0e48\u0e21\u0e35\u0e41\u0e1c\u0e25\u0e14\u0e27\u0e25\u0e1d\u0e31\u0e48\u0e07\u0e15\u0e23\u0e07\u0e02\u0e49\u0e32\u0e21\u0e17\u0e35\u0e48\u0e23\u0e2d\u0e04\u0e39\u0e48\u0e43\u0e19\u0e02\u0e13\u0e30\u0e19\u0e35\u0e49\u0e04\u0e23\u0e31\u0e1a';
+      if (groupId) { pushToLine(groupId, noOpenMsg); } else { replyToLine(replyToken, noOpenMsg, userId); }
     }
     return;
   }
-  
-  // 3. PARSE BET FORMULAS (ชล100, ชถ500, 300-340ล100, ก+5ล200, ก-5ถ400, ม+5ล100, +5ล300, -5ถ400, 300-330ถ300ชตย, etc.)
-  const isChotoy = clean.indexOf('ชตย') !== -1;
-  const cleanBetText = clean.replace(/ชตย/g, '').trim();
 
-  const keywordsLowBase = ['ชล', 'ล', 'ไล่', 'ช่างไล่'];
-  const keywordsHighBase = ['ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'ช่างยั่ง', 'ช่างถอย'];
+  // 2. PARSE BET FORMULAS
+  // Rule 1 (admin quote): \u0e0a\u0e25100, \u0e0a\u0e16500, +5\u0e0a\u0e25100, -5\u0e0a\u0e16100, +10\u0e0a\u0e25100, -10\u0e0a\u0e16500
+  // Rule 2 (custom range): 760-840\u0e25500, 800-880\u0e16500 (window must = 80cs)
+  var isChotoy = clean.indexOf('\u0e0a\u0e15\u0e22') !== -1 || text.indexOf('\u0e0a\u0e15\u0e22') !== -1;
+  var cleanBetText = clean.replace(/\u0e0a\u0e15\u0e22/g, '').trim();
 
-  const fullBetRegex = /^(?:(\d+)-(\d+))?\s*(?:(ก|เกิบ|ม|หมวก)?([+-]\d+))?\s*(ชล|ล|ไล่|ช่างไล่|ชย|ชถ|ย|ถ|ยั่ง|ถอย|ช่างยั่ง|ช่างถอย)\s*(\d+)?$/;
+  var keywordsHigh = ['\u0e0a\u0e25', '\u0e25', '\u0e44\u0e25\u0e48', '\u0e2a\u0e39\u0e07', '\u0e0a\u0e2a\u0e39\u0e07', '\u0e0a\u0e48\u0e32\u0e07\u0e2a\u0e39\u0e07', '\u0e0a\u0e48\u0e32\u0e07\u0e44\u0e25\u0e48', '\u0e2a'];
+  var keywordsLow  = ['\u0e0a\u0e22', '\u0e0a\u0e16', '\u0e22', '\u0e16', '\u0e22\u0e31\u0e48\u0e07', '\u0e16\u0e2d\u0e22', '\u0e15\u0e48\u0e33', '\u0e0a\u0e15\u0e48\u0e33', '\u0e0a\u0e48\u0e32\u0e07\u0e15\u0e48\u0e33', '\u0e0a\u0e48\u0e32\u0e07\u0e22\u0e31\u0e48\u0e07', '\u0e0a\u0e48\u0e32\u0e07\u0e16\u0e2d\u0e22', '\u0e15'];
 
-  let betType = '';
-  let rangeMin = null;
-  let rangeMax = null;
-  let side = '';
-  let amount = 0;
+  // Detect rate-offset prefix BEFORE keyword matching (supports +-5 and +-10)
+  var offsetDelta = 0;
+  var strippedBetText = cleanBetText;
+  if (/^[+\-]\d+/.test(strippedBetText)) {
+    var deltaMatch = strippedBetText.match(/^([+\-]\d+)/);
+    var deltaVal = parseInt(deltaMatch[1]);
+    if (deltaVal !== 5 && deltaVal !== -5 && deltaVal !== 10 && deltaVal !== -10) {
+      var deltaErrMsg = groupId
+        ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)'
+        : '⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)';
+      if (groupId) { pushToLine(groupId, deltaErrMsg); } else { replyToLine(replyToken, deltaErrMsg, userId); }
+      return;
+    }
+    offsetDelta = deltaVal;
+    strippedBetText = strippedBetText.replace(/^[+\-]\d+/, '').trim();
+  }
 
-  if (fullBetRegex.test(cleanBetText)) {
-    const match = cleanBetText.match(fullBetRegex);
-    const rawMin = match[1];
-    const rawMax = match[2];
-    const modifierTarget = match[3];
-    const modifierVal = match[4];
-    const sideKeyword = match[5];
-    const rawAmount = match[6];
+  var rangeRegex = /^(\d+)[-\/](\d+)([a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
+  var simpleRegex = /^([a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
 
-    if (keywordsLowBase.indexOf(sideKeyword) !== -1) side = 'low';
-    else if (keywordsHighBase.indexOf(sideKeyword) !== -1) side = 'high';
+  var betType = '';
+  var rangeMin = null;
+  var rangeMax = null;
+  var side = '';
+  var amount = 0;
+
+  if (rangeRegex.test(cleanBetText)) {
+    // Rule 2: Custom range
+    var rMatch = cleanBetText.match(rangeRegex);
+    rangeMin = parseInt(rMatch[1]);
+    rangeMax = parseInt(rMatch[2]);
+    var rCmd = rMatch[3];
+    side = keywordsLow.indexOf(rCmd) !== -1 ? 'low' : (keywordsHigh.indexOf(rCmd) !== -1 ? 'high' : '');
+    amount = rMatch[4] ? parseInt(rMatch[4]) : 500;
+    betType = 'custom_range';
 
     if (side) {
-      amount = rawAmount ? parseInt(rawAmount) : 500;
-      rangeMin = rawMin ? parseInt(rawMin) : null;
-      rangeMax = rawMax ? parseInt(rawMax) : null;
-
-      if (modifierVal) {
-        const offset = parseInt(modifierVal);
-        if (rangeMin === null || rangeMax === null) {
-          rangeMin = 330;
-          rangeMax = 370;
-        }
-        const target = (modifierTarget || '').toLowerCase();
-        if (target === 'ก' || target === 'เกิบ') {
-          rangeMin += offset;
-        } else if (target === 'ม' || target === 'หมวก') {
-          rangeMax += offset;
-        } else {
-          rangeMin += offset;
-          rangeMax += offset;
-        }
+      // 1. Check low-to-high order
+      if (rangeMin >= rangeMax) {
+        var orderErrMsg = groupId
+          ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-380' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ')'
+          : '⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-380' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ')';
+        if (groupId) { pushToLine(groupId, orderErrMsg); } else { replyToLine(replyToken, orderErrMsg, userId); }
+        return;
       }
 
-      betType = (rangeMin !== null && rangeMax !== null) ? 'range' : 'high_low';
+      // 2. Strict 80-second range window
+      if (rangeMax - rangeMin !== 80) {
+        var diff = rangeMax - rangeMin;
+        var windowErrMsg = groupId
+          ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ ช่วงราคาต้องห่างกัน 80 วินาทีพอดีครับ เช่น 300-380' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ' ห่าง ' + diff + ' วิ)'
+          : '⚠️ ช่วงราคาต้องห่างกัน 80 วินาทีพอดีครับ เช่น 300-380' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ' ห่าง ' + diff + ' วิ)';
+        if (groupId) { pushToLine(groupId, windowErrMsg); } else { replyToLine(replyToken, windowErrMsg, userId); }
+        return;
+      }
+
+      // 3. Minimum bet amount
+      if (amount < 100) {
+        var minAmtMsg = groupId
+          ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)'
+          : '⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)';
+        if (groupId) { pushToLine(groupId, minAmtMsg); } else { replyToLine(replyToken, minAmtMsg, userId); }
+        return;
+      }
     }
+  } else if (simpleRegex.test(strippedBetText)) {
+    // Rule 1: Follow admin quote with optional offset
+    var sMatch = strippedBetText.match(simpleRegex);
+    var sCmd = sMatch[1];
+    side = keywordsLow.indexOf(sCmd) !== -1 ? 'low' : (keywordsHigh.indexOf(sCmd) !== -1 ? 'high' : '');
+    amount = sMatch[2] ? parseInt(sMatch[2]) : 500;
+    betType = 'range';
+
+    if (side && amount < 100) {
+      var minAmtMsg = groupId
+        ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)'
+        : '⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)';
+      if (groupId) { pushToLine(groupId, minAmtMsg); } else { replyToLine(replyToken, minAmtMsg, userId); }
+      return;
+    }
+
+    var baseProps = PropertiesService.getScriptProperties();
+    rangeMin = Number(baseProps.getProperty('ACTIVE_MIN')) || 800;
+    rangeMax = Number(baseProps.getProperty('ACTIVE_MAX')) || 880;
+    rangeMin += offsetDelta;
+    rangeMax += offsetDelta;
+  }
+  if (clean === 'กติกา' || clean === 'rule' || clean === 'rules' || clean === 'วิธีเล่น' || clean === 'คู่มือ') {
+    var ruleFlex = constructRuleGuideFlex();
+    replyToLine(replyToken, ruleFlex, userId);
+    return;
   }
 
   if (!side || amount < 10) {
-    // Check if the user is typing "เมนู" or "menu" or "สวัสดี" or if it is an unrecognized private message
     const isPrivateChat = !groupId;
     if (isPrivateChat || clean === 'เมนู' || clean === 'menu' || clean === 'สวัสดี' || clean === 'help' || clean === 'เริ่ม' || clean === 'start') {
       const mainMenuFlex = constructMainMenuFlex();
@@ -565,29 +881,51 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
     return;
   }
   
-  // Check user credit balance
-  const balance = getPlayerBalance(userId, displayName);
-  if (balance < amount) {
-    replyToLine(replyToken, `❌ เครดิตคงเหลือไม่เพียงพอ!\nยอดปัจจุบันของคุณ: ${balance} แต้ม\nต้องการใช้: ${amount} แต้ม\n\nกรุณาเติมแต้มด้วยการแจ้งเติมเงินและส่งรูปภาพสลิปที่ห้องหลังบ้านครับ`, userId);
+  // ROUND LOCK GUARD: Block custom/tailor-rate orders after admin sends last call
+  // Uses `betType` (the correct local variable), checked against PropertiesService-backed status
+  if (isRocketRoundClosed() && (betType === 'custom_range' || betType === 'custom' || betType === 'pre_quote' || offsetDelta !== 0)) {
+    var closedMsg = groupId
+      ? '👤 [ถึงคุณ @' + displayName + ']: ⛔ ปิดรับการเปิดราคาเองแล้ว (Final Call) กรุณารอจับคู่แผลที่เปิดค้างอยู่หรือรอรอบถัดไปครับ'
+      : '⛔ ปิดรับการเปิดราคาเองแล้ว (Final Call) กรุณารอจับคู่แผลที่เปิดค้างอยู่หรือรอรอบถัดไปครับ';
+    if (groupId) { pushToLine(groupId, closedMsg); } else { replyToLine(replyToken, closedMsg, userId); }
     return;
   }
   
-  // Lock credits from player balance
-  adjustPlayerBalance(userId, -amount);
-  
-  // Write to Sheets database as open bet
-  const orderNumber = Math.floor(Math.random() * 89999 + 10000).toString();
-  saveOpenBet(orderNumber, userId, displayName, side, amount, betType, rangeMin, rangeMax);
-  
-  let rangeInfo = '';
-  if (betType === 'range') {
-    rangeInfo = `${rangeMin}-${rangeMax}${isChotoy ? ' (ชตย: ช่างต่อยยุติ)' : ''}`;
-  } else if (isChotoy) {
-    rangeInfo = '(ชตย: ช่างต่อยยุติ)';
+  // Check user credit balance
+  const balance = getPlayerBalance(userId, displayName);
+  if (balance < amount) {
+    const needed = amount - balance;
+    const msg = groupId
+      ? `⚠️ แต้มไม่พอ (มี ${balance}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`
+      : `⚠️ เครดิตไม่พอ (มี ${balance}pt | ต้องการ ${amount}pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ`;
+    replyToLine(replyToken, msg, userId);
+    return;
   }
   
-  const betOpenFlex = constructBetOpenFlex(orderNumber, amount, side, displayName, rangeInfo);
+  // Write to Sheets database as open bet (credit lock happens inside saveOpenBet)
+  // Generate 4-digit order numbers (1000 - 9999)
+  var orderNumber = (Math.floor(Math.random() * 9000) + 1000).toString();
+  var isPreQuoteBet = (betType === 'pre_quote');
+  // Build the user-typed command string for the Flex card title
+  var userTypedCmdStr = cleanBetText || null;
+  var saveResult = saveOpenBet(orderNumber, userId, displayName, side, amount, betType, rangeMin, rangeMax, groupId, userTypedCmdStr, isPreQuoteBet);
+  if (saveResult && saveResult.error) {
+    var bal = saveResult.current || 0;
+    var needed = amount - bal;
+    var insufficientMsg = groupId
+      ? '⚠️ แต้มไม่พอ (มี ' + bal + 'pt | ขาด ' + needed + 'pt) พิมพ์ "ฝากเงิน"'
+      : '⚠️ เครดิตไม่พอ (มี ' + bal + 'pt | ต้องการ ' + amount + 'pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ';
+    replyToLine(replyToken, insufficientMsg, userId);
+    return;
+  }
+  
+  var rangeInfo = (rangeMin && rangeMax) ? (rangeMin + '-' + rangeMax + 's') : '';
+  var betOpenFlex = constructBetOpenFlex(orderNumber, amount, side, displayName, rangeInfo, false, userTypedCmdStr, isPreQuoteBet);
   replyToLine(replyToken, betOpenFlex, userId);
+  // If created in group, also send copy to user's private 1-on-1 chat
+  if (groupId && userId && userId !== groupId) {
+    pushToLine(userId, betOpenFlex);
+  }
 }
 
 /**
@@ -725,24 +1063,21 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
     }
   }
   
-  // Match check against requested buy-in credit session
+  // Official transfer amount is ALWAYS per the pay-in slip (actualAmount)
   var requestedAmount = findPendingRequestedAmount(userId);
-  if (requestedAmount === null) {
-    // If player did not select an amount beforehand and sent the slip directly,
-    // we bypass the mismatch verification and accept the slip amount directly.
-    requestedAmount = actualAmount;
-  }
+  var finalCreditAmount = actualAmount > 0 ? actualAmount : (requestedAmount || 100);
+
+  // SUCCESS: Credit player balance 1:1 based on actual slip amount, log transaction as success
+  adjustPlayerBalance(userId, finalCreditAmount, displayName);
   
-  if (requestedAmount !== actualAmount) {
-    logTransaction(userId, displayName, requestedAmount, actualAmount, refCode, 'escalated', `Amount Mismatch (Requested ${requestedAmount} vs Slip ${actualAmount})`);
-    replyToLine(replyToken, `⚠️ ยอดสลิปไม่ตรงบิล!\nแจ้งซื้อ ${requestedAmount} แต้ม แต่โอนจริง ${actualAmount} บาท ส่งให้แอดมินรีวิวยอดแมนนวลครับ`);
-    return;
-  }
- 
+  var noteStr = (requestedAmount && requestedAmount !== finalCreditAmount)
+    ? 'Auto approved via Slip Scanner. Marked ' + requestedAmount + ' THB vs Slip ' + finalCreditAmount + ' THB. Ref: ' + refCode
+    : 'Auto approved via Slip Scanner. Ref: ' + refCode;
+
+  logTransaction(userId, displayName, requestedAmount || finalCreditAmount, finalCreditAmount, refCode, 'success', noteStr);
   
-  // SUCCESS: Credit player balance 1:1, log transaction as success
-  adjustPlayerBalance(userId, actualAmount, displayName);
-  
+  // GUARD: Remove the duplicate logTransaction call that appeared after the first one.
+  // The single call to logTransaction at line ~767 already handles upsert of the PENDING_SLIP row.
   // Extract sender details to record registered bank account
   var senderBank = '';
   var senderAccount = '';
@@ -775,9 +1110,9 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
     updatePlayerBank(userId, senderBank, senderAccount, senderName);
   }
 
-  logTransaction(userId, displayName, requestedAmount, actualAmount, refCode, 'success', 'Auto credited via slip API 1:1');
-  const details = "เติมเงินสำเร็จผ่านระบบสแกนสลิปอัตโนมัติ เลขอ้างอิง: " + refCode;
-  const slipFlex = constructBankingFlex("Income", actualAmount, details, null, userId);
+  // Deliver success Flex card to player
+  var slipSuccessDetails = 'เติมเงินสำเร็จผ่านระบบสแกนสลิปอัตโนมัติ เลขอ้างอิง: ' + refCode;
+  var slipFlex = constructBankingFlex('Income', actualAmount, slipSuccessDetails, null, userId);
   replyToLine(replyToken, slipFlex);
 }
 
@@ -803,24 +1138,72 @@ function getPlayerBalance(userId, displayName) {
 function adjustPlayerBalance(userId, delta, displayName) {
   const shortUserId = getOrCreateShortUserId(userId, displayName);
   var searchId = cleanUserId(shortUserId);
-  if (!searchId) return;
-  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Players');
-  const data = sheet.getDataRange().getValues();
-  const numericDelta = Number(delta) || 0;
-  for (let i = 1; i < data.length; i++) {
-    const rowId = data[i][0] ? data[i][0].toString().trim() : '';
-    if (rowId === searchId) {
-      const cell = sheet.getRange(i + 1, 3);
-      const currentBalance = Number(data[i][2]) || 0;
-      cell.setValue(currentBalance + numericDelta);
-      return;
+  if (!searchId) return false;
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (e) {
+    Logger.log('[LOCK] Could not acquire lock for adjustPlayerBalance: ' + e.toString());
+    return false;
+  }
+  try {
+    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Players');
+    const data = sheet.getDataRange().getValues();
+    const numericDelta = Number(delta) || 0;
+    for (let i = 1; i < data.length; i++) {
+      const rowId = data[i][0] ? data[i][0].toString().trim() : '';
+      if (rowId === searchId) {
+        const cell = sheet.getRange(i + 1, 3);
+        const currentBalance = Number(data[i][2]) || 0;
+        // Strict Anti-Overdraft Guard: Block deductions if resulting balance would be less than 0
+        if (numericDelta < 0 && (currentBalance + numericDelta < 0)) {
+          Logger.log('[CREDIT BLOCK] Refused deduction for ' + searchId + ': current balance ' + currentBalance + ', attempted ' + numericDelta);
+          return false;
+        }
+        cell.setValue(currentBalance + numericDelta);
+        return true;
+      }
     }
+    return false;
+  } finally {
+    lock.releaseLock();
   }
 }
 
 
-function saveOpenBet(orderNo, userId, displayName, side, amount, type, rMin, rMax) {
+/**
+ * Save a new open bet to the Bets sheet and push Flex card to the LINE group.
+ * @param {string} orderNo - Unique 6-digit order number
+ * @param {string} userId - Short passport-style player ID
+ * @param {string} displayName - Player display name
+ * @param {'low'|'high'} side - Player's chosen side
+ * @param {number} amount - Bet amount in credits
+ * @param {string} type - Bet type ('range', 'custom_range', 'pre_quote')
+ * @param {number|null} rMin - Range minimum
+ * @param {number|null} rMax - Range maximum
+ * @param {string|null} targetGroupId - LINE Group ID
+ * @param {string|null} userTypedCmd - Original text command typed by user (for Flex title)
+ * @param {boolean} [isPreQuote] - Whether this is a pre-quote bet
+ */
+function saveOpenBet(orderNo, userId, displayName, side, amount, type, rMin, rMax, targetGroupId, userTypedCmd, isPreQuote) {
   var searchId = cleanUserId(userId);
+  var betAmount = Number(amount) || 0;
+  
+  const isAdminUser = searchId === 'admin' || searchId === 'user' || (typeof userId === 'string' && (userId.toLowerCase() === 'user' || userId.toLowerCase() === 'admin'));
+
+  // Anti-Overdraft Guard: verify regular creator has sufficient balance before locking credit
+  if (!isAdminUser && betAmount > 0) {
+    const currentBal = getPlayerBalance(searchId, displayName);
+    if (currentBal < betAmount) {
+      return { error: 'INSUFFICIENT_BALANCE', required: betAmount, current: currentBal };
+    }
+    // Lock creator's credit immediately
+    const deducted = adjustPlayerBalance(searchId, -betAmount, displayName);
+    if (!deducted) {
+      return { error: 'INSUFFICIENT_BALANCE', required: betAmount, current: currentBal };
+    }
+  }
+  
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Bets');
   sheet.appendRow([
     orderNo,
@@ -834,66 +1217,220 @@ function saveOpenBet(orderNo, userId, displayName, side, amount, type, rMin, rMa
     rMax || '',
     'pending_match',
     '',
-    new Date()
+    new Date(),
+    targetGroupId || ''
   ]);
+
+  var targetGroups = [];
+  if (targetGroupId && targetGroupId !== 'ALL') {
+    targetGroups = [targetGroupId];
+  } else {
+    var activeId = getActiveGroupId();
+    if (activeId) targetGroups.push(activeId);
+  }
+
+  if (targetGroups.length > 0) {
+    try {
+      var rangeInfoStr = (rMin && rMax) ? (rMin + '-' + rMax + 's') : '';
+      var betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfoStr, false, userTypedCmd || null, !!isPreQuote);
+      for (var gi = 0; gi < targetGroups.length; gi++) {
+        pushLineGroupMessage(targetGroups[gi], betCard);
+      }
+    } catch(e) {
+      Logger.log('Error pushing order flex card in saveOpenBet: ' + e.toString());
+    }
+  }
 }
 
-function matchExistingOpenBet(userId, displayName) {
-  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Bets');
-  const data = sheet.getDataRange().getValues();
+/**
+ * Match a player to an existing open bet.
+ * Uses LockService to prevent concurrent double-match race conditions.
+ * @param {string} userId - Short passport-style ID of the matcher
+ * @param {string} displayName - Display name of the matcher
+ * @param {string|null} targetOrderNo - Explicit order number to match (optional)
+ * @param {number|null} customMatchAmount - Custom credit amount to wager (optional, ≥100)
+ * @returns {Object} Match result or error descriptor
+ */
+function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmount) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+  } catch (e) {
+    Logger.log('[LOCK] matchExistingOpenBet could not acquire lock: ' + e.toString());
+    return { error: 'LOCK_TIMEOUT' };
+  }
+
+  try {
+  var searchId = cleanUserId(userId);
+  var matcherBal = getPlayerBalance(searchId, displayName);
+  var cleanTargetOrder = targetOrderNo ? targetOrderNo.toString().trim().replace(/#/g, '') : null;
+  var matchAmt = (customMatchAmount && !isNaN(customMatchAmount)) ? parseInt(customMatchAmount) : null;
+  if (matchAmt !== null && matchAmt < 100) {
+    return { error: 'BELOW_MIN_LIMIT', provided: matchAmt };
+  }
+  var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Bets');
+  var data = sheet.getDataRange().getValues();
   
+  // 1. Search by target order first if specified
+  if (cleanTargetOrder) {
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const orderNo = row[0].toString().trim();
+      if (orderNo === cleanTargetOrder || orderNo.endsWith(cleanTargetOrder)) {
+        const status = row[9];
+        let playerLowId = row[1] ? row[1].toString().trim() : '';
+        let playerLowName = row[2] ? row[2].toString().trim() : '';
+        let playerHighId = row[3] ? row[3].toString().trim() : '';
+        let playerHighName = row[4] ? row[4].toString().trim() : '';
+        const amount = Number(row[5]) || 0;
+        
+        const creatorId = playerLowId ? playerLowId : playerHighId;
+        const creatorName = playerLowId ? playerLowName : playerHighName;
+
+        // 1. OWN_BET GUARD: Check clean ID, raw ID, and displayName
+        if (creatorId === searchId || creatorId === cleanUserId(userId) || (creatorName && displayName && creatorName === displayName)) {
+          return { error: 'OWN_BET', orderNumber: orderNo };
+        }
+
+        // 2. STATUS GUARDS: Distinguish cancelled from matched
+        if (status === 'cancelled' || status === 'void') {
+          return { error: 'CANCELLED', orderNumber: orderNo };
+        }
+        if (status === 'matched' || status === 'resolved') {
+          return { error: 'ALREADY_MATCHED', orderNumber: orderNo };
+        }
+        
+        if (matchAmt !== null) {
+          var min20Percent = Math.max(1, Math.round(amount * 0.20));
+          if (matchAmt < min20Percent) {
+            return { error: 'BELOW_MIN_PERCENT_LIMIT', minAllowed: min20Percent, percent: 20, provided: matchAmt, orderNumber: orderNo };
+          }
+          if (matchAmt > amount) {
+            return { error: 'EXCEEDS_ORDER_AMOUNT', maxAllowed: amount, provided: matchAmt, orderNumber: orderNo };
+          }
+        }
+        var finalMatchAmt = matchAmt !== null ? matchAmt : amount;
+        if (matcherBal < finalMatchAmt) {
+          return { error: 'INSUFFICIENT_BALANCE', required: finalMatchAmt, current: matcherBal, orderNumber: orderNo };
+        }
+        
+        if (!playerLowId) {
+          playerLowId = searchId;
+          playerLowName = displayName;
+        } else {
+          playerHighId = searchId;
+          playerHighName = displayName;
+        }
+        
+        sheet.getRange(i + 1, 2).setValue(playerLowId);
+        sheet.getRange(i + 1, 3).setValue(playerLowName);
+        sheet.getRange(i + 1, 4).setValue(playerHighId);
+        sheet.getRange(i + 1, 5).setValue(playerHighName);
+        sheet.getRange(i + 1, 10).setValue('matched');
+        
+        adjustPlayerBalance(searchId, -finalMatchAmt);
+        return {
+          orderNumber: orderNo,
+          amount: finalMatchAmt,
+          playerLowName: playerLowName,
+          playerHighName: playerHighName,
+          creatorId: creatorId,
+          matcherId: searchId
+        };
+      }
+    }
+    return { error: 'NOT_FOUND', targetOrderNo: cleanTargetOrder };
+  }
+  
+  // 2. Search first open pending bet
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     if (row[9] === 'pending_match') {
       const orderNo = row[0];
-      const amount = row[5];
+      const amount = Number(row[5]) || 0;
       
-      let playerLowId = row[1];
+      let playerLowId = row[1] ? row[1].toString().trim() : '';
       let playerLowName = row[2];
-      let playerHighId = row[3];
+      let playerHighId = row[3] ? row[3].toString().trim() : '';
       let playerHighName = row[4];
       
-      if (playerLowId === userId || playerHighId === userId) continue; // No self match
-      
       const creatorId = playerLowId ? playerLowId : playerHighId;
+      if (creatorId === searchId) continue;
+      
+      if (matcherBal < amount) {
+        return { error: 'INSUFFICIENT_BALANCE', required: amount, current: matcherBal, orderNumber: orderNo };
+      }
       
       if (!playerLowId) {
-        playerLowId = userId;
+        playerLowId = searchId;
         playerLowName = displayName;
       } else {
-        playerHighId = userId;
+        playerHighId = searchId;
         playerHighName = displayName;
       }
       
-      // Update matched records
       sheet.getRange(i + 1, 2).setValue(playerLowId);
       sheet.getRange(i + 1, 3).setValue(playerLowName);
       sheet.getRange(i + 1, 4).setValue(playerHighId);
       sheet.getRange(i + 1, 5).setValue(playerHighName);
       sheet.getRange(i + 1, 10).setValue('matched');
       
-      // Deduct opponent credit too
-      adjustPlayerBalance(userId, -amount);
-      
+      var finalMatchAmtAuto = (matchAmt !== null && matchAmt <= amount) ? matchAmt : amount;
+      if (matcherBal < finalMatchAmtAuto) {
+        return { error: 'INSUFFICIENT_BALANCE', required: finalMatchAmtAuto, current: matcherBal, orderNumber: orderNo };
+      }
+      adjustPlayerBalance(searchId, -finalMatchAmtAuto);
+
       return {
         orderNumber: orderNo,
-        amount: amount,
+        amount: finalMatchAmtAuto,
         playerLowName: playerLowName,
         playerHighName: playerHighName,
         creatorId: creatorId,
-        matcherId: userId
+        matcherId: searchId
       };
     }
   }
-  return null;
+  return { error: 'NO_OPEN_BET' };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function logTransaction(userId, displayName, reqAmt, actAmt, refCode, status, reason) {
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Transactions');
+  const searchId = userId ? userId.toString().trim() : '';
   const isWithdraw = (refCode && refCode.toString().indexOf('WD') === 0) || (reason && reason.toString().toLowerCase().indexOf('withdraw') !== -1);
+
+  if (!isWithdraw) {
+    const data = sheet.getDataRange().getValues();
+    for (let i = data.length - 1; i >= 1; i--) {
+      const rowUserId = data[i][1] ? data[i][1].toString().trim() : '';
+      const rowStatus = data[i][6] ? data[i][6].toString() : '';
+      const rowRef = data[i][5] ? data[i][5].toString() : '';
+      const rowReason = data[i][7] ? data[i][7].toString().toLowerCase() : '';
+      const rowTxId = data[i][0] ? data[i][0].toString() : '';
+
+      if (rowUserId === searchId && rowStatus === 'escalated' && !rowTxId.startsWith('WD') &&
+          (rowRef === 'PENDING_SLIP' || rowReason.includes('waiting for user'))) {
+        const updatedReqAmt = Number(reqAmt) > 0 ? reqAmt : data[i][3];
+        const updatedActAmt = Number(actAmt) >= 0 ? actAmt : data[i][4];
+        
+        sheet.getRange(i + 1, 4).setValue(updatedReqAmt);
+        sheet.getRange(i + 1, 5).setValue(updatedActAmt);
+        if (refCode && refCode !== 'PENDING_SLIP') sheet.getRange(i + 1, 6).setValue(refCode);
+        sheet.getRange(i + 1, 7).setValue(status);
+        sheet.getRange(i + 1, 8).setValue(reason);
+        sheet.getRange(i + 1, 9).setValue(new Date());
+        return rowTxId;
+      }
+    }
+  }
+
   const prefix = isWithdraw ? 'WD' : 'TX';
   const txId = prefix + Date.now().toString().slice(-6);
   sheet.appendRow([txId, userId, displayName, reqAmt, actAmt, refCode, status, reason, new Date()]);
+  return txId;
 }
 
 /**
@@ -954,13 +1491,22 @@ function replyToLine(replyToken, text, userId) {
   let messageObj;
   
   if (typeof text === 'object' && text !== null) {
+    var flexContents = text.type === 'bubble'
+      ? { type: 'carousel', contents: [text] }
+      : text;
     messageObj = {
       type: 'flex',
       altText: 'ระบบบริการ Rocket Science 🚀',
-      contents: text
+      contents: flexContents
     };
   } else {
-    messageObj = { type: 'text', text: text };
+    let outText = String(text);
+    const pName = (userId ? getPlayerNameFromDb(userId) : null) || 'ผู้เล่น';
+    const tagStr = `@${pName}`;
+    if (userId && outText.indexOf('@') === -1 && outText.indexOf('ถึงคุณ') === -1) {
+      outText = `👤 [ถึงคุณ ${tagStr}]: ` + outText;
+    }
+    messageObj = { type: 'text', text: outText };
   }
   
   const payload = {
@@ -1001,7 +1547,7 @@ function adminSetPlayerBank(userId, bankName, accountNumber, accountName) {
   if (!searchId) return { ok: false, error: 'Missing userId' };
   updatePlayerBank(searchId, bankName.trim(), accountNumber.replace(/[\-\.\s]/g, ''), accountName.trim());
   // Notify the player via LINE push
-  const msg = `🏦 แอดมินได้ลงทะเบียนบัญชีธนาคารสำหรับการถอนเงินของคุณแล้วค่ะ
+  const msg = `🏦 แอดมินได้ลงทะเบียนบัญชีธนาคารสำหรับการถอนเงินของคุณแล้วครับ
 
 🏦 ธนาคาร: ${bankName.trim()}
 🔢 เลขบัญชี: ${accountNumber.replace(/[\-\.\s]/g, '')}
@@ -1029,7 +1575,7 @@ function adminCreatePlayer(lineId, displayName, initialBalance) {
   const balance = Number(initialBalance) || 0;
   sheet.appendRow([searchId, displayName.trim(), balance, new Date(), '', '', '']);
   // Welcome push
-  const msg = `🎉 ยินดีต้อนรับสู่ระบบ Rocket Science Billing ค่ะ!\n\nบัญชีของคุณถูกสร้างโดยแอดมินเรียบร้อยแล้ว\n💰 เครดิตเริ่มต้น: ${balance} แต้ม\n\nหากมีข้อสงสัยติดต่อฝ่ายสนับสนุน: 089-104-1992`;
+  const msg = `🎉 ยินดีต้อนรับสู่ระบบ Rocket Science Billing ครับ!\n\nบัญชีของคุณถูกสร้างโดยแอดมินเรียบร้อยแล้ว\n💰 เครดิตเริ่มต้น: ${balance} แต้ม\n\nหากมีข้อสงสัยติดต่อฝ่ายสนับสนุน: 089-104-1992`;
   pushToLine(searchId, msg);
   return getDashboardData();
 }
@@ -1186,7 +1732,9 @@ function getDashboardData() {
     players: players,
     transactions: transactions,
     bets: bets,
-    chatLogs: chatLogs
+    chatLogs: chatLogs,
+    activeGroupId: getActiveGroupId(),
+    lineGroups: getLineGroups()
   };
 }
 
@@ -1206,12 +1754,18 @@ function adminApproveTransaction(txId) {
       const userId = tData[i][1];
       const displayName = tData[i][2];
       const reqAmt = Number(tData[i][3]) || 0;
-      const actualAmount = Number(tData[i][4]) || 0;
+      let actualAmount = Number(tData[i][4]) || 0;
+      if (actualAmount <= 0) {
+        actualAmount = reqAmt;
+        tSheet.getRange(i + 1, 5).setValue(actualAmount);
+      }
       
       tSheet.getRange(i + 1, 7).setValue('success');
       tSheet.getRange(i + 1, 8).setValue('Manually approved by supervisor');
       
-      if (searchId.indexOf('WD') === 0) {
+      const isWithdrawal = searchId.indexOf('WD') === 0 || (tData[i][5] && tData[i][5].toString().toUpperCase().indexOf('WD') !== -1) || (tData[i][7] && tData[i][7].toString().toLowerCase().indexOf('withdraw') !== -1);
+
+      if (isWithdrawal) {
         // Withdrawal: the balance was already deducted, we just record the actual payout in sheet
         tSheet.getRange(i + 1, 5).setValue(reqAmt);
         let details = "ถอนเงินคืนเข้าบัญชีของคุณ";
@@ -1219,21 +1773,15 @@ function adminApproveTransaction(txId) {
         if (bank) {
           details = "โอนเข้าบัญชี " + bank.bankName + " " + bank.accountNumber + " (" + bank.accountName + ")";
         }
-        const wdFlex = constructBankingFlex("Expense", reqAmt, details, null, userId);
+        const wdFlex = constructBankingFlex("withdraw", reqAmt, details, null, userId);
         pushToLine(userId, wdFlex);
+        logLineChatMessage(userId, displayName || 'ผู้เล่น', 'bot', `💸 [ถอนเงินสำเร็จ]: ` + reqAmt + ` THB โอนเข้าบัญชีแล้ว 🚀`, 'text');
       } else {
         // Deposit: credit player balance
         adjustPlayerBalance(userId, actualAmount, displayName);
-        // If the player still has no registered bank, try to extract from the transaction's reason field
-        const existingBank = getPlayerBank(userId);
-        if (!existingBank) {
-          // reason field (col index 7) may contain "Withdrawal request to BANK ACCNO NAME" or similar
-          // For deposits, we cannot reconstruct the sender bank from this row, so we
-          // leave a flag so the player is prompted to register when they try to withdraw.
-          // No-op here: bank registration is handled gracefully during withdrawal flow.
-        }
-        const dpFlex = constructBankingFlex("Income", actualAmount, "เติมเงินสำเร็จ (แอดมินอนุมัติแมนนวล)", null, userId);
+        const dpFlex = constructBankingFlex("deposit", actualAmount, "เติมเงินสำเร็จ (แอดมินอนุมัติแมนนวล)", null, userId);
         pushToLine(userId, dpFlex);
+        logLineChatMessage(userId, displayName || 'ผู้เล่น', 'bot', `🟢 [เติมเงินสำเร็จ]: +` + actualAmount + `pt เข้าบัญชีเรียบร้อย 🚀`, 'text');
       }
       return true;
     }
@@ -1258,16 +1806,20 @@ function adminRejectTransaction(txId, reason) {
       tSheet.getRange(i + 1, 7).setValue('rejected');
       tSheet.getRange(i + 1, 8).setValue(reason || 'Rejected by supervisor');
       
-      if (searchId.indexOf('WD') === 0) {
+      const isWithdrawal = searchId.indexOf('WD') === 0 || (tData[i][5] && tData[i][5].toString().toUpperCase().indexOf('WD') !== -1) || (tData[i][7] && tData[i][7].toString().toLowerCase().indexOf('withdraw') !== -1);
+      
+      if (isWithdrawal) {
         // Withdrawal rejected: refund the locked balance back to player
         adjustPlayerBalance(userId, reqAmt, displayName);
         const currentBalance = getPlayerBalance(userId, displayName);
         const rejFlex = constructRejectionFlex("WD", reqAmt, reason || 'ข้อมูลไม่ถูกต้อง', currentBalance, userId);
         pushToLine(userId, rejFlex);
+        logLineChatMessage(userId, displayName || 'ผู้เล่น', 'bot', `❌ [ปฏิเสธถอนเงิน]: ยอด ` + reqAmt + ` THB (คืนแต้มเข้าบัญชีแล้ว)`, 'text');
       } else {
         const currentBalance = getPlayerBalance(userId, displayName);
         const rejFlex = constructRejectionFlex("DP", reqAmt, reason || 'สลิปไม่ผ่านเกณฑ์ตรวจสอบ', currentBalance, userId);
         pushToLine(userId, rejFlex);
+        logLineChatMessage(userId, displayName || 'ผู้เล่น', 'bot', `❌ [ปฏิเสธฝากเงิน]: ยอด ` + reqAmt + ` THB (สาเหตุ: ` + (reason || 'สลิปไม่ผ่านเกณฑ์') + `)`, 'text');
       }
       return true;
     }
@@ -1356,6 +1908,86 @@ function adminResolveBets(finalTime, targetTime) {
       }
     }
   }
+
+  var groups = getLineGroups();
+  var activeId = getActiveGroupId();
+  var targetGroups = {};
+  for (var gi = 0; gi < groups.length; gi++) {
+    if (groups[gi].id) targetGroups[groups[gi].id] = true;
+  }
+  if (activeId) targetGroups[activeId] = true;
+  var groupKeys = Object.keys(targetGroups);
+
+  if (groupKeys.length > 0) {
+    try {
+      var ssInfo = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Rockets');
+      var rocketName = 'ช่างบั้งไฟสด';
+      if (ssInfo) {
+        var rData = ssInfo.getDataRange().getValues();
+        for (var r = 1; r < rData.length; r++) {
+          if (rData[r][3] === 'ACTIVE' || rData[r][3] === 'LOCKED') {
+            rocketName = rData[r][0] || rocketName;
+            break;
+          }
+        }
+      }
+      var roundFlex = constructRoundSummaryFlex(finalTime, targetMin, targetMax, rocketName);
+      for (var gk = 0; gk < groupKeys.length; gk++) {
+        pushLineGroupMessage(groupKeys[gk], roundFlex);
+      }
+    } catch(e) {
+      Logger.log("Error pushing round summary flex: " + e);
+    }
+  }
+
+  setRocketRoundStatus('ACTIVE');
+  return getDashboardData();
+}
+
+function adminVoidRound() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const bSheet = ss.getSheetByName('Bets');
+  const bData = bSheet.getDataRange().getValues();
+
+  for (let i = 1; i < bData.length; i++) {
+    const status = bData[i][9];
+    if (status === 'pending_match' || status === 'matched' || status === 'pending_cancel') {
+      const orderNo = bData[i][0];
+      const lowId = bData[i][1];
+      const lowName = bData[i][2];
+      const highId = bData[i][3];
+      const highName = bData[i][4];
+      const amt = Number(bData[i][5]) || 0;
+
+      bSheet.getRange(i + 1, 10).setValue('cancelled');
+
+      if (lowId) adjustPlayerBalance(lowId, amt, lowName);
+      if (highId) adjustPlayerBalance(highId, amt, highName);
+    }
+  }
+
+  setRocketRoundStatus('ACTIVE');
+
+  var groups = getLineGroups();
+  var activeId = getActiveGroupId();
+  var targetGroups = {};
+  for (var gi = 0; gi < groups.length; gi++) {
+    if (groups[gi].id) targetGroups[groups[gi].id] = true;
+  }
+  if (activeId) targetGroups[activeId] = true;
+  var groupKeys = Object.keys(targetGroups);
+
+  if (groupKeys.length > 0) {
+    try {
+      var roundNotice = "⛔ [โมฆะรอบ / ช่าง ⛔]: ยกเลิกแผลดวลค้างทั้งหมด และคืนแต้ม 100% เรียบร้อยครับ 🚀";
+      for (var gk = 0; gk < groupKeys.length; gk++) {
+        pushLineGroupMessage(groupKeys[gk], roundNotice);
+      }
+    } catch(e) {
+      Logger.log("Error pushing void notice: " + e);
+    }
+  }
+
   return getDashboardData();
 }
 
@@ -1499,8 +2131,8 @@ function verifyMockSlipFromClient(depositAmt, realAmt, ref, isQRValid, isDupe) {
 /**
  * Simulate messaging text command from client dashboard
  */
-function simulateTextMessageFromDashboard(text, userId, displayName) {
-  handleTextMessage(text, userId, displayName, 'MOCK_REPLY_TOKEN');
+function simulateTextMessageFromDashboard(text, userId, displayName, targetGroupId) {
+  handleTextMessage(text, userId, displayName, 'MOCK_REPLY_TOKEN', targetGroupId || null);
 }
 
 /**
@@ -1530,23 +2162,79 @@ function resetGoogleSheetsDatabase() {
   cSheet.appendRow(['Timestamp', 'User ID', 'Display Name', 'Sender', 'Message Text', 'Message Type']);
 }
 
+/**
+ * Push a message to a LINE Group (using groupId directly, no Players lookup).
+ * @param {string} groupId - LINE Group ID (starts with 'C')
+ * @param {Object|string} text - Message payload
+ */
+function pushLineGroupMessage(groupId, text) {
+  if (!groupId) return;
+  var url = 'https://api.line.me/v2/bot/message/push';
+  var messageObj;
+  if (typeof text === 'object' && text !== null) {
+    var alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
+      ? text.header.contents[0].text
+      : 'ระบบบริการ Rocket Science 🚀';
+    messageObj = { type: 'flex', altText: alt, contents: text };
+  } else {
+    messageObj = { type: 'text', text: String(text) };
+  }
+  var payload = { to: groupId, messages: [messageObj] };
+  var options = {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+  try {
+    var res = UrlFetchApp.fetch(url, options);
+    var code = res.getResponseCode();
+    var body = res.getContentText();
+    Logger.log('[pushLineGroupMessage to ' + groupId + '] Status: ' + code + ' Body: ' + body);
+    if (code !== 200 && typeof text === 'object') {
+      var headerStr = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text) || '';
+      var fbText = '🚀 ' + headerStr;
+      UrlFetchApp.fetch(url, {
+        method: 'post',
+        contentType: 'application/json',
+        headers: { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN },
+        payload: JSON.stringify({ to: groupId, messages: [{ type: 'text', text: fbText }] }),
+        muteHttpExceptions: true
+      });
+    }
+  } catch (e) {
+    Logger.log('[pushLineGroupMessage] Error: ' + e.toString());
+  }
+}
+
+/**
+ * Push a message to a player's 1-on-1 LINE OA DM (resolves short ID → raw LINE userId).
+ * @param {string} userId - Short passport-style ID or raw LINE userId
+ * @param {Object|string} text - Message payload
+ */
 function pushToLine(userId, text) {
-  if (!userId || userId === 'user' || userId.startsWith('p')) return; // Simulator bypass
-  
-  const rawLineUserId = getRawLineUserId(userId);
+  if (!userId || userId === 'user' || (typeof userId === 'string' && userId.startsWith('p') && !userId.startsWith('player_U'))) return;
+
+  var rawLineUserId = (typeof userId === 'string' && (userId.startsWith('U') || userId.startsWith('C')))
+    ? userId
+    : getRawLineUserId(userId);
   if (!rawLineUserId) return;
   
   const url = 'https://api.line.me/v2/bot/message/push';
   let messageObj;
   
   if (typeof text === 'object' && text !== null) {
+    var alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
+      ? text.header.contents[0].text
+      : 'ระบบบริการ Rocket Science 🚀';
     messageObj = {
       type: 'flex',
-      altText: 'ระบบบริการ Rocket Science 🚀',
+      altText: alt,
       contents: text
     };
   } else {
-    messageObj = { type: 'text', text: text };
+    messageObj = { type: 'text', text: String(text) };
   }
   
   const payload = {
@@ -1560,10 +2248,28 @@ function pushToLine(userId, text) {
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   };
-  UrlFetchApp.fetch(url, options);
+  try {
+    var res = UrlFetchApp.fetch(url, options);
+    var code = res.getResponseCode();
+    var body = res.getContentText();
+    Logger.log('[pushToLine to ' + rawLineUserId + '] Status: ' + code + ' Body: ' + body);
+    if (code !== 200 && typeof text === 'object') {
+      var headerStr = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text) || '';
+      var fbText = '🚀 ' + headerStr;
+      UrlFetchApp.fetch(url, {
+        method: 'post',
+        contentType: 'application/json',
+        headers: { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN },
+        payload: JSON.stringify({ to: rawLineUserId, messages: [{ type: 'text', text: fbText }] }),
+        muteHttpExceptions: true
+      });
+    }
+  } catch (e) {
+    Logger.log('[pushToLine] Error: ' + e.toString());
+  }
   
   // Log the push message
-  const logText = typeof text === 'object' ? '[Flex Message]' : text;
+  const logText = typeof text === 'object' ? '[Flex Message]' : String(text);
   logLineChatMessage(userId, 'ผู้ใช้', 'bot', logText, typeof text === 'object' ? 'flex' : 'text');
 }
 
@@ -1574,54 +2280,56 @@ function pushToLine(userId, text) {
 function constructMainMenuFlex() {
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
+      "backgroundColor": "#0D9488",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": "🚀 Rocket Science Billing",
+          "text": "🚀 Rocket Science Menu",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "md"
+          "size": "xs",
+          "align": "center"
         }
-      ],
-      "backgroundColor": "#00796B",
-      "paddingAll": "16px"
+      ]
     },
     "body": {
       "type": "box",
       "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": "ยินดีต้อนรับสู่ระบบเติมทุนหลังบ้าน Rocket Science\nกรุณาเลือกบริการที่คุณต้องการทำรายการด้านล่างค่ะ",
-          "size": "sm",
-          "color": "#555555",
+          "text": "เลือกบริการที่คุณต้องการทำรายการครับ",
+          "size": "xxs",
+          "color": "#64748B",
+          "align": "center",
           "wrap": true
-        }
-      ],
-      "paddingAll": "20px"
-    },
-    "footer": {
-      "type": "box",
-      "layout": "vertical",
-      "spacing": "sm",
-      "contents": [
+        },
+        {
+          "type": "separator",
+          "margin": "xs",
+          "color": "#F1F5F9"
+        },
         {
           "type": "box",
           "layout": "horizontal",
-          "spacing": "sm",
+          "spacing": "xs",
+          "margin": "xs",
           "contents": [
             {
               "type": "button",
               "style": "primary",
               "height": "sm",
-              "color": "#00796B",
+              "color": "#0284C7",
               "action": {
                 "type": "message",
-                "label": "ตรวจสอบยอด",
+                "label": "💳 เช็คยอด",
                 "text": "เช็คยอด"
               }
             },
@@ -1629,10 +2337,10 @@ function constructMainMenuFlex() {
               "type": "button",
               "style": "primary",
               "height": "sm",
-              "color": "#00796B",
+              "color": "#10B981",
               "action": {
                 "type": "message",
-                "label": "ฝากเงิน",
+                "label": "💰 ฝากเงิน",
                 "text": "ฝากเงิน"
               }
             }
@@ -1641,16 +2349,17 @@ function constructMainMenuFlex() {
         {
           "type": "box",
           "layout": "horizontal",
-          "spacing": "sm",
+          "spacing": "xs",
+          "margin": "xs",
           "contents": [
             {
               "type": "button",
               "style": "primary",
               "height": "sm",
-              "color": "#00796B",
+              "color": "#64748B",
               "action": {
                 "type": "message",
-                "label": "ถอนเงิน",
+                "label": "💸 ถอนเงิน",
                 "text": "ถอนเงิน"
               }
             },
@@ -1658,110 +2367,97 @@ function constructMainMenuFlex() {
               "type": "button",
               "style": "primary",
               "height": "sm",
-              "color": "#00796B",
+              "color": "#6366F1",
               "action": {
                 "type": "message",
-                "label": "รายการดวล",
+                "label": "⚔️ รายการดวล",
                 "text": "รายการดวล"
               }
             }
           ]
         }
-      ],
-      "paddingAll": "16px"
+      ]
     }
   };
 }
 
 function constructBalanceFlex(displayName, balance) {
+  var formattedBal = Number(balance || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
+      "backgroundColor": "#0284C7",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": "💳 ยอดเครดิตคงเหลือของคุณ",
+          "text": "💰 ยอดแต้มของคุณ",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "md"
+          "size": "xs",
+          "align": "center"
         }
-      ],
-      "backgroundColor": "#00796B",
-      "paddingAll": "16px"
+      ]
     },
     "body": {
       "type": "box",
       "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "sm",
       "contents": [
         {
-          "type": "box",
-          "layout": "horizontal",
-          "contents": [
-            {
-              "type": "text",
-              "text": "👤 ผู้เล่น:",
-              "color": "#888888",
-              "size": "sm",
-              "flex": 3
-            },
-            {
-              "type": "text",
-              "text": displayName,
-              "weight": "bold",
-              "color": "#333333",
-              "size": "sm",
-              "flex": 7,
-              "align": "end"
-            }
-          ]
+          "type": "text",
+          "text": formattedBal,
+          "weight": "bold",
+          "color": "#0284C7",
+          "size": "xl",
+          "align": "center"
+        },
+        {
+          "type": "text",
+          "text": "แต้มคงเหลือ",
+          "color": "#94A3B8",
+          "size": "xxs",
+          "align": "center"
+        },
+        {
+          "type": "separator",
+          "margin": "xs",
+          "color": "#F1F5F9"
         },
         {
           "type": "box",
           "layout": "horizontal",
-          "margin": "md",
+          "margin": "xs",
           "contents": [
-            {
-              "type": "text",
-              "text": "💰 คงเหลือ:",
-              "color": "#888888",
-              "size": "sm",
-              "flex": 3
-            },
-            {
-              "type": "text",
-              "text": balance.toFixed(2) + " แต้ม",
-              "weight": "bold",
-              "color": "#2E7D32",
-              "size": "lg",
-              "flex": 7,
-              "align": "end"
-            }
+            { "type": "text", "text": "👤 ชื่อ", "color": "#94A3B8", "size": "xxs", "flex": 4 },
+            { "type": "text", "text": displayName || "ผู้เล่น", "weight": "bold", "color": "#334155", "size": "xxs", "flex": 6, "align": "end" }
           ]
         }
-      ],
-      "paddingAll": "20px"
+      ]
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "sm",
+      "spacing": "xs",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "box",
           "layout": "horizontal",
-          "spacing": "sm",
+          "spacing": "xs",
           "contents": [
             {
               "type": "button",
               "style": "primary",
               "height": "sm",
-              "color": "#00796B",
+              "color": "#10B981",
               "action": {
                 "type": "message",
-                "label": "ฝากเงิน",
+                "label": "💰 ฝากเงิน",
                 "text": "ฝากเงิน"
               }
             },
@@ -1769,27 +2465,16 @@ function constructBalanceFlex(displayName, balance) {
               "type": "button",
               "style": "primary",
               "height": "sm",
-              "color": "#00796B",
+              "color": "#64748B",
               "action": {
                 "type": "message",
-                "label": "ถอนเงิน",
+                "label": "💸 ถอนเงิน",
                 "text": "ถอนเงิน"
               }
             }
           ]
-        },
-        {
-          "type": "button",
-          "style": "secondary",
-          "height": "sm",
-          "action": {
-            "type": "message",
-            "label": "🏠 เมนูหลัก",
-            "text": "เมนู"
-          }
         }
-      ],
-      "paddingAll": "16px"
+      ]
     }
   };
 }
@@ -1797,51 +2482,53 @@ function constructBalanceFlex(displayName, balance) {
 function constructDepositFlex() {
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
+      "backgroundColor": "#10B981",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": "💰 ฝากเครดิตเข้าระบบ",
+          "text": "💰 ฝากเครดิต",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "md"
+          "size": "xs",
+          "align": "center"
         }
-      ],
-      "backgroundColor": "#00796B",
-      "paddingAll": "16px"
+      ]
     },
     "body": {
       "type": "box",
       "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": "กรุณาเลือกยอดเงินที่ต้องการฝากเพื่อรับใบแจ้งยอดโอนเงิน หรือพิมพ์ระบุจำนวนเงินที่ต้องการฝากอื่นๆ ได้เลยค่ะ",
-          "size": "sm",
-          "color": "#555555",
+          "text": "เลือกยอดเงินที่ต้องการฝากครับ",
+          "size": "xxs",
+          "color": "#64748B",
+          "align": "center",
           "wrap": true
-        }
-      ],
-      "paddingAll": "20px"
-    },
-    "footer": {
-      "type": "box",
-      "layout": "vertical",
-      "spacing": "sm",
-      "contents": [
+        },
+        {
+          "type": "separator",
+          "margin": "xs",
+          "color": "#F1F5F9"
+        },
         {
           "type": "box",
           "layout": "horizontal",
-          "spacing": "sm",
+          "spacing": "xs",
+          "margin": "xs",
           "contents": [
             {
               "type": "button",
               "style": "primary",
               "height": "sm",
-              "color": "#00796B",
+              "color": "#10B981",
               "action": {
                 "type": "message",
                 "label": "100 บาท",
@@ -1852,7 +2539,7 @@ function constructDepositFlex() {
               "type": "button",
               "style": "primary",
               "height": "sm",
-              "color": "#00796B",
+              "color": "#10B981",
               "action": {
                 "type": "message",
                 "label": "300 บาท",
@@ -1864,13 +2551,14 @@ function constructDepositFlex() {
         {
           "type": "box",
           "layout": "horizontal",
-          "spacing": "sm",
+          "spacing": "xs",
+          "margin": "xs",
           "contents": [
             {
               "type": "button",
               "style": "primary",
               "height": "sm",
-              "color": "#00796B",
+              "color": "#10B981",
               "action": {
                 "type": "message",
                 "label": "500 บาท",
@@ -1881,7 +2569,7 @@ function constructDepositFlex() {
               "type": "button",
               "style": "primary",
               "height": "sm",
-              "color": "#00796B",
+              "color": "#10B981",
               "action": {
                 "type": "message",
                 "label": "1,000 บาท",
@@ -1889,379 +2577,241 @@ function constructDepositFlex() {
               }
             }
           ]
-        },
-        {
-          "type": "button",
-          "style": "secondary",
-          "height": "sm",
-          "action": {
-            "type": "message",
-            "label": "🏠 เมนูหลัก",
-            "text": "เมนู"
-          }
         }
-      ],
-      "paddingAll": "16px"
+      ]
     }
   };
 }
 
 function constructDepositInvoiceFlex(depositAmt) {
+  var formattedAmt = Number(depositAmt || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
+      "backgroundColor": "#10B981",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": "🧾 ใบแจ้งยอดโอนเงิน",
+          "text": "🧾 ใบแจ้งยอดโอน",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "md"
+          "size": "xs",
+          "align": "center"
         }
-      ],
-      "backgroundColor": "#00796B",
-      "paddingAll": "16px"
+      ]
     },
     "body": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "md",
+      "spacing": "xs",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": "กรุณาโอนเงินตามยอดด้านล่างนี้ และส่งรูปภาพสลิปที่ได้ลงในแชทนี้ ระบบจะสแกนและอัพเครดิตทันทีค่ะ",
-          "size": "sm",
-          "color": "#555555",
-          "wrap": true
+          "text": formattedAmt + " THB",
+          "weight": "bold",
+          "color": "#059669",
+          "size": "xl",
+          "align": "center"
         },
         {
-          "type": "separator"
+          "type": "text",
+          "text": "ยอดโอนเงินฝาก",
+          "color": "#94A3B8",
+          "size": "xxs",
+          "align": "center"
+        },
+        {
+          "type": "separator",
+          "margin": "xs",
+          "color": "#F1F5F9"
         },
         {
           "type": "box",
-          "layout": "horizontal",
+          "layout": "vertical",
+          "margin": "xs",
           "contents": [
             {
-              "type": "text",
-              "text": "🏦 ธนาคาร:",
-              "color": "#888888",
-              "size": "sm",
-              "flex": 4
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                { "type": "text", "text": "🏦 SCB", "color": "#94A3B8", "size": "xxs", "flex": 4 },
+                { "type": "text", "text": "064-2-35656-6", "weight": "bold", "color": "#334155", "size": "xxs", "flex": 6, "align": "end" }
+              ]
             },
             {
-              "type": "text",
-              "text": "ไทยพาณิชย์ (SCB)",
-              "weight": "bold",
-              "color": "#333333",
-              "size": "sm",
-              "flex": 6,
-              "align": "end"
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                { "type": "text", "text": "👤 ชื่อ", "color": "#94A3B8", "size": "xxs", "flex": 4 },
+                { "type": "text", "text": "อิทธิรัตน์ แนวหล่า", "weight": "bold", "color": "#334155", "size": "xxs", "flex": 6, "align": "end" }
+              ]
             }
           ]
         },
         {
-          "type": "box",
-          "layout": "horizontal",
-          "contents": [
-            {
-              "type": "text",
-              "text": "🔢 เลขบัญชี:",
-              "color": "#888888",
-              "size": "sm",
-              "flex": 4
-            },
-            {
-              "type": "text",
-              "text": "064-2-35656-6",
-              "weight": "bold",
-              "color": "#333333",
-              "size": "sm",
-              "flex": 6,
-              "align": "end"
-            }
-          ]
+          "type": "separator",
+          "margin": "xs",
+          "color": "#F1F5F9"
         },
         {
-          "type": "box",
-          "layout": "horizontal",
-          "contents": [
-            {
-              "type": "text",
-              "text": "👤 ชื่อบัญชี:",
-              "color": "#888888",
-              "size": "sm",
-              "flex": 4
-            },
-            {
-              "type": "text",
-              "text": "อิทธิรัตน์ แนวหล่า",
-              "weight": "bold",
-              "color": "#333333",
-              "size": "sm",
-              "flex": 6,
-              "align": "end",
-              "wrap": true
-            }
-          ]
-        },
-        {
-          "type": "box",
-          "layout": "horizontal",
-          "contents": [
-            {
-              "type": "text",
-              "text": "💵 ยอดโอนตรง:",
-              "color": "#888888",
-              "size": "sm",
-              "flex": 4
-            },
-            {
-              "type": "text",
-              "text": depositAmt + ".00 บาท",
-              "weight": "bold",
-              "color": "#2E7D32",
-              "size": "md",
-              "flex": 6,
-              "align": "end"
-            }
-          ]
+          "type": "text",
+          "text": "💡 โอนเสร็จส่งสลิปในแชทรับเครดิตทันทีครับ",
+          "size": "xxs",
+          "color": "#64748B",
+          "align": "center",
+          "wrap": true,
+          "margin": "xs"
         }
-      ],
-      "paddingAll": "20px"
-    },
-    "footer": {
-      "type": "box",
-      "layout": "vertical",
-      "spacing": "sm",
-      "contents": [
-        {
-          "type": "button",
-          "style": "secondary",
-          "height": "sm",
-          "action": {
-            "type": "message",
-            "label": "🏠 เมนูหลัก",
-            "text": "เมนู"
-          }
-        }
-      ],
-      "paddingAll": "16px"
+      ]
     }
   };
 }
 
-/**
- * Flex message to prompt the player to register their bank account for withdrawal.
- * Shown when they have a successful deposit but no bank account on file.
- */
 function constructBankRegistrationFlex() {
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
+      "backgroundColor": "#0D9488",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
           "text": "📋 ยืนยันบัญชีธนาคาร",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "md"
-        },
-        {
-          "type": "text",
-          "text": "เพื่อรับเงินโอนคืนอย่างปลอดภัย",
-          "color": "#B2DFDB",
-          "size": "sm"
+          "size": "xs",
+          "align": "center"
         }
-      ],
-      "backgroundColor": "#00796B",
-      "paddingAll": "16px"
+      ]
     },
     "body": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "md",
+      "spacing": "xs",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": "ระบบพบว่าคุณมียอดเงินในระบบแล้ว แต่ยังไม่ได้ลงทะเบียนบัญชีสำหรับรับเงินโอนคืน",
-          "size": "sm",
-          "color": "#555555",
-          "wrap": true
-        },
-        {
-          "type": "separator"
-        },
-        {
-          "type": "text",
-          "text": "📸 วิธีลงทะเบียนบัญชี:",
-          "weight": "bold",
-          "size": "sm",
-          "color": "#00695C"
-        },
-        {
-          "type": "box",
-          "layout": "vertical",
-          "backgroundColor": "#E0F2F1",
-          "cornerRadius": "8px",
-          "paddingAll": "12px",
-          "spacing": "sm",
-          "contents": [
-            {
-              "type": "text",
-              "text": "📷 ถ่ายรูปหน้าสมุดบัญชี หรือ สกรีนช็อตแอปธนาคาร ที่แสดง:",
-              "size": "sm",
-              "color": "#004D40",
-              "wrap": true
-            },
-            {
-              "type": "text",
-              "text": "• ชื่อ-นามสกุล เจ้าของบัญชี",
-              "size": "sm",
-              "color": "#00695C",
-              "wrap": true
-            },
-            {
-              "type": "text",
-              "text": "• เลขบัญชีที่ใช้โอนเงินฝากเข้ามาเท่านั้น",
-              "size": "sm",
-              "color": "#00695C",
-              "wrap": true
-            },
-            {
-              "type": "text",
-              "text": "แล้วส่งรูปในแชทนี้ได้เลยค่ะ",
-              "size": "sm",
-              "color": "#004D40",
-              "weight": "bold",
-              "wrap": true
-            }
-          ]
-        },
-        {
-          "type": "text",
-          "text": "⚠️ ต้องเป็นบัญชีเดียวกับที่โอนเงินเข้ามาเท่านั้น ทีมงานจะยืนยันและลงทะเบียนให้ภายใน 24 ชั่วโมงค่ะ",
-          "size": "xs",
-          "color": "#E65100",
-          "wrap": true
+          "text": "📸 ส่งรูปสมุดบัญชี หรือ สกรีนช็อตแอปธนาคารที่เห็นชื่อ-เลขบัญชีตรงกับที่ใช้โอนฝากเข้ามาครับ",
+          "size": "xxs",
+          "color": "#334155",
+          "wrap": true,
+          "align": "center"
         }
-      ],
-      "paddingAll": "20px"
+      ]
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "sm",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "button",
           "style": "primary",
           "height": "sm",
-          "color": "#00796B",
+          "color": "#0D9488",
           "action": {
             "type": "uri",
-            "label": "📞 โทรติดต่อทีมงาน 089-104-1992",
+            "label": "📞 ติดต่อ 089-104-1992",
             "uri": "tel:0891041992"
           }
         }
-      ],
-      "paddingAll": "12px"
+      ]
     }
   };
 }
 
 function constructWithdrawalFlex(bankName, accountNumber, accountName, balance) {
+  var formattedBal = Number(balance || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
+      "backgroundColor": "#64748B",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": "💸 ถอนเงินคืนเข้าบัญชี",
+          "text": "💸 ถอนเงินคืน",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "md"
+          "size": "xs",
+          "align": "center"
         }
-      ],
-      "backgroundColor": "#455A64",
-      "paddingAll": "16px"
+      ]
     },
     "body": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "md",
+      "spacing": "xs",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
-          "text": "บัญชีรับเงินโอนคืนของคุณ (บัญชีเดียวกับที่เคยใช้ฝากเงิน):",
-          "size": "sm",
-          "color": "#555555",
-          "wrap": true
-        },
-        {
-          "type": "box",
-          "layout": "vertical",
-          "spacing": "xs",
-          "contents": [
-            {
-              "type": "text",
-              "text": "🏦 ธนาคาร: " + bankName,
-              "size": "sm",
-              "color": "#333333",
-              "weight": "bold"
-            },
-            {
-              "type": "text",
-              "text": "🔢 เลขบัญชี: " + accountNumber,
-              "size": "sm",
-              "color": "#333333",
-              "weight": "bold"
-            },
-            {
-              "type": "text",
-              "text": "👤 ชื่อบัญชี: " + accountName,
-              "size": "sm",
-              "color": "#333333",
-              "weight": "bold"
-            }
-          ]
-        },
-        {
-          "type": "separator"
+          "text": formattedBal + " pt",
+          "weight": "bold",
+          "color": "#10B981",
+          "size": "xl",
+          "align": "center"
         },
         {
           "type": "text",
-          "text": "💰 เครดิตคงเหลือ: " + balance.toFixed(2) + " แต้ม",
-          "size": "sm",
-          "color": "#2E7D32",
-          "weight": "bold"
+          "text": "เครดิตคงเหลือ",
+          "color": "#94A3B8",
+          "size": "xxs",
+          "align": "center"
+        },
+        {
+          "type": "separator",
+          "margin": "xs",
+          "color": "#F1F5F9"
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "xs",
+          "contents": [
+            { "type": "text", "text": "🏦 บัญชีรับเงิน", "color": "#94A3B8", "size": "xxs", "flex": 4 },
+            { "type": "text", "text": (bankName || '') + ' ' + (accountNumber || ''), "weight": "bold", "color": "#334155", "size": "xxs", "flex": 6, "align": "end" }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "xs",
+          "contents": [
+            { "type": "text", "text": "👤 ชื่อบัญชี", "color": "#94A3B8", "size": "xxs", "flex": 4 },
+            { "type": "text", "text": accountName || "ผู้เล่น", "weight": "bold", "color": "#334155", "size": "xxs", "flex": 6, "align": "end" }
+          ]
         }
-      ],
-      "paddingAll": "20px"
+      ]
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "sm",
+      "spacing": "xs",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "box",
           "layout": "horizontal",
-          "spacing": "sm",
+          "spacing": "xs",
           "contents": [
             {
               "type": "button",
               "style": "primary",
               "height": "sm",
-              "color": "#455A64",
+              "color": "#64748B",
               "action": {
                 "type": "message",
                 "label": "ถอน 100",
@@ -2272,194 +2822,512 @@ function constructWithdrawalFlex(bankName, accountNumber, accountName, balance) 
               "type": "button",
               "style": "primary",
               "height": "sm",
-              "color": "#455A64",
-              "action": {
-                "type": "message",
-                "label": "ถอน 300",
-                "text": "ถอน 300"
-              }
-            }
-          ]
-        },
-        {
-          "type": "box",
-          "layout": "horizontal",
-          "spacing": "sm",
-          "contents": [
-            {
-              "type": "button",
-              "style": "primary",
-              "height": "sm",
-              "color": "#455A64",
+              "color": "#64748B",
               "action": {
                 "type": "message",
                 "label": "ถอน 500",
                 "text": "ถอน 500"
               }
-            },
-            {
-              "type": "button",
-              "style": "primary",
-              "height": "sm",
-              "color": "#455A64",
-              "action": {
-                "type": "message",
-                "label": "ถอน 1,000",
-                "text": "ถอน 1000"
-              }
             }
           ]
-        },
-        {
-          "type": "button",
-          "style": "secondary",
-          "height": "sm",
-          "action": {
-            "type": "message",
-            "label": "🏠 เมนูหลัก",
-            "text": "เมนู"
-          }
         }
-      ],
-      "paddingAll": "16px"
+      ]
     }
   };
 }
 
-function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo) {
-  var sideText = side === 'low' ? 'ต่ำ (Low)' : 'สูง (High)';
-  var sideColor = side === 'low' ? '#1E88E5' : '#E53935';
+
+function constructCancelOrderMiniFlex(orderNo) {
   return {
     "type": "bubble",
-    "size": "mega",
-    "header": {
+    "size": "micro",
+    "body": {
       "type": "box",
       "layout": "vertical",
+      "paddingAll": "md",
+      "backgroundColor": "#1E1B4B",
+      "cornerRadius": "md",
       "contents": [
         {
           "type": "text",
-          "text": "🚀 เปิดดีลดวล!",
+          "text": "⛔️ ยกเลิกสำเร็จ ⛔️",
+          "weight": "bold",
+          "color": "#EF4444",
+          "size": "sm",
+          "align": "center"
+        },
+        {
+          "type": "text",
+          "text": "ยกเลิก Order #" + orderNo + " สำเร็จ!",
           "weight": "bold",
           "color": "#FFFFFF",
-          "size": "md"
+          "size": "xs",
+          "align": "center",
+          "margin": "xs"
         }
-      ],
-      "backgroundColor": "#1E1B4B",
-      "paddingAll": "16px"
+      ]
+    }
+  };
+}
+
+function constructRuleGuideFlex() {
+  return {
+    "type": "bubble",
+    "size": "kilo",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#E0E7FF",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "🚀 ROCKET SCIENCE",
+          "weight": "bold",
+          "color": "#4338CA",
+          "size": "xxs",
+          "align": "center"
+        },
+        {
+          "type": "text",
+          "text": "📖 กติกา & วิธีการเล่นบั้งไฟ",
+          "weight": "bold",
+          "color": "#1E1B4B",
+          "size": "sm",
+          "align": "center",
+          "margin": "xs"
+        }
+      ]
     },
     "body": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "md",
+      "spacing": "sm",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "box",
-          "layout": "horizontal",
+          "layout": "vertical",
+          "backgroundColor": "#DCFCE7",
+          "cornerRadius": "md",
+          "paddingAll": "sm",
           "contents": [
             {
               "type": "text",
-              "text": "เลขที่ดีล:",
-              "color": "#888888",
-              "size": "sm",
-              "flex": 4
+              "text": "1️⃣ แทงตามราคาช่าง (ปรับได้ ±5 / ±10)",
+              "weight": "bold",
+              "color": "#166534",
+              "size": "xs"
             },
             {
               "type": "text",
-              "text": "#" + orderNo,
-              "weight": "bold",
-              "color": "#333333",
-              "size": "sm",
-              "flex": 6,
-              "align": "end"
+              "text": "• ทายชนะ (สูง): ชล, +5ชล, -5ชล, +10ชล, -10ชล\n• ทายแพ้ (ต่ำ): ชถ, +5ชถ, -5ชถ, +10ชถ, -10ชถ\nเช่น ชล500, +5ชล1000, -10ชถ200",
+              "color": "#14532D",
+              "size": "xxs",
+              "wrap": true,
+              "margin": "xs"
             }
           ]
         },
         {
           "type": "box",
-          "layout": "horizontal",
+          "layout": "vertical",
+          "backgroundColor": "#E0F2FE",
+          "cornerRadius": "md",
+          "paddingAll": "sm",
           "contents": [
             {
               "type": "text",
-              "text": "ผู้ท้าดวล:",
-              "color": "#888888",
-              "size": "sm",
-              "flex": 4
+              "text": "2️⃣ เปิดราคาเอง (ช่วงห่าง 80 วิพอดี)",
+              "weight": "bold",
+              "color": "#0369A1",
+              "size": "xs"
             },
             {
               "type": "text",
-              "text": creatorName,
-              "weight": "bold",
-              "color": "#333333",
-              "size": "sm",
-              "flex": 6,
-              "align": "end"
+              "text": "• ช่วงเวลาห่าง 80 วิ: 300-380ล500 หรือ 350-430ถ1000\n• เผื่อช่างไม่ต่อย: ใส่ ชตย เช่น 300-380ล500 ชตย",
+              "color": "#0C4A6E",
+              "size": "xxs",
+              "wrap": true,
+              "margin": "xs"
             }
           ]
         },
         {
           "type": "box",
-          "layout": "horizontal",
+          "layout": "vertical",
+          "backgroundColor": "#F3E8FF",
+          "cornerRadius": "md",
+          "paddingAll": "sm",
           "contents": [
             {
               "type": "text",
-              "text": "ฝั่งที่เลือก:",
-              "color": "#888888",
-              "size": "sm",
-              "flex": 4
+              "text": "3️⃣ การรับแผลดวล & ขั้นต่ำ 20%",
+              "weight": "bold",
+              "color": "#6B21A8",
+              "size": "xs"
             },
             {
               "type": "text",
-              "text": sideText + (rangeInfo ? " (" + rangeInfo + ")" : ""),
-              "weight": "bold",
-              "color": sideColor,
-              "size": "sm",
-              "flex": 6,
-              "align": "end"
+              "text": "• แตะปุ่มเปอร์เซ็นต์ [20%] [40%] [80%] [100%]\n• หรือพิมพ์: [เลขบิล] [แต้ม] เช่น 4812 200 หรือ ต4812\n• ขั้นต่ำการรับแผลคือ 20% ของยอดแผล",
+              "color": "#581C87",
+              "size": "xxs",
+              "wrap": true,
+              "margin": "xs"
             }
           ]
         },
         {
           "type": "box",
-          "layout": "horizontal",
+          "layout": "vertical",
+          "backgroundColor": "#FFE4E6",
+          "cornerRadius": "md",
+          "paddingAll": "sm",
           "contents": [
             {
               "type": "text",
-              "text": "ยอดท้าดวล:",
-              "color": "#888888",
-              "size": "sm",
-              "flex": 4
+              "text": "4️⃣ การยกเลิกแผลดวล",
+              "weight": "bold",
+              "color": "#9F1239",
+              "size": "xs"
             },
             {
               "type": "text",
-              "text": amount + " แต้ม",
-              "weight": "bold",
-              "color": "#E65100",
-              "size": "sm",
-              "flex": 6,
-              "align": "end"
+              "text": "• พิมพ์ ยกเลิก [เลขบิล] เช่น ยกเลิก 4812 (ก่อนมีคู่รับ)",
+              "color": "#881337",
+              "size": "xxs",
+              "wrap": true,
+              "margin": "xs"
             }
           ]
         }
-      ],
-      "paddingAll": "20px"
+      ]
     },
     "footer": {
       "type": "box",
-      "layout": "vertical",
+      "layout": "horizontal",
+      "paddingAll": "xs",
       "contents": [
         {
           "type": "button",
-          "style": "primary",
-          "height": "sm",
-          "color": "#1E88E5",
           "action": {
             "type": "message",
-            "label": "(ยอมรับดีลดวลนี้)",
-            "text": "ต"
-          }
+            "label": "📋 ดูกระดานดวลสด",
+            "text": "กระดานดวล"
+          },
+          "style": "primary",
+          "color": "#334155",
+          "height": "sm"
         }
-      ],
-      "paddingAll": "16px"
+      ]
+    }
+  };
+}
+
+function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy, userTypedCmd, isPreQuote) {
+  var sideShort = side === 'high' ? 'ล' : 'ถ';
+  var cleanCmd = (userTypedCmd && typeof userTypedCmd === 'string') ? userTypedCmd.trim() : (sideShort + amount);
+  // Strip any leading range numbers like "350-450" or "300/380" in front of the betting command
+  cleanCmd = cleanCmd.replace(/^\d+[-\/]\d+/, '').trim();
+  // Strip trailing "pt" if present
+  cleanCmd = cleanCmd.replace(/pt$/i, '').trim();
+  if (!cleanCmd) cleanCmd = sideShort + amount;
+
+  var cardTitle = (cleanCmd.indexOf(amount.toString()) !== -1) ? cleanCmd : (cleanCmd + ' ' + amount);
+  var numAmount = Number(amount) || 100;
+
+  var amt20 = Math.max(1, Math.round(numAmount * 0.20));
+  var amt40 = Math.max(1, Math.round(numAmount * 0.40));
+  var amt80 = Math.max(1, Math.round(numAmount * 0.80));
+  var amt100 = numAmount;
+
+  // Row 1: [20] [40] [80] (Pastel Blue)
+  var row1Buttons = [
+    { label: '20% (' + amt20 + ')', val: amt20 },
+    { label: '40% (' + amt40 + ')', val: amt40 },
+    { label: '80% (' + amt80 + ')', val: amt80 }
+  ].map(function(item) {
+    return {
+      "type": "box",
+      "layout": "vertical",
+      "flex": 1,
+      "backgroundColor": "#BAE6FD",
+      "cornerRadius": "sm",
+      "paddingAll": "xs",
+      "action": {
+        "type": "message",
+        "label": item.label,
+        "text": "ต " + orderNo + " " + item.val
+      },
+      "contents": [
+        { "type": "text", "text": item.label, "color": "#0369A1", "weight": "bold", "size": "xxs", "align": "center" }
+      ]
+    };
+  });
+
+  // Row 2: [100] [Cancel] (Pastel Green & Pastel Red)
+  var row2Buttons = [
+    {
+      "type": "box",
+      "layout": "vertical",
+      "flex": 1,
+      "backgroundColor": "#BBF7D0",
+      "cornerRadius": "sm",
+      "paddingAll": "xs",
+      "action": {
+        "type": "message",
+        "label": "100% (" + amt100 + ")",
+        "text": "ต " + orderNo + " " + amt100
+      },
+      "contents": [
+        { "type": "text", "text": "100% (" + amt100 + ")", "color": "#15803D", "weight": "bold", "size": "xs", "align": "center" }
+      ]
+    },
+    {
+      "type": "box",
+      "layout": "vertical",
+      "flex": 1,
+      "backgroundColor": "#FECDD3",
+      "cornerRadius": "sm",
+      "paddingAll": "xs",
+      "action": {
+        "type": "message",
+        "label": "⛔ ยกเลิก",
+        "text": "ยกเลิก " + orderNo
+      },
+      "contents": [
+        { "type": "text", "text": "⛔ ยกเลิก", "color": "#9F1239", "weight": "bold", "size": "xs", "align": "center" }
+      ]
+    }
+  ];
+
+  var bodyContents = [
+    {
+      "type": "text",
+      "text": cardTitle + (isChotoy ? ' (ชตย)' : ''),
+      "weight": "bold",
+      "color": "#1E293B",
+      "size": "md",
+      "align": "center"
+    },
+    {
+      "type": "separator",
+      "margin": "xs",
+      "color": "#F1F5F9"
+    },
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "spacing": "xs",
+      "margin": "xs",
+      "contents": row1Buttons
+    },
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "spacing": "xs",
+      "margin": "xs",
+      "contents": row2Buttons
+    },
+    {
+      "type": "text",
+      "text": "หรือพิมพ์: " + orderNo + " [จำนวนเงิน]",
+      "size": "xxs",
+      "color": "#2563EB",
+      "weight": "bold",
+      "align": "center",
+      "margin": "xs"
+    }
+  ];
+
+  return {
+    "type": "bubble",
+    "size": "kilo",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#334155",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "Order #" + orderNo + (isPreQuote ? ' (รอราคาช่าง)' : ''),
+          "weight": "bold",
+          "color": "#F8FAFC",
+          "size": "xs",
+          "align": "center"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "sm",
+      "contents": bodyContents
+    }
+  };
+}
+
+function constructMatchNotificationFlex(orderNo, amount, playerLowName, playerHighName, rangeInfo, isChotoy, rocketName) {
+  var lowText = playerLowName || "ผู้เล่น";
+  var highText = playerHighName || "คู่ดวล";
+  var cleanAmt = typeof amount === 'number' ? amount : (parseInt(amount) || amount);
+
+  return {
+    "type": "bubble",
+    "size": "kilo",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#1E1B4B",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "🚀 แมตช์สำเร็จ #" + orderNo,
+          "weight": "bold",
+          "color": "#FFFFFF",
+          "size": "sm",
+          "align": "center"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "md",
+      "contents": [
+        {
+          "type": "text",
+          "text": cleanAmt + " pt",
+          "weight": "bold",
+          "color": "#059669",
+          "size": "xl",
+          "align": "center"
+        },
+        {
+          "type": "separator",
+          "margin": "sm",
+          "color": "#F0F0F0"
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "sm",
+          "contents": [
+            { "type": "text", "text": "🔻 ต่ำ (Low):", "color": "#DC2626", "size": "xs", "weight": "bold", "flex": 4 },
+            { "type": "text", "text": "@" + lowText, "color": "#1E293B", "size": "xs", "weight": "bold", "flex": 6, "align": "end" }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "xs",
+          "contents": [
+            { "type": "text", "text": "🔺 สูง (High):", "color": "#16A34A", "size": "xs", "weight": "bold", "flex": 4 },
+            { "type": "text", "text": "@" + highText, "color": "#1E293B", "size": "xs", "weight": "bold", "flex": 6, "align": "end" }
+          ]
+        },
+        ...(rangeInfo ? [{
+          "type": "text",
+          "text": "ช่วงราคา: " + rangeInfo,
+          "color": "#64748B",
+          "size": "xxs",
+          "align": "center",
+          "margin": "sm"
+        }] : [])
+      ]
+    }
+  };
+}
+
+function constructRoundSummaryFlex(finalTime, targetMin, targetMax, rocketName) {
+  var isLowWin = finalTime < targetMin;
+  var isHighWin = finalTime > targetMax;
+  var outcomeTitle = isLowWin ? "🔻 ฝั่งต่ำ (ชล)" : (isHighWin ? "🔺 ฝั่งสูง (ชถ)" : "🎯 ในราคาช่าง (คืนแต้ม)");
+  var outcomeColor = isLowWin ? "#DC2626" : (isHighWin ? "#16A34A" : "#D97706");
+
+  var bodyContents = [
+    {
+      "type": "text",
+      "text": finalTime + "s",
+      "weight": "bold",
+      "color": "#1E1B4B",
+      "size": "3xl",
+      "align": "center"
+    },
+    {
+      "type": "text",
+      "text": "เวลาบั้งไฟจริง",
+      "size": "xxs",
+      "color": "#64748B",
+      "align": "center",
+      "margin": "none"
+    },
+    {
+      "type": "separator",
+      "margin": "sm",
+      "color": "#F0F0F0"
+    },
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "margin": "sm",
+      "contents": [
+        { "type": "text", "text": "🎯 ราคาช่าง:", "color": "#64748B", "size": "xs", "flex": 4 },
+        { "type": "text", "text": targetMin + " - " + targetMax + " s", "color": "#1E293B", "weight": "bold", "size": "xs", "align": "end", "flex": 6 }
+      ]
+    },
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "margin": "xs",
+      "contents": [
+        { "type": "text", "text": "👑 ฝั่งชนะ:", "color": "#64748B", "size": "xs", "flex": 4 },
+        { "type": "text", "text": outcomeTitle, "color": outcomeColor, "weight": "bold", "size": "xs", "align": "end", "flex": 6 }
+      ]
+    }
+  ];
+
+  if (rocketName) {
+    bodyContents.push({
+      "type": "box",
+      "layout": "horizontal",
+      "margin": "xs",
+      "contents": [
+        { "type": "text", "text": "🚀 บั้งไฟ:", "color": "#64748B", "size": "xs", "flex": 4 },
+        { "type": "text", "text": rocketName, "color": "#334155", "weight": "bold", "size": "xs", "align": "end", "flex": 6 }
+      ]
+    });
+  }
+
+  return {
+    "type": "bubble",
+    "size": "kilo",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#1E1B4B",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "🏆 ประกาศผลสรุปดวล",
+          "weight": "bold",
+          "color": "#FFFFFF",
+          "size": "sm",
+          "align": "center"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "md",
+      "contents": bodyContents
     }
   };
 }
@@ -2484,192 +3352,56 @@ function constructBankingFlex(type, amount, accountDetails, targetUrl, userId) {
   var dateStr = Utilities.formatDate(now, "GMT+7", "dd/MM/yyyy HH:mm:ss");
 
   var isIncome = (type === "Income" || type === "deposit" || type === "เงินเข้า" || type === "ฝากเงิน");
-  // Ocean Green (#00796B) for Income/Deposit, Slate Grey (#455A64) for Expense/Withdrawal
-  var headerBgColor = isIncome ? "#00796B" : "#455A64"; 
+  var headerBgColor = isIncome ? "#10B981" : "#F43F5E"; 
   var badgeText = isIncome ? "เงินเข้า" : "เงินออก";
-  var badgeBgColor = isIncome ? "#E0F2F1" : "#ECEFF1";
-  var badgeTextColor = isIncome ? "#00796B" : "#455A64";
-  
   var amountText = (isIncome ? "+" : "-") + formattedAmount + " บาท";
-  var amountTextColor = isIncome ? "#00796B" : "#455A64";
-  
-  var transactionLabel = isIncome ? "โอนเงินเข้าบัญชี" : "ถอน/โอนเงินออกจากบัญชี";
-  var buttonColor = isIncome ? "#00796B" : "#455A64";
-  
-  var finalUrl = targetUrl || "";
-  if (!finalUrl) {
-    try {
-      finalUrl = ScriptApp.getService().getUrl();
-      if (userId) {
-        finalUrl += "?userId=" + userId;
-      }
-    } catch (e) {
-      finalUrl = "https://example.com/statement";
-    }
-  }
 
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
       "contents": [
         {
-          "type": "box",
-          "layout": "horizontal",
-          "contents": [
-            {
-              "type": "text",
-              "text": "ธุรกรรม",
-              "weight": "bold",
-              "color": "#FFFFFF",
-              "size": "sm",
-              "flex": 1,
-              "align": "start"
-            },
-            {
-              "type": "box",
-              "layout": "vertical",
-              "contents": [
-                {
-                  "type": "text",
-                  "text": badgeText,
-                  "weight": "bold",
-                  "color": badgeTextColor,
-                  "size": "xxs",
-                  "align": "center"
-                }
-              ],
-              "backgroundColor": badgeBgColor,
-              "cornerRadius": "md",
-              "paddingStart": "8px",
-              "paddingEnd": "8px",
-              "paddingTop": "2px",
-              "paddingBottom": "2px",
-              "flex": 0
-            }
-          ]
+          "type": "text",
+          "text": "💳 " + badgeText + ": " + amountText,
+          "weight": "bold",
+          "color": "#FFFFFF",
+          "size": "xs",
+          "align": "center"
         }
       ],
       "backgroundColor": headerBgColor,
-      "paddingAll": "16px"
+      "paddingAll": "sm"
     },
     "body": {
       "type": "box",
       "layout": "vertical",
+      "spacing": "xs",
       "contents": [
-        {
-          "type": "text",
-          "text": amountText,
-          "weight": "bold",
-          "size": "xxl",
-          "color": amountTextColor,
-          "align": "center",
-          "margin": "md"
-        },
-        {
-          "type": "separator",
-          "margin": "lg",
-          "color": "#EAEAEA"
-        },
-        {
-          "type": "box",
-          "layout": "vertical",
-          "margin": "lg",
-          "spacing": "md",
-          "contents": [
-            {
-              "type": "box",
-              "layout": "horizontal",
-              "contents": [
-                {
-                  "type": "text",
-                  "text": "รายการ",
-                  "color": "#999999",
-                  "size": "sm",
-                  "flex": 3
-                },
-                {
-                  "type": "text",
-                  "text": transactionLabel,
-                  "weight": "bold",
-                  "color": "#333333",
-                  "size": "sm",
-                  "flex": 7,
-                  "align": "end"
-                }
-              ]
-            },
-            {
-              "type": "box",
-              "layout": "horizontal",
-              "contents": [
-                {
-                  "type": "text",
-                  "text": "รายละเอียด",
-                  "color": "#999999",
-                  "size": "sm",
-                  "flex": 3
-                },
-                {
-                  "type": "text",
-                  "text": accountDetails,
-                  "weight": "regular",
-                  "color": "#333333",
-                  "size": "sm",
-                  "flex": 7,
-                  "align": "end",
-                  "wrap": true
-                }
-              ]
-            },
-            {
-              "type": "box",
-              "layout": "horizontal",
-              "contents": [
-                {
-                  "type": "text",
-                  "text": "วัน-เวลา",
-                  "color": "#999999",
-                  "size": "sm",
-                  "flex": 3
-                },
-                {
-                  "type": "text",
-                  "text": dateStr + " น.",
-                  "weight": "regular",
-                  "color": "#333333",
-                  "size": "sm",
-                  "flex": 7,
-                  "align": "end"
-                }
-              ]
-            }
-          ]
-        }
+        { "type": "text", "text": accountDetails, "size": "xxs", "color": "#334155", "wrap": true },
+        { "type": "text", "text": "🕒 " + dateStr, "size": "xxs", "color": "#94A3B8" }
       ],
-      "paddingAll": "20px"
+      "paddingAll": "sm"
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "sm",
       "contents": [
         {
           "type": "button",
           "style": "primary",
           "height": "sm",
-          "color": buttonColor,
+          "color": headerBgColor,
           "action": {
             "type": "message",
-            "label": "กลับสู่เมนูหลัก 📋",
+            "label": "🏠 เมนูหลัก",
             "text": "เมนู"
           }
         }
       ],
-      "flex": 0,
-      "paddingAll": "16px"
+      "paddingAll": "sm"
     }
   };
 }
@@ -2744,20 +3476,55 @@ function getLineChatLogs() {
   }
 }
 
-function sendAdminMessageToLine(userId, messageText) {
-  const clean = messageText.replace(/\s+/g, '').toLowerCase();
+function sendAdminMessageToLine(targetId, messageText) {
+  const clean = (messageText || '').toString().replace(/\s+/g, '').toLowerCase();
+
+  // Update round lock status automatically if broadcast contains explicit round open/close keywords
+  const isExplicitCloseCmd = (clean.indexOf('🔒ปิดรับดวล') !== -1 || clean.indexOf('ปิดรับดวล') === 0 || clean.indexOf('ปิดรอบ') === 0 || clean.indexOf('ล็อครอบ') === 0 || clean.indexOf('3-2-go') === 0 || clean.indexOf('หมดเวลาท้าดวลก่อนปล่อยบั้งไฟ') !== -1);
+  const isExplicitOpenCmd = (clean.indexOf('🚀เปิดรอบ') !== -1 || clean.indexOf('เปิดรอบ') === 0 || clean.indexOf('เปิดรับดวล') === 0);
+
+  if (isExplicitCloseCmd) {
+    setRocketRoundStatus('CLOSED');
+  } else if (isExplicitOpenCmd) {
+    setRocketRoundStatus('ACTIVE');
+  }
+
+  var logMsg = typeof messageText === 'object' ? '[Flex Message]' : messageText;
+
+  // Broadcast to ALL active groups
+  if (!targetId || targetId === 'ALL') {
+    var groups = getLineGroups();
+    var activeId = getActiveGroupId();
+    var targetIds = {};
+    for (var gi = 0; gi < groups.length; gi++) {
+      if (groups[gi].id) targetIds[groups[gi].id] = true;
+    }
+    if (activeId) targetIds[activeId] = true;
+
+    var keys = Object.keys(targetIds);
+    if (keys.length === 0) {
+      Logger.log('[sendAdminMessageToLine] No active groups to broadcast.');
+      return false;
+    }
+    for (var k = 0; k < keys.length; k++) {
+      pushLineGroupMessage(keys[k], messageText);
+      logLineChatMessage(keys[k], 'กลุ่ม', 'admin', logMsg, typeof messageText === 'object' ? 'flex' : 'text');
+    }
+    return true;
+  }
+
   let payload = messageText;
-  
+
   if (clean === 'เช็คยอด' || clean === 'คงเหลือ' || clean === 'balance') {
-    const name = getPlayerNameFromDb(userId) || "ผู้เล่น";
-    const balance = getPlayerBalance(userId, name);
+    const name = getPlayerNameFromDb(targetId) || "ผู้เล่น";
+    const balance = getPlayerBalance(targetId, name);
     payload = constructBalanceFlex(name, balance);
   } else if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit') {
     payload = constructDepositFlex();
   } else if (clean === 'ถอนเงิน' || clean === 'ถอนยอด' || clean === 'withdraw') {
-    const bank = getPlayerBank(userId);
+    const bank = getPlayerBank(targetId);
     if (bank) {
-      const balance = getPlayerBalance(userId, bank.accountName || "ผู้เล่น");
+      const balance = getPlayerBalance(targetId, bank.accountName || "ผู้เล่น");
       payload = constructWithdrawalFlex(bank.bankName, bank.accountNumber, bank.accountName, balance);
     } else {
       payload = "❌ ผู้เล่นรายนี้ยังไม่ได้ลงทะเบียนบัญชีธนาคาร (กรุณาทำรายการฝากเงินเข้ามาก่อน)";
@@ -2765,12 +3532,14 @@ function sendAdminMessageToLine(userId, messageText) {
   } else if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start') {
     payload = constructMainMenuFlex();
   }
-  
-  // Push the message to LINE OA
-  pushToLine(userId, payload);
-  // Log it to the database
-  const logText = typeof payload === 'object' ? `[Flex Message: ${messageText}]` : messageText;
-  logLineChatMessage(userId, 'ผู้เล่น', 'admin', logText, typeof payload === 'object' ? 'flex' : 'text');
+
+  if (typeof targetId === 'string' && (targetId.startsWith('C') || /^\d{10,}$/.test(targetId))) {
+    pushLineGroupMessage(targetId, payload);
+  } else {
+    pushToLine(targetId, payload);
+  }
+
+  logLineChatMessage(targetId, 'ผู้เล่น', 'admin', logMsg, typeof payload === 'object' ? 'flex' : 'text');
   return true;
 }
 
@@ -2790,436 +3559,366 @@ function constructRejectionFlex(type, amount, reason, currentBalance, userId) {
     formattedAmount = amount.toString();
   }
 
-  var now = new Date();
-  var dateStr = Utilities.formatDate(now, "GMT+7", "dd/MM/yyyy HH:mm:ss");
-
   var isWithdrawal = (type === "WD" || type === "withdraw" || type === "ถอนเงิน");
-  var title = isWithdrawal ? "คำขอถอนเงินถูกปฏิเสธ" : "บิลฝากเงินถูกปฏิเสธ";
-  var headerBgColor = "#E07A5F"; // Coral/Terracotta (not resembling Thai bank)
-  var badgeText = "ปฏิเสธ";
-  var badgeBgColor = "#FDF0ED";
-  var badgeTextColor = "#E07A5F";
-  
-  var amountText = formattedAmount + " บาท";
-  var amountTextColor = "#E07A5F";
-  
-  var transactionLabel = isWithdrawal ? "ถอนเครดิต (คืนแต้ม)" : "แจ้งฝากเงิน";
-  var balanceLabel = isWithdrawal ? "ยอดคงเหลือปัจจุบัน" : "ยอดคงเหลือ";
-  var balanceText = currentBalance !== undefined ? currentBalance.toLocaleString('th-TH') + " แต้ม" : "-";
-
-  var contents = [
-    {
-      "type": "box",
-      "layout": "horizontal",
-      "contents": [
-        {
-          "type": "text",
-          "text": "รายการ",
-          "color": "#999999",
-          "size": "sm",
-          "flex": 3
-        },
-        {
-          "type": "text",
-          "text": transactionLabel,
-          "weight": "bold",
-          "color": "#333333",
-          "size": "sm",
-          "flex": 7,
-          "align": "end"
-        }
-      ]
-    },
-    {
-      "type": "box",
-      "layout": "horizontal",
-      "contents": [
-        {
-          "type": "text",
-          "text": "เหตุผล",
-          "color": "#999999",
-          "size": "sm",
-          "flex": 3
-        },
-        {
-          "type": "text",
-          "text": reason || "ข้อมูลไม่ถูกต้อง/สลิปไม่ผ่าน",
-          "weight": "bold",
-          "color": "#E07A5F",
-          "size": "sm",
-          "flex": 7,
-          "align": "end",
-          "wrap": true
-        }
-      ]
-    },
-    {
-      "type": "box",
-      "layout": "horizontal",
-      "contents": [
-        {
-          "type": "text",
-          "text": "วัน-เวลา",
-          "color": "#999999",
-          "size": "sm",
-          "flex": 3
-        },
-        {
-          "type": "text",
-          "text": dateStr + " น.",
-          "weight": "regular",
-          "color": "#333333",
-          "size": "sm",
-          "flex": 7,
-          "align": "end"
-        }
-      ]
-    }
-  ];
-
-  if (isWithdrawal && currentBalance !== undefined) {
-    contents.push({
-      "type": "box",
-      "layout": "horizontal",
-      "contents": [
-        {
-          "type": "text",
-          "text": balanceLabel,
-          "color": "#999999",
-          "size": "sm",
-          "flex": 4
-        },
-        {
-          "type": "text",
-          "text": balanceText,
-          "weight": "bold",
-          "color": "#2E7D32",
-          "size": "sm",
-          "flex": 6,
-          "align": "end"
-        }
-      ]
-    });
-  }
-
-  var finalUrl = "";
-  try {
-    finalUrl = ScriptApp.getService().getUrl();
-    if (userId) {
-      finalUrl += "?userId=" + userId;
-    }
-  } catch (e) {
-    finalUrl = "https://example.com";
-  }
+  var title = isWithdrawal ? "ปฏิเสธถอนเงิน" : "ปฏิเสธฝากเงิน";
 
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
       "contents": [
         {
-          "type": "box",
-          "layout": "horizontal",
-          "contents": [
-            {
-              "type": "text",
-              "text": title,
-              "weight": "bold",
-              "color": "#FFFFFF",
-              "size": "sm",
-              "flex": 1,
-              "align": "start"
-            },
-            {
-              "type": "box",
-              "layout": "vertical",
-              "contents": [
-                {
-                  "type": "text",
-                  "text": badgeText,
-                  "weight": "bold",
-                  "color": badgeTextColor,
-                  "size": "xxs",
-                  "align": "center"
-                }
-              ],
-              "backgroundColor": badgeBgColor,
-              "cornerRadius": "md",
-              "paddingStart": "8px",
-              "paddingEnd": "8px",
-              "paddingTop": "2px",
-              "paddingBottom": "2px",
-              "flex": 0
-            }
-          ]
+          "type": "text",
+          "text": "❌ " + title + " (" + formattedAmount + "B)",
+          "weight": "bold",
+          "color": "#FFFFFF",
+          "size": "xs",
+          "align": "center"
         }
       ],
-      "backgroundColor": headerBgColor,
-      "paddingAll": "16px"
+      "backgroundColor": "#F43F5E",
+      "paddingAll": "sm"
     },
     "body": {
       "type": "box",
       "layout": "vertical",
+      "spacing": "xs",
       "contents": [
-        {
-          "type": "text",
-          "text": amountText,
-          "weight": "bold",
-          "size": "xxl",
-          "color": amountTextColor,
-          "align": "center",
-          "margin": "md"
-        },
-        {
-          "type": "separator",
-          "margin": "lg",
-          "color": "#EAEAEA"
-        },
-        {
-          "type": "box",
-          "layout": "vertical",
-          "margin": "lg",
-          "spacing": "md",
-          "contents": contents
-        }
+        { "type": "text", "text": "เหตุผล: " + (reason || "ข้อมูลไม่ถูกต้อง"), "size": "xxs", "color": "#E11D48", "wrap": true }
       ],
-      "paddingAll": "20px"
+      "paddingAll": "sm"
     },
     "footer": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "sm",
       "contents": [
         {
           "type": "button",
           "style": "primary",
           "height": "sm",
-          "color": "#E07A5F",
+          "color": "#F43F5E",
           "action": {
             "type": "uri",
-            "label": "ติดต่อฝ่ายสนับสนุน",
-            "uri": "tel:089-104-1992"
+            "label": "📞 ติดต่อ 089-104-1992",
+            "uri": "tel:0891041992"
           }
         }
       ],
-      "flex": 0,
-      "paddingAll": "16px"
+      "paddingAll": "sm"
     }
   };
 }
 
-function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, payout, currentBalance, winnings, commission, userId) {
-  var headerBgColor = isWinner ? "#00796B" : "#455A64"; // Ocean Green or Slate Grey
-  var title = isWinner ? "🏆 สรุปผลดวล - คุณชนะ!" : "☄️ สรุปผลดวล - คุณแพ้";
-  var badgeText = isWinner ? "ชนะ" : "แพ้";
-  var badgeBgColor = isWinner ? "#E8F5E9" : "#ECEFF1";
-  var badgeTextColor = isWinner ? "#00796B" : "#455A64";
-  
-  var amountText = isWinner ? "+" + payout.toLocaleString('th-TH') + " แต้ม" : "-" + amount.toLocaleString('th-TH') + " แต้ม";
-  var amountTextColor = isWinner ? "#00796B" : "#E07A5F";
-  
-  var details = isWinner 
-    ? "คืนทุน " + amount + " + กำไรหลังหักคอมมิชชั่น 10% (" + (winnings - commission) + " แต้ม)"
-    : "หักเครดิตตามจำนวนเดิมพัน";
-
-  var contents = [
-    {
-      "type": "box",
-      "layout": "horizontal",
-      "contents": [
-        {
-          "type": "text",
-          "text": "แผลดวล",
-          "color": "#999999",
-          "size": "sm",
-          "flex": 3
-        },
-        {
-          "type": "text",
-          "text": "Order #" + orderNo,
-          "weight": "bold",
-          "color": "#333333",
-          "size": "sm",
-          "flex": 7,
-          "align": "end"
-        }
-      ]
-    },
-    {
-      "type": "box",
-      "layout": "horizontal",
-      "contents": [
-        {
-          "type": "text",
-          "text": "เวลาบินจริง",
-          "color": "#999999",
-          "size": "sm",
-          "flex": 3
-        },
-        {
-          "type": "text",
-          "text": finalTime + " วินาที 🚀",
-          "weight": "bold",
-          "color": "#333333",
-          "size": "sm",
-          "flex": 7,
-          "align": "end"
-        }
-      ]
-    },
-    {
-      "type": "box",
-      "layout": "horizontal",
-      "contents": [
-        {
-          "type": "text",
-          "text": "รายละเอียด",
-          "color": "#999999",
-          "size": "sm",
-          "flex": 3
-        },
-        {
-          "type": "text",
-          "text": details,
-          "weight": "regular",
-          "color": "#666666",
-          "size": "xs",
-          "flex": 7,
-          "align": "end",
-          "wrap": true
-        }
-      ]
-    },
-    {
-      "type": "box",
-      "layout": "horizontal",
-      "contents": [
-        {
-          "type": "text",
-          "text": "ยอดเครดิตปัจจุบัน",
-          "color": "#999999",
-          "size": "sm",
-          "flex": 4
-        },
-        {
-          "type": "text",
-          "text": currentBalance.toLocaleString('th-TH') + " แต้ม 💳",
-          "weight": "bold",
-          "color": "#2E7D32",
-          "size": "sm",
-          "flex": 6,
-          "align": "end"
-        }
-      ]
-    }
-  ];
-
-  var finalUrl = "";
-  try {
-    finalUrl = ScriptApp.getService().getUrl();
-    if (userId) {
-      finalUrl += "?userId=" + userId;
-    }
-  } catch (e) {
-    finalUrl = "https://example.com";
-  }
+function constructMatchResultFlex(isWinner, orderNo, amount, finalTime, payout, currentBalance, winnings, commission, userId, rocketName, rangeInfo) {
+  var isWin = !!isWinner;
+  var headerBg = isWin ? "#10B981" : "#F43F5E";
+  var headerTitle = isWin ? "🏆 ชนะ (" + finalTime + "s)" : "☄️ แพ้ (" + finalTime + "s)";
+  var formattedAmt = isWin 
+    ? "+" + Number(payout || (amount * 1.9)).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : "-" + Number(amount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  var amtColor = isWin ? "#059669" : "#E11D48";
+  var dateStr = Utilities.formatDate(new Date(), "GMT+7", "dd MMM yy HH:mm");
 
   return {
     "type": "bubble",
-    "size": "mega",
+    "size": "giga",
     "header": {
       "type": "box",
       "layout": "vertical",
+      "backgroundColor": headerBg,
+      "paddingAll": "sm",
       "contents": [
         {
-          "type": "box",
-          "layout": "horizontal",
-          "contents": [
-            {
-              "type": "text",
-              "text": title,
-              "weight": "bold",
-              "color": "#FFFFFF",
-              "size": "sm",
-              "flex": 1,
-              "align": "start"
-            },
-            {
-              "type": "box",
-              "layout": "vertical",
-              "contents": [
-                {
-                  "type": "text",
-                  "text": badgeText,
-                  "weight": "bold",
-                  "color": badgeTextColor,
-                  "size": "xxs",
-                  "align": "center"
-                }
-              ],
-              "backgroundColor": badgeBgColor,
-              "cornerRadius": "md",
-              "paddingStart": "8px",
-              "paddingEnd": "8px",
-              "paddingTop": "2px",
-              "paddingBottom": "2px",
-              "flex": 0
-            }
-          ]
+          "type": "text",
+          "text": headerTitle,
+          "weight": "bold",
+          "color": "#FFFFFF",
+          "size": "md",
+          "align": "center"
         }
-      ],
-      "backgroundColor": headerBgColor,
-      "paddingAll": "16px"
+      ]
     },
     "body": {
       "type": "box",
       "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "lg",
       "contents": [
         {
           "type": "text",
-          "text": amountText,
+          "text": "Order #" + orderNo,
+          "color": "#94A3B8",
+          "size": "xs",
+          "align": "center"
+        },
+        {
+          "type": "text",
+          "text": formattedAmt,
           "weight": "bold",
-          "size": "xxl",
-          "color": amountTextColor,
+          "color": amtColor,
+          "size": "3xl",
           "align": "center",
-          "margin": "md"
+          "margin": "xs"
+        },
+        {
+          "type": "text",
+          "text": dateStr,
+          "color": "#94A3B8",
+          "size": "xxs",
+          "align": "center",
+          "margin": "xs"
         },
         {
           "type": "separator",
-          "margin": "lg",
-          "color": "#EAEAEA"
+          "margin": "md",
+          "color": "#F1F5F9"
         },
         {
           "type": "box",
-          "layout": "vertical",
-          "margin": "lg",
-          "spacing": "md",
-          "contents": contents
-        }
-      ],
-      "paddingAll": "20px"
-    },
-    "footer": {
-      "type": "box",
-      "layout": "vertical",
-      "spacing": "sm",
-      "contents": [
+          "layout": "horizontal",
+          "margin": "md",
+          "contents": [
+            { "type": "text", "text": "ทีม", "color": "#94A3B8", "size": "xs", "flex": 4 },
+            { "type": "text", "text": rocketName || "ช่างบั้งไฟสด", "weight": "bold", "color": "#334155", "size": "xs", "flex": 6, "align": "end" }
+          ]
+        },
         {
-          "type": "button",
-          "style": "primary",
-          "height": "sm",
-          "color": headerBgColor,
-          "action": {
-            "type": "uri",
-            "label": "ร่วมดวลต่อรอบใหม่ 🚀",
-            "uri": finalUrl
-          }
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "xs",
+          "contents": [
+            { "type": "text", "text": "ราคาช่าง", "color": "#94A3B8", "size": "xs", "flex": 4 },
+            { "type": "text", "text": rangeInfo ? (rangeInfo + "s") : "รอราคาช่าง", "weight": "bold", "color": "#334155", "size": "xs", "flex": 6, "align": "end" }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "margin": "xs",
+          "contents": [
+            { "type": "text", "text": "คงเหลือ", "color": "#94A3B8", "size": "xs", "flex": 4 },
+            { "type": "text", "text": Number(currentBalance || 0).toLocaleString('th-TH') + " pt", "weight": "bold", "color": "#10B981", "size": "xs", "flex": 6, "align": "end" }
+          ]
         }
-      ],
-      "flex": 0,
-      "paddingAll": "16px"
+      ]
     }
   };
+}
+
+function constructOpenRoundQuoteFlex(name, min, max, isChotoy) {
+  var roundName = name || 'บั้งไฟสด';
+  var minVal = min || 330;
+  var maxVal = max || 380;
+
+  return {
+    "type": "bubble",
+    "size": "micro",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#BAE6FD",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "🚀 ราคาช่างเปิด ➔ " + roundName,
+          "weight": "bold",
+          "color": "#0369A1",
+          "size": "sm",
+          "align": "center",
+          "wrap": true
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#F0F9FF",
+      "spacing": "xs",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "⏱️ ช่วงราคา: " + minVal + "-" + maxVal + " วิ" + (isChotoy ? ' (ชตย)' : ''),
+          "weight": "bold",
+          "color": "#0284C7",
+          "size": "xs",
+          "align": "center",
+          "wrap": true
+        },
+        {
+          "type": "text",
+          "text": "⚡ พิมพ์ ชล / ชถ (±5, ±10) ได้ทันที",
+          "color": "#64748B",
+          "size": "xxs",
+          "align": "center"
+        }
+      ]
+    }
+  };
+}
+
+function constructRoundCloseFlex() {
+  return {
+    "type": "bubble",
+    "size": "micro",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FECDD3",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "⛔ FINAL CALL · ปิดรับดวล",
+          "weight": "bold",
+          "color": "#9F1239",
+          "size": "sm",
+          "align": "center"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FFF1F2",
+      "spacing": "xs",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "⚠️ ปิดรับการเปิดราคาเองรอบนี้แล้ว",
+          "weight": "bold",
+          "color": "#BE123C",
+          "size": "xxs",
+          "align": "center",
+          "wrap": true
+        },
+        {
+          "type": "text",
+          "text": "(จับคู่เฉพาะแผลที่เปิดค้างอยู่เท่านั้น)",
+          "color": "#64748B",
+          "size": "xxs",
+          "align": "center"
+        }
+      ]
+    }
+  };
+}
+
+function constructVoidRoundFlex() {
+  return {
+    "type": "bubble",
+    "size": "micro",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FECDD3",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "⛔ ช่าง ⛔ (โมฆะรอบ)",
+          "weight": "bold",
+          "color": "#9F1239",
+          "size": "sm",
+          "align": "center"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FFF1F2",
+      "spacing": "xs",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "ยกเลิกและคืนแต้มทุกแผลดวล 100% เรียบร้อยครับ",
+          "weight": "bold",
+          "color": "#BE123C",
+          "size": "xxs",
+          "align": "center",
+          "wrap": true
+        }
+      ]
+    }
+  };
+}
+
+function constructSecurityWarningFlex() {
+  return {
+    "type": "bubble",
+    "size": "micro",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FDE68A",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "🚨 เตือนความปลอดภัย",
+          "weight": "bold",
+          "color": "#92400E",
+          "size": "sm",
+          "align": "center"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FEFCE8",
+      "spacing": "xs",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1-on-1 เท่านั้นครับ ❌",
+          "weight": "bold",
+          "color": "#B45309",
+          "size": "xxs",
+          "align": "center",
+          "wrap": true
+        }
+      ]
+    }
+  };
+}
+
+// =========================================================================
+// ROUND STATUS — Persisted in ScriptProperties (survives across GAS invocations)
+// =========================================================================
+
+/**
+ * Persist round open/close status across stateless GAS webhook invocations.
+ * Uses ScriptProperties so the state survives between separate HTTP requests.
+ * @param {'ACTIVE'|'CLOSED'} status
+ */
+function setRocketRoundStatus(status) {
+  PropertiesService.getScriptProperties().setProperty('ROUND_STATUS', status);
+  Logger.log('[ROUND] Status set to: ' + status);
+}
+
+/**
+ * Returns true if the admin has locked the current round (no more custom-range bets).
+ * Reads from ScriptProperties — consistent across concurrent webhook invocations.
+ * @returns {boolean}
+ */
+function isRocketRoundClosed() {
+  var status = PropertiesService.getScriptProperties().getProperty('ROUND_STATUS');
+  return status === 'CLOSED';
+}
+
+/**
+ * Returns active round metadata.
+ * @returns {{ name: string, status: string }}
+ */
+function getActiveRocketRound() {
+  var status = PropertiesService.getScriptProperties().getProperty('ROUND_STATUS') || 'ACTIVE';
+  return { name: 'ทั่วไป', status: status };
 }
