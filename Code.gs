@@ -7,11 +7,14 @@
 const LINE_CHANNEL_ACCESS_TOKEN = 'imrgIDDKJzCz68l399JwA9h7O0DGfHeJYEH4BychnR766i6GfWTTENcpm3MshP37uQMGIrV3GoGY9UsMC3li2Yxvq4BYIJjwND1u4GJgppSR0EJPfnGrY+56hzfW0bh0zNyCfQz5wUCABcIhaLGl9gdB04t89/1O/w1cDnyilFU=';
 const SLIP_API_KEY = '697ef678-60df-4955-a13a-6ed4e26a38c0'; // SlipOk or EasySlip
 const SLIP_API_URL = 'https://api.easyslip.com/v2/verify/bank'; // EasySlip bank verification endpoint
-let SHEET_ID = '';
+let SHEET_ID = '1NaQbaUz8fcgd32sCAfxxKNBnpmFA5vu0_YVSehhdCEQ';
 try {
-  SHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
+  var activeSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  if (activeSpreadsheet) {
+    SHEET_ID = activeSpreadsheet.getId();
+  }
 } catch (err) {
-  console.warn("SpreadsheetApp.getActiveSpreadsheet() failed. Standalone mode assumed.");
+  console.warn("Using default SPREADSHEET_ID: " + SHEET_ID);
 }
 
 /**
@@ -867,6 +870,23 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
       if (matchedBet.matcherId && matchedBet.matcherId !== matchedBet.creatorId) {
         pushToLine(matchedBet.matcherId, matchFlex);
       }
+      // If partial match split occurred, broadcast the remaining child bet card to the group!
+      if (matchedBet.isSplit && matchedBet.splitOrderNumber && matchedBet.remainingAmount >= 100) {
+        var groupTarget = groupId || getActiveGroupId();
+        if (groupTarget) {
+          var splitCard = constructBetOpenFlex(
+            matchedBet.splitOrderNumber,
+            matchedBet.remainingAmount,
+            matchedBet.splitSide,
+            matchedBet.creatorName,
+            matchedBet.rangeInfo,
+            false,
+            null,
+            false
+          );
+          pushLineGroupMessage(groupTarget, splitCard);
+        }
+      }
     } else {
       var noOpenMsg = tagPrefix + '🚫 ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ในขณะนี้ครับ';
       replyToLine(replyToken, noOpenMsg, userId);
@@ -1386,10 +1406,15 @@ function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmo
         let playerLowName = row[2] ? row[2].toString().trim() : '';
         let playerHighId = row[3] ? row[3].toString().trim() : '';
         let playerHighName = row[4] ? row[4].toString().trim() : '';
-        const amount = Number(row[5]) || 0;
+        const totalAmount = Number(row[5]) || 0;
+        const betType = row[6] || 'range';
+        const rMin = row[7];
+        const rMax = row[8];
+        const targetGroupId = row[12] || '';
         
         const creatorId = playerLowId ? playerLowId : playerHighId;
         const creatorName = playerLowId ? playerLowName : playerHighName;
+        const creatorSide = playerLowId ? 'low' : 'high';
 
         // 1. OWN_BET GUARD: Check clean ID, raw ID, and displayName
         if (creatorId === searchId || creatorId === cleanUserId(userId) || (creatorName && displayName && creatorName === displayName)) {
@@ -1405,18 +1430,22 @@ function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmo
         }
         
         if (matchAmt !== null) {
-          var min20Percent = Math.max(1, Math.round(amount * 0.20));
+          var min20Percent = Math.max(1, Math.round(totalAmount * 0.20));
           if (matchAmt < min20Percent) {
             return { error: 'BELOW_MIN_PERCENT_LIMIT', minAllowed: min20Percent, percent: 20, provided: matchAmt, orderNumber: orderNo };
           }
-          if (matchAmt > amount) {
-            return { error: 'EXCEEDS_ORDER_AMOUNT', maxAllowed: amount, provided: matchAmt, orderNumber: orderNo };
+          if (matchAmt > totalAmount) {
+            return { error: 'EXCEEDS_ORDER_AMOUNT', maxAllowed: totalAmount, provided: matchAmt, orderNumber: orderNo };
           }
         }
-        var finalMatchAmt = matchAmt !== null ? matchAmt : amount;
+        var finalMatchAmt = matchAmt !== null ? matchAmt : totalAmount;
         if (matcherBal < finalMatchAmt) {
           return { error: 'INSUFFICIENT_BALANCE', required: finalMatchAmt, current: matcherBal, orderNumber: orderNo };
         }
+
+        var isSplit = finalMatchAmt < totalAmount;
+        var remainingAmount = totalAmount - finalMatchAmt;
+        var splitOrderNumber = null;
         
         if (!playerLowId) {
           playerLowId = searchId;
@@ -1426,20 +1455,51 @@ function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmo
           playerHighName = displayName;
         }
         
+        // Update matched portion in sheet
         sheet.getRange(i + 1, 2).setValue(playerLowId);
         sheet.getRange(i + 1, 3).setValue(playerLowName);
         sheet.getRange(i + 1, 4).setValue(playerHighId);
         sheet.getRange(i + 1, 5).setValue(playerHighName);
+        sheet.getRange(i + 1, 6).setValue(finalMatchAmt);
         sheet.getRange(i + 1, 10).setValue('matched');
         
-        adjustPlayerBalance(searchId, -finalMatchAmt);
+        adjustPlayerBalance(searchId, -finalMatchAmt, displayName);
+
+        // If partial match: create Child split order for the remaining amount
+        if (isSplit && remainingAmount >= 100) {
+          splitOrderNumber = (Math.floor(Math.random() * 9000) + 1000).toString();
+          sheet.appendRow([
+            splitOrderNumber,
+            creatorSide === 'low' ? creatorId : '',
+            creatorSide === 'low' ? creatorName : '',
+            creatorSide === 'high' ? creatorId : '',
+            creatorSide === 'high' ? creatorName : '',
+            remainingAmount,
+            betType,
+            rMin || '',
+            rMax || '',
+            'pending_match',
+            '',
+            new Date(),
+            targetGroupId || ''
+          ]);
+        }
+
+        var rangeInfoStr = (rMin && rMax) ? (rMin + '-' + rMax + 's') : '';
+
         return {
           orderNumber: orderNo,
           amount: finalMatchAmt,
           playerLowName: playerLowName,
           playerHighName: playerHighName,
           creatorId: creatorId,
-          matcherId: searchId
+          creatorName: creatorName,
+          matcherId: searchId,
+          rangeInfo: rangeInfoStr,
+          isSplit: isSplit,
+          remainingAmount: remainingAmount,
+          splitOrderNumber: splitOrderNumber,
+          splitSide: creatorSide
         };
       }
     }
@@ -1451,7 +1511,11 @@ function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmo
     const row = data[i];
     if (row[9] === 'pending_match') {
       const orderNo = row[0];
-      const amount = Number(row[5]) || 0;
+      const totalAmount = Number(row[5]) || 0;
+      const betType = row[6] || 'range';
+      const rMin = row[7];
+      const rMax = row[8];
+      const targetGroupId = row[12] || '';
       
       let playerLowId = row[1] ? row[1].toString().trim() : '';
       let playerLowName = row[2];
@@ -1459,11 +1523,18 @@ function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmo
       let playerHighName = row[4];
       
       const creatorId = playerLowId ? playerLowId : playerHighId;
+      const creatorName = playerLowId ? playerLowName : playerHighName;
+      const creatorSide = playerLowId ? 'low' : 'high';
       if (creatorId === searchId) continue;
-      
-      if (matcherBal < amount) {
-        return { error: 'INSUFFICIENT_BALANCE', required: amount, current: matcherBal, orderNumber: orderNo };
+
+      var finalMatchAmtAuto = (matchAmt !== null && matchAmt <= totalAmount) ? matchAmt : totalAmount;
+      if (matcherBal < finalMatchAmtAuto) {
+        return { error: 'INSUFFICIENT_BALANCE', required: finalMatchAmtAuto, current: matcherBal, orderNumber: orderNo };
       }
+
+      var isSplitAuto = finalMatchAmtAuto < totalAmount;
+      var remainingAmountAuto = totalAmount - finalMatchAmtAuto;
+      var splitOrderNumberAuto = null;
       
       if (!playerLowId) {
         playerLowId = searchId;
@@ -1477,13 +1548,31 @@ function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmo
       sheet.getRange(i + 1, 3).setValue(playerLowName);
       sheet.getRange(i + 1, 4).setValue(playerHighId);
       sheet.getRange(i + 1, 5).setValue(playerHighName);
+      sheet.getRange(i + 1, 6).setValue(finalMatchAmtAuto);
       sheet.getRange(i + 1, 10).setValue('matched');
       
-      var finalMatchAmtAuto = (matchAmt !== null && matchAmt <= amount) ? matchAmt : amount;
-      if (matcherBal < finalMatchAmtAuto) {
-        return { error: 'INSUFFICIENT_BALANCE', required: finalMatchAmtAuto, current: matcherBal, orderNumber: orderNo };
+      adjustPlayerBalance(searchId, -finalMatchAmtAuto, displayName);
+
+      if (isSplitAuto && remainingAmountAuto >= 100) {
+        splitOrderNumberAuto = (Math.floor(Math.random() * 9000) + 1000).toString();
+        sheet.appendRow([
+          splitOrderNumberAuto,
+          creatorSide === 'low' ? creatorId : '',
+          creatorSide === 'low' ? creatorName : '',
+          creatorSide === 'high' ? creatorId : '',
+          creatorSide === 'high' ? creatorName : '',
+          remainingAmountAuto,
+          betType,
+          rMin || '',
+          rMax || '',
+          'pending_match',
+          '',
+          new Date(),
+          targetGroupId || ''
+        ]);
       }
-      adjustPlayerBalance(searchId, -finalMatchAmtAuto);
+
+      var rangeInfoStrAuto = (rMin && rMax) ? (rMin + '-' + rMax + 's') : '';
 
       return {
         orderNumber: orderNo,
@@ -1491,7 +1580,13 @@ function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmo
         playerLowName: playerLowName,
         playerHighName: playerHighName,
         creatorId: creatorId,
-        matcherId: searchId
+        creatorName: creatorName,
+        matcherId: searchId,
+        rangeInfo: rangeInfoStrAuto,
+        isSplit: isSplitAuto,
+        remainingAmount: remainingAmountAuto,
+        splitOrderNumber: splitOrderNumberAuto,
+        splitSide: creatorSide
       };
     }
   }
@@ -2266,7 +2361,10 @@ function resetGoogleSheetsDatabase() {
  * @param {Object|string} text - Message payload
  */
 function pushLineGroupMessage(groupId, text) {
-  if (!groupId) return;
+  if (!groupId) {
+    Logger.log('[pushLineGroupMessage] Error: No groupId specified.');
+    return { success: false, error: 'NO_GROUP_ID' };
+  }
   var url = 'https://api.line.me/v2/bot/message/push';
   var messageObj;
   if (typeof text === 'object' && text !== null) {
@@ -2290,20 +2388,49 @@ function pushLineGroupMessage(groupId, text) {
     var code = res.getResponseCode();
     var body = res.getContentText();
     Logger.log('[pushLineGroupMessage to ' + groupId + '] Status: ' + code + ' Body: ' + body);
-    if (code !== 200 && typeof text === 'object') {
+    
+    if (code === 200) {
+      return { success: true, code: 200, groupId: groupId };
+    }
+
+    // Fallback: If flex fails, try sending plain text
+    if (typeof text === 'object') {
       var headerStr = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text) || '';
       var fbText = '🚀 ' + headerStr;
-      UrlFetchApp.fetch(url, {
+      var fbRes = UrlFetchApp.fetch(url, {
         method: 'post',
         contentType: 'application/json',
         headers: { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN },
         payload: JSON.stringify({ to: groupId, messages: [{ type: 'text', text: fbText }] }),
         muteHttpExceptions: true
       });
+      var fbCode = fbRes.getResponseCode();
+      return { success: fbCode === 200, code: fbCode, body: fbRes.getContentText(), groupId: groupId, fallback: true };
     }
+    return { success: false, code: code, body: body, groupId: groupId };
   } catch (e) {
-    Logger.log('[pushLineGroupMessage] Error: ' + e.toString());
+    Logger.log('[pushLineGroupMessage] Exception: ' + e.toString());
+    return { success: false, error: e.toString(), groupId: groupId };
   }
+}
+
+/**
+ * Diagnostic test push from Admin Portal to verify LINE group connectivity
+ */
+function adminTestPushGroupMessage(targetGroupId) {
+  var gid = targetGroupId || getActiveGroupId();
+  if (!gid) {
+    return { success: false, error: 'ไม่พบ Group ID ที่เชื่อมต่อ — กรุณาใส่ Group ID ก่อนทดสอบครับ' };
+  }
+  var testMsg = '🔔 ทดสอบการเชื่อมต่อระบบ Rocket Science จาก Admin Web App (เวลา: ' + Utilities.formatDate(new Date(), 'GMT+7', 'HH:mm:ss') + ') 🚀';
+  var res = pushLineGroupMessage(gid, testMsg);
+  return {
+    success: res.success,
+    code: res.code,
+    groupId: gid,
+    body: res.body || '',
+    error: res.error || null
+  };
 }
 
 /**
@@ -3802,13 +3929,15 @@ function sendAdminMessageToLine(targetId, messageText) {
     var keys = Object.keys(targetIds);
     if (keys.length === 0) {
       Logger.log('[sendAdminMessageToLine] No active groups found to broadcast. ACTIVE_GROUP_ID=' + getActiveGroupId());
-      return false;
+      return { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ — กรุณาใส่ Group ID ก่อนส่งครับ', targets: [] };
     }
+    var sendResults = [];
     for (var k = 0; k < keys.length; k++) {
-      pushLineGroupMessage(keys[k], messageText);
+      var r = pushLineGroupMessage(keys[k], messageText);
+      sendResults.push(r);
       logLineChatMessage(keys[k], 'กลุ่ม', 'admin', logMsg, isObj ? 'flex' : 'text');
     }
-    return true;
+    return { success: true, count: keys.length, targets: keys, results: sendResults };
   }
 
   // ─── Single target: resolve payload if keyword ───
@@ -3836,14 +3965,16 @@ function sendAdminMessageToLine(targetId, messageText) {
   // ─── Route by ID type ───
   // Group IDs start with 'C' or 'R', User IDs start with 'U'
   var isGroupTarget = typeof targetId === 'string' && (targetId.startsWith('C') || targetId.startsWith('R') || /^\d{10,}$/.test(targetId));
+  var singleRes = null;
   if (isGroupTarget) {
-    pushLineGroupMessage(targetId, payload);
+    singleRes = pushLineGroupMessage(targetId, payload);
   } else {
     pushToLine(targetId, payload);
+    singleRes = { success: true, targetId: targetId };
   }
 
   logLineChatMessage(targetId, isGroupTarget ? 'กลุ่ม' : 'ผู้เล่น', 'admin', logMsg, (typeof payload === 'object') ? 'flex' : 'text');
-  return true;
+  return { success: true, count: 1, targets: [targetId], result: singleRes };
 }
 
 

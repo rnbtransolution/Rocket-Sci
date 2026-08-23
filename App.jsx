@@ -210,7 +210,7 @@ export default function App() {
   const [quoteBetAmount, setQuoteBetAmount] = useState(''); // Bet Amount (entered manually by admin)
   const [quoteIsChotoy, setQuoteIsChotoy] = useState(false);
 
-  const handleBroadcastFastQuote = (overrideMin = null, overrideMax = null, overrideAmt = null, overrideChotoy = null) => {
+  const handleBroadcastFastQuote = async (overrideMin = null, overrideMax = null, overrideAmt = null, overrideChotoy = null) => {
     const min = overrideMin !== null ? overrideMin : targetMin;
     const max = overrideMax !== null ? overrideMax : targetMax;
     const isChotoy = overrideChotoy !== null ? overrideChotoy : quoteIsChotoy;
@@ -269,10 +269,20 @@ export default function App() {
     };
 
     // Use GAS-side wrapper to avoid sending large Flex objects through the bridge
-    runBackendFunction('adminBroadcastQuote', [broadcastTargetGroup || 'ALL', name, min, max, isChotoy]);
-    const targetObj = lineGroups.find(g => g.id === broadcastTargetGroup);
-    const targetName = broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่ม' : (targetObj ? targetObj.name : `กลุ่ม (#${broadcastTargetGroup.slice(-4)})`);
-    addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) → ${targetName} เรียบร้อย!`, 'success');
+    try {
+      const res = await runBackendFunction('adminBroadcastQuote', [broadcastTargetGroup || 'ALL', name, min, max, isChotoy]);
+      const targetObj = lineGroups.find(g => g.id === broadcastTargetGroup);
+      const targetName = broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่ม' : (targetObj ? targetObj.name : `กลุ่ม (#${broadcastTargetGroup.slice(-4)})`);
+      
+      if (res && res.success === false) {
+        addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || 'ไม่พบ Group ID'}`, 'warning');
+      } else {
+        addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) → ${targetName} เรียบร้อย!`, 'success');
+      }
+    } catch (e) {
+      console.error('Error broadcasting quote:', e);
+      addToast(`❌ Broadcast Error: ${e.message}`, 'danger');
+    }
   };
   const [customRocketTime, setCustomRocketTime] = useState(''); // Manual entry by admin (blank default)
   const [flightLogs, setFlightLogs] = useState([]);
@@ -2017,17 +2027,34 @@ export default function App() {
                   </div>
                 )}
                 {activeGroupId && (
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-emerald-800">✅ Active Group ID: <span className="font-mono text-[10px]">...{activeGroupId.slice(-10)}</span></span>
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-emerald-800">✅ Active Group ID: <span className="font-mono text-[10px]">...{activeGroupId.slice(-10)}</span></span>
+                      <button onClick={async () => {
+                        const gid = window.prompt('เปลี่ยน Group ID (วาง LINE Group ID ใหม่):');
+                        if (gid && gid.trim().length > 5) {
+                          await runBackendFunction('adminSetActiveGroupId', [gid.trim()]);
+                          const dash = await runBackendFunction('getDashboardData', []);
+                          if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
+                          addToast(`✅ เปลี่ยน Group ID เป็น ...${gid.trim().slice(-8)}`, 'success');
+                        }
+                      }} className="text-[10px] text-emerald-600 hover:text-emerald-800 font-bold underline">เปลี่ยน</button>
+                    </div>
                     <button onClick={async () => {
-                      const gid = window.prompt('เปลี่ยน Group ID (วาง LINE Group ID ใหม่):');
-                      if (gid && gid.trim().length > 5) {
-                        await runBackendFunction('adminSetActiveGroupId', [gid.trim()]);
-                        const dash = await runBackendFunction('getDashboardData', []);
-                        if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
-                        addToast(`✅ เปลี่ยน Group ID เป็น ...${gid.trim().slice(-8)}`, 'success');
+                      addToast('⚡ กำลังทดสอบส่ง Push Message เข้ากลุ่ม...', 'info');
+                      try {
+                        const testRes = await runBackendFunction('adminTestPushGroupMessage', [activeGroupId]);
+                        if (testRes && testRes.success) {
+                          addToast(`✅ ทดสอบส่ง Push สำเร็จ! (HTTP 200) ข้อความเด้งเข้ากลุ่มแล้ว 🚀`, 'success');
+                        } else {
+                          addToast(`❌ LINE Push ล้มเหลว (HTTP ${testRes?.code || 'Error'}): ${testRes?.body || testRes?.error || 'Unknown'}`, 'danger');
+                        }
+                      } catch (err) {
+                        addToast(`❌ Error: ${err.message}`, 'danger');
                       }
-                    }} className="text-[10px] text-emerald-600 hover:text-emerald-800 font-bold underline">เปลี่ยน</button>
+                    }} className="py-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg transition-all active:scale-95 shadow-xs flex items-center gap-1">
+                      ⚡ ทดสอบส่ง Push เข้ากลุ่ม
+                    </button>
                   </div>
                 )}
 
@@ -2076,28 +2103,40 @@ export default function App() {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs font-bold">
                     {/* Rule Guide */}
-                    <button onClick={() => {
-                      runBackendFunction('adminBroadcastRuleGuide', [broadcastTargetGroup || 'ALL']);
-                      addToast('📖 ประกาศส่งคู่มือคีย์เวิร์ด & กติกาการเล่น เรียบร้อย!', 'info');
+                    <button onClick={async () => {
+                      try {
+                        const res = await runBackendFunction('adminBroadcastRuleGuide', [broadcastTargetGroup || 'ALL']);
+                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || 'ไม่พบ Group ID'}`, 'warning');
+                        else addToast('📖 ประกาศส่งคู่มือคีย์เวิร์ด & กติกาการเล่น เรียบร้อย!', 'info');
+                      } catch(e) { addToast(`❌ Error: ${e.message}`, 'danger'); }
                     }} className="py-2.5 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">📖 ประกาศส่งคู่มือคีย์เวิร์ดกติกา</button>
 
                     {/* Final Call */}
-                    <button onClick={() => {
-                      runBackendFunction('adminBroadcastFinalCall', [broadcastTargetGroup || 'ALL']);
-                      addToast('⛔ ประกาศปิดรับดวล (Final Call) เรียบร้อย!', 'warning');
+                    <button onClick={async () => {
+                      try {
+                        const res = await runBackendFunction('adminBroadcastFinalCall', [broadcastTargetGroup || 'ALL']);
+                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || 'ไม่พบ Group ID'}`, 'warning');
+                        else addToast('⛔ ประกาศปิดรับดวล (Final Call) เรียบร้อย!', 'warning');
+                      } catch(e) { addToast(`❌ Error: ${e.message}`, 'danger'); }
                     }} className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">⛔ ปิดรับดวล (Final Call)</button>
 
                     {/* Void Round */}
-                    <button onClick={() => {
+                    <button onClick={async () => {
                       if (!window.confirm("⛔ คุณต้องการประกาศ 'ช่าง ⛔' (โมฆะรอบ) และยกเลิกคืนแต้มแผลดวลทั้งหมดใช่หรือไม่?")) return;
-                      runBackendFunction('adminBroadcastVoidRound', [broadcastTargetGroup || 'ALL']);
-                      addToast('⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ) และคืนแต้มผู้เล่นเรียบร้อย!', 'danger');
+                      try {
+                        const res = await runBackendFunction('adminBroadcastVoidRound', [broadcastTargetGroup || 'ALL']);
+                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || 'ไม่พบ Group ID'}`, 'warning');
+                        else addToast('⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ) และคืนแต้มผู้เล่นเรียบร้อย!', 'danger');
+                      } catch(e) { addToast(`❌ Error: ${e.message}`, 'danger'); }
                     }} className="py-2.5 px-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ)</button>
 
                     {/* Scam Warning */}
-                    <button onClick={() => {
-                      runBackendFunction('adminBroadcastScamWarning', [broadcastTargetGroup || 'ALL']);
-                      addToast('🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพเรียบร้อย!', 'info');
+                    <button onClick={async () => {
+                      try {
+                        const res = await runBackendFunction('adminBroadcastScamWarning', [broadcastTargetGroup || 'ALL']);
+                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || 'ไม่พบ Group ID'}`, 'warning');
+                        else addToast('🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพเรียบร้อย!', 'info');
+                      } catch(e) { addToast(`❌ Error: ${e.message}`, 'danger'); }
                     }} className="py-2.5 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">🚨 เตือนมิจฉาชีพ</button>
                   </div>
                 </div>
