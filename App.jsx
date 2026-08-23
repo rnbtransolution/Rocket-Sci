@@ -109,9 +109,10 @@ const SLIP_PRESETS = [
 const ADMIN_PASSCODE = '1234';
 
 export default function App() {
-  const isGAS = typeof window !== 'undefined' && !!(window.google && window.google.script && window.google.script.run);
+  const isGAS = typeof window !== 'undefined' && !!(window.google && window.google.script && window.google.script.run) && !window.isNodeJS;
   const isGitHubPages = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
-  const API_BASE_URL = isGitHubPages ? 'https://rocket-sci.onrender.com' : '';
+  const GAS_ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbzzzrz0KDdYOwZ7nK7SxYbFMf7OT39mR8lAw4xeGUT_48Ju3tfafkiZzdrrqrRbvIzqyg/exec';
+  const API_BASE_URL = isGitHubPages ? '' : '';
 
   const runBackendFunction = async (functionName, args = []) => {
     if (isGAS) {
@@ -134,6 +135,24 @@ export default function App() {
         }
       });
     }
+
+    if (isGitHubPages) {
+      // Direct high-speed API to Google Apps Script from GitHub Pages
+      try {
+        const res = await fetch(GAS_ENDPOINT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ functionName, args }),
+        });
+        const json = await res.json();
+        if (json.error) throw new Error(json.error);
+        return json.data;
+      } catch (err) {
+        console.error(`[GitHub Pages API Call to GAS Error]:`, err);
+        throw err;
+      }
+    }
+
     const res = await fetch(`${API_BASE_URL}/api/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -352,6 +371,21 @@ export default function App() {
       };
       fetchGAS();
       const interval = setInterval(fetchGAS, 3000);
+      return () => clearInterval(interval);
+
+    } else if (isGitHubPages) {
+      // GitHub Pages hosted: direct high-speed poll to Google Apps Script API
+      const fetchFromGASApi = async () => {
+        try {
+          const res = await fetch(`${GAS_ENDPOINT_URL}?action=getDashboardData`);
+          const json = await res.json();
+          if (json && json.data) applyData(json.data);
+        } catch(e) {
+          console.error('[GitHub Pages Polling Error]:', e);
+        }
+      };
+      fetchFromGASApi();
+      const interval = setInterval(fetchFromGASApi, 2500);
       return () => clearInterval(interval);
 
     } else if (isLiveBackend) {

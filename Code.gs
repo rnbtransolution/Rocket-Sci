@@ -238,10 +238,26 @@ function adminOpenRound(name) {
 }
 
 /**
- * HTTP GET: Serves the bundled React Admin & Simulator UI.
- * This runs when accessing the GAS Web App URL in a browser.
+ * HTTP GET: Serves the bundled React Admin & Simulator UI, or JSON API for external clients.
  */
 function doGet(e) {
+  // If requested via JSON API (e.g. from GitHub Pages)
+  if (e && e.parameter && (e.parameter.action === 'getDashboardData' || e.parameter.api === '1')) {
+    var data = getDashboardData();
+    return ContentService.createTextOutput(JSON.stringify({ success: true, data: data }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  if (e && e.parameter && e.parameter.action) {
+    var action = e.parameter.action;
+    var args = [];
+    try {
+      args = e.parameter.args ? JSON.parse(e.parameter.args) : [];
+    } catch(_) {}
+    var res = executeAdminAction(action, args);
+    return ContentService.createTextOutput(JSON.stringify({ success: true, data: res }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
   var html;
   try {
     html = HtmlService.createHtmlOutputFromFile('index');
@@ -255,14 +271,56 @@ function doGet(e) {
 }
 
 /**
- * HTTP POST: LINE OA Webhook endpoint.
- * This receives messages, images, and events sent by players.
+ * Universal Action Dispatcher for Admin RPC functions.
+ */
+function executeAdminAction(functionName, args) {
+  args = args || [];
+  switch (functionName) {
+    case 'getDashboardData': return getDashboardData();
+    case 'adminApproveTransaction': return adminApproveTransaction(args[0]);
+    case 'adminRejectTransaction': return adminRejectTransaction(args[0], args[1]);
+    case 'adminResolveBets': return adminResolveBets(args[0], args[1], args[2]);
+    case 'adminVoidRound': return adminVoidRound();
+    case 'adminRequestCancelBet': return adminRequestCancelBet(args[0]);
+    case 'adminSetPlayerBank': return adminSetPlayerBank(args[0], args[1], args[2], args[3]);
+    case 'adminCreatePlayer': return adminCreatePlayer(args[0], args[1], args[2]);
+    case 'adminUpdatePlayerName': return adminUpdatePlayerName(args[0], args[1]);
+    case 'adminSetPlayerBalance': return adminSetPlayerBalance(args[0], args[1]);
+    case 'adminDeletePlayer': return adminDeletePlayer(args[0]);
+    case 'saveOpenBet': return saveOpenBet(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9]);
+    case 'verifyMockSlipFromClient': return verifyMockSlipFromClient(args[0], args[1], args[2], args[3], args[4]);
+    case 'resetGoogleSheetsDatabase': return resetGoogleSheetsDatabase();
+    case 'sendAdminMessageToLine': return sendAdminMessageToLine(args[0], args[1]);
+    case 'adminOpenRound': return adminOpenRound(args[0]);
+    case 'adminBroadcastQuote': return adminBroadcastQuote(args[0], args[1], args[2], args[3], args[4]);
+    case 'adminBroadcastFinalCall': return adminBroadcastFinalCall(args[0]);
+    case 'adminBroadcastVoidRound': return adminBroadcastVoidRound(args[0]);
+    case 'adminBroadcastRuleGuide': return adminBroadcastRuleGuide(args[0]);
+    case 'adminBroadcastScamWarning': return adminBroadcastScamWarning(args[0]);
+    case 'adminSetActiveGroupId': return adminSetActiveGroupId(args[0]);
+    case 'adminDiscoverGroupIds': return adminDiscoverGroupIds();
+    case 'adminTestPushGroupMessage': return adminTestPushGroupMessage(args[0]);
+    default: return { error: 'Unknown function: ' + functionName };
+  }
+}
+
+/**
+ * HTTP POST: LINE OA Webhook endpoint & External API endpoint.
  */
 function doPost(e) {
   try {
     const postData = JSON.parse(e.postData.contents);
-    const events = postData.events;
     
+    // Check if this is an API call from GitHub Pages or external client
+    if (postData.functionName || postData.action) {
+      const fn = postData.functionName || postData.action;
+      const args = postData.args || [];
+      const res = executeAdminAction(fn, args);
+      return ContentService.createTextOutput(JSON.stringify({ success: true, data: res }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    const events = postData.events || [];
     for (let i = 0; i < events.length; i++) {
       const event = events[i];
       const replyToken = event.replyToken;

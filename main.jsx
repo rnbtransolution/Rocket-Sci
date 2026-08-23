@@ -16,7 +16,9 @@ function createAppsScriptRunner(successHandler = null, failureHandler = null) {
       
       // Return a function representing the remote server-side function
       return function(...args) {
-        fetch('/api/run', {
+        const isGH = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
+        const baseUrl = isGH ? 'https://rocket-sci.onrender.com' : '';
+        fetch(`${baseUrl}/api/run`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ functionName: prop, args })
