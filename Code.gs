@@ -1052,10 +1052,6 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
   var rangeInfo = (rangeMin && rangeMax) ? (rangeMin + '-' + rangeMax + 's') : '';
   var betOpenFlex = constructBetOpenFlex(orderNumber, amount, side, displayName, rangeInfo, false, userTypedCmdStr, isPreQuoteBet);
   replyToLine(replyToken, betOpenFlex, userId);
-  // If created in group, also send copy to user's private 1-on-1 chat
-  if (groupId && userId && userId !== groupId) {
-    pushToLine(userId, betOpenFlex);
-  }
 }
 
 /**
@@ -1350,26 +1346,6 @@ function saveOpenBet(orderNo, userId, displayName, side, amount, type, rMin, rMa
     new Date(),
     targetGroupId || ''
   ]);
-
-  var targetGroups = [];
-  if (targetGroupId && targetGroupId !== 'ALL') {
-    targetGroups = [targetGroupId];
-  } else {
-    var activeId = getActiveGroupId();
-    if (activeId) targetGroups.push(activeId);
-  }
-
-  if (targetGroups.length > 0) {
-    try {
-      var rangeInfoStr = (rMin && rMax) ? (rMin + '-' + rMax + 's') : '';
-      var betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfoStr, false, userTypedCmd || null, !!isPreQuote);
-      for (var gi = 0; gi < targetGroups.length; gi++) {
-        pushLineGroupMessage(targetGroups[gi], betCard);
-      }
-    } catch(e) {
-      Logger.log('Error pushing order flex card in saveOpenBet: ' + e.toString());
-    }
-  }
 }
 
 /**

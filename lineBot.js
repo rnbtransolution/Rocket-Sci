@@ -1161,9 +1161,6 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   
   const betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfo, isChotoy, userTypedCmd, isPreQuote);
   await replyToLine(replyToken, betCard, userId);
-  if (groupId && userId && userId !== groupId) {
-    await pushToLine(userId, betCard);
-  }
 }
 
 // --- LINE FLEX CONSTRUCTORS ---
