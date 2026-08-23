@@ -353,6 +353,16 @@ export async function broadcastToAllGroups(messageTextOrFlex) {
   groups.forEach(g => { if (g.id) targetIds.add(g.id); });
   if (activeId) targetIds.add(activeId);
 
+  // Fallback: If no group in properties, search open/historical bets for group IDs
+  if (targetIds.size === 0) {
+    const bets = dashData?.bets || [];
+    bets.forEach(b => {
+      if (b.groupId && (b.groupId.startsWith('C') || b.groupId.startsWith('R') || b.groupId.startsWith('c') || b.groupId.startsWith('r'))) {
+        targetIds.add(b.groupId);
+      }
+    });
+  }
+
   const pushes = Array.from(targetIds).map(gId => pushToLine(gId, messageTextOrFlex));
   await Promise.allSettled(pushes);
   return true;
@@ -942,8 +952,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
         const orderErrMsg = groupId
           ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-380${cmd} (คุณระบุ ${minVal}-${maxVal})`
           : `⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-380${cmd} (คุณระบุ ${minVal}-${maxVal})`;
-        if (groupId) await pushToLine(groupId, orderErrMsg);
-        else await replyToLine(replyToken, orderErrMsg, userId);
+        await replyToLine(replyToken, orderErrMsg, userId);
         return true;
       }
 
@@ -953,8 +962,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
         const windowErrMsg = groupId
           ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ช่วงราคาต้องห่างกัน 80 วินาทีพอดีครับ เช่น 300-380${cmd} (คุณระบุ ${minVal}-${maxVal} ห่าง ${diff} วิ)`
           : `⚠️ ช่วงราคาต้องห่างกัน 80 วินาทีพอดีครับ เช่น 300-380${cmd} (คุณระบุ ${minVal}-${maxVal} ห่าง ${diff} วิ)`;
-        if (groupId) await pushToLine(groupId, windowErrMsg);
-        else await replyToLine(replyToken, windowErrMsg, userId);
+        await replyToLine(replyToken, windowErrMsg, userId);
         return true;
       }
 
@@ -963,8 +971,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
         const minAmtMsg = groupId
           ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`
           : `⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`;
-        if (groupId) await pushToLine(groupId, minAmtMsg);
-        else await replyToLine(replyToken, minAmtMsg, userId);
+        await replyToLine(replyToken, minAmtMsg, userId);
         return true;
       }
 
@@ -983,8 +990,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
       const deltaErrMsg = groupId
         ? `👤 [ถึงคุณ @${displayName}]: ⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)`
         : `⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)`;
-      if (groupId) await pushToLine(groupId, deltaErrMsg);
-      else await replyToLine(replyToken, deltaErrMsg, userId);
+      await replyToLine(replyToken, deltaErrMsg, userId);
       return true;
     }
     offsetDelta = deltaVal;
@@ -1006,8 +1012,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
         const minAmtMsg = groupId
           ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`
           : `⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`;
-        if (groupId) await pushToLine(groupId, minAmtMsg);
-        else await replyToLine(replyToken, minAmtMsg, userId);
+        await replyToLine(replyToken, minAmtMsg, userId);
         return true;
       }
 
@@ -1037,7 +1042,7 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
     const msg = groupId
       ? `👤 [ถึงคุณ @${displayName}]: ⛔ ปิดรับการเปิดราคาเองแล้ว (Final Call) กรุณารอจับคู่แผลที่เปิดค้างอยู่หรือรอรอบถัดไปครับ`
       : `⛔ ปิดรับการเปิดราคาเองแล้ว (Final Call) กรุณารอจับคู่แผลที่เปิดค้างอยู่หรือรอรอบถัดไปครับ`;
-    if (groupId) await pushToLine(groupId, msg); else await replyToLine(replyToken, msg, userId);
+    await replyToLine(replyToken, msg, userId);
     return;
   }
   // Check if admin account (Admin quotes do NOT require credit deduction as they serve as guidelines)

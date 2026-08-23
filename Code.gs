@@ -724,29 +724,29 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
 
     if (matchedBet && matchedBet.error === 'BELOW_MIN_PERCENT_LIMIT') {
       var minMsg = tagPrefix + '⚠️ ยอดดวลขั้นต่ำคือ 20% (' + (matchedBet.minAllowed || 0) + ' pt) ของ Order #' + (matchedBet.orderNumber || targetOrderNo) + ' ครับ (คุณระบุ ' + (matchedBet.provided || 0) + ' pt)';
-      if (groupId) { pushToLine(groupId, minMsg); } else { replyToLine(replyToken, minMsg, userId); }
+      replyToLine(replyToken, minMsg, userId);
     } else if (matchedBet && matchedBet.error === 'OWN_BET') {
       var ownBetMsg = tagPrefix + '⚠️ คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ';
-      if (groupId) { pushToLine(groupId, ownBetMsg); } else { replyToLine(replyToken, ownBetMsg, userId); }
+      replyToLine(replyToken, ownBetMsg, userId);
     } else if (matchedBet && matchedBet.error === 'CANCELLED') {
       var cancelMsg = tagPrefix + '🚫 แผล Order #' + matchedBet.orderNumber + ' ถูกยกเลิกไปแล้วครับ';
-      if (groupId) { pushToLine(groupId, cancelMsg); } else { replyToLine(replyToken, cancelMsg, userId); }
+      replyToLine(replyToken, cancelMsg, userId);
     } else if (matchedBet && matchedBet.error === 'ALREADY_MATCHED') {
       var alreadyMsg = tagPrefix + '⚠️ แผล Order #' + matchedBet.orderNumber + ' มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ';
-      if (groupId) { pushToLine(groupId, alreadyMsg); } else { replyToLine(replyToken, alreadyMsg, userId); }
+      replyToLine(replyToken, alreadyMsg, userId);
     } else if (matchedBet && matchedBet.error === 'INSUFFICIENT_BALANCE') {
       var needed = (matchedBet.required || 0) - (matchedBet.current || 0);
       var insuffMsg = tagPrefix + '⚠️ แต้มไม่พอ (มี ' + (matchedBet.current || 0) + 'pt | ขาด ' + needed + 'pt) พิมพ์ "ฝากเงิน"';
-      if (groupId) { pushToLine(groupId, insuffMsg); } else { replyToLine(replyToken, insuffMsg, userId); }
+      replyToLine(replyToken, insuffMsg, userId);
     } else if (matchedBet && matchedBet.error === 'BELOW_MIN_LIMIT') {
       var minMsg = tagPrefix + '⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + (matchedBet.provided || 0) + ' pt)';
-      if (groupId) { pushToLine(groupId, minMsg); } else { replyToLine(replyToken, minMsg, userId); }
+      replyToLine(replyToken, minMsg, userId);
     } else if (matchedBet && matchedBet.error === 'NOT_FOUND') {
       var notFoundMsg = tagPrefix + '🚫 ไม่พบแผล Order #' + targetOrderNo + ' ในระบบครับ';
-      if (groupId) { pushToLine(groupId, notFoundMsg); } else { replyToLine(replyToken, notFoundMsg, userId); }
+      replyToLine(replyToken, notFoundMsg, userId);
     } else if (matchedBet && matchedBet.error === 'EXCEEDS_ORDER_AMOUNT') {
       var exceedsMsg = tagPrefix + '⚠️ ยอดรับดวล (' + (matchedBet.provided || 0) + ' pt) เกินยอดของ Order #' + (matchedBet.orderNumber || targetOrderNo) + ' (รับได้สูงสุด ' + (matchedBet.maxAllowed || 0) + ' pt ครับ)';
-      if (groupId) { pushToLine(groupId, exceedsMsg); } else { replyToLine(replyToken, exceedsMsg, userId); }
+      replyToLine(replyToken, exceedsMsg, userId);
     } else if (matchedBet && matchedBet.orderNumber) {
       var matchFlex = constructMatchNotificationFlex(matchedBet.orderNumber, matchedBet.amount, matchedBet.playerLowName, matchedBet.playerHighName, matchedBet.rangeInfo, false, null);
       replyToLine(replyToken, matchFlex, userId);
@@ -758,20 +758,20 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
         pushToLine(matchedBet.matcherId, matchFlex);
       }
     } else {
-      var noOpenMsg = tagPrefix + '\ud83d\udeab \u0e44\u0e21\u0e48\u0e21\u0e35\u0e41\u0e1c\u0e25\u0e14\u0e27\u0e25\u0e1d\u0e31\u0e48\u0e07\u0e15\u0e23\u0e07\u0e02\u0e49\u0e32\u0e21\u0e17\u0e35\u0e48\u0e23\u0e2d\u0e04\u0e39\u0e48\u0e43\u0e19\u0e02\u0e13\u0e30\u0e19\u0e35\u0e49\u0e04\u0e23\u0e31\u0e1a';
+      var noOpenMsg = tagPrefix + '🚫 ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ในขณะนี้ครับ';
       replyToLine(replyToken, noOpenMsg, userId);
     }
     return;
   }
 
   // 2. PARSE BET FORMULAS
-  // Rule 1 (admin quote): \u0e0a\u0e25100, \u0e0a\u0e16500, +5\u0e0a\u0e25100, -5\u0e0a\u0e16100, +10\u0e0a\u0e25100, -10\u0e0a\u0e16500
-  // Rule 2 (custom range): 760-840\u0e25500, 800-880\u0e16500 (window must = 80cs)
-  var isChotoy = clean.indexOf('\u0e0a\u0e15\u0e22') !== -1 || text.indexOf('\u0e0a\u0e15\u0e22') !== -1;
-  var cleanBetText = clean.replace(/\u0e0a\u0e15\u0e22/g, '').trim();
+  // Rule 1 (admin quote): ชล100, ชถ500, +5ชล100, -5ชถ100, +10ชล100, -10ชถ500
+  // Rule 2 (custom range): 760-840ล500, 800-880ถ500 (window must = 80s)
+  var isChotoy = clean.indexOf('ชตย') !== -1 || text.indexOf('ชตย') !== -1;
+  var cleanBetText = clean.replace(/ชตย/g, '').trim();
 
-  var keywordsHigh = ['\u0e0a\u0e25', '\u0e25', '\u0e44\u0e25\u0e48', '\u0e2a\u0e39\u0e07', '\u0e0a\u0e2a\u0e39\u0e07', '\u0e0a\u0e48\u0e32\u0e07\u0e2a\u0e39\u0e07', '\u0e0a\u0e48\u0e32\u0e07\u0e44\u0e25\u0e48', '\u0e2a'];
-  var keywordsLow  = ['\u0e0a\u0e22', '\u0e0a\u0e16', '\u0e22', '\u0e16', '\u0e22\u0e31\u0e48\u0e07', '\u0e16\u0e2d\u0e22', '\u0e15\u0e48\u0e33', '\u0e0a\u0e15\u0e48\u0e33', '\u0e0a\u0e48\u0e32\u0e07\u0e15\u0e48\u0e33', '\u0e0a\u0e48\u0e32\u0e07\u0e22\u0e31\u0e48\u0e07', '\u0e0a\u0e48\u0e32\u0e07\u0e16\u0e2d\u0e22', '\u0e15'];
+  var keywordsHigh = ['ชล', 'ล', 'ไล่', 'สูง', 'ชสูง', 'ช่างสูง', 'ช่างไล่', 'ส'];
+  var keywordsLow  = ['ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'ต่ำ', 'ชต่ำ', 'ช่างต่ำ', 'ช่างยั่ง', 'ช่างถอย', 'ต'];
 
   // Detect rate-offset prefix BEFORE keyword matching (supports +-5 and +-10)
   var offsetDelta = 0;
@@ -783,7 +783,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
       var deltaErrMsg = groupId
         ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)'
         : '⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)';
-      if (groupId) { pushToLine(groupId, deltaErrMsg); } else { replyToLine(replyToken, deltaErrMsg, userId); }
+      replyToLine(replyToken, deltaErrMsg, userId);
       return;
     }
     offsetDelta = deltaVal;
@@ -815,7 +815,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
         var orderErrMsg = groupId
           ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-380' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ')'
           : '⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-380' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ')';
-        if (groupId) { pushToLine(groupId, orderErrMsg); } else { replyToLine(replyToken, orderErrMsg, userId); }
+        replyToLine(replyToken, orderErrMsg, userId);
         return;
       }
 
@@ -825,7 +825,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
         var windowErrMsg = groupId
           ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ ช่วงราคาต้องห่างกัน 80 วินาทีพอดีครับ เช่น 300-380' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ' ห่าง ' + diff + ' วิ)'
           : '⚠️ ช่วงราคาต้องห่างกัน 80 วินาทีพอดีครับ เช่น 300-380' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ' ห่าง ' + diff + ' วิ)';
-        if (groupId) { pushToLine(groupId, windowErrMsg); } else { replyToLine(replyToken, windowErrMsg, userId); }
+        replyToLine(replyToken, windowErrMsg, userId);
         return;
       }
 
@@ -834,7 +834,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
         var minAmtMsg = groupId
           ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)'
           : '⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)';
-        if (groupId) { pushToLine(groupId, minAmtMsg); } else { replyToLine(replyToken, minAmtMsg, userId); }
+        replyToLine(replyToken, minAmtMsg, userId);
         return;
       }
     }
@@ -850,7 +850,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
       var minAmtMsg = groupId
         ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)'
         : '⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)';
-      if (groupId) { pushToLine(groupId, minAmtMsg); } else { replyToLine(replyToken, minAmtMsg, userId); }
+      replyToLine(replyToken, minAmtMsg, userId);
       return;
     }
 
@@ -881,7 +881,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
     var closedMsg = groupId
       ? '👤 [ถึงคุณ @' + displayName + ']: ⛔ ปิดรับการเปิดราคาเองแล้ว (Final Call) กรุณารอจับคู่แผลที่เปิดค้างอยู่หรือรอรอบถัดไปครับ'
       : '⛔ ปิดรับการเปิดราคาเองแล้ว (Final Call) กรุณารอจับคู่แผลที่เปิดค้างอยู่หรือรอรอบถัดไปครับ';
-    if (groupId) { pushToLine(groupId, closedMsg); } else { replyToLine(replyToken, closedMsg, userId); }
+    replyToLine(replyToken, closedMsg, userId);
     return;
   }
   
@@ -3499,9 +3499,28 @@ function sendAdminMessageToLine(targetId, messageText) {
     }
     if (activeId) targetIds[activeId] = true;
 
+    // Fallback: If no group ID found in properties, retrieve from Bets or LineChatLogs sheets
+    if (Object.keys(targetIds).length === 0) {
+      try {
+        var ss = SpreadsheetApp.openById(SHEET_ID);
+        var bSheet = ss.getSheetByName('Bets');
+        if (bSheet) {
+          var bData = bSheet.getDataRange().getValues();
+          for (var bi = 1; bi < bData.length; bi++) {
+            var gVal = (bData[bi][12] && bData[bi][12].toString().trim()) || (bData[bi][7] && bData[bi][7].toString().trim());
+            if (gVal && (gVal.startsWith('C') || gVal.startsWith('R') || gVal.startsWith('c') || gVal.startsWith('r'))) {
+              targetIds[gVal] = true;
+            }
+          }
+        }
+      } catch (e) {
+        Logger.log('[sendAdminMessageToLine] Fallback error: ' + e.toString());
+      }
+    }
+
     var keys = Object.keys(targetIds);
     if (keys.length === 0) {
-      Logger.log('[sendAdminMessageToLine] No active groups to broadcast.');
+      Logger.log('[sendAdminMessageToLine] No active groups found to broadcast.');
       return false;
     }
     for (var k = 0; k < keys.length; k++) {

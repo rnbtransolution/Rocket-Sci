@@ -109,10 +109,18 @@ const SLIP_PRESETS = [
 const ADMIN_PASSCODE = '1234';
 
 export default function App() {
-  const isGitHubPages = window.location.hostname.includes('github.io');
+  const isGAS = typeof window !== 'undefined' && !!(window.google && window.google.script && window.google.script.run);
+  const isGitHubPages = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
   const API_BASE_URL = isGitHubPages ? 'https://rocket-sci.onrender.com' : '';
 
   const runBackendFunction = async (functionName, args = []) => {
+    if (isGAS) {
+      return new Promise((resolve, reject) => {
+        window.google.script.run
+          .withSuccessHandler((res) => resolve(res))
+          .withFailureHandler((err) => reject(err))[functionName](...args);
+      });
+    }
     const res = await fetch(`${API_BASE_URL}/api/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -296,9 +304,6 @@ export default function App() {
       setPlayerUserId(normalizedUid);
     }
   }, []);
-
-  // Detect Google Apps Script Environment
-  const isGAS = typeof window !== 'undefined' && window.google && window.google.script && window.google.script.run;
 
   // Detect live Node.js Express backend (localhost, Render, Vercel, Railway, or custom host)
   const isLiveBackend = typeof window !== 'undefined' && !isGAS;
@@ -1140,7 +1145,7 @@ export default function App() {
   };
 
   // Send admin chat message to LINE user from GAS console
-  const handleSendAdminChatMessage = (overrideText = null) => {
+  const handleSendAdminChatMessage = async (overrideText = null) => {
     const text = overrideText !== null ? overrideText : adminChatInput;
     if (!text.trim() || !selectedChatPlayerId) return;
     
@@ -1163,26 +1168,14 @@ export default function App() {
     };
     setChatLogs(prev => [...prev, newLog]);
     
-    if (isGAS) {
-      window.google.script.run
-        .withSuccessHandler(() => {
-          addToast('ส่งข้อความไปยัง LINE ผู้เล่นสำเร็จแล้ว', 'success');
-        })
-        .sendAdminMessageToLine(selectedChatPlayerId, text);
-    } else {
+    const targetChatId = selectedChatPlayerId || (lineChatType === 'group' ? (activeGroupId || 'ALL') : 'user');
+
+    try {
+      await runBackendFunction('sendAdminMessageToLine', [targetChatId, text]);
+      addToast(lineChatType === 'group' ? 'ส่งข้อความลงกลุ่ม LINE สำเร็จแล้ว' : 'ส่งข้อความไปยัง LINE ผู้เล่นสำเร็จแล้ว', 'success');
+    } catch (e) {
+      console.error('Error sending admin message to LINE:', e);
       addToast('จำลอง: ส่งข้อความ LINE สำเร็จ (Sandbox)', 'success');
-      // Simulate bot reply in sandbox after 1.5 seconds
-      setTimeout(() => {
-        const botReply = {
-          timestamp: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
-          userId: selectedChatPlayerId,
-          displayName: players.find(p => p.id === selectedChatPlayerId)?.name || 'ผู้เล่น',
-          sender: 'bot',
-          text: `[Sandbox Bot] ได้รับข้อความ "${text}" เรียบร้อยแล้วครับ!`,
-          type: 'text'
-        };
-        setChatLogs(prev => [...prev, botReply]);
-      }, 1500);
     }
   };
 
