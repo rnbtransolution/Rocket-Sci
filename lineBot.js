@@ -1839,11 +1839,11 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
   const amt80 = Math.max(1, Math.round(numAmount * 0.80));
   const amt100 = numAmount;
 
-  // Row 1: [20] [40] [80] (Pastel Blue)
+  // Row 1: [20% Amt] [40% Amt] [80% Amt] (Pastel Blue)
   const row1Buttons = [
-    { label: `20% (${amt20})`, val: amt20 },
-    { label: `40% (${amt40})`, val: amt40 },
-    { label: `80% (${amt80})`, val: amt80 }
+    { label: amt20.toString(), val: amt20 },
+    { label: amt40.toString(), val: amt40 },
+    { label: amt80.toString(), val: amt80 }
   ].map(item => ({
     "type": "box",
     "layout": "vertical",
@@ -1857,11 +1857,11 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
       "text": `ต ${orderNo} ${item.val}`
     },
     "contents": [
-      { "type": "text", "text": item.label, "color": "#0369A1", "weight": "bold", "size": "xxs", "align": "center" }
+      { "type": "text", "text": item.label, "color": "#0369A1", "weight": "bold", "size": "xs", "align": "center" }
     ]
   }));
 
-  // Row 2: [100] [Cancel] (Pastel Green & Pastel Red)
+  // Row 2: [100% Amt] [Cancel] (Pastel Green & Pastel Red)
   const row2Buttons = [
     {
       "type": "box",
@@ -1872,11 +1872,11 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
       "paddingAll": "xs",
       "action": {
         "type": "message",
-        "label": `100% (${amt100})`,
+        "label": amt100.toString(),
         "text": `ต ${orderNo} ${amt100}`
       },
       "contents": [
-        { "type": "text", "text": `100% (${amt100})`, "color": "#15803D", "weight": "bold", "size": "xs", "align": "center" }
+        { "type": "text", "text": amt100.toString(), "color": "#15803D", "weight": "bold", "size": "xs", "align": "center" }
       ]
     },
     {
