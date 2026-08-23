@@ -4,7 +4,7 @@ import jsQR from 'jsqr';
 import jpeg from 'jpeg-js';
 import { PNG } from 'pngjs';
 
-const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || 'imrgIDDKJzCz68l399JwA9h7O0DGfHeJYEH4BychnR766i6GfWTTENcpm3MshP37uQMGIrV3GoGY9UsMC3li2Yxvq4BYIJjwND1u4GJgppSR0EJPfnGrY+56hzfW0bh0zNyCfQz5wUCABcIhaLGl9gdB04t89/1O/w1cDnyilFU=';
+const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=';
 const SLIP_API_KEY = process.env.SLIP_API_KEY || '697ef678-60df-4955-a13a-6ed4e26a38c0';
 const SLIP_API_URL = process.env.SLIP_API_URL || 'https://api.easyslip.com/v2/verify/bank';
 const APP_URL = process.env.APP_URL || 'http://localhost:3001';
@@ -280,6 +280,109 @@ export async function fetchLINEGroupName(groupId) {
     console.error(`[LINE Group Summary Error for ${groupId}]:`, err);
   }
   return null;
+}
+
+export async function adminBroadcastQuote(targetId, name, minVal, maxVal, isChotoy) {
+  const quoteFlex = {
+    type: 'bubble',
+    size: 'kilo',
+    header: {
+      type: 'box',
+      layout: 'vertical',
+      backgroundColor: '#BAE6FD',
+      paddingAll: 'md',
+      contents: [
+        { type: 'text', text: `🚀 ราคาช่างเปิด ➔ ${name || 'ช่างบั้งไฟสด'}`, weight: 'bold', color: '#0369A1', size: 'sm', align: 'center', wrap: true }
+      ]
+    },
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      backgroundColor: '#F0F9FF',
+      spacing: 'sm',
+      paddingAll: 'md',
+      contents: [
+        { type: 'text', text: `⏱️ ช่วงราคา: ${minVal}-${maxVal} วิ${isChotoy ? ' (ชตย)' : ''}`, weight: 'bold', color: '#0284C7', size: 'sm', align: 'center', wrap: true },
+        { type: 'text', text: '⚡ พิมพ์ ชล / ชถ (±5, ±10) ได้ทันที', color: '#64748B', size: 'xs', align: 'center', wrap: true }
+      ]
+    }
+  };
+  db.setActiveRocketRound(name || 'ช่างบั้งไฟสด');
+  db.setTargetMinMax(Number(minVal), Number(maxVal));
+  return await sendAdminMessageToLine(targetId || 'ALL', quoteFlex);
+}
+
+export async function adminBroadcastFinalCall(targetId) {
+  db.setRocketRoundStatus('CLOSED');
+  const closeFlex = {
+    type: 'bubble',
+    size: 'kilo',
+    header: { type: 'box', layout: 'vertical', backgroundColor: '#FECDD3', paddingAll: 'md', contents: [
+      { type: 'text', text: '⛔ FINAL CALL · ปิดรับดวล', weight: 'bold', color: '#9F1239', size: 'sm', align: 'center', wrap: true }
+    ]},
+    body: { type: 'box', layout: 'vertical', backgroundColor: '#FFF1F2', spacing: 'sm', paddingAll: 'md', contents: [
+      { type: 'text', text: 'ปิดรับการเปิดราคาเองรอบนี้แล้วครับ กรุณารอจับคู่แผลค้างก่อนปล่อยจรวด 🚀', color: '#BE123C', size: 'xs', align: 'center', wrap: true }
+    ]}
+  };
+  return await sendAdminMessageToLine(targetId || 'ALL', closeFlex);
+}
+
+export async function adminBroadcastVoidRound(targetId) {
+  await db.adminVoidRound();
+  const voidFlex = {
+    type: 'bubble',
+    size: 'kilo',
+    header: { type: 'box', layout: 'vertical', backgroundColor: '#FECDD3', paddingAll: 'md', contents: [
+      { type: 'text', text: '⛔ ช่าง ⛔ (โมฆะรอบ)', weight: 'bold', color: '#9F1239', size: 'sm', align: 'center', wrap: true }
+    ]},
+    body: { type: 'box', layout: 'vertical', backgroundColor: '#FFF1F2', spacing: 'sm', paddingAll: 'md', contents: [
+      { type: 'text', text: 'ยกเลิกและคืนแต้มทุกแผลดวล 100% เรียบร้อยครับ 🚀', weight: 'bold', color: '#BE123C', size: 'xs', align: 'center', wrap: true }
+    ]}
+  };
+  return await sendAdminMessageToLine(targetId || 'ALL', voidFlex);
+}
+
+export async function adminBroadcastRuleGuide(targetId) {
+  const ruleGuideFlex = {
+    type: 'bubble',
+    size: 'kilo',
+    header: { type: 'box', layout: 'vertical', backgroundColor: '#134E4A', paddingAll: 'md', contents: [
+      { type: 'text', text: '🚀 คู่มือดวลสด · วิธีเล่น', weight: 'bold', color: '#6EE7B7', size: 'md', align: 'center', wrap: true }
+    ]},
+    body: { type: 'box', layout: 'vertical', backgroundColor: '#F0FDF4', spacing: 'md', paddingAll: 'md', contents: [
+      { type: 'text', text: '📋 คีย์เวิร์ดคำสั่ง', weight: 'bold', color: '#065F46', size: 'sm' },
+      { type: 'text', text: 'ชล500 ➔ เดิมพันต่ำ 500pt\nชถ200 ➔ เดิมพันสูง 200pt\n300-380ล500 ➔ กำหนดช่วงเอง\n+5ชล ➔ บวกราคา 5 วิ\n-10ชถ ➔ ลดราคา 10 วิ', wrap: true, size: 'xs', color: '#064E3B' },
+      { type: 'separator' },
+      { type: 'text', text: '🔒 เงื่อนไขสำคัญ', weight: 'bold', color: '#065F46', size: 'sm' },
+      { type: 'text', text: '• ช่วงราคาต้องห่าง 80 วิพอดี\n• ปรับราคาช่างได้แค่ ±5 หรือ ±10 วิ\n• ดวลขั้นต่ำ 100pt\n• พิมพ์ "กระดานดวล" เพื่อดูแผลค้าง', wrap: true, size: 'xs', color: '#064E3B' }
+    ]},
+    footer: { type: 'box', layout: 'horizontal', paddingAll: 'sm', contents: [
+      { type: 'button', action: { type: 'message', label: '📋 ดูกระดานดวลสด', text: 'กระดานดวล' }, style: 'primary', color: '#334155', height: 'sm' }
+    ]}
+  };
+  return await sendAdminMessageToLine(targetId || 'ALL', ruleGuideFlex);
+}
+
+export async function adminBroadcastScamWarning(targetId) {
+  const warnFlex = {
+    type: 'bubble',
+    size: 'kilo',
+    header: { type: 'box', layout: 'vertical', backgroundColor: '#FDE68A', paddingAll: 'md', contents: [
+      { type: 'text', text: '🚨 เตือนความปลอดภัย', weight: 'bold', color: '#92400E', size: 'sm', align: 'center', wrap: true }
+    ]},
+    body: { type: 'box', layout: 'vertical', backgroundColor: '#FEFCE8', spacing: 'sm', paddingAll: 'md', contents: [
+      { type: 'text', text: 'ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1-on-1 เท่านั้นครับ ห้ามโอนเงินผ่านแชตกลุ่มเด็ดขาด ❌', weight: 'bold', color: '#B45309', size: 'xs', align: 'center', wrap: true }
+    ]}
+  };
+  return await sendAdminMessageToLine(targetId || 'ALL', warnFlex);
+}
+
+export async function adminTestPushGroupMessage(targetGroupId) {
+  const gid = targetGroupId || db.getActiveGroupId();
+  if (!gid) return { success: false, error: 'ไม่พบ Group ID ที่เชื่อมต่อ — กรุณาใส่ Group ID ก่อนทดสอบครับ' };
+  const testMsg = `🔔 ทดสอบการเชื่อมต่อระบบ Rocket Science จาก Admin Web App (เวลา: ${new Date().toLocaleTimeString('th-TH')}) 🚀`;
+  await pushToLine(gid, testMsg);
+  return { success: true, groupId: gid };
 }
 
 // Intercept admin sending message to Line to log it properly and convert keywords

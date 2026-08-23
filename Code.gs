@@ -3794,12 +3794,12 @@ function adminDiscoverGroupIds() {
 function adminBroadcastQuote(targetId, name, minVal, maxVal, isChotoy) {
   var quoteFlex = {
     "type": "bubble",
-    "size": "micro",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#BAE6FD",
-      "paddingAll": "sm",
+      "paddingAll": "md",
       "contents": [
         { "type": "text", "text": "\uD83D\uDE80 ราคาช่างเปิด \u27A1 " + (name || 'ช่างบั้งไฟสด'), "weight": "bold", "color": "#0369A1", "size": "sm", "align": "center", "wrap": true }
       ]
@@ -3808,11 +3808,11 @@ function adminBroadcastQuote(targetId, name, minVal, maxVal, isChotoy) {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#F0F9FF",
-      "spacing": "xs",
-      "paddingAll": "sm",
+      "spacing": "sm",
+      "paddingAll": "md",
       "contents": [
-        { "type": "text", "text": "\u23F1\uFE0F ช่วงราคา: " + minVal + "-" + maxVal + " วิ" + (isChotoy ? " (ชตย)" : ""), "weight": "bold", "color": "#0284C7", "size": "xs", "align": "center", "wrap": true },
-        { "type": "text", "text": "\u26A1 พิมพ์ ชล / ชถ (\u00B15, \u00B110) ได้ทันที", "color": "#64748B", "size": "xxs", "align": "center" }
+        { "type": "text", "text": "\u23F1\uFE0F ช่วงราคา: " + minVal + "-" + maxVal + " วิ" + (isChotoy ? " (ชตย)" : ""), "weight": "bold", "color": "#0284C7", "size": "sm", "align": "center", "wrap": true },
+        { "type": "text", "text": "\u26A1 พิมพ์ ชล / ชถ (\u00B15, \u00B110) ได้ทันที", "color": "#64748B", "size": "xs", "align": "center", "wrap": true }
       ]
     }
   };
@@ -3825,12 +3825,12 @@ function adminBroadcastFinalCall(targetId) {
   setRocketRoundStatus('CLOSED');
   var closeFlex = {
     "type": "bubble",
-    "size": "micro",
-    "header": { "type": "box", "layout": "vertical", "backgroundColor": "#FECDD3", "paddingAll": "sm", "contents": [
-      { "type": "text", "text": "\u26D4 FINAL CALL · ปิดรับดวล", "weight": "bold", "color": "#9F1239", "size": "sm", "align": "center" }
+    "size": "kilo",
+    "header": { "type": "box", "layout": "vertical", "backgroundColor": "#FECDD3", "paddingAll": "md", "contents": [
+      { "type": "text", "text": "\u26D4 FINAL CALL · ปิดรับดวล", "weight": "bold", "color": "#9F1239", "size": "sm", "align": "center", "wrap": true }
     ]},
-    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FFF1F2", "spacing": "xs", "paddingAll": "sm", "contents": [
-      { "type": "text", "text": "ปิดรับดวลแล้วครับ กรุณารอจับคู่แผลค้างก่อนปล่อยจรวด \uD83D\uDE80", "color": "#BE123C", "size": "xxs", "align": "center", "wrap": true }
+    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FFF1F2", "spacing": "sm", "paddingAll": "md", "contents": [
+      { "type": "text", "text": "ปิดรับการเปิดราคาเองรอบนี้แล้วครับ กรุณารอจับคู่แผลค้างก่อนปล่อยจรวด \uD83D\uDE80", "color": "#BE123C", "size": "xs", "align": "center", "wrap": true }
     ]}
   };
   return sendAdminMessageToLine(targetId || 'ALL', closeFlex);
@@ -3840,12 +3840,12 @@ function adminBroadcastVoidRound(targetId) {
   adminVoidRound();
   var voidFlex = {
     "type": "bubble",
-    "size": "micro",
-    "header": { "type": "box", "layout": "vertical", "backgroundColor": "#FECDD3", "paddingAll": "sm", "contents": [
-      { "type": "text", "text": "\u26D4 ช่าง \u26D4 (โมฆะรอบ)", "weight": "bold", "color": "#9F1239", "size": "sm", "align": "center" }
+    "size": "kilo",
+    "header": { "type": "box", "layout": "vertical", "backgroundColor": "#FECDD3", "paddingAll": "md", "contents": [
+      { "type": "text", "text": "\u26D4 ช่าง \u26D4 (โมฆะรอบ)", "weight": "bold", "color": "#9F1239", "size": "sm", "align": "center", "wrap": true }
     ]},
-    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FFF1F2", "spacing": "xs", "paddingAll": "sm", "contents": [
-      { "type": "text", "text": "ยกเลิกและคืนแต้มทุกแผลดวล 100% เรียบร้อยครับ", "weight": "bold", "color": "#BE123C", "size": "xxs", "align": "center", "wrap": true }
+    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FFF1F2", "spacing": "sm", "paddingAll": "md", "contents": [
+      { "type": "text", "text": "ยกเลิกและคืนแต้มทุกแผลดวล 100% เรียบร้อยครับ 🚀", "weight": "bold", "color": "#BE123C", "size": "xs", "align": "center", "wrap": true }
     ]}
   };
   return sendAdminMessageToLine(targetId || 'ALL', voidFlex);
@@ -3856,7 +3856,7 @@ function adminBroadcastRuleGuide(targetId) {
     "type": "bubble",
     "size": "kilo",
     "header": { "type": "box", "layout": "vertical", "backgroundColor": "#134E4A", "paddingAll": "md", "contents": [
-      { "type": "text", "text": "\uD83D\uDE80 คู่มือดวลสด · วิธีเล่น", "weight": "bold", "color": "#6EE7B7", "size": "md", "align": "center" }
+      { "type": "text", "text": "\uD83D\uDE80 คู่มือดวลสด · วิธีเล่น", "weight": "bold", "color": "#6EE7B7", "size": "md", "align": "center", "wrap": true }
     ]},
     "body": { "type": "box", "layout": "vertical", "backgroundColor": "#F0FDF4", "spacing": "md", "paddingAll": "md", "contents": [
       { "type": "text", "text": "\uD83D\uDCCB คีย์เวิร์ดคำสั่ง", "weight": "bold", "color": "#065F46", "size": "sm" },
@@ -3865,7 +3865,7 @@ function adminBroadcastRuleGuide(targetId) {
       { "type": "text", "text": "\uD83D\uDD12 เงื่อนไขสำคัญ", "weight": "bold", "color": "#065F46", "size": "sm" },
       { "type": "text", "text": "• ช่วงราคาต้องห่าง 80 วิพอดี\n• ปรับราคาช่างได้แค่ \u00B15 หรือ \u00B110 วิ\n• ดวลขั้นต่ำ 100pt\n• พิมพ์ \"กระดานดวล\" เพื่อดูแผลค้าง", "wrap": true, "size": "xs", "color": "#064E3B" }
     ]},
-    "footer": { "type": "box", "layout": "horizontal", "paddingAll": "xs", "contents": [
+    "footer": { "type": "box", "layout": "horizontal", "paddingAll": "sm", "contents": [
       { "type": "button", "action": { "type": "message", "label": "\uD83D\uDCCB ดูกระดานดวลสด", "text": "กระดานดวล" }, "style": "primary", "color": "#334155", "height": "sm" }
     ]}
   };
@@ -3875,12 +3875,12 @@ function adminBroadcastRuleGuide(targetId) {
 function adminBroadcastScamWarning(targetId) {
   var warnFlex = {
     "type": "bubble",
-    "size": "micro",
-    "header": { "type": "box", "layout": "vertical", "backgroundColor": "#FDE68A", "paddingAll": "sm", "contents": [
-      { "type": "text", "text": "\uD83D\uDEA8 เตือนความปลอดภัย", "weight": "bold", "color": "#92400E", "size": "sm", "align": "center" }
+    "size": "kilo",
+    "header": { "type": "box", "layout": "vertical", "backgroundColor": "#FDE68A", "paddingAll": "md", "contents": [
+      { "type": "text", "text": "\uD83D\uDEA8 เตือนความปลอดภัย", "weight": "bold", "color": "#92400E", "size": "sm", "align": "center", "wrap": true }
     ]},
-    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FEFCE8", "spacing": "xs", "paddingAll": "sm", "contents": [
-      { "type": "text", "text": "ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1-on-1 เท่านั้นครับ \u274C", "weight": "bold", "color": "#B45309", "size": "xxs", "align": "center", "wrap": true }
+    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FEFCE8", "spacing": "sm", "paddingAll": "md", "contents": [
+      { "type": "text", "text": "ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1-on-1 เท่านั้นครับ ห้ามโอนเงินผ่านแชตกลุ่มเด็ดขาด ❌", "weight": "bold", "color": "#B45309", "size": "xs", "align": "center", "wrap": true }
     ]}
   };
   return sendAdminMessageToLine(targetId || 'ALL', warnFlex);
@@ -4161,12 +4161,12 @@ function constructOpenRoundQuoteFlex(name, min, max, isChotoy) {
 
   return {
     "type": "bubble",
-    "size": "micro",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#BAE6FD",
-      "paddingAll": "sm",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
@@ -4183,15 +4183,15 @@ function constructOpenRoundQuoteFlex(name, min, max, isChotoy) {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#F0F9FF",
-      "spacing": "xs",
-      "paddingAll": "sm",
+      "spacing": "sm",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
           "text": "⏱️ ช่วงราคา: " + minVal + "-" + maxVal + " วิ" + (isChotoy ? ' (ชตย)' : ''),
           "weight": "bold",
           "color": "#0284C7",
-          "size": "xs",
+          "size": "sm",
           "align": "center",
           "wrap": true
         },
@@ -4199,8 +4199,9 @@ function constructOpenRoundQuoteFlex(name, min, max, isChotoy) {
           "type": "text",
           "text": "⚡ พิมพ์ ชล / ชถ (±5, ±10) ได้ทันที",
           "color": "#64748B",
-          "size": "xxs",
-          "align": "center"
+          "size": "xs",
+          "align": "center",
+          "wrap": true
         }
       ]
     }
@@ -4210,12 +4211,12 @@ function constructOpenRoundQuoteFlex(name, min, max, isChotoy) {
 function constructRoundCloseFlex() {
   return {
     "type": "bubble",
-    "size": "micro",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#FECDD3",
-      "paddingAll": "sm",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
@@ -4223,7 +4224,8 @@ function constructRoundCloseFlex() {
           "weight": "bold",
           "color": "#9F1239",
           "size": "sm",
-          "align": "center"
+          "align": "center",
+          "wrap": true
         }
       ]
     },
@@ -4231,15 +4233,15 @@ function constructRoundCloseFlex() {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#FFF1F2",
-      "spacing": "xs",
-      "paddingAll": "sm",
+      "spacing": "sm",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
-          "text": "⚠️ ปิดรับการเปิดราคาเองรอบนี้แล้ว",
+          "text": "⚠️ ปิดรับการเปิดราคาเองรอบนี้แล้วครับ",
           "weight": "bold",
           "color": "#BE123C",
-          "size": "xxs",
+          "size": "xs",
           "align": "center",
           "wrap": true
         },
@@ -4247,8 +4249,9 @@ function constructRoundCloseFlex() {
           "type": "text",
           "text": "(จับคู่เฉพาะแผลที่เปิดค้างอยู่เท่านั้น)",
           "color": "#64748B",
-          "size": "xxs",
-          "align": "center"
+          "size": "xs",
+          "align": "center",
+          "wrap": true
         }
       ]
     }
@@ -4258,12 +4261,12 @@ function constructRoundCloseFlex() {
 function constructVoidRoundFlex() {
   return {
     "type": "bubble",
-    "size": "micro",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#FECDD3",
-      "paddingAll": "sm",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
@@ -4271,7 +4274,8 @@ function constructVoidRoundFlex() {
           "weight": "bold",
           "color": "#9F1239",
           "size": "sm",
-          "align": "center"
+          "align": "center",
+          "wrap": true
         }
       ]
     },
@@ -4279,15 +4283,15 @@ function constructVoidRoundFlex() {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#FFF1F2",
-      "spacing": "xs",
-      "paddingAll": "sm",
+      "spacing": "sm",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
-          "text": "ยกเลิกและคืนแต้มทุกแผลดวล 100% เรียบร้อยครับ",
+          "text": "ยกเลิกและคืนแต้มทุกแผลดวล 100% เรียบร้อยครับ 🚀",
           "weight": "bold",
           "color": "#BE123C",
-          "size": "xxs",
+          "size": "xs",
           "align": "center",
           "wrap": true
         }
@@ -4299,12 +4303,12 @@ function constructVoidRoundFlex() {
 function constructSecurityWarningFlex() {
   return {
     "type": "bubble",
-    "size": "micro",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#FDE68A",
-      "paddingAll": "sm",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
@@ -4312,7 +4316,8 @@ function constructSecurityWarningFlex() {
           "weight": "bold",
           "color": "#92400E",
           "size": "sm",
-          "align": "center"
+          "align": "center",
+          "wrap": true
         }
       ]
     },
@@ -4320,15 +4325,15 @@ function constructSecurityWarningFlex() {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#FEFCE8",
-      "spacing": "xs",
-      "paddingAll": "sm",
+      "spacing": "sm",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
-          "text": "ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1-on-1 เท่านั้นครับ ❌",
+          "text": "ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1-on-1 เท่านั้นครับ ห้ามโอนเงินผ่านแชตกลุ่มเด็ดขาด ❌",
           "weight": "bold",
           "color": "#B45309",
-          "size": "xxs",
+          "size": "xs",
           "align": "center",
           "wrap": true
         }

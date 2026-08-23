@@ -205,7 +205,7 @@ export default function App() {
 
   // Real LINE OA chat states
   const [chatLogs, setChatLogs] = useState([]);
-  const [selectedChatPlayerId, setSelectedChatPlayerId] = useState(null);
+  const [selectedChatPlayerId, setSelectedChatPlayerId] = useState('GROUP_STREAM');
   const [adminChatInput, setAdminChatInput] = useState('');
   const liveChatEndRef = useRef(null);
   const liveChatContainerRef = useRef(null);
@@ -3248,15 +3248,43 @@ export default function App() {
                 </div>
                 
                 <div className="flex-1 overflow-y-auto divide-y divide-slate-100 p-2 space-y-1">
-                  {(() => {
-                    if (chatTypeMode === 'group') {
-                      // Render connected LINE Group Rooms
+                  {/* Live Group Chat Stream Item at top of sidebar */}
+                  <button
+                    onClick={() => {
+                      setChatTypeMode('group');
+                      setSelectedChatPlayerId('GROUP_STREAM');
+                    }}
+                    className={`w-full text-left p-3 rounded-xl transition-all flex items-center gap-3 border mb-2 ${
+                      selectedChatPlayerId === 'GROUP_STREAM'
+                        ? 'bg-emerald-700 border-emerald-700 text-white shadow-md'
+                        : 'bg-emerald-50/70 border-emerald-200 hover:bg-emerald-100/60 text-emerald-900'
+                    }`}
+                  >
+                    <div className="text-2xl w-10 h-10 rounded-full bg-emerald-600/20 flex items-center justify-center shrink-0">
+                      🌐
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-0.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs truncate block">รวมแชตกลุ่มดวลสด (Live Group Stream)</span>
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 bg-emerald-500 text-white animate-pulse">
+                          LIVE
+                        </span>
+                      </div>
+                      <p className={`text-[10px] truncate ${selectedChatPlayerId === 'GROUP_STREAM' ? 'text-emerald-100' : 'text-emerald-700'}`}>
+                        {chatLogs.length > 0 ? chatLogs[chatLogs.length - 1].text : 'รอข้อความจากกลุ่ม...'}
+                      </p>
+                    </div>
+                  </button>
+
+                  {chatTypeMode === 'group' ? (
+                    // Connected LINE Groups
+                    (() => {
                       const groupsToRender = lineGroups.length > 0 ? lineGroups : (activeGroupId ? [{ id: activeGroupId, name: `🚀 กลุ่มดวลสด LINE (#${activeGroupId.slice(-4)})`, lastMessage: 'เชื่อมต่อกลุ่มแล้ว', timestamp: 'Live' }] : []);
                       if (groupsToRender.length === 0) {
                         return (
-                          <div className="text-center py-8 text-xs text-slate-400 italic font-sans space-y-1">
+                          <div className="text-center py-6 text-xs text-slate-400 italic font-sans space-y-1">
                             <div>👥 ยังไม่มีกลุ่ม LINE ดวลสดที่เชื่อมต่อ</div>
-                            <div className="text-[10px] text-amber-600 font-normal">เชิญบอร์ดเข้ากลุ่ม หรือพิมพ์ข้อความในกลุ่มเพื่อเชื่อมต่อ</div>
+                            <div className="text-[10px] text-amber-600 font-normal">เชิญบอทเข้ากลุ่ม หรือพิมพ์ข้อความในกลุ่มเพื่อเชื่อมต่อ</div>
                           </div>
                         );
                       }
@@ -3291,145 +3319,157 @@ export default function App() {
                           </button>
                         );
                       });
-                    }
-                    // Get unique users from chat logs
-                    const uniquePlayers = [];
-                    chatLogs.forEach(log => {
-                      if (log.userId && !uniquePlayers.some(p => p.id === log.userId)) {
-                        const pDb = players.find(p => p.id === log.userId);
-                        uniquePlayers.push({
-                          id: log.userId,
-                          name: pDb ? pDb.name : log.displayName || 'ผู้เล่น LINE',
-                          avatar: pDb ? pDb.avatar : '🐉',
-                          balance: pDb ? pDb.balance : 0
-                        });
-                      }
-                    });
-                    
-                    // Fallback to active players who are not 'user' to ensure admin can initiate chat
-                    players.forEach(p => {
-                      if (p.id !== 'user' && !uniquePlayers.some(up => up.id === p.id)) {
-                        uniquePlayers.push({
-                          id: p.id,
-                          name: p.name,
-                          avatar: p.avatar || '🐉',
-                          balance: p.balance
-                        });
-                      }
-                    });
-
-                    if (uniquePlayers.length === 0) {
-                      return <div className="text-center py-8 text-xs text-slate-400 italic font-sans">ไม่มีผู้เล่นในรายชื่อแชท</div>;
-                    }
-
-                    return uniquePlayers.map(p => {
-                      const isSelected = selectedChatPlayerId === p.id;
-                      const playerLogs = chatLogs.filter(log => log.userId === p.id);
-                      const lastLog = playerLogs[playerLogs.length - 1];
-                      const lastMsgText = lastLog ? (lastLog.text.length > 25 ? lastLog.text.substring(0, 25) + '...' : lastLog.text) : 'ยังไม่มีข้อความ';
+                    })()
+                  ) : (
+                    // Private 1:1 Chats
+                    (() => {
+                      const uniquePlayers = [];
+                      chatLogs.forEach(log => {
+                        if (log.userId && log.userId !== 'GROUP_STREAM' && !uniquePlayers.some(p => p.id === log.userId)) {
+                          const pDb = players.find(p => p.id === log.userId);
+                          uniquePlayers.push({
+                            id: log.userId,
+                            name: pDb ? pDb.name : log.displayName || 'ผู้เล่น LINE',
+                            avatar: pDb ? pDb.avatar : '🐉',
+                            balance: pDb ? pDb.balance : 0
+                          });
+                        }
+                      });
                       
-                      return (
-                        <button
-                          key={p.id}
-                          onClick={() => setSelectedChatPlayerId(p.id)}
-                          className={`w-full text-left p-3 rounded-xl transition-all flex items-center gap-3 border ${
-                            isSelected 
-                              ? 'bg-sky-600 border-sky-600 text-white shadow-md' 
-                              : 'bg-white border-slate-100 hover:bg-slate-50 text-slate-700'
-                          }`}
-                        >
-                          <div className="text-2xl w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0 shadow-inner">
-                            {p.avatar}
-                          </div>
-                          <div className="flex-1 min-w-0 space-y-0.5">
-                            <div className="flex items-center justify-between">
-                              <span className="font-bold text-xs truncate block">{p.name}</span>
-                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
-                                isSelected ? 'bg-sky-500 text-white' : 'bg-slate-100 text-slate-500'
-                              }`}>
-                                {p.balance} pt
-                              </span>
+                      players.forEach(p => {
+                        if (p.id !== 'user' && !uniquePlayers.some(up => up.id === p.id)) {
+                          uniquePlayers.push({
+                            id: p.id,
+                            name: p.name,
+                            avatar: p.avatar || '🐉',
+                            balance: p.balance
+                          });
+                        }
+                      });
+
+                      if (uniquePlayers.length === 0) {
+                        return <div className="text-center py-6 text-xs text-slate-400 italic font-sans">ไม่มีผู้เล่นในรายชื่อแชท 1:1</div>;
+                      }
+
+                      return uniquePlayers.map(p => {
+                        const isSelected = selectedChatPlayerId === p.id;
+                        const playerLogs = chatLogs.filter(log => log.userId === p.id);
+                        const lastLog = playerLogs[playerLogs.length - 1];
+                        const lastMsgText = lastLog ? (lastLog.text.length > 25 ? lastLog.text.substring(0, 25) + '...' : lastLog.text) : 'ยังไม่มีข้อความ';
+                        
+                        return (
+                          <button
+                            key={p.id}
+                            onClick={() => setSelectedChatPlayerId(p.id)}
+                            className={`w-full text-left p-3 rounded-xl transition-all flex items-center gap-3 border ${
+                              isSelected 
+                                ? 'bg-sky-600 border-sky-600 text-white shadow-md' 
+                                : 'bg-white border-slate-100 hover:bg-slate-50 text-slate-700'
+                            }`}
+                          >
+                            <div className="text-2xl w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0 shadow-inner">
+                              {p.avatar}
                             </div>
-                            <p className={`text-[10px] truncate ${isSelected ? 'text-sky-100' : 'text-slate-400'}`}>
-                              {lastMsgText}
-                            </p>
-                          </div>
-                        </button>
-                      );
-                    });
-                  })()}
+                            <div className="flex-1 min-w-0 space-y-0.5">
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-xs truncate block">{p.name}</span>
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
+                                  isSelected ? 'bg-sky-500 text-white' : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {p.balance} pt
+                                </span>
+                              </div>
+                              <p className={`text-[10px] truncate ${isSelected ? 'text-sky-100' : 'text-slate-400'}`}>
+                                {lastMsgText}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      });
+                    })()
+                  )}
                 </div>
               </div>
               
               {/* Right main pane: chat messages & action interface */}
-              <div className="flex-1 flex flex-col bg-white h-2/3 md:h-full">
-                {selectedChatPlayerId ? (
-                  <>
-                    {/* Header showing player details */}
-                    <div className="p-4 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-50">
-                      <div className="flex items-center gap-2.5">
-                        <div className="text-xl">
-                          {players.find(p => p.id === selectedChatPlayerId)?.avatar || '🐉'}
+                <div className="flex-1 flex flex-col bg-white h-2/3 md:h-full">
+                  {selectedChatPlayerId ? (
+                    <>
+                      {/* Header showing player details or group info */}
+                      <div className="p-4 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-50">
+                        <div className="flex items-center gap-2.5">
+                          <div className="text-xl">
+                            {selectedChatPlayerId === 'GROUP_STREAM' ? '🌐' : (players.find(p => p.id === selectedChatPlayerId)?.avatar || '🐉')}
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-xs text-slate-800">
+                              {selectedChatPlayerId === 'GROUP_STREAM' 
+                                ? 'รวมแชตกลุ่มดวลสด (Live Group Stream)' 
+                                : (players.find(p => p.id === selectedChatPlayerId)?.name || 'ผู้เล่น LINE')}
+                            </h4>
+                            <span className="text-[9px] font-mono text-slate-400">
+                              {selectedChatPlayerId === 'GROUP_STREAM'
+                                ? `Active Group: ${activeGroupId ? '...' + activeGroupId.slice(-10) : 'ทุกกลุ่ม'}`
+                                : `ID: ${selectedChatPlayerId}`}
+                            </span>
+                          </div>
                         </div>
-                        <div>
-                          <h4 className="font-bold text-xs text-slate-800">
-                            {players.find(p => p.id === selectedChatPlayerId)?.name || 'ผู้เล่น LINE'}
-                          </h4>
-                          <span className="text-[9px] font-mono text-slate-400">ID: {selectedChatPlayerId}</span>
+                        <div className="text-right">
+                          <span className="text-[10px] font-sans font-bold bg-emerald-50 text-emerald-700 border border-emerald-100 px-2.5 py-1 rounded-full">
+                            {selectedChatPlayerId === 'GROUP_STREAM' 
+                              ? `กลุ่มที่เชื่อมต่อ: ${lineGroups.length} กลุ่ม`
+                              : `เครดิต: ${players.find(p => p.id === selectedChatPlayerId)?.balance || 0} pt`}
+                          </span>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <span className="text-[10px] font-sans font-bold bg-emerald-50 text-emerald-700 border border-emerald-100 px-2.5 py-1 rounded-full">
-                          เครดิต: {players.find(p => p.id === selectedChatPlayerId)?.balance || 0} pt
-                        </span>
-                      </div>
-                    </div>
-                    
-                    {/* Message body container (scrollable) */}
-                    <div 
-                      ref={liveChatContainerRef}
-                      className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50"
-                    >
-                      {chatLogs.filter(log => log.userId === selectedChatPlayerId).length === 0 ? (
-                        <div className="text-center py-20 text-xs text-slate-400 italic font-sans">
-                          -- เริ่มการสนทนากับผู้เล่น (แอดมินสามารถส่งข้อความตรงหรือปุ่ม Flex ได้ทันที) --
-                        </div>
-                      ) : (
-                        chatLogs.filter(log => log.userId === selectedChatPlayerId).map((log, index) => {
-                          const isAdmin = log.sender === 'admin';
-                          const isBot = log.sender === 'bot';
-                          
-                          let bubbleBg = 'bg-white text-slate-800 border border-slate-200';
-                          let containerClass = 'flex justify-start';
-                          let nameColor = 'text-slate-500';
-                          
-                          if (isAdmin) {
-                            bubbleBg = 'bg-sky-600 text-white shadow-sm';
-                            containerClass = 'flex justify-end';
-                            nameColor = 'text-sky-600 text-right';
-                          } else if (isBot) {
-                            bubbleBg = 'bg-purple-600 text-white shadow-sm';
-                            containerClass = 'flex justify-end';
-                            nameColor = 'text-purple-600 text-right';
-                          }
-                          
-                          return (
-                            <div key={index} className={`w-full ${containerClass} animate-fade-in`}>
-                              <div className="max-w-[75%] space-y-0.5">
-                                <span className={`text-[9px] block font-bold ${nameColor}`}>
-                                  {isAdmin ? 'แอดมิน (Admin)' : isBot ? 'ระบบบอท (Automation)' : log.displayName}
-                                  <span className="font-normal text-slate-400 ml-1.5">{log.timestamp}</span>
-                                </span>
-                                <div className={`p-3 rounded-2xl text-xs whitespace-pre-wrap font-sans ${bubbleBg}`}>
-                                  {log.text}
+                      
+                      {/* Message body container (scrollable) */}
+                      <div 
+                        ref={liveChatContainerRef}
+                        className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50"
+                      >
+                        {(selectedChatPlayerId === 'GROUP_STREAM' ? chatLogs : chatLogs.filter(log => log.userId === selectedChatPlayerId)).length === 0 ? (
+                          <div className="text-center py-20 text-xs text-slate-400 italic font-sans">
+                            {selectedChatPlayerId === 'GROUP_STREAM' 
+                              ? '-- ยังไม่มีข้อความในกลุ่มดวลสด --' 
+                              : '-- เริ่มการสนทนากับผู้เล่น (แอดมินสามารถส่งข้อความตรงหรือปุ่ม Flex ได้ทันที) --'}
+                          </div>
+                        ) : (
+                          (selectedChatPlayerId === 'GROUP_STREAM' ? chatLogs : chatLogs.filter(log => log.userId === selectedChatPlayerId)).map((log, index) => {
+                            const isAdmin = log.sender === 'admin';
+                            const isBot = log.sender === 'bot';
+                            
+                            let bubbleBg = 'bg-white text-slate-800 border border-slate-200';
+                            let containerClass = 'flex justify-start';
+                            let nameColor = 'text-slate-500';
+                            
+                            if (isAdmin) {
+                              bubbleBg = 'bg-sky-600 text-white shadow-sm';
+                              containerClass = 'flex justify-end';
+                              nameColor = 'text-sky-600 text-right';
+                            } else if (isBot) {
+                              bubbleBg = 'bg-purple-600 text-white shadow-sm';
+                              containerClass = 'flex justify-end';
+                              nameColor = 'text-purple-600 text-right';
+                            }
+                            
+                            return (
+                              <div key={index} className={`w-full ${containerClass} animate-fade-in`}>
+                                <div className="max-w-[75%] space-y-0.5">
+                                  <span className={`text-[9px] block font-bold ${nameColor}`}>
+                                    {isAdmin ? 'แอดมิน (Admin)' : isBot ? 'ระบบบอท (Automation)' : log.displayName}
+                                    <span className="font-normal text-slate-400 ml-1.5">{log.timestamp}</span>
+                                  </span>
+                                  <div className={`p-3 rounded-2xl text-xs whitespace-pre-wrap font-sans ${bubbleBg}`}>
+                                    {log.text}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          );
-                        })
-                      )}
-                      <div ref={liveChatEndRef} />
-                    </div>
+                            );
+                          })
+                        )}
+                        <div ref={liveChatEndRef} />
+                      </div>
                     
                     {/* Footer input and quick action shortcuts */}
                     <div className="p-4 border-t border-slate-200 bg-white shrink-0 space-y-3">

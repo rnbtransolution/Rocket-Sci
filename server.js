@@ -133,10 +133,38 @@ app.post('/api/run', async (req, res) => {
         result = db.setActiveRocketRound(args[0]);
         break;
         
-      case 'setRocketRoundStatus':
-        result = db.setRocketRoundStatus(args[0]);
+      case 'adminBroadcastQuote':
+        result = await lineBot.adminBroadcastQuote(args[0], args[1], args[2], args[3], args[4]);
         break;
-        
+
+      case 'adminBroadcastFinalCall':
+        result = await lineBot.adminBroadcastFinalCall(args[0]);
+        break;
+
+      case 'adminBroadcastVoidRound':
+        result = await lineBot.adminBroadcastVoidRound(args[0]);
+        break;
+
+      case 'adminBroadcastRuleGuide':
+        result = await lineBot.adminBroadcastRuleGuide(args[0]);
+        break;
+
+      case 'adminBroadcastScamWarning':
+        result = await lineBot.adminBroadcastScamWarning(args[0]);
+        break;
+
+      case 'adminSetActiveGroupId':
+        result = db.saveActiveGroupId(args[0]);
+        break;
+
+      case 'adminDiscoverGroupIds':
+        result = db.adminDiscoverGroupIds ? db.adminDiscoverGroupIds() : { activeGroupId: db.getActiveGroupId(), lineGroups: db.getDashboardData()?.lineGroups || [], discovered: [] };
+        break;
+
+      case 'adminTestPushGroupMessage':
+        result = await lineBot.adminTestPushGroupMessage(args[0]);
+        break;
+
       default:
         return res.status(404).json({ error: `Function "${functionName}" is not implemented on Node.js server.` });
     }
