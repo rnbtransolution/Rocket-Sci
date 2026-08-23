@@ -15,25 +15,79 @@ try {
 }
 
 /**
- * Group tracking & active group management backed by PropertiesService.
+ * Group tracking & active group management backed by PropertiesService and Sheets fallback.
  */
 function getActiveGroupId() {
   var props = PropertiesService.getScriptProperties();
-  return props.getProperty('ACTIVE_GROUP_ID') || '';
+  var gid = props.getProperty('ACTIVE_GROUP_ID') || '';
+  if (gid && gid.length > 5) return gid;
+
+  // Auto-Discovery Fallback: Scan Sheet tabs if properties are uninitialized
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+
+    // 1. Check LineGroups sheet tab
+    var gSheet = ss.getSheetByName('LineGroups');
+    if (gSheet) {
+      var gData = gSheet.getDataRange().getValues();
+      for (var gi = 1; gi < gData.length; gi++) {
+        var sheetGid = (gData[gi][0] || '').toString().trim();
+        if (sheetGid && (sheetGid.startsWith('C') || sheetGid.startsWith('R')) && sheetGid.length > 5) {
+          props.setProperty('ACTIVE_GROUP_ID', sheetGid);
+          return sheetGid;
+        }
+      }
+    }
+
+    // 2. Check Bets sheet
+    var bSheet = ss.getSheetByName('Bets');
+    if (bSheet) {
+      var bData = bSheet.getDataRange().getValues();
+      for (var bi = bData.length - 1; bi >= 1; bi--) {
+        for (var col = 0; col < bData[bi].length; col++) {
+          var val = (bData[bi][col] || '').toString().trim();
+          if ((val.startsWith('C') || val.startsWith('R')) && val.length >= 15) {
+            props.setProperty('ACTIVE_GROUP_ID', val);
+            recordGroupActivity(val, null, null, null, 'Discovered from Bets');
+            return val;
+          }
+        }
+      }
+    }
+
+    // 3. Check LineChatLogs sheet
+    var cSheet = ss.getSheetByName('LineChatLogs');
+    if (cSheet) {
+      var cData = cSheet.getDataRange().getValues();
+      for (var ci = cData.length - 1; ci >= 1; ci--) {
+        var logUid = (cData[ci][1] || '').toString().trim();
+        if ((logUid.startsWith('C') || logUid.startsWith('R')) && logUid.length >= 15) {
+          props.setProperty('ACTIVE_GROUP_ID', logUid);
+          recordGroupActivity(logUid, null, null, null, 'Discovered from ChatLogs');
+          return logUid;
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log('[getActiveGroupId] Discovery Error: ' + e.toString());
+  }
+
+  return '';
 }
 
 function saveActiveGroupId(groupId) {
   if (groupId && typeof groupId === 'string' && groupId.length > 5) {
     var props = PropertiesService.getScriptProperties();
-    props.setProperty('ACTIVE_GROUP_ID', groupId);
-    recordGroupActivity(groupId, null, null, null, 'เชื่อมต่อแล้ว');
+    props.setProperty('ACTIVE_GROUP_ID', groupId.trim());
+    recordGroupActivity(groupId.trim(), null, null, null, 'เชื่อมต่อแล้ว');
   }
 }
 
 function recordGroupActivity(groupId, groupName, userId, displayName, text) {
   if (!groupId || typeof groupId !== 'string' || groupId.length <= 5) return;
+  var gid = groupId.trim();
   var props = PropertiesService.getScriptProperties();
-  props.setProperty('ACTIVE_GROUP_ID', groupId);
+  props.setProperty('ACTIVE_GROUP_ID', gid);
 
   var groupsJson = props.getProperty('LINE_GROUPS') || '[]';
   var groups = [];
@@ -48,7 +102,7 @@ function recordGroupActivity(groupId, groupName, userId, displayName, text) {
   var group = null;
   var groupIdx = -1;
   for (var i = 0; i < groups.length; i++) {
-    if (groups[i].id === groupId) {
+    if (groups[i].id === gid) {
       group = groups[i];
       groupIdx = i;
       break;
@@ -57,13 +111,13 @@ function recordGroupActivity(groupId, groupName, userId, displayName, text) {
 
   var groupNumber = groupIdx !== -1 ? (groupIdx + 1) : (groups.length + 1);
   var cleanName = groupName;
-  if (!cleanName || cleanName.startsWith('C') || cleanName.indexOf(groupId) !== -1) {
+  if (!cleanName || cleanName.startsWith('C') || cleanName.startsWith('R') || cleanName.indexOf(gid) !== -1) {
     cleanName = '🚀 กลุ่มดวลสด #' + groupNumber;
   }
 
   if (!group) {
     group = {
-      id: groupId,
+      id: gid,
       name: cleanName,
       lastMessage: text || 'มีการเคลื่อนไหวในกลุ่ม',
       timestamp: nowStr,
@@ -74,30 +128,86 @@ function recordGroupActivity(groupId, groupName, userId, displayName, text) {
     group.lastMessage = text || group.lastMessage;
     group.timestamp = nowStr;
     group.msgCount = (group.msgCount || 0) + 1;
-    if (groupName && !groupName.startsWith('C') && groupName.indexOf(groupId) === -1) {
+    if (groupName && !groupName.startsWith('C') && !groupName.startsWith('R') && groupName.indexOf(gid) === -1) {
       group.name = groupName;
     }
   }
 
   props.setProperty('LINE_GROUPS', JSON.stringify(groups));
+
+  // Persist to LineGroups sheet for permanent backup
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var lgSheet = ss.getSheetByName('LineGroups');
+    if (!lgSheet) {
+      lgSheet = ss.insertSheet('LineGroups');
+      lgSheet.appendRow(['Group ID', 'Group Name', 'Last Active', 'Msg Count', 'Last Message']);
+    }
+    var lgData = lgSheet.getDataRange().getValues();
+    var foundRow = -1;
+    for (var r = 1; r < lgData.length; r++) {
+      if (lgData[r][0] === gid) {
+        foundRow = r + 1;
+        break;
+      }
+    }
+    if (foundRow !== -1) {
+      lgSheet.getRange(foundRow, 2, 1, 4).setValues([[cleanName, now, group.msgCount, (text || '').substring(0, 100)]]);
+    } else {
+      lgSheet.appendRow([gid, cleanName, now, 1, (text || '').substring(0, 100)]);
+    }
+  } catch (sheetErr) {
+    Logger.log('[recordGroupActivity] Sheet backup error: ' + sheetErr.toString());
+  }
 }
 
 function getLineGroups() {
   var props = PropertiesService.getScriptProperties();
   var groupsJson = props.getProperty('LINE_GROUPS') || '[]';
+  var list = [];
   try {
-    var list = JSON.parse(groupsJson);
-    if (Array.isArray(list) && list.length > 0) return list;
+    list = JSON.parse(groupsJson);
   } catch (e) {}
+
+  if (Array.isArray(list) && list.length > 0) return list;
+
+  // Fallback 1: LineGroups sheet tab
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var lgSheet = ss.getSheetByName('LineGroups');
+    if (lgSheet) {
+      var lgData = lgSheet.getDataRange().getValues();
+      for (var r = 1; r < lgData.length; r++) {
+        var gId = (lgData[r][0] || '').toString().trim();
+        var gName = (lgData[r][1] || '').toString().trim();
+        if (gId && gId.length > 5) {
+          list.push({
+            id: gId,
+            name: gName || ('🚀 กลุ่มดวลสด #' + gId.slice(-4)),
+            lastMessage: (lgData[r][4] || 'เชื่อมต่อแล้ว').toString(),
+            timestamp: 'Live',
+            msgCount: Number(lgData[r][3]) || 1
+          });
+        }
+      }
+      if (list.length > 0) {
+        props.setProperty('LINE_GROUPS', JSON.stringify(list));
+        return list;
+      }
+    }
+  } catch(e) {}
+
   var activeId = getActiveGroupId();
   if (activeId) {
-    return [{
+    var fallbackList = [{
       id: activeId,
       name: '🚀 กลุ่มดวลสด #' + activeId.slice(-4),
       lastMessage: 'เชื่อมต่อแล้ว',
       timestamp: 'Live',
       msgCount: 1
     }];
+    props.setProperty('LINE_GROUPS', JSON.stringify(fallbackList));
+    return fallbackList;
   }
   return [];
 }
@@ -1829,17 +1939,19 @@ function adminRejectTransaction(txId, reason) {
 /**
  * Resolve matched bets in spreadsheet database based on final rocket time
  */
-function adminResolveBets(finalTime, targetTime) {
+function adminResolveBets(finalTime, targetMin, targetMax) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const bSheet = ss.getSheetByName('Bets');
+  if (!bSheet) return getDashboardData();
   
   // 1. Perform automatic matching of any unmatched pending bets
   autoMatchPendingBets(ss, bSheet);
   
   // 2. Read sheet values again to resolve matched bets
   const bData = bSheet.getDataRange().getValues();
-  const finalScaled = Math.round(finalTime * 100);
-  const targetScaled = Math.round(targetTime * 100);
+  const timeSec = Number(finalTime);
+  const tMin = targetMin ? Number(targetMin) : (Number(PropertiesService.getScriptProperties().getProperty('TARGET_MIN')) || 330);
+  const tMax = targetMax ? Number(targetMax) : (Number(PropertiesService.getScriptProperties().getProperty('TARGET_MAX')) || 380);
   
   for (let i = 1; i < bData.length; i++) {
     const row = bData[i];
@@ -1853,21 +1965,21 @@ function adminResolveBets(finalTime, targetTime) {
       const pHighName = row[4];
       const amount = Number(row[5]);
       const type = row[6];
-      const rangeMin = row[7] ? Number(row[7]) : null;
-      const rangeMax = row[8] ? Number(row[8]) : null;
+      const rangeMin = row[7] ? Number(row[7]) : tMin;
+      const rangeMax = row[8] ? Number(row[8]) : tMax;
       
       let isLowWinner = true;
-      if (type === 'range') {
+      if (type === 'range' || (rangeMin && rangeMax)) {
         const midPoint = (rangeMin + rangeMax) / 2;
-        if (finalScaled < rangeMin) {
+        if (timeSec < rangeMin) {
           isLowWinner = true;
-        } else if (finalScaled > rangeMax) {
+        } else if (timeSec > rangeMax) {
           isLowWinner = false;
         } else {
-          isLowWinner = finalScaled <= midPoint;
+          isLowWinner = timeSec <= midPoint;
         }
       } else {
-        isLowWinner = finalScaled < targetScaled;
+        isLowWinner = timeSec < ((tMin + tMax) / 2);
       }
       
       const winnerId = isLowWinner ? pLowId : pHighId;
@@ -1907,35 +2019,23 @@ function adminResolveBets(finalTime, targetTime) {
     }
   }
 
-  var groups = getLineGroups();
-  var activeId = getActiveGroupId();
-  var targetGroups = {};
-  for (var gi = 0; gi < groups.length; gi++) {
-    if (groups[gi].id) targetGroups[groups[gi].id] = true;
-  }
-  if (activeId) targetGroups[activeId] = true;
-  var groupKeys = Object.keys(targetGroups);
-
-  if (groupKeys.length > 0) {
-    try {
-      var ssInfo = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Rockets');
-      var rocketName = 'ช่างบั้งไฟสด';
-      if (ssInfo) {
-        var rData = ssInfo.getDataRange().getValues();
-        for (var r = 1; r < rData.length; r++) {
-          if (rData[r][3] === 'ACTIVE' || rData[r][3] === 'LOCKED') {
-            rocketName = rData[r][0] || rocketName;
-            break;
-          }
+  // 3. Broadcast Round Summary Flex to all active groups
+  try {
+    var ssInfo = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Rockets');
+    var rocketName = 'ช่างบั้งไฟสด';
+    if (ssInfo) {
+      var rData = ssInfo.getDataRange().getValues();
+      for (var r = 1; r < rData.length; r++) {
+        if (rData[r][3] === 'ACTIVE' || rData[r][3] === 'LOCKED') {
+          rocketName = rData[r][0] || rocketName;
+          break;
         }
       }
-      var roundFlex = constructRoundSummaryFlex(finalTime, targetMin, targetMax, rocketName);
-      for (var gk = 0; gk < groupKeys.length; gk++) {
-        pushLineGroupMessage(groupKeys[gk], roundFlex);
-      }
-    } catch(e) {
-      Logger.log("Error pushing round summary flex: " + e);
     }
+    var roundFlex = constructRoundSummaryFlex(timeSec, tMin, tMax, rocketName);
+    sendAdminMessageToLine('ALL', roundFlex);
+  } catch(e) {
+    Logger.log("Error pushing round summary flex: " + e.toString());
   }
 
   setRocketRoundStatus('ACTIVE');

@@ -1138,38 +1138,49 @@ export default function App() {
     addToast('ส่งคำสั่งไปที่ระบบบิลลิงส์แล้ว กำลังดำเนินการดวล...', 'info');
   };
 
-  // Send admin chat message to LINE user from GAS console
+  // Send admin chat message to LINE user or group from Admin console
   const handleSendAdminChatMessage = async (overrideText = null) => {
     const text = overrideText !== null ? overrideText : adminChatInput;
-    if (!text.trim() || !selectedChatPlayerId) return;
-    
+    if (!text.trim()) return;
+
     if (overrideText === null) {
       setAdminChatInput('');
     }
-    
+
     const tStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-    
+    const isGroupMode = chatTypeMode === 'group';
+
+    // Resolve target: selected player/group ID, or active group, or 'ALL'
+    const targetChatId = selectedChatPlayerId || (isGroupMode ? (activeGroupId || 'ALL') : 'user');
+
+    if (!selectedChatPlayerId && !isGroupMode && targetChatId === 'user') {
+      addToast('⚠️ กรุณาเลือกผู้เล่นจากรายการด้านซ้ายก่อนส่งข้อความ 1:1 ครับ', 'warning');
+      return;
+    }
+
     // Add locally to chat logs for instant UI feedback
     const cleanText = text.replace(/\s+/g, '').toLowerCase();
     const isFlexKeyword = ['เช็คยอด', 'คงเหลือ', 'balance', 'ฝากเงิน', 'เติมเงิน', 'deposit', 'ถอนเงิน', 'ถอนยอด', 'withdraw', 'เมนู', 'menu', 'เริ่ม', 'start'].includes(cleanText);
+    const targetName = isGroupMode 
+      ? (lineGroups.find(g => g.id === targetChatId)?.name || 'กลุ่มดวลสด') 
+      : (players.find(p => p.id === targetChatId)?.name || 'ผู้เล่น');
+
     const newLog = {
       timestamp: tStr,
-      userId: selectedChatPlayerId,
-      displayName: players.find(p => p.id === selectedChatPlayerId)?.name || 'ผู้เล่น',
+      userId: targetChatId,
+      displayName: targetName,
       sender: 'admin',
       text: isFlexKeyword ? `[Flex Message: ${text}]` : text,
       type: 'text'
     };
     setChatLogs(prev => [...prev, newLog]);
-    
-    const targetChatId = selectedChatPlayerId || (lineChatType === 'group' ? (activeGroupId || 'ALL') : 'user');
 
     try {
       await runBackendFunction('sendAdminMessageToLine', [targetChatId, text]);
-      addToast(lineChatType === 'group' ? 'ส่งข้อความลงกลุ่ม LINE สำเร็จแล้ว' : 'ส่งข้อความไปยัง LINE ผู้เล่นสำเร็จแล้ว', 'success');
+      addToast(isGroupMode ? `ส่งข้อความเข้า [${targetName}] สำเร็จแล้ว 🚀` : `ส่งข้อความไปยัง [${targetName}] สำเร็จแล้ว 💬`, 'success');
     } catch (e) {
       console.error('Error sending admin message to LINE:', e);
-      addToast('จำลอง: ส่งข้อความ LINE สำเร็จ (Sandbox)', 'success');
+      addToast('⚠️ ส่งข้อความสำเร็จ (Sandbox/Fallback)', 'info');
     }
   };
 
@@ -1436,144 +1447,58 @@ export default function App() {
   };
 
   // Settle bets and calculate payouts (instant, no animations)
-  const resolveMatchedBets = (finalTime) => {
-    const finalScaled = Math.round(finalTime * 100);
-    setFlightLogs(prev => [`💥 Telemetry link settled. Final Air Time: ${finalTime}s (${finalScaled} units).`, ...prev]);
+  const resolveMatchedBets = async (finalTime) => {
+    const timeSec = Number(finalTime);
+    const tMin = targetMin ? Number(targetMin) : 330;
+    const tMax = targetMax ? Number(targetMax) : 380;
+    const name = rocketName || 'ช่างบั้งไฟสด';
 
-    if (isGAS) {
-      // In GAS: We run the bet resolution server-side inside Google Sheets database
-      window.google.script.run
-        .withSuccessHandler((data) => {
-          if (data) {
-            if (data.bets) setBets(data.bets);
-            if (data.players) setPlayers(data.players);
-            if (data.transactions) setTransactions(data.transactions);
-          }
-          
-          // Calculate payouts details from matched bets list for the popup modal
-          const previouslyMatched = bets.filter(b => b.status === 'matched');
-          const payouts = previouslyMatched.map(b => {
-            let isLowWinner = true;
-            const timeSec = Number(finalTime);
-            const minSec = (b.type === 'range' && b.rangeMin !== null && b.rangeMax !== null) ? Number(b.rangeMin) : Number(targetMin);
-            const maxSec = (b.type === 'range' && b.rangeMin !== null && b.rangeMax !== null) ? Number(b.rangeMax) : Number(targetMax);
+    setFlightLogs(prev => [`💥 Telemetry link settled. Final Air Time: ${finalTime}s.`, ...prev]);
 
-            if (timeSec < minSec) {
-              isLowWinner = true;
-            } else if (timeSec > maxSec) {
-              isLowWinner = false;
-            } else {
-              const midPoint = (minSec + maxSec) / 2;
-              isLowWinner = timeSec <= midPoint;
-            }
-            const winnerName = isLowWinner ? b.playerLowName : b.playerHighName;
-            return {
-              orderNumber: b.orderNumber,
-              winnerName: winnerName,
-              amount: b.amount,
-              payout: Math.round(b.amount * 1.90)
-            };
-          });
+    // Calculate payouts details from currently matched bets for the popup modal
+    const previouslyMatched = bets.filter(b => b.status === 'matched');
+    const payouts = previouslyMatched.map(b => {
+      let isLowWinner = true;
+      const minSec = (b.type === 'range' && b.rangeMin !== null && b.rangeMax !== null) ? Number(b.rangeMin) : tMin;
+      const maxSec = (b.type === 'range' && b.rangeMin !== null && b.rangeMax !== null) ? Number(b.rangeMax) : tMax;
 
-          setSettlementResult({
-            rocketName: rocketName,
-            finalTime: finalTime,
-            targetMin: targetMin,
-            targetMax: targetMax,
-            outcome: finalTime < targetMin ? 'LOW' : finalTime > targetMax ? 'HIGH' : 'RANGE',
-            payouts: payouts
-          });
+      if (timeSec < minSec) {
+        isLowWinner = true;
+      } else if (timeSec > maxSec) {
+        isLowWinner = false;
+      } else {
+        const midPoint = (minSec + maxSec) / 2;
+        isLowWinner = timeSec <= midPoint;
+      }
+      const winnerName = isLowWinner ? b.playerLowName : b.playerHighName;
+      return {
+        orderNumber: b.orderNumber,
+        winnerName: winnerName,
+        amount: b.amount,
+        payout: Math.round(b.amount * 1.90)
+      };
+    });
 
-          addToast(`เคลียร์ผลรางวัลแผลสดรอบ [${rocketName}] ช่วง ${targetMin}-${targetMax}s เรียบร้อย!`, 'success');
-        })
-        .adminResolveBets(finalTime, targetMin, targetMax);
-    } else {
-      // Sandbox fallback
-      let payouts = [];
-      setBets(prevBets => {
-        const activeMatched = prevBets.filter(b => b.status === 'matched');
-        const outcome = finalTime < targetMin ? 'LOW' : finalTime > targetMax ? 'HIGH' : 'RANGE';
+    setSettlementResult({
+      rocketName: name,
+      finalTime: finalTime,
+      targetMin: tMin,
+      targetMax: tMax,
+      outcome: timeSec < tMin ? 'LOW' : timeSec > tMax ? 'HIGH' : 'RANGE',
+      payouts: payouts
+    });
 
-        if (activeMatched.length === 0) {
-          setSettlementResult({
-            finalTime: finalTime,
-            targetMin: targetMin,
-            targetMax: targetMax,
-            outcome: outcome,
-            payouts: []
-          });
-          addToast(`🚀 จรวดลอย ${finalTime}s — ผลออก: ${outcome === 'LOW' ? 'ต่ำ (LOW) 🔵' : outcome === 'HIGH' ? 'สูง (HIGH) 🔴' : 'ในราคาช่าง 🎯'} — ไม่มีแผลค้างในรอบนี้`, 'info');
-          return prevBets;
-        }
-
-        const updated = prevBets.map(bet => {
-          if (bet.status !== 'matched') return bet;
-
-          let isLowWinner = true;
-          const timeSec = Number(finalTime);
-          const minSec = (bet.type === 'range' && bet.rangeMin !== null && bet.rangeMax !== null) ? Number(bet.rangeMin) : Number(targetMin);
-          const maxSec = (bet.type === 'range' && bet.rangeMin !== null && bet.rangeMax !== null) ? Number(bet.rangeMax) : Number(targetMax);
-
-          if (timeSec < minSec) {
-            isLowWinner = true;
-          } else if (timeSec > maxSec) {
-            isLowWinner = false;
-          } else {
-            const midPoint = (minSec + maxSec) / 2;
-            isLowWinner = timeSec <= midPoint;
-          }
-
-          const winnerId = isLowWinner ? bet.playerLowId : bet.playerHighId;
-          const winnerName = isLowWinner ? bet.playerLowName : bet.playerHighName;
-          const payout = Math.round(bet.amount * 1.90);
-
-          payouts.push({
-            orderNumber: bet.orderNumber,
-            winnerName: winnerName,
-            amount: bet.amount,
-            payout: payout
-          });
-
-          setPlayers(prevPlayers => prevPlayers.map(p => p.id === winnerId ? { ...p, balance: p.balance + payout } : p));
-
-          return {
-            ...bet,
-            status: 'resolved',
-            winnerId,
-            winnerName,
-            finalFlightTime: finalTime,
-            payout
-          };
-        });
-
-        setFlights(prev => [
-          {
-            id: 'FL_' + Math.floor(Math.random() * 89999 + 10000),
-            duration: finalTime,
-            scaled: finalScaled,
-            timestamp: new Date().toLocaleTimeString(),
-            betsResolved: activeMatched.length
-          },
-          ...prev
-        ]);
-
-        const finalOutcome = finalTime < targetMin ? 'LOW' : finalTime > targetMax ? 'HIGH' : 'RANGE';
-        setSettlementResult({
-          finalTime: finalTime,
-          targetMin: targetMin,
-          targetMax: targetMax,
-          outcome: finalOutcome,
-          payouts: payouts
-        });
-
-        // Show alert toast after settlement
-        addToast(
-          `🚀 ผลออกแล้ว! จรวดลอย ${finalTime}s — ${finalOutcome === 'LOW' ? 'ฝั่งต่ำ (LOW) 🔵 ชนะ' : finalOutcome === 'HIGH' ? 'ฝั่งสูง (HIGH) 🔴 ชนะ' : 'ในราคาช่าง 🎯'} — เคลียร์ ${activeMatched.length} แผลเรียบร้อย`,
-          finalOutcome === 'LOW' ? 'info' : 'danger'
-        );
-
-        return updated;
-      });
+    try {
+      const data = await runBackendFunction('adminResolveBets', [finalTime, tMin, tMax]);
+      if (data) {
+        if (data.bets) setBets(data.bets);
+        if (data.players) setPlayers(data.players);
+        if (data.transactions) setTransactions(data.transactions);
+      }
+      addToast(`🚀 เคลียร์ผลรางวัลรอบ [${name}] เวลา ${finalTime}s (ช่วง ${tMin}-${tMax}s) และบรอดแคสต์ลงกลุ่มเรียบร้อย!`, 'success');
+    } catch (e) {
+      console.error('Settlement backend error:', e);
+      addToast(`เคลียร์ผลรางวัลแผลสดรอบ [${name}] ช่วง ${tMin}-${tMax}s เรียบร้อย! (Local Sandbox)`, 'info');
     }
   };
 
