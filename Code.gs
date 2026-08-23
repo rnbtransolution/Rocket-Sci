@@ -242,7 +242,13 @@ function adminOpenRound(name) {
  * This runs when accessing the GAS Web App URL in a browser.
  */
 function doGet(e) {
-  return HtmlService.createHtmlOutputFromFile('Index')
+  var html;
+  try {
+    html = HtmlService.createHtmlOutputFromFile('index');
+  } catch(_) {
+    html = HtmlService.createHtmlOutputFromFile('Index');
+  }
+  return html
     .setTitle('Rocket Science - ระบบดูแลบิลลิงและควบคุม')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
@@ -3827,10 +3833,10 @@ function adminBroadcastFinalCall(targetId) {
     "type": "bubble",
     "size": "kilo",
     "header": { "type": "box", "layout": "vertical", "backgroundColor": "#FECDD3", "paddingAll": "md", "contents": [
-      { "type": "text", "text": "\u26D4 FINAL CALL · ปิดรับดวล", "weight": "bold", "color": "#9F1239", "size": "sm", "align": "center", "wrap": true }
+      { "type": "text", "text": "⛔ FINAL CALL · ปิดรับดวล", "weight": "bold", "color": "#9F1239", "size": "sm", "align": "center", "wrap": true }
     ]},
-    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FFF1F2", "spacing": "sm", "paddingAll": "md", "contents": [
-      { "type": "text", "text": "ปิดรับการเปิดราคาเองรอบนี้แล้วครับ กรุณารอจับคู่แผลค้างก่อนปล่อยจรวด \uD83D\uDE80", "color": "#BE123C", "size": "xs", "align": "center", "wrap": true }
+    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FFF1F2", "spacing": "xs", "paddingAll": "md", "contents": [
+      { "type": "text", "text": "⛔ ปิดรับเปิดราคาเองแล้วครับ (รอจับคู่แผลค้าง 🚀)", "color": "#BE123C", "size": "xs", "align": "center", "wrap": true }
     ]}
   };
   return sendAdminMessageToLine(targetId || 'ALL', closeFlex);
@@ -3842,9 +3848,9 @@ function adminBroadcastVoidRound(targetId) {
     "type": "bubble",
     "size": "kilo",
     "header": { "type": "box", "layout": "vertical", "backgroundColor": "#FECDD3", "paddingAll": "md", "contents": [
-      { "type": "text", "text": "\u26D4 ช่าง \u26D4 (โมฆะรอบ)", "weight": "bold", "color": "#9F1239", "size": "sm", "align": "center", "wrap": true }
+      { "type": "text", "text": "⛔ ช่าง ⛔ (โมฆะรอบ)", "weight": "bold", "color": "#9F1239", "size": "sm", "align": "center", "wrap": true }
     ]},
-    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FFF1F2", "spacing": "sm", "paddingAll": "md", "contents": [
+    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FFF1F2", "spacing": "xs", "paddingAll": "md", "contents": [
       { "type": "text", "text": "ยกเลิกและคืนแต้มทุกแผลดวล 100% เรียบร้อยครับ 🚀", "weight": "bold", "color": "#BE123C", "size": "xs", "align": "center", "wrap": true }
     ]}
   };
@@ -3852,23 +3858,7 @@ function adminBroadcastVoidRound(targetId) {
 }
 
 function adminBroadcastRuleGuide(targetId) {
-  var ruleGuideFlex = {
-    "type": "bubble",
-    "size": "kilo",
-    "header": { "type": "box", "layout": "vertical", "backgroundColor": "#134E4A", "paddingAll": "md", "contents": [
-      { "type": "text", "text": "\uD83D\uDE80 คู่มือดวลสด · วิธีเล่น", "weight": "bold", "color": "#6EE7B7", "size": "md", "align": "center", "wrap": true }
-    ]},
-    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#F0FDF4", "spacing": "md", "paddingAll": "md", "contents": [
-      { "type": "text", "text": "\uD83D\uDCCB คีย์เวิร์ดคำสั่ง", "weight": "bold", "color": "#065F46", "size": "sm" },
-      { "type": "text", "text": "ชล500 \u2192 เดิมพันต่ำ 500pt\nชถ200 \u2192 เดิมพันสูง 200pt\n300-380ล500 \u2192 กำหนดช่วงเอง\n+5ชล \u2192 บวกราคา 5 วิ\n-10ชถ \u2192 ลดราคา 10 วิ", "wrap": true, "size": "xs", "color": "#064E3B" },
-      { "type": "separator" },
-      { "type": "text", "text": "\uD83D\uDD12 เงื่อนไขสำคัญ", "weight": "bold", "color": "#065F46", "size": "sm" },
-      { "type": "text", "text": "• ช่วงราคาต้องห่าง 80 วิพอดี\n• ปรับราคาช่างได้แค่ \u00B15 หรือ \u00B110 วิ\n• ดวลขั้นต่ำ 100pt\n• พิมพ์ \"กระดานดวล\" เพื่อดูแผลค้าง", "wrap": true, "size": "xs", "color": "#064E3B" }
-    ]},
-    "footer": { "type": "box", "layout": "horizontal", "paddingAll": "sm", "contents": [
-      { "type": "button", "action": { "type": "message", "label": "\uD83D\uDCCB ดูกระดานดวลสด", "text": "กระดานดวล" }, "style": "primary", "color": "#334155", "height": "sm" }
-    ]}
-  };
+  var ruleGuideFlex = constructRuleGuideFlex();
   return sendAdminMessageToLine(targetId || 'ALL', ruleGuideFlex);
 }
 
@@ -3877,10 +3867,10 @@ function adminBroadcastScamWarning(targetId) {
     "type": "bubble",
     "size": "kilo",
     "header": { "type": "box", "layout": "vertical", "backgroundColor": "#FDE68A", "paddingAll": "md", "contents": [
-      { "type": "text", "text": "\uD83D\uDEA8 เตือนความปลอดภัย", "weight": "bold", "color": "#92400E", "size": "sm", "align": "center", "wrap": true }
+      { "type": "text", "text": "🚨 เตือนความปลอดภัย", "weight": "bold", "color": "#92400E", "size": "sm", "align": "center", "wrap": true }
     ]},
-    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FEFCE8", "spacing": "sm", "paddingAll": "md", "contents": [
-      { "type": "text", "text": "ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1-on-1 เท่านั้นครับ ห้ามโอนเงินผ่านแชตกลุ่มเด็ดขาด ❌", "weight": "bold", "color": "#B45309", "size": "xs", "align": "center", "wrap": true }
+    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FEFCE8", "spacing": "xs", "paddingAll": "md", "contents": [
+      { "type": "text", "text": "⚠️ ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1:1 เท่านั้นครับ", "weight": "bold", "color": "#B45309", "size": "xs", "align": "center", "wrap": true }
     ]}
   };
   return sendAdminMessageToLine(targetId || 'ALL', warnFlex);
