@@ -390,7 +390,7 @@ export async function sendAdminMessageToLine(targetId, messageText) {
   }
 
   // Handle multi-group / global broadcast
-  if (!targetId || targetId === 'ALL') {
+  if (!targetId || targetId === 'ALL' || targetId === 'GROUP_STREAM') {
     return await broadcastToAllGroups(messageText);
   }
 

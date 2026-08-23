@@ -1850,6 +1850,29 @@ function adminDeletePlayer(userId) {
   return { ok: false, error: 'Player not found' };
 }
 
+function safeFormatDate(val, format) {
+  if (!val) return '';
+  if (typeof val === 'string' && val.trim().length > 0) {
+    var d = new Date(val);
+    if (!isNaN(d.getTime())) {
+      try {
+        return Utilities.formatDate(d, 'GMT+7', format || 'HH:mm:ss');
+      } catch(_) {
+        return val;
+      }
+    }
+    return val;
+  }
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    try {
+      return Utilities.formatDate(val, 'GMT+7', format || 'HH:mm:ss');
+    } catch(_) {
+      return val.toString();
+    }
+  }
+  return '';
+}
+
 /**
  * Fetch players, transactions, and bets from Google Sheet database.
  */
@@ -1867,7 +1890,7 @@ function getDashboardData() {
       id: row[0].toString(),
       name: row[1].toString(),
       balance: Number(row[2]) || 0,
-      joinDate: row[3] ? Utilities.formatDate(new Date(row[3]), 'GMT+7', 'dd/MM/yy') : '-',
+      joinDate: safeFormatDate(row[3], 'dd/MM/yy') || '-',
       bankName: row[4] ? row[4].toString() : '',
       bankAccount: row[5] ? formatBankAccount(row[5]) : '',
       accountName: row[6] ? row[6].toString() : '',
@@ -1888,11 +1911,11 @@ function getDashboardData() {
       playerName: row[2].toString(),
       requestedAmount: Number(row[3]) || 0,
       actualAmount: Number(row[4]) || 0,
-      slipRef: row[5].toString(),
-      status: row[6].toString(),
-      reviewReason: row[7].toString(),
-      timestamp: row[8] ? Utilities.formatDate(new Date(row[8]), "GMT+7", "HH:mm:ss") : '',
-      logs: [`Verified in Sheets Database`, `Status: ${row[6]}`]
+      slipRef: row[5] ? row[5].toString() : '',
+      status: row[6] ? row[6].toString() : 'pending',
+      reviewReason: row[7] ? row[7].toString() : '',
+      timestamp: safeFormatDate(row[8], 'HH:mm:ss'),
+      logs: [`Verified in Sheets Database`, `Status: ${row[6] || 'pending'}`]
     });
   }
 
@@ -1909,12 +1932,12 @@ function getDashboardData() {
       playerHighId: row[3] ? row[3].toString() : '',
       playerHighName: row[4] ? row[4].toString() : '',
       amount: Number(row[5]) || 0,
-      type: row[6].toString(),
+      type: row[6] ? row[6].toString() : '',
       rangeMin: row[7] ? Number(row[7]) : null,
       rangeMax: row[8] ? Number(row[8]) : null,
-      status: row[9].toString(),
+      status: row[9] ? row[9].toString() : '',
       winnerName: row[10] ? row[10].toString() : '',
-      timestamp: row[11] ? Utilities.formatDate(new Date(row[11]), "GMT+7", "HH:mm:ss") : ''
+      timestamp: safeFormatDate(row[11], 'HH:mm:ss')
     });
   }
 
@@ -1925,7 +1948,7 @@ function getDashboardData() {
     for (let i = 1; i < cData.length; i++) {
       const row = cData[i];
       chatLogs.push({
-        timestamp: row[0] ? Utilities.formatDate(new Date(row[0]), "GMT+7", "HH:mm:ss") : '',
+        timestamp: safeFormatDate(row[0], 'HH:mm:ss'),
         userId: row[1] ? row[1].toString() : '',
         displayName: row[2] ? row[2].toString() : '',
         sender: row[3] ? row[3].toString() : '',
@@ -3899,7 +3922,7 @@ function sendAdminMessageToLine(targetId, messageText) {
   var logMsg = isObj ? '[Flex Message]' : messageText;
 
   // ─── Broadcast to ALL active groups ───
-  if (!targetId || targetId === 'ALL') {
+  if (!targetId || targetId === 'ALL' || targetId === 'GROUP_STREAM') {
     var groups = getLineGroups();
     var activeId = getActiveGroupId();
     var targetIds = {};

@@ -1176,7 +1176,9 @@ export default function App() {
     const isGroupMode = chatTypeMode === 'group';
 
     // Resolve target: selected player/group ID, or active group, or 'ALL'
-    const targetChatId = selectedChatPlayerId || (isGroupMode ? (activeGroupId || 'ALL') : 'user');
+    const targetChatId = selectedChatPlayerId === 'GROUP_STREAM'
+      ? (activeGroupId || 'ALL')
+      : (selectedChatPlayerId || (isGroupMode ? (activeGroupId || 'ALL') : 'user'));
 
     if (!selectedChatPlayerId && !isGroupMode && targetChatId === 'user') {
       addToast('⚠️ กรุณาเลือกผู้เล่นจากรายการด้านซ้ายก่อนส่งข้อความ 1:1 ครับ', 'warning');
