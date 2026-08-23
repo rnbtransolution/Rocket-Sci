@@ -104,13 +104,13 @@ export async function replyToLine(replyToken, text, userId) {
   let messageObj;
   
   if (typeof text === 'object' && text !== null) {
-    const flexContents = text.type === 'bubble'
-      ? { type: 'carousel', contents: [text] }
-      : text;
+    const alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
+      || (text.contents && text.contents[0] && text.contents[0].header && text.contents[0].header.contents && text.contents[0].header.contents[0].text)
+      || '🚀 Rocket Science';
     messageObj = {
       type: 'flex',
-      altText: 'ระบบบริการ Rocket Science 🚀',
-      contents: flexContents
+      altText: alt,
+      contents: text
     };
   } else {
     let outText = String(text);
@@ -155,6 +155,10 @@ export async function replyToLine(replyToken, text, userId) {
       },
       body: JSON.stringify(payload)
     });
+    const resBody = await res.text();
+    if (!res.ok) {
+      console.error(`[LINE Reply Error] Status ${res.status}: ${resBody}`);
+    }
     
     if (userId) {
       const logText = typeof text === 'object' ? '[Flex Message]' : text;
@@ -696,7 +700,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     const hoursDiff = (nowDate - slipDate) / (1000 * 60 * 60);
     if (!isNaN(hoursDiff) && hoursDiff > 24) {
       db.logTransaction(userId, displayName, pendingReqAmt, actualAmount, refCode, 'escalated', `Stale slip rejected - date: ${slipDateStr}`);
-      await replyToLine(replyToken, `⏰ สลิปหมดอายุ (โอนเมื่อ ${slipDateStr})\n⚠️ ระบบรับเฉพาะสลิปที่โอนภายใน 24 ชั่วโมงที่ผ่านมาเท่านั้นครับ`);
+      await replyToLine(replyToken, `⏰ สลิปหมดอายุ (โอนเมื่อ ${slipDateStr})\n⚠️ ระบบรับเฉพาะสลิปที่โอนภายใน 24 ชั่วโมงที่ผ่านมาเท่านั้นครับ`, userId);
       return;
     }
   }
@@ -706,7 +710,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     const isMatchReceiver = receiverName.indexOf("อิทธิรัตน์") !== -1 || receiverName.toUpperCase().indexOf("ITTHIRAT") !== -1;
     if (!isMatchReceiver) {
       db.logTransaction(userId, displayName, pendingReqAmt, actualAmount, refCode, 'escalated', `Receiver Name Mismatch (Receiver: ${receiverName})`);
-      await replyToLine(replyToken, `❌ บัญชีปลายทางไม่ถูกต้อง (ผู้รับคือ ${receiverName})\n⚠️ ระบบรับเฉพาะสลิปที่โอนเข้าบัญชี คุณอิทธิรัตน์ เท่านั้นครับ`);
+      await replyToLine(replyToken, `❌ บัญชีปลายทางไม่ถูกต้อง (ผู้รับคือ ${receiverName})\n⚠️ ระบบรับเฉพาะสลิปที่โอนเข้าบัญชี คุณอิทธิรัตน์ เท่านั้นครับ`, userId);
       return;
     }
   }
@@ -782,28 +786,28 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
     if (res.success) {
       const miniFlex = constructCancelOrderMiniFlex(res.orderNumber);
-      if (groupId) {
-        await pushToLine(groupId, miniFlex);
-        // Also notify user in private 1-on-1 chat
-        if (userId && userId !== groupId) {
-          await pushToLine(userId, miniFlex);
-        }
-      } else {
-        await replyToLine(replyToken, miniFlex, userId);
-        // CRITICAL: When cancelled from 1-on-1 private chat, also notify the LINE group where the open bet was posted!
+      await replyToLine(replyToken, miniFlex, userId);
+      // When cancelled from 1-on-1 private chat, also notify the LINE group where the open bet was posted!
+      if (!groupId) {
         const targetGroup = res.groupId || db.getActiveGroupId();
         if (targetGroup) {
           await pushToLine(targetGroup, miniFlex);
         }
+      } else if (userId && userId !== groupId) {
+        // When cancelled from group, notify creator private chat as well
+        await pushToLine(userId, miniFlex);
       }
     } else if (res.error === 'UNAUTHORIZED') {
       const msg = `${tagPrefix}⚠️ เฉพาะเจ้าของแผล (@${res.creatorName}) หรือแอดมินเท่านั้นที่ยกเลิกได้ครับ`;
-      if (groupId) await pushToLine(groupId, msg); else await replyToLine(replyToken, msg, userId);
+      await replyToLine(replyToken, msg, userId);
+    } else if (res.error === 'ALREADY_MATCHED') {
+      const msg = `${tagPrefix}⚠️ แผล Order #${res.orderNumber} มีคู่ดวลแล้ว ไม่สามารถยกเลิกได้ครับ`;
+      await replyToLine(replyToken, msg, userId);
     } else {
       const notFoundText = targetOrderNo
-        ? `${tagPrefix}🚫 ไม่พบแผล Order #${targetOrderNo} ครับ`
-        : `${tagPrefix}🚫 คุณไม่มีแผลดวลค้างครับ`;
-      if (groupId) await pushToLine(groupId, notFoundText); else await replyToLine(replyToken, notFoundText, userId);
+        ? `🚫 ไม่พบแผล Order #${targetOrderNo} ในระบบครับ`
+        : `🚫 ไม่มีแผลที่เปิดรอคู่ในระบบครับ`;
+      await replyToLine(replyToken, `${tagPrefix}${notFoundText}`, userId);
     }
     return true;
   }
@@ -837,11 +841,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 
   if (keywordsAccept.includes(clean) || targetOrderNo) {
     const sendNotice = async (msg) => {
-      if (groupId) {
-        await pushToLine(groupId, msg);
-      } else {
-        await replyToLine(replyToken, msg, userId);
-      }
+      await replyToLine(replyToken, msg, userId);
     };
 
     const matched = await db.matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmount);
@@ -882,12 +882,10 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     }
 
     if (matched && matched.orderNumber) {
-      // Parallelize push notifications (Group Flex card + Private 1-on-1 DMs) concurrently!
+      // Reply directly to group/chat via replyToken
       const flexMatch = constructMatchNotificationFlex(matched.orderNumber, matched.amount, matched.playerLowName, matched.playerHighName, matched.rangeInfo, matched.isChotoy, matched.rocketName);
 
-      const groupPush = groupId
-        ? pushToLine(groupId, flexMatch)
-        : replyToLine(replyToken, flexMatch, userId);
+      const groupReply = replyToLine(replyToken, flexMatch, userId);
 
       const creatorPush = (async () => {
         try {
@@ -909,7 +907,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
         }
       })();
 
-      await Promise.allSettled([groupPush, creatorPush, matcherPush]);
+      await Promise.allSettled([groupReply, creatorPush, matcherPush]);
       return true;
     } else {
       const notFoundText = targetOrderNo
@@ -1070,13 +1068,9 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   }
   
   const betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfo, isChotoy, userTypedCmd, isPreQuote);
-  if (!groupId) {
-    await replyToLine(replyToken, betCard, userId);
-  } else {
-    // If created in group, also send copy to user's private 1-on-1 chat
-    if (userId && userId !== groupId) {
-      await pushToLine(userId, betCard);
-    }
+  await replyToLine(replyToken, betCard, userId);
+  if (groupId && userId && userId !== groupId) {
+    await pushToLine(userId, betCard);
   }
 }
 

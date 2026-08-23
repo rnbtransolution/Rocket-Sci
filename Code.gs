@@ -499,17 +499,17 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
     var cancelTagPrefix = groupId ? ('👤 [ถึงคุณ @' + displayName + ']: ') : '';
     if (groupId) {
       if (typeof cancelResult === 'object' && cancelResult.success) {
-        pushToLine(groupId, cancelResult.flex);
+        replyToLine(replyToken, cancelResult.flex, userId);
         if (userId && userId !== groupId) {
           pushToLine(userId, cancelResult.flex);
         }
       } else if (typeof cancelResult === 'object') {
-        pushToLine(groupId, cancelResult);
+        replyToLine(replyToken, cancelResult, userId);
         if (userId && userId !== groupId) {
           pushToLine(userId, cancelResult);
         }
       } else {
-        pushToLine(groupId, cancelTagPrefix + cancelResult);
+        replyToLine(replyToken, cancelTagPrefix + cancelResult, userId);
         if (userId && userId !== groupId) {
           pushToLine(userId, cancelResult);
         }
@@ -518,7 +518,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
       // 1:1 Private Chat cancellation
       if (typeof cancelResult === 'object' && cancelResult.success) {
         replyToLine(replyToken, cancelResult.flex, userId);
-        // CRITICAL: Also notify the LINE group where the bet was created!
+        // Also notify the LINE group where the bet was created!
         var groupToNotify = cancelResult.targetGroupId || getActiveGroupId();
         if (groupToNotify) {
           pushLineGroupMessage(groupToNotify, cancelResult.flex);
@@ -749,23 +749,17 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
       if (groupId) { pushToLine(groupId, exceedsMsg); } else { replyToLine(replyToken, exceedsMsg, userId); }
     } else if (matchedBet && matchedBet.orderNumber) {
       var matchFlex = constructMatchNotificationFlex(matchedBet.orderNumber, matchedBet.amount, matchedBet.playerLowName, matchedBet.playerHighName, matchedBet.rangeInfo, false, null);
-      var groupTarget = groupId || getActiveGroupId();
-      if (groupTarget) {
-        pushLineGroupMessage(groupTarget, matchFlex);
-      }
-      // Also push to both players in 1-on-1 private chat
+      replyToLine(replyToken, matchFlex, userId);
+      // Also push to both players in 1-on-1 private chat if different
       if (matchedBet.creatorId) {
         pushToLine(matchedBet.creatorId, matchFlex);
       }
       if (matchedBet.matcherId && matchedBet.matcherId !== matchedBet.creatorId) {
         pushToLine(matchedBet.matcherId, matchFlex);
       }
-      if (!groupTarget) {
-        replyToLine(replyToken, matchFlex, userId);
-      }
     } else {
       var noOpenMsg = tagPrefix + '\ud83d\udeab \u0e44\u0e21\u0e48\u0e21\u0e35\u0e41\u0e1c\u0e25\u0e14\u0e27\u0e25\u0e1d\u0e31\u0e48\u0e07\u0e15\u0e23\u0e07\u0e02\u0e49\u0e32\u0e21\u0e17\u0e35\u0e48\u0e23\u0e2d\u0e04\u0e39\u0e48\u0e43\u0e19\u0e02\u0e13\u0e30\u0e19\u0e35\u0e49\u0e04\u0e23\u0e31\u0e1a';
-      if (groupId) { pushToLine(groupId, noOpenMsg); } else { replyToLine(replyToken, noOpenMsg, userId); }
+      replyToLine(replyToken, noOpenMsg, userId);
     }
     return;
   }
@@ -1491,13 +1485,13 @@ function replyToLine(replyToken, text, userId) {
   let messageObj;
   
   if (typeof text === 'object' && text !== null) {
-    var flexContents = text.type === 'bubble'
-      ? { type: 'carousel', contents: [text] }
-      : text;
+    var alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
+      || (text.contents && text.contents[0] && text.contents[0].header && text.contents[0].header.contents && text.contents[0].header.contents[0].text)
+      || 'ระบบบริการ Rocket Science 🚀';
     messageObj = {
       type: 'flex',
-      altText: 'ระบบบริการ Rocket Science 🚀',
-      contents: flexContents
+      altText: alt,
+      contents: text
     };
   } else {
     let outText = String(text);
@@ -1523,6 +1517,10 @@ function replyToLine(replyToken, text, userId) {
   
   const res = UrlFetchApp.fetch(url, options);
   const code = res.getResponseCode();
+  const resBody = res.getContentText();
+  if (code >= 400) {
+    Logger.log('[LINE Reply Error] Status: ' + code + ' Body: ' + resBody);
+  }
   
   if (userId) {
     const logText = typeof text === 'object' ? '[Flex Message]' : text;
