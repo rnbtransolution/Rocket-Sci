@@ -317,11 +317,11 @@ export async function adminBroadcastFinalCall(targetId) {
   const closeFlex = {
     type: 'bubble',
     size: 'kilo',
-    header: { type: 'box', layout: 'vertical', backgroundColor: '#FECDD3', paddingAll: 'md', contents: [
-      { type: 'text', text: '⛔ FINAL CALL · ปิดรับดวล', weight: 'bold', color: '#9F1239', size: 'sm', align: 'center', wrap: true }
+    header: { type: 'box', layout: 'vertical', backgroundColor: '#BE123C', paddingAll: 'md', contents: [
+      { type: 'text', text: '⛔️ ปิดรับดวล ⛔️', weight: 'bold', color: '#FFFFFF', size: 'md', align: 'center', wrap: true }
     ]},
     body: { type: 'box', layout: 'vertical', backgroundColor: '#FFF1F2', spacing: 'xs', paddingAll: 'md', contents: [
-      { type: 'text', text: '⛔ ปิดรับเปิดราคาเองแล้วครับ (รอจับคู่แผลค้าง 🚀)', color: '#BE123C', size: 'xs', align: 'center', wrap: true }
+      { type: 'text', text: 'ออเดอร์หลังจากนี้ไม่ติดทุกกรณี', weight: 'bold', color: '#9F1239', size: 'sm', align: 'center', wrap: true }
     ]}
   };
   return await sendAdminMessageToLine(targetId || 'ALL', closeFlex);
@@ -2509,20 +2509,21 @@ export function constructOpenRoundQuoteFlex(name, min, max, isChotoy = false) {
 export function constructRoundCloseFlex() {
   return {
     "type": "bubble",
-    "size": "micro",
+    "size": "kilo",
     "header": {
       "type": "box",
       "layout": "vertical",
-      "backgroundColor": "#FECDD3",
-      "paddingAll": "sm",
+      "backgroundColor": "#BE123C",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
-          "text": "⛔ FINAL CALL · ปิดรับดวล",
+          "text": "⛔️ ปิดรับดวล ⛔️",
           "weight": "bold",
-          "color": "#9F1239",
-          "size": "sm",
-          "align": "center"
+          "color": "#FFFFFF",
+          "size": "md",
+          "align": "center",
+          "wrap": true
         }
       ]
     },
@@ -2531,23 +2532,16 @@ export function constructRoundCloseFlex() {
       "layout": "vertical",
       "backgroundColor": "#FFF1F2",
       "spacing": "xs",
-      "paddingAll": "sm",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
-          "text": "⚠️ ปิดรับการเปิดราคาเองรอบนี้แล้ว",
+          "text": "ออเดอร์หลังจากนี้ไม่ติดทุกกรณี",
           "weight": "bold",
-          "color": "#BE123C",
-          "size": "xxs",
+          "color": "#9F1239",
+          "size": "sm",
           "align": "center",
           "wrap": true
-        },
-        {
-          "type": "text",
-          "text": "(จับคู่เฉพาะแผลที่เปิดค้างอยู่เท่านั้น)",
-          "color": "#64748B",
-          "size": "xxs",
-          "align": "center"
         }
       ]
     }
