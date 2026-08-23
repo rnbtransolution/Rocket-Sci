@@ -116,9 +116,22 @@ export default function App() {
   const runBackendFunction = async (functionName, args = []) => {
     if (isGAS) {
       return new Promise((resolve, reject) => {
-        window.google.script.run
-          .withSuccessHandler((res) => resolve(res))
-          .withFailureHandler((err) => reject(err))[functionName](...args);
+        try {
+          if (!window.google.script.run[functionName]) {
+            reject(new Error(`ฟังก์ชัน '${functionName}' ไม่พบใน Code.gs`));
+            return;
+          }
+          window.google.script.run
+            .withSuccessHandler((res) => resolve(res))
+            .withFailureHandler((err) => {
+              console.error(`[GAS RPC Error in ${functionName}]:`, err);
+              const errMsg = (err && (err.message || err.error)) || (typeof err === 'string' ? err : JSON.stringify(err)) || 'เกิดข้อผิดพลาดในการเรียก Apps Script';
+              reject(new Error(errMsg));
+            })[functionName](...args);
+        } catch (callErr) {
+          console.error(`[GAS Call Exception in ${functionName}]:`, callErr);
+          reject(new Error(callErr?.message || String(callErr)));
+        }
       });
     }
     const res = await fetch(`${API_BASE_URL}/api/run`, {
@@ -275,13 +288,14 @@ export default function App() {
       const targetName = broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่ม' : (targetObj ? targetObj.name : `กลุ่ม (#${broadcastTargetGroup.slice(-4)})`);
       
       if (res && res.success === false) {
-        addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || 'ไม่พบ Group ID'}`, 'warning');
+        addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'ไม่พบ Group ID หรือโควตาเต็ม'}`, 'warning');
       } else {
         addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) → ${targetName} เรียบร้อย!`, 'success');
       }
     } catch (e) {
       console.error('Error broadcasting quote:', e);
-      addToast(`❌ Broadcast Error: ${e.message}`, 'danger');
+      const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Unknown Error';
+      addToast(`❌ Broadcast Error: ${errStr}`, 'danger');
     }
   };
   const [customRocketTime, setCustomRocketTime] = useState(''); // Manual entry by admin (blank default)
@@ -292,6 +306,7 @@ export default function App() {
   const [chatTypeMode, setChatTypeMode] = useState('group'); // 'group' or 'private'
   const [selectedGroupFilter, setSelectedGroupFilter] = useState('ALL'); // Multi-group filter
   const [broadcastTargetGroup, setBroadcastTargetGroup] = useState('ALL'); // Multi-group broadcast target
+  const [lineQuota, setLineQuota] = useState({ totalUsage: 300, limit: 300, isExhausted: true, remaining: 0 }); // Live LINE quota monitor
   
   const privateChatEndRef = useRef(null);
   const groupChatEndRef = useRef(null);
@@ -1980,6 +1995,53 @@ export default function App() {
                   </label>
                 </div>
 
+                {/* ─── LINE OA Quota & Status Monitoring Banner ─── */}
+                <div className={`rounded-xl p-3 border transition-all ${lineQuota?.isExhausted ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">{lineQuota?.isExhausted ? '⚠️' : '📡'}</span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black text-slate-800 font-heading">
+                            LINE OA Push Message Quota:
+                          </span>
+                          <span className={`text-[11px] font-mono font-black px-2 py-0.5 rounded-md ${lineQuota?.isExhausted ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-emerald-100 text-emerald-800'}`}>
+                            {lineQuota ? `${lineQuota.totalUsage} / ${lineQuota.limit} ข้อความ (เต็ม 100%)` : 'กำลังตรวจสอบ...'}
+                          </span>
+                        </div>
+                        {lineQuota?.isExhausted && (
+                          <p className="text-[10px] text-amber-800 mt-1 leading-relaxed">
+                            ⚠️ <strong>โควตา Push Message รายเดือนของ LINE OA ฟรี 300 ข้อความเต็มแล้ว</strong><br />
+                            • บอทตอบกลับในกลุ่มยังทำงานได้ฟรี 100% (ผ่าน Reply API ไม่เสียโควตา)<br />
+                            • การบรอดแคสต์/กดปุ่มส่งข้อความจากหน้า Web App จะถูก LINE ปฏิเสธ (HTTP 429 Limit Exceeded)<br />
+                            • 💡 <strong>วิธีแก้ไข:</strong> อัปเกรดแพ็กเกจเป็น Basic/Pro ที่ <a href="https://manager.line.biz" target="_blank" rel="noreferrer" className="text-blue-600 font-bold underline">manager.line.biz</a> เพื่อปลดล็อค 15,000 ข้อความ/เดือนครับ
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        addToast('🔄 กำลังตรวจสอบโควตา LINE OA ล่าสุด...', 'info');
+                        try {
+                          const q = await runBackendFunction('adminGetLineQuota', []);
+                          if (q && !q.error) {
+                            setLineQuota(q);
+                            addToast(`📊 โควตา LINE: ใช้งานไปแล้ว ${q.totalUsage}/${q.limit} ข้อความ`, q.isExhausted ? 'warning' : 'success');
+                          } else {
+                            addToast(`⚠️ ตรวจสอบโควตาไม่สำเร็จ: ${q?.error || 'Unknown'}`, 'warning');
+                          }
+                        } catch(err) {
+                          const errStr = err?.message || (typeof err === 'string' ? err : JSON.stringify(err)) || 'Error';
+                          addToast(`❌ Error: ${errStr}`, 'danger');
+                        }
+                      }}
+                      className="py-1 px-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 text-[10px] font-bold rounded-lg transition-all active:scale-95"
+                    >
+                      🔄 รีเฟรชโควตา
+                    </button>
+                  </div>
+                </div>
+
                 {/* ─── Group ID Setup Widget ─── */}
                 {!activeGroupId && (
                   <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 space-y-2">
@@ -2002,7 +2064,10 @@ export default function App() {
                           } else {
                             addToast('❌ ไม่พบ Group ID ในระบบ — กรุณา Paste Group ID ด้วยตนเองครับ', 'warning');
                           }
-                        } catch(e) { addToast('❌ Discover Error: ' + e.message, 'danger'); }
+                        } catch(e) {
+                          const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
+                          addToast(`❌ Discover Error: ${errStr}`, 'danger');
+                        }
                       }} className="py-1.5 px-3 bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold rounded-lg transition-all active:scale-95">
                         🔍 Auto Discover
                       </button>
@@ -2019,7 +2084,10 @@ export default function App() {
                               if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
                               addToast(`✅ ตั้งค่า Group ID สำเร็จ: ...${gid.slice(-8)}`, 'success');
                               e.target.value = '';
-                            } catch(err) { addToast('❌ Error: ' + err.message, 'danger'); }
+                            } catch(err) {
+                              const errStr = err?.message || (typeof err === 'string' ? err : JSON.stringify(err)) || 'Error';
+                              addToast(`❌ Error: ${errStr}`, 'danger');
+                            }
                           }
                         }}
                       />
@@ -2047,10 +2115,11 @@ export default function App() {
                         if (testRes && testRes.success) {
                           addToast(`✅ ทดสอบส่ง Push สำเร็จ! (HTTP 200) ข้อความเด้งเข้ากลุ่มแล้ว 🚀`, 'success');
                         } else {
-                          addToast(`❌ LINE Push ล้มเหลว (HTTP ${testRes?.code || 'Error'}): ${testRes?.body || testRes?.error || 'Unknown'}`, 'danger');
+                          addToast(`⚠️ LINE Push ไม่สำเร็จ: ${testRes?.error || testRes?.body || 'โควตาเต็ม'}`, 'warning');
                         }
                       } catch (err) {
-                        addToast(`❌ Error: ${err.message}`, 'danger');
+                        const errStr = err?.message || (typeof err === 'string' ? err : JSON.stringify(err)) || 'Error';
+                        addToast(`❌ Error: ${errStr}`, 'danger');
                       }
                     }} className="py-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg transition-all active:scale-95 shadow-xs flex items-center gap-1">
                       ⚡ ทดสอบส่ง Push เข้ากลุ่ม
@@ -2106,18 +2175,24 @@ export default function App() {
                     <button onClick={async () => {
                       try {
                         const res = await runBackendFunction('adminBroadcastRuleGuide', [broadcastTargetGroup || 'ALL']);
-                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || 'ไม่พบ Group ID'}`, 'warning');
+                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
                         else addToast('📖 ประกาศส่งคู่มือคีย์เวิร์ด & กติกาการเล่น เรียบร้อย!', 'info');
-                      } catch(e) { addToast(`❌ Error: ${e.message}`, 'danger'); }
+                      } catch(e) {
+                        const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
+                        addToast(`❌ Error: ${errStr}`, 'danger');
+                      }
                     }} className="py-2.5 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">📖 ประกาศส่งคู่มือคีย์เวิร์ดกติกา</button>
 
                     {/* Final Call */}
                     <button onClick={async () => {
                       try {
                         const res = await runBackendFunction('adminBroadcastFinalCall', [broadcastTargetGroup || 'ALL']);
-                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || 'ไม่พบ Group ID'}`, 'warning');
+                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
                         else addToast('⛔ ประกาศปิดรับดวล (Final Call) เรียบร้อย!', 'warning');
-                      } catch(e) { addToast(`❌ Error: ${e.message}`, 'danger'); }
+                      } catch(e) {
+                        const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
+                        addToast(`❌ Error: ${errStr}`, 'danger');
+                      }
                     }} className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">⛔ ปิดรับดวล (Final Call)</button>
 
                     {/* Void Round */}
@@ -2125,18 +2200,24 @@ export default function App() {
                       if (!window.confirm("⛔ คุณต้องการประกาศ 'ช่าง ⛔' (โมฆะรอบ) และยกเลิกคืนแต้มแผลดวลทั้งหมดใช่หรือไม่?")) return;
                       try {
                         const res = await runBackendFunction('adminBroadcastVoidRound', [broadcastTargetGroup || 'ALL']);
-                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || 'ไม่พบ Group ID'}`, 'warning');
+                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
                         else addToast('⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ) และคืนแต้มผู้เล่นเรียบร้อย!', 'danger');
-                      } catch(e) { addToast(`❌ Error: ${e.message}`, 'danger'); }
+                      } catch(e) {
+                        const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
+                        addToast(`❌ Error: ${errStr}`, 'danger');
+                      }
                     }} className="py-2.5 px-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ)</button>
 
                     {/* Scam Warning */}
                     <button onClick={async () => {
                       try {
                         const res = await runBackendFunction('adminBroadcastScamWarning', [broadcastTargetGroup || 'ALL']);
-                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || 'ไม่พบ Group ID'}`, 'warning');
+                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
                         else addToast('🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพเรียบร้อย!', 'info');
-                      } catch(e) { addToast(`❌ Error: ${e.message}`, 'danger'); }
+                      } catch(e) {
+                        const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
+                        addToast(`❌ Error: ${errStr}`, 'danger');
+                      }
                     }} className="py-2.5 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">🚨 เตือนมิจฉาชีพ</button>
                   </div>
                 </div>

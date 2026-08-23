@@ -4,7 +4,7 @@
 // =========================================================================
 
 // CONFIGURATION CONSTANTS (Update these in your GAS environment)
-const LINE_CHANNEL_ACCESS_TOKEN = 'imrgIDDKJzCz68l399JwA9h7O0DGfHeJYEH4BychnR766i6GfWTTENcpm3MshP37uQMGIrV3GoGY9UsMC3li2Yxvq4BYIJjwND1u4GJgppSR0EJPfnGrY+56hzfW0bh0zNyCfQz5wUCABcIhaLGl9gdB04t89/1O/w1cDnyilFU=';
+const LINE_CHANNEL_ACCESS_TOKEN = '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=';
 const SLIP_API_KEY = '697ef678-60df-4955-a13a-6ed4e26a38c0'; // SlipOk or EasySlip
 const SLIP_API_URL = 'https://api.easyslip.com/v2/verify/bank'; // EasySlip bank verification endpoint
 let SHEET_ID = '1NaQbaUz8fcgd32sCAfxxKNBnpmFA5vu0_YVSehhdCEQ';
@@ -2393,8 +2393,17 @@ function pushLineGroupMessage(groupId, text) {
       return { success: true, code: 200, groupId: groupId };
     }
 
-    // Fallback: If flex fails, try sending plain text
-    if (typeof text === 'object') {
+    var errorMsg = 'LINE API Error (HTTP ' + code + ')';
+    if (body && (body.indexOf('monthly limit') !== -1 || body.indexOf('reached your monthly') !== -1)) {
+      errorMsg = 'โควตา Push Message ของ LINE OA เดือนนี้เต็มแล้ว (300/300 ข้อความ) — กรุณาอัปเกรดแพ็กเกจเป็น Basic/Pro ที่ manager.line.biz เพื่อส่งข้อความได้ไม่จำกัดครับ';
+    } else if (body && body.indexOf('Invalid reply token') !== -1) {
+      errorMsg = 'โทเค็นตอบกลับหมดอายุ';
+    } else if (body && body.indexOf('Authentication failed') !== -1) {
+      errorMsg = 'LINE Channel Access Token ไม่ถูกต้องหรือหมดอายุ';
+    }
+
+    // Fallback: If flex fails and NOT a quota error, try sending plain text
+    if (typeof text === 'object' && code !== 429 && body.indexOf('monthly limit') === -1) {
       var headerStr = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text) || '';
       var fbText = '🚀 ' + headerStr;
       var fbRes = UrlFetchApp.fetch(url, {
@@ -2405,9 +2414,11 @@ function pushLineGroupMessage(groupId, text) {
         muteHttpExceptions: true
       });
       var fbCode = fbRes.getResponseCode();
-      return { success: fbCode === 200, code: fbCode, body: fbRes.getContentText(), groupId: groupId, fallback: true };
+      if (fbCode === 200) {
+        return { success: true, code: fbCode, groupId: groupId, fallback: true };
+      }
     }
-    return { success: false, code: code, body: body, groupId: groupId };
+    return { success: false, code: code, error: errorMsg, body: body, groupId: groupId };
   } catch (e) {
     Logger.log('[pushLineGroupMessage] Exception: ' + e.toString());
     return { success: false, error: e.toString(), groupId: groupId };
@@ -4370,48 +4381,26 @@ function setTargetMinMax(minVal, maxVal) {
 }
 
 /**
- * Void all pending bets and refund credits to all players.
- * Returns the dashboard data after processing.
+ * Fetch real-time LINE OA message quota and monthly consumption status
  */
-function adminVoidRound() {
-  var ss = SpreadsheetApp.openById(SHEET_ID);
-  var bSheet = ss.getSheetByName('Bets');
-  var pSheet = ss.getSheetByName('Players');
-  if (!bSheet || !pSheet) {
-    Logger.log('[adminVoidRound] Bets or Players sheet not found.');
-    return getDashboardData();
+function adminGetLineQuota() {
+  try {
+    var headers = { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN };
+    var qRes = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/quota', { headers: headers, muteHttpExceptions: true });
+    var cRes = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/quota/consumption', { headers: headers, muteHttpExceptions: true });
+    var quotaJson = JSON.parse(qRes.getContentText());
+    var consJson = JSON.parse(cRes.getContentText());
+    var totalLimit = quotaJson.value || 0;
+    var used = consJson.totalUsage || 0;
+    return {
+      type: quotaJson.type || 'limited',
+      limit: totalLimit,
+      totalUsage: used,
+      remaining: Math.max(0, totalLimit - used),
+      isExhausted: totalLimit > 0 && used >= totalLimit
+    };
+  } catch (e) {
+    Logger.log('[adminGetLineQuota] Error: ' + e.toString());
+    return { error: e.toString() };
   }
-
-  var bData = bSheet.getDataRange().getValues();
-  var pData = pSheet.getDataRange().getValues();
-
-  // Build player index: userId -> row index
-  var playerIdx = {};
-  for (var pi = 1; pi < pData.length; pi++) {
-    if (pData[pi][0]) playerIdx[pData[pi][0]] = pi;
-  }
-
-  // Refund all pending bets
-  for (var bi = 1; bi < bData.length; bi++) {
-    var betStatus = (bData[bi][8] || '').toString().trim();
-    if (betStatus === 'pending_match' || betStatus === 'open' || betStatus === 'pending') {
-      var betCreator = bData[bi][2]; // creator userId
-      var betAmount = Number(bData[bi][4]) || 0; // bet amount
-      // Mark bet as voided
-      bSheet.getRange(bi + 1, 9).setValue('voided');
-      // Refund creator
-      if (betCreator && playerIdx[betCreator] !== undefined) {
-        var pRow = playerIdx[betCreator];
-        var currentBal = Number(pData[pRow][3]) || 0;
-        var newBal = currentBal + betAmount;
-        pSheet.getRange(pRow + 1, 4).setValue(newBal);
-        pData[pRow][3] = newBal; // Update local cache
-        Logger.log('[adminVoidRound] Refunded ' + betAmount + 'pt to ' + betCreator + ' (new balance: ' + newBal + ')');
-      }
-    }
-  }
-
-  setRocketRoundStatus('ACTIVE');
-  Logger.log('[adminVoidRound] All pending bets voided and credits refunded.');
-  return getDashboardData();
 }
