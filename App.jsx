@@ -268,17 +268,11 @@ export default function App() {
       }
     };
 
-    runBackendFunction('adminOpenRound', [name]);
-
-    if (broadcastTargetGroup === 'ALL') {
-      runBackendFunction('sendAdminMessageToLine', ['ALL', quoteFlex]);
-      addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) กระจายทุกกลุ่มเรียบร้อย!`, 'success');
-    } else {
-      const targetObj = lineGroups.find(g => g.id === broadcastTargetGroup);
-      const targetName = targetObj ? targetObj.name : `กลุ่ม (#${broadcastTargetGroup.slice(-4)})`;
-      runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, quoteFlex]);
-      addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) เข้า [${targetName}] เรียบร้อย!`, 'success');
-    }
+    // Use GAS-side wrapper to avoid sending large Flex objects through the bridge
+    runBackendFunction('adminBroadcastQuote', [broadcastTargetGroup || 'ALL', name, min, max, isChotoy]);
+    const targetObj = lineGroups.find(g => g.id === broadcastTargetGroup);
+    const targetName = broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่ม' : (targetObj ? targetObj.name : `กลุ่ม (#${broadcastTargetGroup.slice(-4)})`);
+    addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) → ${targetName} เรียบร้อย!`, 'success');
   };
   const [customRocketTime, setCustomRocketTime] = useState(''); // Manual entry by admin (blank default)
   const [flightLogs, setFlightLogs] = useState([]);
@@ -2095,258 +2089,29 @@ export default function App() {
                     <span className="text-[10px] text-emerald-700 font-mono font-bold">💡 ราคาช่างเปิดจากแอดมินไม่ต้องใช้แต้ม</span>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs font-bold">
+                    {/* Rule Guide */}
                     <button onClick={() => {
-                      const ruleGuideFlex = {
-                        "type": "bubble",
-                        "size": "kilo",
-                        "header": {
-                          "type": "box",
-                          "layout": "vertical",
-                          "backgroundColor": "#E0E7FF",
-                          "paddingAll": "sm",
-                          "contents": [
-                            {
-                              "type": "text",
-                              "text": "🚀 ROCKET SCIENCE",
-                              "weight": "bold",
-                              "color": "#4338CA",
-                              "size": "xxs",
-                              "align": "center"
-                            },
-                            {
-                              "type": "text",
-                              "text": "📖 กติกา & วิธีการเล่นบั้งไฟ",
-                              "weight": "bold",
-                              "color": "#1E1B4B",
-                              "size": "sm",
-                              "align": "center",
-                              "margin": "xs"
-                            }
-                          ]
-                        },
-                        "body": {
-                          "type": "box",
-                          "layout": "vertical",
-                          "spacing": "sm",
-                          "paddingAll": "sm",
-                          "contents": [
-                            {
-                              "type": "box",
-                              "layout": "vertical",
-                              "backgroundColor": "#DCFCE7",
-                              "cornerRadius": "md",
-                              "paddingAll": "sm",
-                              "contents": [
-                                { "type": "text", "text": "1️⃣ แทงตามราคาช่าง (ปรับได้ ±5 / ±10)", "weight": "bold", "color": "#166534", "size": "xs" },
-                                { "type": "text", "text": "• ทายชนะ (สูง): ชล, +5ชล, -5ชล, +10ชล, -10ชล\n• ทายแพ้ (ต่ำ): ชถ, +5ชถ, -5ชถ, +10ชถ, -10ชถ\nเช่น ชล500, +5ชล1000, -10ชถ200", "color": "#14532D", "size": "xxs", "wrap": true, "margin": "xs" }
-                              ]
-                            },
-                            {
-                              "type": "box",
-                              "layout": "vertical",
-                              "backgroundColor": "#E0F2FE",
-                              "cornerRadius": "md",
-                              "paddingAll": "sm",
-                              "contents": [
-                                { "type": "text", "text": "2️⃣ เปิดราคาเอง (ช่วงห่าง 80 วิพอดี)", "weight": "bold", "color": "#0369A1", "size": "xs" },
-                                { "type": "text", "text": "• ช่วงเวลาห่าง 80 วิ: 300-380ล500 หรือ 350-430ถ1000\n• เผื่อช่างไม่ต่อย: ใส่ ชตย เช่น 300-380ล500 ชตย", "color": "#0C4A6E", "size": "xxs", "wrap": true, "margin": "xs" }
-                              ]
-                            },
-                            {
-                              "type": "box",
-                              "layout": "vertical",
-                              "backgroundColor": "#F3E8FF",
-                              "cornerRadius": "md",
-                              "paddingAll": "sm",
-                              "contents": [
-                                { "type": "text", "text": "3️⃣ การรับแผลดวล & ขั้นต่ำ 20%", "weight": "bold", "color": "#6B21A8", "size": "xs" },
-                                { "type": "text", "text": "• แตะปุ่มเปอร์เซ็นต์ [20%] [40%] [80%] [100%]\n• หรือพิมพ์: [เลขบิล] [แต้ม] เช่น 4812 200 หรือ ต4812\n• ขั้นต่ำการรับแผลคือ 20% ของยอดแผล", "color": "#581C87", "size": "xxs", "wrap": true, "margin": "xs" }
-                              ]
-                            },
-                            {
-                              "type": "box",
-                              "layout": "vertical",
-                              "backgroundColor": "#FFE4E6",
-                              "cornerRadius": "md",
-                              "paddingAll": "sm",
-                              "contents": [
-                                { "type": "text", "text": "4️⃣ การยกเลิกแผลดวล", "weight": "bold", "color": "#9F1239", "size": "xs" },
-                                { "type": "text", "text": "• พิมพ์ ยกเลิก [เลขบิล] เช่น ยกเลิก 4812 (ก่อนมีคู่รับ)", "color": "#881337", "size": "xxs", "wrap": true, "margin": "xs" }
-                              ]
-                            }
-                          ]
-                        },
-                        "footer": {
-                          "type": "box",
-                          "layout": "horizontal",
-                          "paddingAll": "xs",
-                          "contents": [
-                            { "type": "button", "action": { "type": "message", "label": "📋 ดูกระดานดวลสด", "text": "กระดานดวล" }, "style": "primary", "color": "#334155", "height": "sm" }
-                          ]
-                        }
-                      };
-                      if (broadcastTargetGroup === 'ALL') {
-                        const targets = lineGroups.length > 0 ? lineGroups.map(g => g.id) : [activeGroupId];
-                        targets.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, ruleGuideFlex]));
-                      } else {
-                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, ruleGuideFlex]);
-                      }
-                      addToast('📖 ประกาศส่งคู่มือคีย์เวิร์ด & กติกาการเล่น (Colorful Flex Card) เรียบร้อย!', 'info');
+                      runBackendFunction('adminBroadcastRuleGuide', [broadcastTargetGroup || 'ALL']);
+                      addToast('📖 ประกาศส่งคู่มือคีย์เวิร์ด & กติกาการเล่น เรียบร้อย!', 'info');
                     }} className="py-2.5 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">📖 ประกาศส่งคู่มือคีย์เวิร์ดกติกา</button>
+
+                    {/* Final Call */}
                     <button onClick={() => {
-                      const closeFlex = {
-                        "type": "bubble",
-                        "size": "micro",
-                        "header": {
-                          "type": "box",
-                          "layout": "vertical",
-                          "backgroundColor": "#FECDD3",
-                          "paddingAll": "sm",
-                          "contents": [
-                            {
-                              "type": "text",
-                              "text": "⛔ FINAL CALL · ปิดรับดวล",
-                              "weight": "bold",
-                              "color": "#9F1239",
-                              "size": "sm",
-                              "align": "center"
-                            }
-                          ]
-                        },
-                        "body": {
-                          "type": "box",
-                          "layout": "vertical",
-                          "backgroundColor": "#FFF1F2",
-                          "spacing": "xs",
-                          "paddingAll": "sm",
-                          "contents": [
-                            {
-                              "type": "text",
-                              "text": "⚠️ ปิดรับการเปิดราคาเองรอบนี้แล้ว",
-                              "weight": "bold",
-                              "color": "#BE123C",
-                              "size": "xxs",
-                              "align": "center",
-                              "wrap": true
-                            },
-                            {
-                              "type": "text",
-                              "text": "(จับคู่เฉพาะแผลที่เปิดค้างอยู่เท่านั้น)",
-                              "color": "#64748B",
-                              "size": "xxs",
-                              "align": "center"
-                            }
-                          ]
-                        }
-                      };
-                      runBackendFunction('setRocketRoundStatus', ['closed']);
-                      if (broadcastTargetGroup === 'ALL') {
-                        const validGroups = lineGroups && lineGroups.length > 0 ? lineGroups.map(g => g.id) : (activeGroupId ? [activeGroupId] : []);
-                        if (validGroups.length === 0) {
-                          runBackendFunction('sendAdminMessageToLine', [activeGroupId, closeFlex]);
-                        } else {
-                          validGroups.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, closeFlex]));
-                        }
-                      } else {
-                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, closeFlex]);
-                      }
-                      addToast(`⛔ ประกาศปิดรับดวล (Final Call Pastel Flex Card) เรียบร้อย!`, 'warning');
+                      runBackendFunction('adminBroadcastFinalCall', [broadcastTargetGroup || 'ALL']);
+                      addToast('⛔ ประกาศปิดรับดวล (Final Call) เรียบร้อย!', 'warning');
                     }} className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">⛔ ปิดรับดวล (Final Call)</button>
+
+                    {/* Void Round */}
                     <button onClick={() => {
                       if (!window.confirm("⛔ คุณต้องการประกาศ 'ช่าง ⛔' (โมฆะรอบ) และยกเลิกคืนแต้มแผลดวลทั้งหมดใช่หรือไม่?")) return;
-                      const voidFlex = {
-                        "type": "bubble",
-                        "size": "micro",
-                        "header": {
-                          "type": "box",
-                          "layout": "vertical",
-                          "backgroundColor": "#FECDD3",
-                          "paddingAll": "sm",
-                          "contents": [
-                            {
-                              "type": "text",
-                              "text": "⛔ ช่าง ⛔ (โมฆะรอบ)",
-                              "weight": "bold",
-                              "color": "#9F1239",
-                              "size": "sm",
-                              "align": "center"
-                            }
-                          ]
-                        },
-                        "body": {
-                          "type": "box",
-                          "layout": "vertical",
-                          "backgroundColor": "#FFF1F2",
-                          "spacing": "xs",
-                          "paddingAll": "sm",
-                          "contents": [
-                            {
-                              "type": "text",
-                              "text": "ยกเลิกและคืนแต้มทุกแผลดวล 100% เรียบร้อยครับ",
-                              "weight": "bold",
-                              "color": "#BE123C",
-                              "size": "xxs",
-                              "align": "center",
-                              "wrap": true
-                            }
-                          ]
-                        }
-                      };
-                      runBackendFunction('adminVoidRound', []);
-                      if (broadcastTargetGroup === 'ALL') {
-                        const validGroups = lineGroups && lineGroups.length > 0 ? lineGroups.map(g => g.id) : (activeGroupId ? [activeGroupId] : []);
-                        validGroups.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, voidFlex]));
-                      } else {
-                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, voidFlex]);
-                      }
-                      addToast(`⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ) และคืนแต้มผู้เล่นเรียบร้อย!`, 'danger');
+                      runBackendFunction('adminBroadcastVoidRound', [broadcastTargetGroup || 'ALL']);
+                      addToast('⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ) และคืนแต้มผู้เล่นเรียบร้อย!', 'danger');
                     }} className="py-2.5 px-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ)</button>
+
+                    {/* Scam Warning */}
                     <button onClick={() => {
-                      const warnFlex = {
-                        "type": "bubble",
-                        "size": "micro",
-                        "header": {
-                          "type": "box",
-                          "layout": "vertical",
-                          "backgroundColor": "#FDE68A",
-                          "paddingAll": "sm",
-                          "contents": [
-                            {
-                              "type": "text",
-                              "text": "🚨 เตือนความปลอดภัย",
-                              "weight": "bold",
-                              "color": "#92400E",
-                              "size": "sm",
-                              "align": "center"
-                            }
-                          ]
-                        },
-                        "body": {
-                          "type": "box",
-                          "layout": "vertical",
-                          "backgroundColor": "#FEFCE8",
-                          "spacing": "xs",
-                          "paddingAll": "sm",
-                          "contents": [
-                            {
-                              "type": "text",
-                              "text": "ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1-on-1 เท่านั้นครับ ❌",
-                              "weight": "bold",
-                              "color": "#B45309",
-                              "size": "xxs",
-                              "align": "center",
-                              "wrap": true
-                            }
-                          ]
-                        }
-                      };
-                      if (broadcastTargetGroup === 'ALL') {
-                        const targets = lineGroups.length > 0 ? lineGroups.map(g => g.id) : [activeGroupId];
-                        targets.forEach(tId => runBackendFunction('sendAdminMessageToLine', [tId, warnFlex]));
-                      } else {
-                        runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup, warnFlex]);
-                      }
-                      addToast(`🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพ (Pastel Flex Card) เรียบร้อย!`, 'info');
+                      runBackendFunction('adminBroadcastScamWarning', [broadcastTargetGroup || 'ALL']);
+                      addToast('🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพเรียบร้อย!', 'info');
                     }} className="py-2.5 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">🚨 เตือนมิจฉาชีพ</button>
                   </div>
                 </div>

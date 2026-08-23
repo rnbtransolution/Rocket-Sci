@@ -3474,12 +3474,120 @@ function getLineChatLogs() {
   }
 }
 
+// ============================================================
+// Admin Hotkey Broadcast Wrappers (GAS-side Flex constructors)
+// These are called directly from frontend via window.google.script.run
+// to avoid sending large Flex objects through the GAS bridge.
+// ============================================================
+
+function adminBroadcastQuote(targetId, name, minVal, maxVal, isChotoy) {
+  var quoteFlex = {
+    "type": "bubble",
+    "size": "micro",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#BAE6FD",
+      "paddingAll": "sm",
+      "contents": [
+        { "type": "text", "text": "\uD83D\uDE80 ราคาช่างเปิด \u27A1 " + (name || 'ช่างบั้งไฟสด'), "weight": "bold", "color": "#0369A1", "size": "sm", "align": "center", "wrap": true }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#F0F9FF",
+      "spacing": "xs",
+      "paddingAll": "sm",
+      "contents": [
+        { "type": "text", "text": "\u23F1\uFE0F ช่วงราคา: " + minVal + "-" + maxVal + " วิ" + (isChotoy ? " (ชตย)" : ""), "weight": "bold", "color": "#0284C7", "size": "xs", "align": "center", "wrap": true },
+        { "type": "text", "text": "\u26A1 พิมพ์ ชล / ชถ (\u00B15, \u00B110) ได้ทันที", "color": "#64748B", "size": "xxs", "align": "center" }
+      ]
+    }
+  };
+  adminOpenRound(name);
+  setTargetMinMax(Number(minVal), Number(maxVal));
+  return sendAdminMessageToLine(targetId || 'ALL', quoteFlex);
+}
+
+function adminBroadcastFinalCall(targetId) {
+  setRocketRoundStatus('CLOSED');
+  var closeFlex = {
+    "type": "bubble",
+    "size": "micro",
+    "header": { "type": "box", "layout": "vertical", "backgroundColor": "#FECDD3", "paddingAll": "sm", "contents": [
+      { "type": "text", "text": "\u26D4 FINAL CALL · ปิดรับดวล", "weight": "bold", "color": "#9F1239", "size": "sm", "align": "center" }
+    ]},
+    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FFF1F2", "spacing": "xs", "paddingAll": "sm", "contents": [
+      { "type": "text", "text": "ปิดรับดวลแล้วครับ กรุณารอจับคู่แผลค้างก่อนปล่อยจรวด \uD83D\uDE80", "color": "#BE123C", "size": "xxs", "align": "center", "wrap": true }
+    ]}
+  };
+  return sendAdminMessageToLine(targetId || 'ALL', closeFlex);
+}
+
+function adminBroadcastVoidRound(targetId) {
+  adminVoidRound();
+  var voidFlex = {
+    "type": "bubble",
+    "size": "micro",
+    "header": { "type": "box", "layout": "vertical", "backgroundColor": "#FECDD3", "paddingAll": "sm", "contents": [
+      { "type": "text", "text": "\u26D4 ช่าง \u26D4 (โมฆะรอบ)", "weight": "bold", "color": "#9F1239", "size": "sm", "align": "center" }
+    ]},
+    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FFF1F2", "spacing": "xs", "paddingAll": "sm", "contents": [
+      { "type": "text", "text": "ยกเลิกและคืนแต้มทุกแผลดวล 100% เรียบร้อยครับ", "weight": "bold", "color": "#BE123C", "size": "xxs", "align": "center", "wrap": true }
+    ]}
+  };
+  return sendAdminMessageToLine(targetId || 'ALL', voidFlex);
+}
+
+function adminBroadcastRuleGuide(targetId) {
+  var ruleGuideFlex = {
+    "type": "bubble",
+    "size": "kilo",
+    "header": { "type": "box", "layout": "vertical", "backgroundColor": "#134E4A", "paddingAll": "md", "contents": [
+      { "type": "text", "text": "\uD83D\uDE80 คู่มือดวลสด · วิธีเล่น", "weight": "bold", "color": "#6EE7B7", "size": "md", "align": "center" }
+    ]},
+    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#F0FDF4", "spacing": "md", "paddingAll": "md", "contents": [
+      { "type": "text", "text": "\uD83D\uDCCB คีย์เวิร์ดคำสั่ง", "weight": "bold", "color": "#065F46", "size": "sm" },
+      { "type": "text", "text": "ชล500 \u2192 เดิมพันต่ำ 500pt\nชถ200 \u2192 เดิมพันสูง 200pt\n300-380ล500 \u2192 กำหนดช่วงเอง\n+5ชล \u2192 บวกราคา 5 วิ\n-10ชถ \u2192 ลดราคา 10 วิ", "wrap": true, "size": "xs", "color": "#064E3B" },
+      { "type": "separator" },
+      { "type": "text", "text": "\uD83D\uDD12 เงื่อนไขสำคัญ", "weight": "bold", "color": "#065F46", "size": "sm" },
+      { "type": "text", "text": "• ช่วงราคาต้องห่าง 80 วิพอดี\n• ปรับราคาช่างได้แค่ \u00B15 หรือ \u00B110 วิ\n• ดวลขั้นต่ำ 100pt\n• พิมพ์ \"กระดานดวล\" เพื่อดูแผลค้าง", "wrap": true, "size": "xs", "color": "#064E3B" }
+    ]},
+    "footer": { "type": "box", "layout": "horizontal", "paddingAll": "xs", "contents": [
+      { "type": "button", "action": { "type": "message", "label": "\uD83D\uDCCB ดูกระดานดวลสด", "text": "กระดานดวล" }, "style": "primary", "color": "#334155", "height": "sm" }
+    ]}
+  };
+  return sendAdminMessageToLine(targetId || 'ALL', ruleGuideFlex);
+}
+
+function adminBroadcastScamWarning(targetId) {
+  var warnFlex = {
+    "type": "bubble",
+    "size": "micro",
+    "header": { "type": "box", "layout": "vertical", "backgroundColor": "#FDE68A", "paddingAll": "sm", "contents": [
+      { "type": "text", "text": "\uD83D\uDEA8 เตือนความปลอดภัย", "weight": "bold", "color": "#92400E", "size": "sm", "align": "center" }
+    ]},
+    "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FEFCE8", "spacing": "xs", "paddingAll": "sm", "contents": [
+      { "type": "text", "text": "ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1-on-1 เท่านั้นครับ \u274C", "weight": "bold", "color": "#B45309", "size": "xxs", "align": "center", "wrap": true }
+    ]}
+  };
+  return sendAdminMessageToLine(targetId || 'ALL', warnFlex);
+}
+
+// ============================================================
+
 function sendAdminMessageToLine(targetId, messageText) {
-  const clean = (messageText || '').toString().replace(/\s+/g, '').toLowerCase();
+  var isObj = (typeof messageText === 'object' && messageText !== null);
+  var clean = isObj ? '' : (messageText || '').toString().replace(/\s+/g, '').toLowerCase();
 
   // Update round lock status automatically if broadcast contains explicit round open/close keywords
-  const isExplicitCloseCmd = (clean.indexOf('🔒ปิดรับดวล') !== -1 || clean.indexOf('ปิดรับดวล') === 0 || clean.indexOf('ปิดรอบ') === 0 || clean.indexOf('ล็อครอบ') === 0 || clean.indexOf('3-2-go') === 0 || clean.indexOf('หมดเวลาท้าดวลก่อนปล่อยบั้งไฟ') !== -1);
-  const isExplicitOpenCmd = (clean.indexOf('🚀เปิดรอบ') !== -1 || clean.indexOf('เปิดรอบ') === 0 || clean.indexOf('เปิดรับดวล') === 0);
+  var isExplicitCloseCmd = isObj 
+    ? false 
+    : (clean.indexOf('ปิดรับดวล') !== -1 || clean.indexOf('ปิดรอบ') === 0 || clean.indexOf('ล็อครอบ') === 0 || clean.indexOf('3-2-go') === 0);
+  var isExplicitOpenCmd = isObj 
+    ? false 
+    : (clean.indexOf('เปิดรอบ') === 0 || clean.indexOf('เปิดรับดวล') === 0);
 
   if (isExplicitCloseCmd) {
     setRocketRoundStatus('CLOSED');
@@ -3487,9 +3595,9 @@ function sendAdminMessageToLine(targetId, messageText) {
     setRocketRoundStatus('ACTIVE');
   }
 
-  var logMsg = typeof messageText === 'object' ? '[Flex Message]' : messageText;
+  var logMsg = isObj ? '[Flex Message]' : messageText;
 
-  // Broadcast to ALL active groups
+  // ─── Broadcast to ALL active groups ───
   if (!targetId || targetId === 'ALL') {
     var groups = getLineGroups();
     var activeId = getActiveGroupId();
@@ -3499,7 +3607,7 @@ function sendAdminMessageToLine(targetId, messageText) {
     }
     if (activeId) targetIds[activeId] = true;
 
-    // Fallback: If no group ID found in properties, retrieve from Bets or LineChatLogs sheets
+    // Fallback: scan Bets sheet for group IDs
     if (Object.keys(targetIds).length === 0) {
       try {
         var ss = SpreadsheetApp.openById(SHEET_ID);
@@ -3514,51 +3622,58 @@ function sendAdminMessageToLine(targetId, messageText) {
           }
         }
       } catch (e) {
-        Logger.log('[sendAdminMessageToLine] Fallback error: ' + e.toString());
+        Logger.log('[sendAdminMessageToLine] Bets fallback error: ' + e.toString());
       }
     }
 
     var keys = Object.keys(targetIds);
     if (keys.length === 0) {
-      Logger.log('[sendAdminMessageToLine] No active groups found to broadcast.');
+      Logger.log('[sendAdminMessageToLine] No active groups found to broadcast. ACTIVE_GROUP_ID=' + getActiveGroupId());
       return false;
     }
     for (var k = 0; k < keys.length; k++) {
       pushLineGroupMessage(keys[k], messageText);
-      logLineChatMessage(keys[k], 'กลุ่ม', 'admin', logMsg, typeof messageText === 'object' ? 'flex' : 'text');
+      logLineChatMessage(keys[k], 'กลุ่ม', 'admin', logMsg, isObj ? 'flex' : 'text');
     }
     return true;
   }
 
-  let payload = messageText;
-
-  if (clean === 'เช็คยอด' || clean === 'คงเหลือ' || clean === 'balance') {
-    const name = getPlayerNameFromDb(targetId) || "ผู้เล่น";
-    const balance = getPlayerBalance(targetId, name);
-    payload = constructBalanceFlex(name, balance);
-  } else if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit') {
-    payload = constructDepositFlex();
-  } else if (clean === 'ถอนเงิน' || clean === 'ถอนยอด' || clean === 'withdraw') {
-    const bank = getPlayerBank(targetId);
-    if (bank) {
-      const balance = getPlayerBalance(targetId, bank.accountName || "ผู้เล่น");
-      payload = constructWithdrawalFlex(bank.bankName, bank.accountNumber, bank.accountName, balance);
-    } else {
-      payload = "❌ ผู้เล่นรายนี้ยังไม่ได้ลงทะเบียนบัญชีธนาคาร (กรุณาทำรายการฝากเงินเข้ามาก่อน)";
+  // ─── Single target: resolve payload if keyword ───
+  var payload = messageText;
+  if (!isObj) {
+    if (clean === 'เช็คยอด' || clean === 'คงเหลือ' || clean === 'balance') {
+      var name = getPlayerNameFromDb(targetId) || "ผู้เล่น";
+      var balance = getPlayerBalance(targetId, name);
+      payload = constructBalanceFlex(name, balance);
+    } else if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit') {
+      payload = constructDepositFlex();
+    } else if (clean === 'ถอนเงิน' || clean === 'ถอนยอด' || clean === 'withdraw') {
+      var bank = getPlayerBank(targetId);
+      if (bank) {
+        var balW = getPlayerBalance(targetId, bank.accountName || "ผู้เล่น");
+        payload = constructWithdrawalFlex(bank.bankName, bank.accountNumber, bank.accountName, balW);
+      } else {
+        payload = "❌ ผู้เล่นรายนี้ยังไม่ได้ลงทะเบียนบัญชีธนาคาร (กรุณาทำรายการฝากเงินเข้ามาก่อน)";
+      }
+    } else if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start') {
+      payload = constructMainMenuFlex();
     }
-  } else if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start') {
-    payload = constructMainMenuFlex();
   }
 
-  if (typeof targetId === 'string' && (targetId.startsWith('C') || /^\d{10,}$/.test(targetId))) {
+  // ─── Route by ID type ───
+  // Group IDs start with 'C' or 'R', User IDs start with 'U'
+  var isGroupTarget = typeof targetId === 'string' && (targetId.startsWith('C') || targetId.startsWith('R') || /^\d{10,}$/.test(targetId));
+  if (isGroupTarget) {
     pushLineGroupMessage(targetId, payload);
   } else {
     pushToLine(targetId, payload);
   }
 
-  logLineChatMessage(targetId, 'ผู้เล่น', 'admin', logMsg, typeof payload === 'object' ? 'flex' : 'text');
+  logLineChatMessage(targetId, isGroupTarget ? 'กลุ่ม' : 'ผู้เล่น', 'admin', logMsg, (typeof payload === 'object') ? 'flex' : 'text');
   return true;
 }
+
+
 
 function constructRejectionFlex(type, amount, reason, currentBalance, userId) {
   var formattedAmount = "";
@@ -3938,4 +4053,61 @@ function isRocketRoundClosed() {
 function getActiveRocketRound() {
   var status = PropertiesService.getScriptProperties().getProperty('ROUND_STATUS') || 'ACTIVE';
   return { name: 'ทั่วไป', status: status };
+}
+
+/**
+ * Set the active target min/max range in script properties.
+ */
+function setTargetMinMax(minVal, maxVal) {
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('TARGET_MIN', String(minVal));
+  props.setProperty('TARGET_MAX', String(maxVal));
+  Logger.log('[ROUND] Target range set: ' + minVal + '-' + maxVal);
+}
+
+/**
+ * Void all pending bets and refund credits to all players.
+ * Returns the dashboard data after processing.
+ */
+function adminVoidRound() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var bSheet = ss.getSheetByName('Bets');
+  var pSheet = ss.getSheetByName('Players');
+  if (!bSheet || !pSheet) {
+    Logger.log('[adminVoidRound] Bets or Players sheet not found.');
+    return getDashboardData();
+  }
+
+  var bData = bSheet.getDataRange().getValues();
+  var pData = pSheet.getDataRange().getValues();
+
+  // Build player index: userId -> row index
+  var playerIdx = {};
+  for (var pi = 1; pi < pData.length; pi++) {
+    if (pData[pi][0]) playerIdx[pData[pi][0]] = pi;
+  }
+
+  // Refund all pending bets
+  for (var bi = 1; bi < bData.length; bi++) {
+    var betStatus = (bData[bi][8] || '').toString().trim();
+    if (betStatus === 'pending_match' || betStatus === 'open' || betStatus === 'pending') {
+      var betCreator = bData[bi][2]; // creator userId
+      var betAmount = Number(bData[bi][4]) || 0; // bet amount
+      // Mark bet as voided
+      bSheet.getRange(bi + 1, 9).setValue('voided');
+      // Refund creator
+      if (betCreator && playerIdx[betCreator] !== undefined) {
+        var pRow = playerIdx[betCreator];
+        var currentBal = Number(pData[pRow][3]) || 0;
+        var newBal = currentBal + betAmount;
+        pSheet.getRange(pRow + 1, 4).setValue(newBal);
+        pData[pRow][3] = newBal; // Update local cache
+        Logger.log('[adminVoidRound] Refunded ' + betAmount + 'pt to ' + betCreator + ' (new balance: ' + newBal + ')');
+      }
+    }
+  }
+
+  setRocketRoundStatus('ACTIVE');
+  Logger.log('[adminVoidRound] All pending bets voided and credits refunded.');
+  return getDashboardData();
 }
