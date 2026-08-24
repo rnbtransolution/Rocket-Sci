@@ -859,11 +859,13 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
   // 6. MATCH ACTION: ACCEPT / LOCK DEALS (Evaluated BEFORE deposits!)
   // ─────────────────────────────────────────────────────────────
   // Formats supported:
-  // - Two-token: "9047 500", "#9047 500", "ต9047 500", "9047ต 500", "ต 9047 500"
-  // - Order + keyword: "ต9047", "ต 9047", "ติด 9047", "รับ 9047", "9047ต", "9047 ติด", "9047 รับ", "ต12"
+  // - Order + Amount: "9047 500", "9047/500", "9047-500", "#9047 500", "ต9047 500", "ต 9047 500", "9047ต 500", "9047 500pt"
+  // - Keyword + Amount (Match latest bet with amount): "ต 500", "ต500", "ติด 500", "รับ 500", "เค 500"
+  // - Order + Keyword / Single Order: "ต9047", "ต 9047", "ติด 9047", "รับ 9047", "9047ต", "9047 ติด", "ต12", "#9047"
   // - Standalone keyword: "ต", "ติด", "รับ", "ครับ", "เค", "จ้า", "ยอมรับ", "ดีล", "รับแผล"
-  // - In group chat: 4-digit order number e.g. "9047"
-  var twoTokenAcceptRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*)?#?(\d{2,6})(?:\s*(ต|ติด|รับ))?\s+(\d{2,6})$/i;
+  // - In group chat: standalone number "500", "1000", "9047"
+  var orderAndAmountRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*)?#?(\d{2,6})\s*(?:[-/:=]|ต|ติด|รับ|\s)\s*(\d{2,6})(?:\s*(?:pt|แต้ม))?$/i;
+  var keywordAndAmountRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*)(\d{2,6})(?:\s*(?:pt|แต้ม))?$/i;
   var explicitOrderAcceptRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*#?(\d{2,6})|#?(\d{2,6})\s*(ต|ติด|รับ)|#(\d{2,6}))$/i;
   var keywordsAcceptList = ['ต', 'ตต', 'ติด', 'ครับ', 'เค', 'จ้า', 'ยอมรับ', 'ดีล', 'รับแผล', 'รับ'];
 
@@ -871,10 +873,16 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
   var customMatchAmount = null;
   var isAcceptMatch = false;
 
-  if (twoTokenAcceptRegex.test(rawTrimmed)) {
-    var m2 = rawTrimmed.match(twoTokenAcceptRegex);
-    targetOrderNo = m2[2];
-    customMatchAmount = parseInt(m2[4]);
+  if (orderAndAmountRegex.test(rawTrimmed)) {
+    var m1 = rawTrimmed.match(orderAndAmountRegex);
+    targetOrderNo = m1[2];
+    customMatchAmount = parseInt(m1[3]);
+    isAcceptMatch = true;
+  } else if (keywordAndAmountRegex.test(rawTrimmed)) {
+    // e.g. "ต 500", "ต500", "ติด 500" -> match latest open bet with 500 pt
+    var mK = rawTrimmed.match(keywordAndAmountRegex);
+    targetOrderNo = null;
+    customMatchAmount = parseInt(mK[2]);
     isAcceptMatch = true;
   } else if (explicitOrderAcceptRegex.test(rawTrimmed)) {
     var me = rawTrimmed.match(explicitOrderAcceptRegex);
@@ -886,9 +894,15 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
     isAcceptMatch = true;
   } else if (keywordsAcceptList.indexOf(clean) !== -1) {
     isAcceptMatch = true;
-  } else if (groupId && /^\d{4}$/.test(clean)) {
-    // In group chat, a 4-digit standalone number is an order match for that order
-    targetOrderNo = clean;
+  } else if (groupId && /^\d+$/.test(clean)) {
+    // In group chat, a pure number is either matching a 4-digit order number (e.g. 9047)
+    // or specifying a match amount (e.g. 500) for the latest open bet!
+    var pureVal = parseInt(clean);
+    if (/^\d{4}$/.test(clean) && pureVal > 1000) {
+      targetOrderNo = clean;
+    } else {
+      customMatchAmount = pureVal;
+    }
     isAcceptMatch = true;
   }
 
@@ -1063,8 +1077,8 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
   if (side && amount >= 100) {
     if (isRocketRoundClosed() && (betType === 'custom_range' || betType === 'custom' || betType === 'pre_quote' || offsetDelta !== 0)) {
       var closedMsg = groupId
-        ? '👤 [ถึงคุณ @' + displayName + ']: ⛔ ปิดรับการเปิดราคาเองแล้ว (Final Call) กรุณารอจับคู่แผลที่เปิดค้างอยู่หรือรอรอบถัดไปครับ'
-        : '⛔ ปิดรับการเปิดราคาเองแล้ว (Final Call) กรุณารอจับคู่แผลที่เปิดค้างอยู่หรือรอรอบถัดไปครับ';
+        ? '👤 [ถึงคุณ @' + displayName + ']: ⛔ ปิดรับการเปิดราคาเองแล้ว กรุณารอรอบต่อไป'
+        : '⛔ ปิดรับการเปิดราคาเองแล้ว กรุณารอรอบต่อไป';
       replyToLine(replyToken, closedMsg, userId);
       return;
     }
@@ -3635,7 +3649,7 @@ function constructMatchNotificationFlex(orderNo, amount, playerLowName, playerHi
     "header": {
       "type": "box",
       "layout": "vertical",
-      "backgroundColor": "#1E1B4B",
+      "backgroundColor": "#059669",
       "paddingAll": "sm",
       "contents": [
         {

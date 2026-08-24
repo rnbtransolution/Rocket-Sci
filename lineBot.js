@@ -907,34 +907,47 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
     return true;
   }
 
-  // 1. Check Accept Match Command (e.g. "ต", "ต12", "ต 12", "4812 500", "ต905662 400", "12ต", "ต#12", "ติด", "รับแผล")
-  const specificAcceptRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*)?#?(\d{2,6})(?:\s*(ต|ติด|รับ))?(?:\s+(\d+))?$/i;
-  const reverseAcceptRegex = /^#?(\d{2,6})\s*(ต|ติด|รับ)?(?:\s*(\d+))?$/i;
+  // 1. Check Accept Match Command (e.g. "9047 500", "9047/500", "ต 500", "ต9047", "ต", "500")
+  const orderAndAmountRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*)?#?(\d{2,6})\s*(?:[-/:=]|ต|ติด|รับ|\s)\s*(\d{2,6})(?:\s*(?:pt|แต้ม))?$/i;
+  const keywordAndAmountRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*)(\d{2,6})(?:\s*(?:pt|แต้ม))?$/i;
+  const explicitOrderAcceptRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*#?(\d{2,6})|#?(\d{2,6})\s*(ต|ติด|รับ)|#(\d{2,6}))$/i;
+
   let targetOrderNo = null;
   let customMatchAmount = null;
+  let isAcceptMatch = false;
 
   const rawTrimmed = text.trim();
-  if (specificAcceptRegex.test(rawTrimmed)) {
-    const m = rawTrimmed.match(specificAcceptRegex);
-    targetOrderNo = m[2];
-    if (m[4]) customMatchAmount = parseInt(m[4]);
-    else if (m[3] && /^\d+$/.test(m[3])) customMatchAmount = parseInt(m[3]);
-  } else if (specificAcceptRegex.test(clean)) {
-    const m = clean.match(specificAcceptRegex);
-    targetOrderNo = m[2];
-    if (m[4]) customMatchAmount = parseInt(m[4]);
-    else if (m[3] && /^\d+$/.test(m[3])) customMatchAmount = parseInt(m[3]);
-  } else if (reverseAcceptRegex.test(rawTrimmed)) {
-    const m = rawTrimmed.match(reverseAcceptRegex);
-    targetOrderNo = m[1];
-    if (m[3]) customMatchAmount = parseInt(m[3]);
-  } else if (reverseAcceptRegex.test(clean)) {
-    const m = clean.match(reverseAcceptRegex);
-    targetOrderNo = m[1];
-    if (m[3]) customMatchAmount = parseInt(m[3]);
+  if (orderAndAmountRegex.test(rawTrimmed)) {
+    const m1 = rawTrimmed.match(orderAndAmountRegex);
+    targetOrderNo = m1[2];
+    customMatchAmount = parseInt(m1[3]);
+    isAcceptMatch = true;
+  } else if (keywordAndAmountRegex.test(rawTrimmed)) {
+    const mK = rawTrimmed.match(keywordAndAmountRegex);
+    targetOrderNo = null;
+    customMatchAmount = parseInt(mK[2]);
+    isAcceptMatch = true;
+  } else if (explicitOrderAcceptRegex.test(rawTrimmed)) {
+    const me = rawTrimmed.match(explicitOrderAcceptRegex);
+    targetOrderNo = me[2] || me[3] || me[4];
+    isAcceptMatch = true;
+  } else if (explicitOrderAcceptRegex.test(clean)) {
+    const mc = clean.match(explicitOrderAcceptRegex);
+    targetOrderNo = mc[2] || mc[3] || mc[4];
+    isAcceptMatch = true;
+  } else if (keywordsAccept.includes(clean)) {
+    isAcceptMatch = true;
+  } else if (groupId && /^\d+$/.test(clean)) {
+    const pureVal = parseInt(clean);
+    if (/^\d{4}$/.test(clean) && pureVal > 1000) {
+      targetOrderNo = clean;
+    } else {
+      customMatchAmount = pureVal;
+    }
+    isAcceptMatch = true;
   }
 
-  if (keywordsAccept.includes(clean) || targetOrderNo) {
+  if (isAcceptMatch) {
     const sendNotice = async (msg) => {
       await replyToLine(replyToken, msg, userId);
     };
@@ -1125,8 +1138,8 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false, groupId = null, userTypedCmd = null, isPreQuote = false, offsetDelta = 0) {
   if (db.isRocketRoundClosed() && (type === 'custom_range' || type === 'custom' || isPreQuote || offsetDelta !== 0)) {
     const msg = groupId
-      ? `👤 [ถึงคุณ @${displayName}]: ⛔ ปิดรับการเปิดราคาเองแล้ว (Final Call) กรุณารอจับคู่แผลที่เปิดค้างอยู่หรือรอรอบถัดไปครับ`
-      : `⛔ ปิดรับการเปิดราคาเองแล้ว (Final Call) กรุณารอจับคู่แผลที่เปิดค้างอยู่หรือรอรอบถัดไปครับ`;
+      ? `👤 [ถึงคุณ @${displayName}]: ⛔ ปิดรับการเปิดราคาเองแล้ว กรุณารอรอบต่อไป`
+      : `⛔ ปิดรับการเปิดราคาเองแล้ว กรุณารอรอบต่อไป`;
     await replyToLine(replyToken, msg, userId);
     return;
   }
@@ -2088,7 +2101,7 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
     "header": {
       "type": "box",
       "layout": "vertical",
-      "backgroundColor": "#1E1B4B",
+      "backgroundColor": "#059669",
       "paddingAll": "sm",
       "contents": [
         {

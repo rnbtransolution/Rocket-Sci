@@ -1263,31 +1263,77 @@ export default function App() {
 
   // Parse bet command from Group chat message (Sandbox fallback)
   const processGroupBetCommand = (cmd) => {
-    const clean = cmd.replace(/\s+/g, '').toLowerCase();
+    const rawTrimmed = (cmd || '').trim();
+    const clean = rawTrimmed.replace(/\s+/g, '').toLowerCase();
 
-    // Check if accept action (ต, ติด, ครับ, เค, จ้า)
-    if (['ต', 'ติด', 'ครับ', 'เค', 'จ้า'].includes(clean)) {
-      const openBet = bets.find(b => b.status === 'pending_match');
+    // Check if accept/match action (e.g. "9047 500", "ต 500", "ต9047", "ต", "500")
+    const orderAndAmountRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*)?#?(\d{2,6})\s*(?:[-/:=]|ต|ติด|รับ|\s)\s*(\d{2,6})(?:\s*(?:pt|แต้ม))?$/i;
+    const keywordAndAmountRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*)(\d{2,6})(?:\s*(?:pt|แต้ม))?$/i;
+    const explicitOrderAcceptRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*#?(\d{2,6})|#?(\d{2,6})\s*(ต|ติด|รับ)|#(\d{2,6}))$/i;
+
+    let targetOrderNo = null;
+    let customMatchAmount = null;
+    let isAcceptMatch = false;
+
+    if (orderAndAmountRegex.test(rawTrimmed)) {
+      const m1 = rawTrimmed.match(orderAndAmountRegex);
+      targetOrderNo = m1[2];
+      customMatchAmount = parseInt(m1[3]);
+      isAcceptMatch = true;
+    } else if (keywordAndAmountRegex.test(rawTrimmed)) {
+      const mK = rawTrimmed.match(keywordAndAmountRegex);
+      targetOrderNo = null;
+      customMatchAmount = parseInt(mK[2]);
+      isAcceptMatch = true;
+    } else if (explicitOrderAcceptRegex.test(rawTrimmed)) {
+      const me = rawTrimmed.match(explicitOrderAcceptRegex);
+      targetOrderNo = me[2] || me[3] || me[4];
+      isAcceptMatch = true;
+    } else if (explicitOrderAcceptRegex.test(clean)) {
+      const mc = clean.match(explicitOrderAcceptRegex);
+      targetOrderNo = mc[2] || mc[3] || mc[4];
+      isAcceptMatch = true;
+    } else if (['ต', 'ตต', 'ติด', 'ครับ', 'เค', 'จ้า', 'ยอมรับ', 'ดีล', 'รับแผล', 'รับ'].includes(clean)) {
+      isAcceptMatch = true;
+    } else if (/^\d+$/.test(clean)) {
+      const pureVal = parseInt(clean);
+      if (/^\d{4}$/.test(clean) && pureVal > 1000) {
+        targetOrderNo = clean;
+      } else {
+        customMatchAmount = pureVal;
+      }
+      isAcceptMatch = true;
+    }
+
+    if (isAcceptMatch) {
+      let openBet = null;
+      if (targetOrderNo) {
+        openBet = bets.find(b => b.orderNumber === targetOrderNo && b.status === 'pending_match');
+      } else {
+        openBet = bets.find(b => b.status === 'pending_match');
+      }
+
       if (openBet) {
         const user = players.find(p => p.isUser);
         const userBal = user ? user.balance : 0;
-        if (userBal < openBet.amount) {
+        const matchAmt = customMatchAmount || openBet.amount;
+
+        if (userBal < matchAmt) {
           setGroupMessages(prev => [...prev, {
             id: Date.now() + 1,
             sender: 'ระบบบอทดูด 🚀',
-            text: `❌ ยอดเงินของคุณไม่พอรับดวลแผลนี้! ต้องการยอด: ${openBet.amount} แต้ม`,
+            text: `⚠️ แต้มไม่พอ (มี ${userBal}pt | ขาด ${matchAmt - userBal}pt) พิมพ์ "ฝากเงิน"`,
             time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
           }]);
           return;
         }
 
-        // Subtract user credit
-        setPlayers(prev => prev.map(p => p.isUser ? { ...p, balance: p.balance - openBet.amount } : p));
+        setPlayers(prev => prev.map(p => p.isUser ? { ...p, balance: p.balance - matchAmt } : p));
         
-        // Find maker side and assign the user ('คุณ (You)') to the opposite side
         const isLowCreator = !!openBet.playerLowId;
         const updatedBet = {
           ...openBet,
+          amount: matchAmt,
           status: 'matched'
         };
         
@@ -1301,14 +1347,13 @@ export default function App() {
         
         setBets(prev => prev.map(b => b.id === openBet.id ? updatedBet : b));
         
-        // Dynamic compiler getCompiledGroupMessages() will auto display the match success message!
         const userSide = isLowCreator ? 'สูง (HIGH) 🔴' : 'ต่ำ (LOW) 🔵';
-        addToast(`✅ จับคู่สำเร็จ! คุณอยู่ฝั่ง ${userSide} vs ${isLowCreator ? openBet.playerLowName : openBet.playerHighName} — ยอดดวล ${openBet.amount} แต้ม`, 'success');
+        addToast(`✅ จับคู่สำเร็จ! คุณอยู่ฝั่ง ${userSide} vs ${isLowCreator ? openBet.playerLowName : openBet.playerHighName} — ยอดดวล ${matchAmt} แต้ม`, 'success');
       } else {
         setGroupMessages(prev => [...prev, {
           id: Date.now() + 1,
           sender: 'ระบบบอทดูด 🚀',
-          text: '❌ ไม่มีแผลดวลเปิดรับอยู่ในขณะนี้',
+          text: targetOrderNo ? `🚫 ไม่พบแผล Order #${targetOrderNo} ที่เปิดรอคู่ครับ` : '🚫 ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ในขณะนี้ครับ',
           time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
         }]);
       }
