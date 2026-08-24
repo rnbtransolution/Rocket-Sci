@@ -86,6 +86,38 @@ function saveActiveGroupId(groupId) {
   }
 }
 
+/**
+ * Fetch real Group or Room name from LINE Messaging API
+ * @param {string} groupId 
+ * @returns {string|null}
+ */
+function fetchLINEGroupName(groupId) {
+  if (!groupId || typeof groupId !== 'string') return null;
+  var gid = groupId.trim();
+  if (!gid.startsWith('C') && !gid.startsWith('c') && !gid.startsWith('R') && !gid.startsWith('r')) return null;
+  
+  try {
+    var endpoint = (gid.startsWith('R') || gid.startsWith('r'))
+      ? ('https://api.line.me/v2/bot/room/' + gid + '/summary')
+      : ('https://api.line.me/v2/bot/group/' + gid + '/summary');
+    var response = UrlFetchApp.fetch(endpoint, {
+      headers: {
+        'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN
+      },
+      muteHttpExceptions: true
+    });
+    if (response.getResponseCode() === 200) {
+      var data = JSON.parse(response.getContentText());
+      if (data && data.groupName) {
+        return data.groupName.trim();
+      }
+    }
+  } catch (e) {
+    Logger.log('[fetchLINEGroupName Error for ' + gid + ']: ' + e);
+  }
+  return null;
+}
+
 function recordGroupActivity(groupId, groupName, userId, displayName, text) {
   if (!groupId || typeof groupId !== 'string' || groupId.length <= 5) return;
   var gid = groupId.trim();
@@ -114,8 +146,17 @@ function recordGroupActivity(groupId, groupName, userId, displayName, text) {
 
   var groupNumber = groupIdx !== -1 ? (groupIdx + 1) : (groups.length + 1);
   var cleanName = groupName;
-  if (!cleanName || cleanName.startsWith('C') || cleanName.startsWith('R') || cleanName.indexOf(gid) !== -1) {
-    cleanName = '🚀 กลุ่มดวลสด #' + groupNumber;
+
+  // If no name provided or placeholder, query LINE API for the real group name
+  if (!cleanName || cleanName.startsWith('C') || cleanName.startsWith('R') || cleanName.indexOf(gid) !== -1 || cleanName.indexOf('กลุ่มดวลสด') !== -1) {
+    var realName = fetchLINEGroupName(gid);
+    if (realName) {
+      cleanName = realName;
+    } else if (group && group.name && group.name.indexOf('กลุ่มดวลสด') === -1) {
+      cleanName = group.name;
+    } else {
+      cleanName = '🚀 กลุ่มดวลสด #' + groupNumber;
+    }
   }
 
   if (!group) {
@@ -128,12 +169,10 @@ function recordGroupActivity(groupId, groupName, userId, displayName, text) {
     };
     groups.push(group);
   } else {
+    group.name = cleanName;
     group.lastMessage = text || group.lastMessage;
     group.timestamp = nowStr;
     group.msgCount = (group.msgCount || 0) + 1;
-    if (groupName && !groupName.startsWith('C') && !groupName.startsWith('R') && groupName.indexOf(gid) === -1) {
-      group.name = groupName;
-    }
   }
 
   props.setProperty('LINE_GROUPS', JSON.stringify(groups));
@@ -172,7 +211,24 @@ function getLineGroups() {
     list = JSON.parse(groupsJson);
   } catch (e) {}
 
-  if (Array.isArray(list) && list.length > 0) return list;
+  var updatedNames = false;
+
+  // Resolve real names for any placeholder group entries
+  if (Array.isArray(list) && list.length > 0) {
+    for (var i = 0; i < list.length; i++) {
+      if (!list[i].name || list[i].name.indexOf('กลุ่มดวลสด') !== -1 || list[i].name.startsWith('C')) {
+        var realGroupName = fetchLINEGroupName(list[i].id);
+        if (realGroupName) {
+          list[i].name = realGroupName;
+          updatedNames = true;
+        }
+      }
+    }
+    if (updatedNames) {
+      props.setProperty('LINE_GROUPS', JSON.stringify(list));
+    }
+    return list;
+  }
 
   // Fallback 1: LineGroups sheet tab
   try {
@@ -184,9 +240,17 @@ function getLineGroups() {
         var gId = (lgData[r][0] || '').toString().trim();
         var gName = (lgData[r][1] || '').toString().trim();
         if (gId && gId.length > 5) {
+          var resolvedName = gName;
+          if (!resolvedName || resolvedName.indexOf('กลุ่มดวลสด') !== -1 || resolvedName.startsWith('C')) {
+            var apiName = fetchLINEGroupName(gId);
+            if (apiName) {
+              resolvedName = apiName;
+              lgSheet.getRange(r + 1, 2).setValue(apiName);
+            }
+          }
           list.push({
             id: gId,
-            name: gName || ('🚀 กลุ่มดวลสด #' + gId.slice(-4)),
+            name: resolvedName || ('🚀 กลุ่มดวลสด #' + gId.slice(-4)),
             lastMessage: (lgData[r][4] || 'เชื่อมต่อแล้ว').toString(),
             timestamp: 'Live',
             msgCount: Number(lgData[r][3]) || 1
@@ -202,9 +266,10 @@ function getLineGroups() {
 
   var activeId = getActiveGroupId();
   if (activeId) {
+    var activeRealName = fetchLINEGroupName(activeId);
     var fallbackList = [{
       id: activeId,
-      name: '🚀 กลุ่มดวลสด #' + activeId.slice(-4),
+      name: activeRealName || ('🚀 กลุ่มดวลสด #' + activeId.slice(-4)),
       lastMessage: 'เชื่อมต่อแล้ว',
       timestamp: 'Live',
       msgCount: 1

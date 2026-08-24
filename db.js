@@ -272,7 +272,7 @@ export async function init(isSilent = false) {
 let activeGroupId = null;
 let lineGroups = [];
 
-export function recordGroupActivity(groupId, groupName, userId, displayName, text) {
+export async function recordGroupActivity(groupId, groupName, userId, displayName, text) {
   if (!groupId || typeof groupId !== 'string' || groupId.length <= 5) return;
   activeGroupId = groupId;
   let group = lineGroups.find(g => g.id === groupId);
@@ -282,8 +282,15 @@ export function recordGroupActivity(groupId, groupName, userId, displayName, tex
   const groupNumber = existingIdx !== -1 ? (existingIdx + 1) : (lineGroups.length + 1);
 
   let cleanName = groupName;
-  if (!cleanName || cleanName.startsWith('C') || cleanName.includes(groupId) || !isNaN(cleanName)) {
-    cleanName = `🚀 กลุ่มดวลสด #${groupNumber}`;
+  if (!cleanName || cleanName.startsWith('C') || cleanName.includes(groupId) || !isNaN(cleanName) || cleanName.includes('กลุ่มดวลสด')) {
+    try {
+      const lineBot = await import('./lineBot.js');
+      const realName = await lineBot.fetchLINEGroupName(groupId);
+      if (realName) cleanName = realName;
+      else cleanName = `🚀 กลุ่มดวลสด #${groupNumber}`;
+    } catch (_) {
+      cleanName = `🚀 กลุ่มดวลสด #${groupNumber}`;
+    }
   }
 
   if (!group) {
@@ -296,12 +303,10 @@ export function recordGroupActivity(groupId, groupName, userId, displayName, tex
     };
     lineGroups.push(group);
   } else {
+    group.name = cleanName;
     group.lastMessage = text || group.lastMessage;
     group.timestamp = nowStr;
     group.msgCount = (group.msgCount || 0) + 1;
-    if (groupName && !groupName.startsWith('C') && !groupName.includes(groupId) && isNaN(groupName)) {
-      group.name = groupName;
-    }
   }
 }
 
