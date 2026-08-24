@@ -1285,21 +1285,6 @@ export async function adminVoidRound() {
   }
 
   setRocketRoundStatus('ACTIVE');
-
-  const targetGroups = lineGroups.length > 0 ? lineGroups : (activeGroupId ? [{ id: activeGroupId }] : []);
-  if (targetGroups.length > 0) {
-    try {
-      const lineBot = await import('./lineBot.js');
-      const roundNotice = `⛔ [โมฆะรอบ / ช่าง ⛔]: ยกเลิกแผลดวลค้างทั้งหมด และคืนแต้ม 100% เรียบร้อยครับ 🚀`;
-      for (const g of targetGroups) {
-        await lineBot.pushToLine(g.id, roundNotice);
-      }
-      logLineChatMessage('SYSTEM', '🤖 Rocket Bot', 'bot', roundNotice, 'text');
-    } catch (e) {
-      console.error("[DB] Error broadcasting void round to groups:", e);
-    }
-  }
-
   return getDashboardData();
 }
 

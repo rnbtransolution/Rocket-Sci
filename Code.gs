@@ -2372,27 +2372,6 @@ function adminVoidRound() {
   }
 
   setRocketRoundStatus('ACTIVE');
-
-  var groups = getLineGroups();
-  var activeId = getActiveGroupId();
-  var targetGroups = {};
-  for (var gi = 0; gi < groups.length; gi++) {
-    if (groups[gi].id) targetGroups[groups[gi].id] = true;
-  }
-  if (activeId) targetGroups[activeId] = true;
-  var groupKeys = Object.keys(targetGroups);
-
-  if (groupKeys.length > 0) {
-    try {
-      var roundNotice = "⛔ [โมฆะรอบ / ช่าง ⛔]: ยกเลิกแผลดวลค้างทั้งหมด และคืนแต้ม 100% เรียบร้อยครับ 🚀";
-      for (var gk = 0; gk < groupKeys.length; gk++) {
-        pushLineGroupMessage(groupKeys[gk], roundNotice);
-      }
-    } catch(e) {
-      Logger.log("Error pushing void notice: " + e);
-    }
-  }
-
   return getDashboardData();
 }
 
