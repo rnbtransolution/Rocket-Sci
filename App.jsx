@@ -483,7 +483,7 @@ export default function App() {
   };
 
   // Expose reset state for debug button (preventing reference error)
-  const resetConsoleState = () => {
+  const resetConsoleState = async () => {
     if (!window.confirm("⚠️ คุณต้องการล้างระเบียนข้อมูลระบบทั้งหมดใช่หรือไม่?\n\nการกระทำนี้จะล้างข้อมูลผู้เล่น ธุรกรรม ประวัติการเดิมพัน และบันทึกแชททั้งหมดใน Google Sheets ให้กลับสู่ค่าเริ่มต้น")) {
       return;
     }
@@ -492,27 +492,30 @@ export default function App() {
     setRocketFlightTime(0.00);
     setSettlementResult(null);
 
-    window.google.script.run
-      .withSuccessHandler((data) => {
-        if (data) {
-          if (data.players) setPlayers(data.players);
-          if (data.transactions) setTransactions(data.transactions);
-          if (data.bets) setBets(data.bets);
-          if (data.chatLogs) setChatLogs(data.chatLogs);
-          if (data.activeGroupId) setActiveGroupId(data.activeGroupId);
-          if (data.lineGroups && data.lineGroups.length > 0) {
-            setLineGroups(data.lineGroups);
-          } else if (data.activeGroupId) {
-            setLineGroups([{ id: data.activeGroupId, name: `🚀 กลุ่มดวลสด LINE (#${data.activeGroupId.slice(-4)})`, lastMessage: 'เชื่อมต่อสำเร็จ', timestamp: 'Live' }]);
-          }
+    try {
+      addToast('⏳ กำลังล้างระเบียนข้อมูลระบบ (Factory Reset)...', 'info');
+      const data = await runBackendFunction('resetGoogleSheetsDatabase', []);
+      if (data) {
+        if (data.players) setPlayers(data.players);
+        if (data.transactions) setTransactions(data.transactions);
+        if (data.bets) setBets(data.bets);
+        if (data.chatLogs) setChatLogs(data.chatLogs);
+      } else {
+        setPlayers(INITIAL_PLAYERS);
+        setTransactions([]);
+        setBets([]);
+        setChatLogs([]);
+      }
+      try {
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('rocket_sci_dashboard_cache');
         }
-        addToast('ล้างระเบียนข้อมูลระบบสำเร็จแล้ว', 'success');
-      })
-      .withFailureHandler((err) => {
-        console.error("Failed to reset database:", err);
-        addToast('เกิดข้อผิดพลาดในการล้างระเบียนระบบ: ' + (err.message || err), 'error');
-      })
-      .resetGoogleSheetsDatabase();
+      } catch (_) {}
+      addToast('✅ ล้างระเบียนข้อมูลระบบ (Factory Reset) สำเร็จแล้ว', 'success');
+    } catch (err) {
+      console.error("Failed to reset database:", err);
+      addToast('เกิดข้อผิดพลาดในการล้างระเบียนระบบ: ' + (err.message || err), 'error');
+    }
   };
   
   // Attach resetConsoleState to window context for global call safety
@@ -2860,31 +2863,27 @@ export default function App() {
                   <button onClick={() => setPlayerEditModal(null)} className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-600 text-sm font-bold rounded-xl hover:bg-slate-50 transition-all">ยกเลิก</button>
                   <button
                     disabled={playerEditSaving || !playerEditForm.name.trim()}
-                    onClick={() => {
+                    onClick={async () => {
                       setPlayerEditSaving(true);
                       const p = playerEditModal.player;
                       const nameChanged = playerEditForm.name.trim() !== p.name;
                       const balChanged = playerEditForm.balance !== p.balance;
-                      const gasCall = (fn, ...args) => new Promise((res, rej) => {
-                        window.google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](...args);
-                      });
-                      const doSave = async () => {
+                      try {
                         let lastData = null;
-                        if (isGAS) {
-                          if (nameChanged) lastData = await gasCall('adminUpdatePlayerName', p.id, playerEditForm.name.trim());
-                          if (balChanged) lastData = await gasCall('adminSetPlayerBalance', p.id, playerEditForm.balance);
-                          if (!nameChanged && !balChanged) lastData = await gasCall('getDashboardData');
-                        } else {
-                          setPlayers(prev => prev.map(pl => pl.id === p.id ? { ...pl, name: playerEditForm.name.trim(), balance: playerEditForm.balance } : pl));
-                          lastData = null;
-                        }
+                        if (nameChanged) lastData = await runBackendFunction('adminUpdatePlayerName', [p.id, playerEditForm.name.trim()]);
+                        if (balChanged) lastData = await runBackendFunction('adminSetPlayerBalance', [p.id, playerEditForm.balance]);
+                        if (!nameChanged && !balChanged) lastData = await runBackendFunction('getDashboardData', []);
+                        
+                        setPlayers(prev => prev.map(pl => pl.id === p.id ? { ...pl, name: playerEditForm.name.trim(), balance: playerEditForm.balance } : pl));
                         if (lastData && lastData.players) setPlayers(lastData.players);
                         if (lastData && lastData.transactions) setTransactions(lastData.transactions);
                         setPlayerEditSaving(false);
                         setPlayerEditModal(null);
                         addToast(`✅ อัปเดตข้อมูล ${p.name} สำเร็จ`, 'success');
-                      };
-                      doSave().catch(err => { setPlayerEditSaving(false); addToast('❌ ' + (err.message || err), 'error'); });
+                      } catch (err) {
+                        setPlayerEditSaving(false);
+                        addToast('❌ ' + (err.message || err), 'error');
+                      }
                     }}
                     className="flex-1 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition-all active:scale-95 shadow-md"
                   >
@@ -2965,33 +2964,24 @@ export default function App() {
                   </button>
                   <button
                     disabled={bankEditSaving || !bankEditForm.bankName || !bankEditForm.bankAccount || !bankEditForm.accountName}
-                    onClick={() => {
+                    onClick={async () => {
                       if (!bankEditForm.bankName || !bankEditForm.bankAccount || !bankEditForm.accountName) return;
                       setBankEditSaving(true);
                       const p = bankEditModal.player;
-                      if (isGAS) {
-                        window.google.script.run
-                          .withSuccessHandler((data) => {
-                            setBankEditSaving(false);
-                            setBankEditModal(null);
-                            if (data && data.players) setPlayers(data.players);
-                            addToast(`✅ บันทึกบัญชีธนาคารของ ${p.name} สำเร็จ และแจ้งผู้เล่นทาง LINE แล้ว`, 'success');
-                          })
-                          .withFailureHandler((err) => {
-                            setBankEditSaving(false);
-                            addToast('❌ เกิดข้อผิดพลาด: ' + err.message, 'error');
-                          })
-                          .adminSetPlayerBank(p.id, bankEditForm.bankName, bankEditForm.bankAccount, bankEditForm.accountName);
-                      } else {
-                        // Local preview mode — update state directly
+                      try {
+                        const data = await runBackendFunction('adminSetPlayerBank', [p.id, bankEditForm.bankName, bankEditForm.bankAccount, bankEditForm.accountName]);
                         setPlayers(prev => prev.map(pl =>
                           pl.id === p.id
                             ? { ...pl, bankName: bankEditForm.bankName, bankAccount: bankEditForm.bankAccount, accountName: bankEditForm.accountName }
                             : pl
                         ));
+                        if (data && data.players) setPlayers(data.players);
                         setBankEditSaving(false);
                         setBankEditModal(null);
-                        addToast(`✅ บันทึกบัญชีธนาคาร (โหมดทดสอบ) ของ ${p.name} สำเร็จ`, 'success');
+                        addToast(`✅ บันทึกบัญชีธนาคารของ ${p.name} สำเร็จ`, 'success');
+                      } catch (err) {
+                        setBankEditSaving(false);
+                        addToast('❌ เกิดข้อผิดพลาด: ' + (err.message || err), 'error');
                       }
                     }}
                     className="flex-1 px-4 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition-all active:scale-95 shadow-md"
@@ -3053,25 +3043,20 @@ export default function App() {
                   <button onClick={() => setCreatePlayerModal(false)} className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-600 text-sm font-bold rounded-xl hover:bg-slate-50 transition-all">ยกเลิก</button>
                   <button
                     disabled={createPlayerSaving || !createPlayerForm.lineId.trim() || !createPlayerForm.name.trim()}
-                    onClick={() => {
+                    onClick={async () => {
                       setCreatePlayerSaving(true);
                       const { lineId, name, balance } = createPlayerForm;
-                      if (isGAS) {
-                        window.google.script.run
-                          .withSuccessHandler(data => {
-                            setCreatePlayerSaving(false);
-                            setCreatePlayerModal(false);
-                            if (data && data.players) setPlayers(data.players);
-                            addToast(`✅ สร้างบัญชี ${name} สำเร็จ และส่งข้อความ LINE แล้ว`, 'success');
-                          })
-                          .withFailureHandler(err => { setCreatePlayerSaving(false); addToast('❌ ' + err.message, 'error'); })
-                          .adminCreatePlayer(lineId.trim(), name.trim(), balance);
-                      } else {
-                        const avatars = ['🐉','🐯','🦅','🦁','🐻','🐼','🦊','🦉'];
+                      const avatars = ['🐉','🐯','🦅','🦁','🐻','🐼','🦊','🦉'];
+                      try {
+                        const data = await runBackendFunction('adminCreatePlayer', [lineId.trim(), name.trim(), balance]);
                         setPlayers(prev => [...prev, { id: lineId.trim(), name: name.trim(), balance, bankName: '', bankAccount: '', accountName: '', avatar: avatars[prev.length % avatars.length] }]);
+                        if (data && data.players) setPlayers(data.players);
                         setCreatePlayerSaving(false);
                         setCreatePlayerModal(false);
-                        addToast(`✅ สร้างบัญชี ${name} สำเร็จ (โหมดทดสอบ)`, 'success');
+                        addToast(`✅ สร้างบัญชี ${name} สำเร็จ`, 'success');
+                      } catch (err) {
+                        setCreatePlayerSaving(false);
+                        addToast('❌ ' + (err.message || err), 'error');
                       }
                     }}
                     className="flex-1 px-4 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition-all active:scale-95 shadow-md"
@@ -3108,24 +3093,19 @@ export default function App() {
                   <button onClick={() => setConfirmDelete(null)} className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-600 text-sm font-bold rounded-xl hover:bg-slate-50 transition-all">ยกเลิก</button>
                   <button
                     disabled={deleteSaving}
-                    onClick={() => {
+                    onClick={async () => {
                       setDeleteSaving(true);
                       const p = confirmDelete.player;
-                      if (isGAS) {
-                        window.google.script.run
-                          .withSuccessHandler(data => {
-                            setDeleteSaving(false);
-                            setConfirmDelete(null);
-                            if (data && data.players) setPlayers(data.players);
-                            addToast(`🗑 ลบบัญชี ${p.name} สำเร็จ`, 'info');
-                          })
-                          .withFailureHandler(err => { setDeleteSaving(false); addToast('❌ ' + err.message, 'error'); })
-                          .adminDeletePlayer(p.id);
-                      } else {
+                      try {
+                        const data = await runBackendFunction('adminDeletePlayer', [p.id]);
                         setPlayers(prev => prev.filter(pl => pl.id !== p.id));
+                        if (data && data.players) setPlayers(data.players);
                         setDeleteSaving(false);
                         setConfirmDelete(null);
-                        addToast(`🗑 ลบบัญชี ${p.name} สำเร็จ (โหมดทดสอบ)`, 'info');
+                        addToast(`🗑 ลบบัญชี ${p.name} สำเร็จ`, 'info');
+                      } catch (err) {
+                        setDeleteSaving(false);
+                        addToast('❌ ' + (err.message || err), 'error');
                       }
                     }}
                     className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition-all active:scale-95 shadow-md"

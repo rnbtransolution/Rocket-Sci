@@ -2565,6 +2565,10 @@ function resetGoogleSheetsDatabase() {
   const cSheet = ss.getSheetByName('LineChatLogs') || ss.insertSheet('LineChatLogs');
   cSheet.clearContents();
   cSheet.appendRow(['Timestamp', 'User ID', 'Display Name', 'Sender', 'Message Text', 'Message Type']);
+
+  // Invalidate in-memory cache and return fresh dashboard payload
+  invalidateDashboardCache();
+  return getDashboardData(true);
 }
 
 /**
@@ -2724,6 +2728,48 @@ function pushToLine(userId, text) {
 // =========================================================================
 // LINE FLEX MESSAGE CREATOR HELPERS
 // =========================================================================
+
+function constructCancelOrderMiniFlex(orderNo) {
+  return {
+    "type": "bubble",
+    "size": "kilo",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#BE123C",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "⛔️ ยกเลิกสำเร็จ ⛔️",
+          "weight": "bold",
+          "color": "#FFFFFF",
+          "size": "sm",
+          "align": "center",
+          "wrap": true
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FFF1F2",
+      "paddingAll": "sm",
+      "spacing": "xs",
+      "contents": [
+        {
+          "type": "text",
+          "text": "Order #" + orderNo,
+          "weight": "bold",
+          "color": "#9F1239",
+          "size": "md",
+          "align": "center",
+          "wrap": true
+        }
+      ]
+    }
+  };
+}
 
 function constructMainMenuFlex() {
   return {
@@ -3285,56 +3331,6 @@ function constructWithdrawalFlex(bankName, accountNumber, accountName, balance) 
 }
 
 
-function constructCancelOrderMiniFlex(orderNo) {
-  return {
-    "type": "bubble",
-    "size": "kilo",
-    "header": {
-      "type": "box",
-      "layout": "vertical",
-      "backgroundColor": "#BE123C",
-      "paddingAll": "sm",
-      "contents": [
-        {
-          "type": "text",
-          "text": "⛔️ ยกเลิกสำเร็จ ⛔️",
-          "weight": "bold",
-          "color": "#FFFFFF",
-          "size": "sm",
-          "align": "center",
-          "wrap": true
-        }
-      ]
-    },
-    "body": {
-      "type": "box",
-      "layout": "vertical",
-      "backgroundColor": "#FFF1F2",
-      "paddingAll": "md",
-      "spacing": "xs",
-      "contents": [
-        {
-          "type": "text",
-          "text": "ยกเลิก Order #" + orderNo + " สำเร็จ!",
-          "weight": "bold",
-          "color": "#9F1239",
-          "size": "md",
-          "align": "center",
-          "wrap": true
-        },
-        {
-          "type": "text",
-          "text": "คืนแต้มเข้าบัญชีผู้เล่นเรียบร้อยแล้วครับ 🚀",
-          "size": "xs",
-          "color": "#881337",
-          "align": "center",
-          "wrap": true,
-          "margin": "xs"
-        }
-      ]
-    }
-  };
-}
 
 function constructRuleGuideFlex() {
   return {
@@ -4468,15 +4464,15 @@ function constructRoundCloseFlex() {
     "header": {
       "type": "box",
       "layout": "vertical",
-      "backgroundColor": "#FECDD3",
+      "backgroundColor": "#BE123C",
       "paddingAll": "md",
       "contents": [
         {
           "type": "text",
-          "text": "⛔ FINAL CALL · ปิดรับดวล",
+          "text": "⛔️ ปิดรับดวล ⛔️",
           "weight": "bold",
-          "color": "#9F1239",
-          "size": "sm",
+          "color": "#FFFFFF",
+          "size": "md",
           "align": "center",
           "wrap": true
         }
@@ -4486,23 +4482,15 @@ function constructRoundCloseFlex() {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#FFF1F2",
-      "spacing": "sm",
+      "spacing": "xs",
       "paddingAll": "md",
       "contents": [
         {
           "type": "text",
-          "text": "⚠️ ปิดรับการเปิดราคาเองรอบนี้แล้วครับ",
+          "text": "ออเดอร์หลังจากนี้ไม่ติดทุกกรณี",
           "weight": "bold",
-          "color": "#BE123C",
-          "size": "xs",
-          "align": "center",
-          "wrap": true
-        },
-        {
-          "type": "text",
-          "text": "(จับคู่เฉพาะแผลที่เปิดค้างอยู่เท่านั้น)",
-          "color": "#64748B",
-          "size": "xs",
+          "color": "#9F1239",
+          "size": "sm",
           "align": "center",
           "wrap": true
         }

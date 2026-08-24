@@ -1760,26 +1760,17 @@ export function constructCancelOrderMiniFlex(orderNo) {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#FFF1F2",
-      "paddingAll": "md",
+      "paddingAll": "sm",
       "spacing": "xs",
       "contents": [
         {
           "type": "text",
-          "text": `ยกเลิก Order #${orderNo} สำเร็จ!`,
+          "text": `Order #${orderNo}`,
           "weight": "bold",
           "color": "#9F1239",
           "size": "md",
           "align": "center",
           "wrap": true
-        },
-        {
-          "type": "text",
-          "text": "คืนแต้มเข้าบัญชีผู้เล่นเรียบร้อยแล้วครับ 🚀",
-          "size": "xs",
-          "color": "#881337",
-          "align": "center",
-          "wrap": true,
-          "margin": "xs"
         }
       ]
     }
