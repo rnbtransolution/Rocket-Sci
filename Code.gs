@@ -440,10 +440,14 @@ function doPost(e) {
           recordGroupActivity(groupId, null, userId, displayName, message.text || '');
         }
         if (message.type === 'text') {
-          handleTextMessage(message.text, userId, displayName, replyToken, groupId);
+          handleTextMessage(message.text, userId, displayName, replyToken, groupId, message.id);
         } else if (message.type === 'image') {
           handleImageSlipMessage(message.id, userId, displayName, replyToken);
         }
+      } else if (event.type === 'unsend') {
+        const unsendMessageId = event.unsend ? event.unsend.messageId : null;
+        const groupId = event.source.groupId || event.source.roomId || null;
+        handleUnsendOrder(unsendMessageId, userId, displayName, groupId);
       }
     }
   } catch (err) {
@@ -760,9 +764,98 @@ function handleCancelBetRequest(userId, orderNo, displayName) {
 }
 
 /**
+ * Handle LINE unsend events:
+ * 1. If that order has been matched -> Cannot cancel order even if creator unsend message.
+ * 2. If not yet matched (pending_match) -> automatically cancel order & refund creator.
+ */
+function handleUnsendOrder(unsendMessageId, userId, displayName, groupId) {
+  if (!unsendMessageId && !userId) return;
+  var searchId = cleanUserId(userId);
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName('Bets');
+  if (!sheet) return;
+  var data = sheet.getDataRange().getValues();
+  var foundRow = -1;
+  var targetBet = null;
+
+  // 1. First priority: match by LINE message ID in column 14
+  if (unsendMessageId) {
+    var searchMsgId = unsendMessageId.toString().trim();
+    for (var i = data.length - 1; i >= 1; i--) {
+      var rowMsgId = data[i][13] ? data[i][13].toString().trim() : '';
+      if (rowMsgId && rowMsgId === searchMsgId) {
+        foundRow = i + 1;
+        targetBet = data[i];
+        break;
+      }
+    }
+  }
+
+  // 2. Fallback: match by creator ID & group within last 15 minutes
+  if (foundRow === -1 && searchId) {
+    for (var i = data.length - 1; i >= 1; i--) {
+      var row = data[i];
+      var pLowId = cleanUserId(row[1]);
+      var pHighId = cleanUserId(row[3]);
+      var pLowName = row[2] ? row[2].toString().trim() : '';
+      var pHighName = row[4] ? row[4].toString().trim() : '';
+      var isCreator = (pLowId === searchId || pHighId === searchId || 
+                       (displayName && (pLowName === displayName || pHighName === displayName)));
+      if (isCreator) {
+        var rowTime = row[11] ? new Date(row[11]).getTime() : 0;
+        if (Date.now() - rowTime < 15 * 60 * 1000) {
+          foundRow = i + 1;
+          targetBet = row;
+          break;
+        }
+      }
+    }
+  }
+
+  if (foundRow === -1 || !targetBet) {
+    Logger.log('[UNSEND] No matching bet found for unsendMessageId: ' + unsendMessageId);
+    return;
+  }
+
+  var orderNo = targetBet[0].toString().trim();
+  var status = targetBet[9].toString().trim();
+  var amount = Number(targetBet[5]) || 0;
+  var pLowId = cleanUserId(targetBet[1]);
+  var pHighId = cleanUserId(targetBet[3]);
+  var creatorId = pLowId || pHighId || searchId;
+  var creatorName = (pLowId ? targetBet[2] : targetBet[4]) || displayName || 'ผู้เล่น';
+  var targetGroupId = groupId || (targetBet[12] ? targetBet[12].toString().trim() : getActiveGroupId());
+
+  // Rule 1: If matched -> Cannot cancel order even creator unsend message.
+  if (status === 'matched' || status === 'resolved') {
+    Logger.log('[UNSEND] Order #' + orderNo + ' is already ' + status + '. Cannot cancel.');
+    return;
+  }
+
+  // Rule 2: If not yet matched (pending_match) -> automatically cancel
+  if (status === 'pending_match') {
+    sheet.getRange(foundRow, 10).setValue('cancelled');
+    // Refund credit to the creator
+    adjustPlayerBalance(creatorId, amount, creatorName);
+    
+    // Invalidate dashboard cache
+    invalidateDashboardCache();
+    
+    // Push the 2-row cancel Flex Card
+    var cancelFlex = constructCancelOrderMiniFlex(orderNo);
+    if (targetGroupId) {
+      pushLineGroupMessage(targetGroupId, cancelFlex);
+    } else if (userId) {
+      pushToLine(userId, cancelFlex);
+    }
+    Logger.log('[UNSEND] Successfully auto-cancelled unmatched Order #' + orderNo);
+  }
+}
+
+/**
  * Handle incoming LINE text commands (ชล200, ชย500, ต, เช็คยอด, ถอนยอด, ฝากเงิน, etc.)
  */
-function handleTextMessage(text, userId, displayName, replyToken, groupId) {
+function handleTextMessage(text, userId, displayName, replyToken, groupId, messageId) {
   userId = getOrCreateShortUserId(userId, displayName);
   // Log user message
   logLineChatMessage(userId, displayName, 'player', text, 'text');
@@ -1161,7 +1254,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
     var orderNumber = (Math.floor(Math.random() * 9000) + 1000).toString();
     var isPreQuoteBet = (betType === 'pre_quote');
     var userTypedCmdStr = cleanBetText || null;
-    var saveResult = saveOpenBet(orderNumber, userId, displayName, side, amount, betType, rangeMin, rangeMax, groupId, userTypedCmdStr, isPreQuoteBet);
+    var saveResult = saveOpenBet(orderNumber, userId, displayName, side, amount, betType, rangeMin, rangeMax, groupId, userTypedCmdStr, isPreQuoteBet, messageId);
     if (saveResult && saveResult.error) {
       var bal = saveResult.current || 0;
       var neededBal = amount - bal;
@@ -1563,7 +1656,7 @@ function adjustPlayerBalance(userId, delta, displayName) {
  * @param {string|null} userTypedCmd - Original text command typed by user (for Flex title)
  * @param {boolean} [isPreQuote] - Whether this is a pre-quote bet
  */
-function saveOpenBet(orderNo, userId, displayName, side, amount, type, rMin, rMax, targetGroupId, userTypedCmd, isPreQuote) {
+function saveOpenBet(orderNo, userId, displayName, side, amount, type, rMin, rMax, targetGroupId, userTypedCmd, isPreQuote, messageId) {
   var searchId = cleanUserId(userId);
   var betAmount = Number(amount) || 0;
   
@@ -1596,7 +1689,8 @@ function saveOpenBet(orderNo, userId, displayName, side, amount, type, rMin, rMa
     'pending_match',
     '',
     new Date(),
-    targetGroupId || ''
+    targetGroupId || '',
+    messageId || ''
   ]);
 }
 
@@ -3468,14 +3562,14 @@ function constructRuleGuideFlex() {
           "contents": [
             {
               "type": "text",
-              "text": "3️⃣ การรับแผลดวล & ขั้นต่ำ 20%",
+              "text": "3️⃣ การรับแผลดวล (ขั้นต่ำ 20%)",
               "weight": "bold",
               "color": "#6B21A8",
               "size": "xs"
             },
             {
               "type": "text",
-              "text": "• แตะปุ่มเปอร์เซ็นต์ [20%] [40%] [80%] [100%]\n• หรือพิมพ์: [เลขบิล] [แต้ม] เช่น 4812 200 หรือ ต4812\n• ขั้นต่ำการรับแผลคือ 20% ของยอดแผล",
+              "text": "• แตะปุ่มจำนวนแต้มที่ต้องการรับใต้การ์ดแผลดวล\n• หรือพิมพ์: [เลขบิล] [แต้ม] เช่น 4812 200 หรือ ต4812 (รับเต็มยอด)\n• ขั้นต่ำการรับแผลคือ 20% ของยอดแผล",
               "color": "#581C87",
               "size": "xxs",
               "wrap": true,

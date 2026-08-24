@@ -504,7 +504,7 @@ export async function adjustPlayerBalance(userId, delta, displayName) {
 }
 
 // Save an open bet (with credit verification)
-export function saveOpenBet(orderNo, userId, displayName, side, betAmount, type = 'normal', rMin = null, rMax = null, targetGroupId = null, userTypedCmd = null, isPreQuote = false, targetGroupName = null) {
+export function saveOpenBet(orderNo, userId, displayName, side, betAmount, type = 'normal', rMin = null, rMax = null, targetGroupId = null, userTypedCmd = null, isPreQuote = false, targetGroupName = null, messageId = null) {
   const searchId = cleanUserId(userId);
   const isAdminUser = searchId === 'admin' || searchId === 'user' || (typeof userId === 'string' && (userId.toLowerCase() === 'user' || userId.toLowerCase() === 'admin'));
 
@@ -556,7 +556,8 @@ export function saveOpenBet(orderNo, userId, displayName, side, betAmount, type 
     timestamp: formatTime(now),
     groupId: assignedGroupId,
     groupName: assignedGroupName,
-    userTypedCmd: userTypedCmd
+    userTypedCmd: userTypedCmd,
+    messageId: messageId
   };
   bets.unshift(newBet); // Add to beginning of memory list
 
@@ -1449,6 +1450,40 @@ export async function handleCancelBetRequest(userId, orderNo) {
   }
 
   return '🚫 ผิดพลาดในการปรับปรุงสถานะแผล';
+}
+
+export async function handleUnsendBet(messageId, userId, displayName, groupId) {
+  const searchId = cleanUserId(userId);
+  let foundBet = null;
+
+  if (messageId) {
+    foundBet = bets.slice().reverse().find(b => b.messageId && String(b.messageId) === String(messageId));
+  }
+
+  if (!foundBet && searchId) {
+    foundBet = bets.slice().reverse().find(b => {
+      const isCreator = cleanUserId(b.playerLowId) === searchId || cleanUserId(b.playerHighId) === searchId ||
+                        (displayName && (b.playerLowName === displayName || b.playerHighName === displayName));
+      return isCreator;
+    });
+  }
+
+  if (!foundBet) return null;
+
+  if (foundBet.status === 'matched' || foundBet.status === 'resolved') {
+    return { cancelled: false, status: foundBet.status, orderNo: foundBet.orderNumber };
+  }
+
+  if (foundBet.status === 'pending_match') {
+    foundBet.status = 'cancelled';
+    const creatorId = foundBet.playerLowId ? cleanUserId(foundBet.playerLowId) : cleanUserId(foundBet.playerHighId);
+    const creatorName = foundBet.playerLowId ? foundBet.playerLowName : (foundBet.playerHighName || displayName);
+    await adjustPlayerBalance(creatorId || searchId, foundBet.amount);
+    updateRowInSheet('Bets', foundBet.orderNumber, { 9: 'cancelled' });
+    return { cancelled: true, orderNo: foundBet.orderNumber, targetGroupId: foundBet.groupId };
+  }
+
+  return null;
 }
 
 export function verifyMockSlipFromClient(depositAmt, realAmt, ref, isQRValid, isDupe) {

@@ -456,22 +456,21 @@ export async function broadcastToAllGroups(messageTextOrFlex) {
 }
 
 export async function handleUnsendMessage(unsendMessageId, userId, displayName, groupId) {
-  const lastLogs = db.getDashboardData()?.chatLogs || [];
-  const foundLog = lastLogs.find(l => l.userId === userId && l.sender === 'player');
-  const msgText = foundLog ? foundLog.text : 'ข้อความในกลุ่ม';
-
-  if (groupId) {
-    await pushToLine(groupId, `🚨 [UNSEND] @${displayName} ยกเลิกข้อความ: "${msgText}" (ผลดวลในระบบมีผลตามเดิมครับ)`);
-  } else if (userId) {
-    await pushToLine(userId, `🚨 [UNSEND] คุณ @${displayName} ได้ยกเลิกข้อความ: "${msgText}" ครับ`);
+  const result = await db.handleUnsendBet(unsendMessageId, userId, displayName, groupId);
+  if (result && result.cancelled) {
+    const cancelFlex = constructCancelOrderMiniFlex(result.orderNo);
+    const target = groupId || result.targetGroupId;
+    if (target) {
+      await pushToLine(target, cancelFlex);
+    } else if (userId) {
+      await pushToLine(userId, cancelFlex);
+    }
   }
-
-  db.logLineChatMessage(userId, displayName, 'system', `[UNSEND ALERT] User unsent message: "${msgText}"`, 'warning');
 }
 
 // --- LINE BOT CONTROLLER / WEBHOOK HANDLERS ---
 
-export async function handleTextMessage(text, userId, displayName, replyToken, groupId) {
+export async function handleTextMessage(text, userId, displayName, replyToken, groupId, messageId) {
   userId = await db.getOrCreateShortUserId(userId, displayName);
   db.logLineChatMessage(userId, displayName, 'player', text, 'text');
   
@@ -1073,7 +1072,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
         return true;
       }
 
-      await processOpenBetRequest(side, amount, 'custom_range', minVal, maxVal, userId, displayName, replyToken, isChotoy, groupId, cleanBetText);
+      await processOpenBetRequest(side, amount, 'custom_range', minVal, maxVal, userId, displayName, replyToken, isChotoy, groupId, cleanBetText, false, 0, messageId);
       return true;
     }
   }
@@ -1127,7 +1126,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
         activeMax = null;
       }
 
-      await processOpenBetRequest(side, amount, isPreQuote ? 'pre_quote' : 'range', activeMin, activeMax, userId, displayName, replyToken, isChotoy, groupId, cleanBetText, isPreQuote, offsetDelta);
+      await processOpenBetRequest(side, amount, isPreQuote ? 'pre_quote' : 'range', activeMin, activeMax, userId, displayName, replyToken, isChotoy, groupId, cleanBetText, isPreQuote, offsetDelta, messageId);
       return true;
     }
   }
@@ -1135,7 +1134,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
   return false;
 }
 
-async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false, groupId = null, userTypedCmd = null, isPreQuote = false, offsetDelta = 0) {
+async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false, groupId = null, userTypedCmd = null, isPreQuote = false, offsetDelta = 0, messageId = null) {
   if (db.isRocketRoundClosed()) {
     const msg = groupId
       ? `👤 [ถึงคุณ @${displayName}]: ⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ`
@@ -1150,7 +1149,7 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   const orderNo = Math.floor(Math.random() * 9000 + 1000);
   
   // Save open bet with groupId for multi-group tracking (credit deduction happens inside db.saveOpenBet)
-  const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal, groupId, userTypedCmd, isPreQuote);
+  const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal, groupId, userTypedCmd, isPreQuote, null, messageId);
   if (!saved || saved.error) {
     const bal = saved?.current || 0;
     const needed = amount - bal;
@@ -1873,7 +1872,7 @@ export function constructRuleGuideFlex() {
           "contents": [
             {
               "type": "text",
-              "text": "3️⃣ การรับแผลดวล & ขั้นต่ำ 20%",
+              "text": "3️⃣ การรับแผลดวล (ขั้นต่ำ 20%)",
               "weight": "bold",
               "color": "#6B21A8",
               "size": "xs",
@@ -1881,7 +1880,7 @@ export function constructRuleGuideFlex() {
             },
             {
               "type": "text",
-              "text": "• แตะปุ่มเปอร์เซ็นต์ [20%] [40%] [80%] [100%]\n• หรือพิมพ์: [เลขบิล] [แต้ม] เช่น 4812 200 หรือ ต4812\n• ขั้นต่ำการรับแผลคือ 20% ของยอดแผล",
+              "text": "• แตะปุ่มจำนวนแต้มที่ต้องการรับใต้การ์ดแผลดวล\n• หรือพิมพ์: [เลขบิล] [แต้ม] เช่น 4812 200 หรือ ต4812 (รับเต็มยอด)\n• ขั้นต่ำการรับแผลคือ 20% ของยอดแผล",
               "color": "#581C87",
               "size": "xxs",
               "wrap": true,
