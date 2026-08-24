@@ -169,10 +169,21 @@ export default function App() {
   const [passcodeInput, setPasscodeInput] = useState('');
   const [passcodeError, setPasscodeError] = useState('');
 
-  // App States
-  const [players, setPlayers] = useState(INITIAL_PLAYERS);
-  const [transactions, setTransactions] = useState([]);
-  const [bets, setBets] = useState([]);
+  // App States (Instant 0ms hydration from localStorage cache)
+  const getInitialCache = () => {
+    try {
+      if (typeof window !== 'undefined') {
+        const cached = localStorage.getItem('rocket_sci_dashboard_cache');
+        if (cached) return JSON.parse(cached);
+      }
+    } catch (_) {}
+    return null;
+  };
+  const initialCache = getInitialCache();
+
+  const [players, setPlayers] = useState(initialCache?.players || INITIAL_PLAYERS);
+  const [transactions, setTransactions] = useState(initialCache?.transactions || []);
+  const [bets, setBets] = useState(initialCache?.bets || []);
   
   const [flights, setFlights] = useState([]);
   
@@ -360,6 +371,11 @@ export default function App() {
       } else if (data.activeGroupId) {
         setLineGroups([{ id: data.activeGroupId, name: `🚀 กลุ่มดวลสด LINE (#${data.activeGroupId.slice(-4)})`, lastMessage: 'เชื่อมต่อสำเร็จ', timestamp: 'Live' }]);
       }
+      try {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('rocket_sci_dashboard_cache', JSON.stringify(data));
+        }
+      } catch (_) {}
     };
 
     if (isGAS) {

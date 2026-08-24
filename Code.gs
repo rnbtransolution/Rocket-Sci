@@ -270,28 +270,63 @@ function doGet(e) {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
+function invalidateDashboardCache() {
+  try {
+    CacheService.getScriptCache().remove('DASHBOARD_DATA_CACHE');
+  } catch(_) {}
+}
+
 /**
  * Universal Action Dispatcher for Admin RPC functions.
  */
 function executeAdminAction(functionName, args) {
   args = args || [];
+  var result;
   switch (functionName) {
-    case 'getDashboardData': return getDashboardData();
-    case 'adminApproveTransaction': return adminApproveTransaction(args[0]);
-    case 'adminRejectTransaction': return adminRejectTransaction(args[0], args[1]);
-    case 'adminResolveBets': return adminResolveBets(args[0], args[1], args[2]);
-    case 'adminVoidRound': return adminVoidRound();
-    case 'adminRequestCancelBet': return adminRequestCancelBet(args[0]);
-    case 'adminSetPlayerBank': return adminSetPlayerBank(args[0], args[1], args[2], args[3]);
-    case 'adminCreatePlayer': return adminCreatePlayer(args[0], args[1], args[2]);
-    case 'adminUpdatePlayerName': return adminUpdatePlayerName(args[0], args[1]);
-    case 'adminSetPlayerBalance': return adminSetPlayerBalance(args[0], args[1]);
-    case 'adminDeletePlayer': return adminDeletePlayer(args[0]);
-    case 'saveOpenBet': return saveOpenBet(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9]);
-    case 'verifyMockSlipFromClient': return verifyMockSlipFromClient(args[0], args[1], args[2], args[3], args[4]);
-    case 'resetGoogleSheetsDatabase': return resetGoogleSheetsDatabase();
+    case 'getDashboardData': return getDashboardData(args[0]);
+    case 'adminApproveTransaction': 
+      invalidateDashboardCache();
+      return adminApproveTransaction(args[0]);
+    case 'adminRejectTransaction': 
+      invalidateDashboardCache();
+      return adminRejectTransaction(args[0], args[1]);
+    case 'adminResolveBets': 
+      invalidateDashboardCache();
+      return adminResolveBets(args[0], args[1], args[2]);
+    case 'adminVoidRound': 
+      invalidateDashboardCache();
+      return adminVoidRound();
+    case 'adminRequestCancelBet': 
+      invalidateDashboardCache();
+      return adminRequestCancelBet(args[0]);
+    case 'adminSetPlayerBank': 
+      invalidateDashboardCache();
+      return adminSetPlayerBank(args[0], args[1], args[2], args[3]);
+    case 'adminCreatePlayer': 
+      invalidateDashboardCache();
+      return adminCreatePlayer(args[0], args[1], args[2]);
+    case 'adminUpdatePlayerName': 
+      invalidateDashboardCache();
+      return adminUpdatePlayerName(args[0], args[1]);
+    case 'adminSetPlayerBalance': 
+      invalidateDashboardCache();
+      return adminSetPlayerBalance(args[0], args[1]);
+    case 'adminDeletePlayer': 
+      invalidateDashboardCache();
+      return adminDeletePlayer(args[0]);
+    case 'saveOpenBet': 
+      invalidateDashboardCache();
+      return saveOpenBet(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9]);
+    case 'verifyMockSlipFromClient': 
+      invalidateDashboardCache();
+      return verifyMockSlipFromClient(args[0], args[1], args[2], args[3], args[4]);
+    case 'resetGoogleSheetsDatabase': 
+      invalidateDashboardCache();
+      return resetGoogleSheetsDatabase();
     case 'sendAdminMessageToLine': return sendAdminMessageToLine(args[0], args[1]);
-    case 'adminOpenRound': return adminOpenRound(args[0]);
+    case 'adminOpenRound': 
+      invalidateDashboardCache();
+      return adminOpenRound(args[0]);
     case 'adminBroadcastQuote': return adminBroadcastQuote(args[0], args[1], args[2], args[3], args[4]);
     case 'adminBroadcastFinalCall': return adminBroadcastFinalCall(args[0]);
     case 'adminBroadcastVoidRound': return adminBroadcastVoidRound(args[0]);
@@ -1989,8 +2024,19 @@ function safeFormatDate(val, format) {
 
 /**
  * Fetch players, transactions, and bets from Google Sheet database.
+ * Uses CacheService for instant sub-50ms responses on repeated calls.
  */
-function getDashboardData() {
+function getDashboardData(forceFresh) {
+  var cache = CacheService.getScriptCache();
+  if (!forceFresh) {
+    try {
+      var cachedStr = cache.get('DASHBOARD_DATA_CACHE');
+      if (cachedStr) {
+        return JSON.parse(cachedStr);
+      }
+    } catch(_) {}
+  }
+
   // Open spreadsheet ONCE and reuse across all sheet reads to avoid repeated API overhead
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
@@ -2074,7 +2120,7 @@ function getDashboardData() {
     // LineChatLogs sheet may not exist yet — return empty array gracefully
   }
 
-  return {
+  const result = {
     players: players,
     transactions: transactions,
     bets: bets,
@@ -2082,6 +2128,15 @@ function getDashboardData() {
     activeGroupId: getActiveGroupId(),
     lineGroups: getLineGroups()
   };
+
+  try {
+    const serialized = JSON.stringify(result);
+    if (serialized.length < 95000) {
+      cache.put('DASHBOARD_DATA_CACHE', serialized, 8); // Cache for 8 seconds
+    }
+  } catch(_) {}
+
+  return result;
 }
 
 /**
