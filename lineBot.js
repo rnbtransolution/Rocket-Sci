@@ -555,8 +555,10 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
     return;
   }
 
-  // C. CANCEL DEAL REQUEST (Removed to allow fall-through to robust cancelBetRegex in parseBetCommand)
-  
+  // C. ROCKET BETTING, MATCHING, CANCEL & BOARD COMMANDS
+  const isMatchCommand = await parseBetCommand(text, userId, displayName, replyToken, groupId);
+  if (isMatchCommand) return;
+
   // D. INITIATE DEPOSIT
   if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit' || clean === 'เติมเครดิต') {
     if (groupId) {
@@ -656,11 +658,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
     return;
   }
 
-  // H. ROCKET BETTING PARSING (Custom Thai language regex rocket science logic)
-  const isMatchCommand = await parseBetCommand(text, userId, displayName, replyToken, groupId);
-  if (isMatchCommand) return;
-
-  // I.1 RULE / GUIDE COMMAND ("กติกา", "rule", "rules", "วิธีเล่น", "คู่มือ")
+  // H. RULE / GUIDE COMMAND ("กติกา", "rule", "rules", "วิธีเล่น", "คู่มือ")
   if (clean === 'กติกา' || clean === 'rule' || clean === 'rules' || clean === 'วิธีเล่น' || clean === 'คู่มือ') {
     const ruleFlex = constructRuleGuideFlex();
     await replyToLine(replyToken, ruleFlex, userId);
@@ -1727,29 +1725,47 @@ export function constructWithdrawalFlex(bankName, accountNumber, accountName, ba
 export function constructCancelOrderMiniFlex(orderNo) {
   return {
     "type": "bubble",
-    "size": "micro",
-    "body": {
+    "size": "kilo",
+    "header": {
       "type": "box",
       "layout": "vertical",
-      "paddingAll": "md",
-      "backgroundColor": "#1E1B4B",
-      "cornerRadius": "md",
+      "backgroundColor": "#BE123C",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
           "text": "⛔️ ยกเลิกสำเร็จ ⛔️",
           "weight": "bold",
-          "color": "#EF4444",
+          "color": "#FFFFFF",
           "size": "sm",
-          "align": "center"
-        },
+          "align": "center",
+          "wrap": true
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FFF1F2",
+      "paddingAll": "md",
+      "spacing": "xs",
+      "contents": [
         {
           "type": "text",
           "text": `ยกเลิก Order #${orderNo} สำเร็จ!`,
           "weight": "bold",
-          "color": "#FFFFFF",
-          "size": "xs",
+          "color": "#9F1239",
+          "size": "md",
           "align": "center",
+          "wrap": true
+        },
+        {
+          "type": "text",
+          "text": "คืนแต้มเข้าบัญชีผู้เล่นเรียบร้อยแล้วครับ 🚀",
+          "size": "xs",
+          "color": "#881337",
+          "align": "center",
+          "wrap": true,
           "margin": "xs"
         }
       ]
@@ -1773,7 +1789,8 @@ export function constructRuleGuideFlex() {
           "weight": "bold",
           "color": "#4338CA",
           "size": "xxs",
-          "align": "center"
+          "align": "center",
+          "wrap": true
         },
         {
           "type": "text",
@@ -1782,7 +1799,8 @@ export function constructRuleGuideFlex() {
           "color": "#1E1B4B",
           "size": "sm",
           "align": "center",
-          "margin": "xs"
+          "margin": "xs",
+          "wrap": true
         }
       ]
     },
@@ -1804,7 +1822,8 @@ export function constructRuleGuideFlex() {
               "text": "1️⃣ แทงตามราคาช่าง (ปรับได้ ±5 / ±10)",
               "weight": "bold",
               "color": "#166534",
-              "size": "xs"
+              "size": "xs",
+              "wrap": true
             },
             {
               "type": "text",
@@ -1828,7 +1847,8 @@ export function constructRuleGuideFlex() {
               "text": "2️⃣ เปิดราคาเอง (ช่วงห่าง 80 วิพอดี)",
               "weight": "bold",
               "color": "#0369A1",
-              "size": "xs"
+              "size": "xs",
+              "wrap": true
             },
             {
               "type": "text",
@@ -1852,7 +1872,8 @@ export function constructRuleGuideFlex() {
               "text": "3️⃣ การรับแผลดวล & ขั้นต่ำ 20%",
               "weight": "bold",
               "color": "#6B21A8",
-              "size": "xs"
+              "size": "xs",
+              "wrap": true
             },
             {
               "type": "text",
@@ -1876,7 +1897,8 @@ export function constructRuleGuideFlex() {
               "text": "4️⃣ การยกเลิกแผลดวล",
               "weight": "bold",
               "color": "#9F1239",
-              "size": "xs"
+              "size": "xs",
+              "wrap": true
             },
             {
               "type": "text",
@@ -1914,9 +1936,7 @@ export function constructRuleGuideFlex() {
 export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy, userTypedCmd = null, isPreQuote = false) {
   const sideShort = side === 'high' ? 'ล' : 'ถ';
   let cleanCmd = (userTypedCmd && typeof userTypedCmd === 'string') ? userTypedCmd.trim() : `${sideShort}${amount}`;
-  // Strip any leading range numbers like "350-450" or "300/380" in front of the betting command
   cleanCmd = cleanCmd.replace(/^\d+[-/]\d+/, '').trim();
-  // Strip trailing "pt" if present
   cleanCmd = cleanCmd.replace(/pt$/i, '').trim();
   if (!cleanCmd) cleanCmd = `${sideShort}${amount}`;
 
@@ -1946,7 +1966,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
       "text": `ต ${orderNo} ${item.val}`
     },
     "contents": [
-      { "type": "text", "text": item.label, "color": "#0369A1", "weight": "bold", "size": "xs", "align": "center" }
+      { "type": "text", "text": item.label, "color": "#0369A1", "weight": "bold", "size": "xs", "align": "center", "wrap": true }
     ]
   }));
 
@@ -1965,7 +1985,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
         "text": `ต ${orderNo} ${amt100}`
       },
       "contents": [
-        { "type": "text", "text": amt100.toString(), "color": "#15803D", "weight": "bold", "size": "xs", "align": "center" }
+        { "type": "text", "text": amt100.toString(), "color": "#15803D", "weight": "bold", "size": "xs", "align": "center", "wrap": true }
       ]
     },
     {
@@ -1981,7 +2001,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
         "text": `ยกเลิก ${orderNo}`
       },
       "contents": [
-        { "type": "text", "text": "⛔ ยกเลิก", "color": "#9F1239", "weight": "bold", "size": "xs", "align": "center" }
+        { "type": "text", "text": "⛔ ยกเลิก", "color": "#9F1239", "weight": "bold", "size": "xs", "align": "center", "wrap": true }
       ]
     }
   ];
@@ -1993,7 +2013,8 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
       "weight": "bold",
       "color": "#1E293B",
       "size": "md",
-      "align": "center"
+      "align": "center",
+      "wrap": true
     },
     {
       "type": "separator",
@@ -2021,7 +2042,8 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
       "color": "#2563EB",
       "weight": "bold",
       "align": "center",
-      "margin": "xs"
+      "margin": "xs",
+      "wrap": true
     }
   ];
 
@@ -2040,7 +2062,8 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
           "weight": "bold",
           "color": "#F8FAFC",
           "size": "xs",
-          "align": "center"
+          "align": "center",
+          "wrap": true
         }
       ]
     },
@@ -2074,7 +2097,8 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
           "weight": "bold",
           "color": "#FFFFFF",
           "size": "sm",
-          "align": "center"
+          "align": "center",
+          "wrap": true
         }
       ]
     },
@@ -2090,7 +2114,8 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
           "weight": "bold",
           "color": "#059669",
           "size": "xl",
-          "align": "center"
+          "align": "center",
+          "wrap": true
         },
         {
           "type": "separator",
@@ -2102,8 +2127,8 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
           "layout": "horizontal",
           "margin": "sm",
           "contents": [
-            { "type": "text", "text": "🔻 ต่ำ (Low):", "color": "#DC2626", "size": "xs", "weight": "bold", "flex": 4 },
-            { "type": "text", "text": `@${lowText}`, "color": "#1E293B", "size": "xs", "weight": "bold", "flex": 6, "align": "end" }
+            { "type": "text", "text": "🔻 ต่ำ (Low):", "color": "#DC2626", "size": "xs", "weight": "bold", "flex": 4, "wrap": true },
+            { "type": "text", "text": `@${lowText}`, "color": "#1E293B", "size": "xs", "weight": "bold", "flex": 6, "align": "end", "wrap": true }
           ]
         },
         {
@@ -2111,8 +2136,8 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
           "layout": "horizontal",
           "margin": "xs",
           "contents": [
-            { "type": "text", "text": "🔺 สูง (High):", "color": "#16A34A", "size": "xs", "weight": "bold", "flex": 4 },
-            { "type": "text", "text": `@${highText}`, "color": "#1E293B", "size": "xs", "weight": "bold", "flex": 6, "align": "end" }
+            { "type": "text", "text": "🔺 สูง (High):", "color": "#16A34A", "size": "xs", "weight": "bold", "flex": 4, "wrap": true },
+            { "type": "text", "text": `@${highText}`, "color": "#1E293B", "size": "xs", "weight": "bold", "flex": 6, "align": "end", "wrap": true }
           ]
         },
         ...(rangeInfo ? [{
@@ -2121,7 +2146,8 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
           "color": "#64748B",
           "size": "xxs",
           "align": "center",
-          "margin": "sm"
+          "margin": "sm",
+          "wrap": true
         }] : [])
       ]
     }
