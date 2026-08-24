@@ -1075,10 +1075,10 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId) {
 
   // If a valid bet was parsed
   if (side && amount >= 100) {
-    if (isRocketRoundClosed() && (betType === 'custom_range' || betType === 'custom' || betType === 'pre_quote' || offsetDelta !== 0)) {
+    if (isRocketRoundClosed()) {
       var closedMsg = groupId
-        ? '👤 [ถึงคุณ @' + displayName + ']: ⛔ ปิดรับการเปิดราคาเองแล้ว กรุณารอรอบต่อไป'
-        : '⛔ ปิดรับการเปิดราคาเองแล้ว กรุณารอรอบต่อไป';
+        ? '👤 [ถึงคุณ @' + displayName + ']: ⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ'
+        : '⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ';
       replyToLine(replyToken, closedMsg, userId);
       return;
     }

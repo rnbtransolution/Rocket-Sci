@@ -1136,10 +1136,10 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
 }
 
 async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false, groupId = null, userTypedCmd = null, isPreQuote = false, offsetDelta = 0) {
-  if (db.isRocketRoundClosed() && (type === 'custom_range' || type === 'custom' || isPreQuote || offsetDelta !== 0)) {
+  if (db.isRocketRoundClosed()) {
     const msg = groupId
-      ? `👤 [ถึงคุณ @${displayName}]: ⛔ ปิดรับการเปิดราคาเองแล้ว กรุณารอรอบต่อไป`
-      : `⛔ ปิดรับการเปิดราคาเองแล้ว กรุณารอรอบต่อไป`;
+      ? `👤 [ถึงคุณ @${displayName}]: ⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ`
+      : `⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ`;
     await replyToLine(replyToken, msg, userId);
     return;
   }
