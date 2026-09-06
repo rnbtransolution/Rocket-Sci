@@ -464,15 +464,41 @@ export async function broadcastToAllGroups(messageTextOrFlex) {
 }
 
 export async function handleUnsendMessage(unsendMessageId, userId, displayName, groupId) {
-  const result = await db.handleUnsendBet(unsendMessageId, userId, displayName, groupId);
-  if (result && result.cancelled) {
-    const cancelFlex = constructCancelOrderMiniFlex(result.orderNo);
-    const target = groupId || result.targetGroupId;
-    if (target) {
-      await pushToLine(target, cancelFlex);
-    } else if (userId) {
-      await pushToLine(userId, cancelFlex);
+  const info = await db.handleUnsendEvent(unsendMessageId, userId, displayName, groupId);
+  const target = groupId || info.targetGroupId || db.getActiveGroupId();
+  const player = displayName || info.displayName || 'ผู้ใช้';
+  const originalText = info.originalText || null;
+  const orderNo = info.orderNo || null;
+
+  const alertFlex = constructUnsendAlertFlex(player, originalText, orderNo);
+  if (target) {
+    await pushToLine(target, alertFlex);
+  } else if (userId) {
+    await pushToLine(userId, alertFlex);
+  }
+}
+
+export async function handleMessageEdited(messageId, newText, userId, displayName, groupId, replyToken) {
+  const info = await db.handleMessageEditedEvent(messageId, newText, userId, displayName, groupId);
+  const target = groupId || info.targetGroupId || db.getActiveGroupId();
+  const player = displayName || info.displayName || 'ผู้ใช้';
+  const originalText = info.originalText || null;
+  const orderNo = info.orderNo || null;
+
+  const alertFlex = constructEditAlertFlex(player, originalText, newText, orderNo);
+  if (replyToken && replyToken !== 'MOCK_REPLY_TOKEN') {
+    try {
+      await replyToLine(replyToken, alertFlex, userId);
+      return;
+    } catch (e) {
+      console.warn('[LINE] replyToken expired or failed for messageEdited, falling back to push:', e.message);
     }
+  }
+
+  if (target) {
+    await pushToLine(target, alertFlex);
+  } else if (userId) {
+    await pushToLine(userId, alertFlex);
   }
 }
 
@@ -481,6 +507,9 @@ export async function handleUnsendMessage(unsendMessageId, userId, displayName, 
 export async function handleTextMessage(text, userId, displayName, replyToken, groupId, messageId) {
   userId = await db.getOrCreateShortUserId(userId, displayName);
   db.logLineChatMessage(userId, displayName, 'player', text, 'text');
+  if (messageId) {
+    db.cacheLineMessage(messageId, text, userId, displayName, groupId);
+  }
   
   if (groupId) {
     let groupName = null;
@@ -1789,6 +1818,207 @@ export function constructCancelOrderMiniFlex(orderNo) {
           "size": "md",
           "align": "center",
           "wrap": true
+        }
+      ]
+    }
+  };
+}
+
+export function constructUnsendAlertFlex(displayName, originalText, orderNo = null) {
+  const contents = [
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        { "type": "text", "text": "👤 ผู้ใช้:", "size": "xs", "color": "#64748B", "flex": 2 },
+        { "type": "text", "text": `@${displayName}`, "size": "xs", "color": "#1E293B", "weight": "bold", "flex": 5, "wrap": true }
+      ]
+    }
+  ];
+
+  if (orderNo) {
+    contents.push({
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        { "type": "text", "text": "📝 รายการ:", "size": "xs", "color": "#64748B", "flex": 2 },
+        { "type": "text", "text": `Order #${orderNo}`, "size": "xs", "color": "#DC2626", "weight": "bold", "flex": 5 }
+      ]
+    });
+  }
+
+  if (originalText) {
+    contents.push({
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        { "type": "text", "text": "💬 ข้อความ:", "size": "xs", "color": "#64748B", "flex": 2 },
+        { "type": "text", "text": `"${originalText}"`, "size": "xs", "color": "#334155", "weight": "bold", "flex": 5, "wrap": true }
+      ]
+    });
+  }
+
+  return {
+    "type": "bubble",
+    "size": "kilo",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#DC2626",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "🚨 ตรวจพบการ Unsend ข้อความ",
+          "weight": "bold",
+          "color": "#FFFFFF",
+          "size": "sm",
+          "align": "center"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FEF2F2",
+      "paddingAll": "md",
+      "spacing": "xs",
+      "contents": [
+        {
+          "type": "box",
+          "layout": "vertical",
+          "spacing": "xs",
+          "contents": contents
+        },
+        { "type": "separator", "margin": "sm", "color": "#FECACA" },
+        {
+          "type": "box",
+          "layout": "vertical",
+          "margin": "sm",
+          "spacing": "xxs",
+          "contents": [
+            {
+              "type": "text",
+              "text": "⛔ การ Unsend ไม่มีผลต่อข้อมูลหรือผลเดิมพันในระบบ!",
+              "color": "#991B1B",
+              "weight": "bold",
+              "size": "xs",
+              "wrap": true
+            },
+            {
+              "type": "text",
+              "text": "💡 ยกเลิกคำสั่งเดิมพันได้ผ่านปุ่ม [⛔ ยกเลิก] บนการ์ด Order เท่านั้น",
+              "color": "#475569",
+              "size": "xxs",
+              "wrap": true
+            }
+          ]
+        }
+      ]
+    }
+  };
+}
+
+export function constructEditAlertFlex(displayName, originalText, newText, orderNo = null) {
+  const contents = [
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        { "type": "text", "text": "👤 ผู้ใช้:", "size": "xs", "color": "#64748B", "flex": 2 },
+        { "type": "text", "text": `@${displayName}`, "size": "xs", "color": "#1E293B", "weight": "bold", "flex": 5, "wrap": true }
+      ]
+    }
+  ];
+
+  if (orderNo) {
+    contents.push({
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        { "type": "text", "text": "📝 รายการ:", "size": "xs", "color": "#64748B", "flex": 2 },
+        { "type": "text", "text": `Order #${orderNo}`, "size": "xs", "color": "#D97706", "weight": "bold", "flex": 5 }
+      ]
+    });
+  }
+
+  if (originalText) {
+    contents.push({
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        { "type": "text", "text": "❌ เดิม:", "size": "xs", "color": "#94A3B8", "flex": 2 },
+        { "type": "text", "text": `"${originalText}"`, "size": "xs", "color": "#64748B", "decoration": "line-through", "flex": 5, "wrap": true }
+      ]
+    });
+  }
+
+  if (newText) {
+    contents.push({
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        { "type": "text", "text": "✏️ แก้เป็น:", "size": "xs", "color": "#D97706", "weight": "bold", "flex": 2 },
+        { "type": "text", "text": `"${newText}"`, "size": "xs", "color": "#B45309", "weight": "bold", "flex": 5, "wrap": true }
+      ]
+    });
+  }
+
+  return {
+    "type": "bubble",
+    "size": "kilo",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#D97706",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "✏️ ตรวจพบการแก้ไขข้อความ (Edited)",
+          "weight": "bold",
+          "color": "#FFFFFF",
+          "size": "sm",
+          "align": "center"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FFFBEB",
+      "paddingAll": "md",
+      "spacing": "xs",
+      "contents": [
+        {
+          "type": "box",
+          "layout": "vertical",
+          "spacing": "xs",
+          "contents": contents
+        },
+        { "type": "separator", "margin": "sm", "color": "#FDE68A" },
+        {
+          "type": "box",
+          "layout": "vertical",
+          "margin": "sm",
+          "spacing": "xxs",
+          "contents": [
+            {
+              "type": "text",
+              "text": "⛔ การแก้ไขข้อความไม่มีผลต่อข้อมูลหรือคำสั่งเดิมพันในระบบ!",
+              "color": "#92400E",
+              "weight": "bold",
+              "size": "xs",
+              "wrap": true
+            },
+            {
+              "type": "text",
+              "text": "💡 คำสั่งเดิมพันยึดตามข้อความเริ่มต้น ยกเลิกผ่านปุ่ม [⛔ ยกเลิก] บนการ์ด Order เท่านั้น",
+              "color": "#475569",
+              "size": "xxs",
+              "wrap": true
+            }
+          ]
         }
       ]
     }

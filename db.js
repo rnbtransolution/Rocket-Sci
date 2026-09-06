@@ -560,6 +560,9 @@ export function saveOpenBet(orderNo, userId, displayName, side, betAmount, type 
     userTypedCmd: userTypedCmd,
     messageId: messageId
   };
+  if (messageId) {
+    linkOrderToMessage(messageId, orderNo);
+  }
   bets.unshift(newBet); // Add to beginning of memory list
 
   appendRowToSheet('Bets', [
@@ -1451,12 +1454,55 @@ export async function handleCancelBetRequest(userId, orderNo) {
   return '🚫 ผิดพลาดในการปรับปรุงสถานะแผล';
 }
 
-export async function handleUnsendBet(messageId, userId, displayName, groupId) {
+// --- MESSAGE CACHING & EDIT / UNSEND AUDITING ---
+const messageCache = new Map();
+
+export function cacheLineMessage(messageId, text, userId, displayName, groupId) {
+  if (!messageId) return;
+  const now = Date.now();
+  messageCache.set(String(messageId), {
+    text: text || '',
+    userId: cleanUserId(userId),
+    displayName: displayName || 'ผู้ใช้',
+    groupId: groupId || null,
+    timestamp: now,
+    orderNo: null
+  });
+
+  // Limit memory usage: purge messages older than 2 hours or if cache > 1500
+  if (messageCache.size > 1500) {
+    for (const [k, v] of messageCache.entries()) {
+      if (now - v.timestamp > 2 * 3600 * 1000) {
+        messageCache.delete(k);
+      }
+    }
+  }
+}
+
+export function linkOrderToMessage(messageId, orderNo) {
+  if (!messageId || !orderNo) return;
+  const cached = messageCache.get(String(messageId));
+  if (cached) {
+    cached.orderNo = String(orderNo);
+  }
+}
+
+export function getCachedMessage(messageId) {
+  if (!messageId) return null;
+  return messageCache.get(String(messageId)) || null;
+}
+
+export async function handleUnsendEvent(messageId, userId, displayName, groupId) {
   const searchId = cleanUserId(userId);
+  let cached = messageId ? messageCache.get(String(messageId)) : null;
   let foundBet = null;
 
   if (messageId) {
     foundBet = bets.slice().reverse().find(b => b.messageId && String(b.messageId) === String(messageId));
+  }
+
+  if (!foundBet && cached && cached.orderNo) {
+    foundBet = bets.find(b => String(b.orderNumber) === String(cached.orderNo));
   }
 
   if (!foundBet && searchId) {
@@ -1467,22 +1513,75 @@ export async function handleUnsendBet(messageId, userId, displayName, groupId) {
     });
   }
 
-  if (!foundBet) return null;
+  const effectiveDisplayName = displayName || (cached ? cached.displayName : (foundBet ? (foundBet.playerLowName || foundBet.playerHighName) : 'ผู้ใช้'));
+  const originalText = (cached && cached.text) ? cached.text : (foundBet ? (foundBet.userTypedCmd || `Order #${foundBet.orderNumber}`) : null);
+  const orderNo = foundBet ? foundBet.orderNumber : (cached ? cached.orderNo : null);
+  const targetGroupId = groupId || (foundBet ? foundBet.groupId : (cached ? cached.groupId : null));
 
-  if (foundBet.status === 'matched' || foundBet.status === 'resolved') {
-    return { cancelled: false, status: foundBet.status, orderNo: foundBet.orderNumber };
+  if (cached) {
+    cached.unsent = true;
   }
 
-  if (foundBet.status === 'pending_match') {
-    foundBet.status = 'cancelled';
-    const creatorId = foundBet.playerLowId ? cleanUserId(foundBet.playerLowId) : cleanUserId(foundBet.playerHighId);
-    const creatorName = foundBet.playerLowId ? foundBet.playerLowName : (foundBet.playerHighName || displayName);
-    await adjustPlayerBalance(creatorId || searchId, foundBet.amount);
-    updateRowInSheet('Bets', foundBet.orderNumber, { 9: 'cancelled' });
-    return { cancelled: true, orderNo: foundBet.orderNumber, targetGroupId: foundBet.groupId };
+  // RULE: Unsend does NOT change, cancel, or refund bets in any way!
+  // Orders can only be cancelled via the interactive Flex card button.
+  return {
+    cancelled: false,
+    orderNo,
+    status: foundBet ? foundBet.status : null,
+    targetGroupId,
+    originalText,
+    displayName: effectiveDisplayName
+  };
+}
+
+export async function handleMessageEditedEvent(messageId, newText, userId, displayName, groupId) {
+  const searchId = cleanUserId(userId);
+  let cached = messageId ? messageCache.get(String(messageId)) : null;
+  let foundBet = null;
+
+  if (messageId) {
+    foundBet = bets.slice().reverse().find(b => b.messageId && String(b.messageId) === String(messageId));
   }
 
-  return null;
+  if (!foundBet && cached && cached.orderNo) {
+    foundBet = bets.find(b => String(b.orderNumber) === String(cached.orderNo));
+  }
+
+  if (!foundBet && searchId) {
+    foundBet = bets.slice().reverse().find(b => {
+      const isCreator = cleanUserId(b.playerLowId) === searchId || cleanUserId(b.playerHighId) === searchId ||
+                        (displayName && (b.playerLowName === displayName || b.playerHighName === displayName));
+      return isCreator;
+    });
+  }
+
+  const effectiveDisplayName = displayName || (cached ? cached.displayName : (foundBet ? (foundBet.playerLowName || foundBet.playerHighName) : 'ผู้ใช้'));
+  const originalText = (cached && cached.text) ? cached.text : (foundBet ? (foundBet.userTypedCmd || `Order #${foundBet.orderNumber}`) : null);
+  const orderNo = foundBet ? foundBet.orderNumber : (cached ? cached.orderNo : null);
+  const targetGroupId = groupId || (foundBet ? foundBet.groupId : (cached ? cached.groupId : null));
+
+  // Update cached text with newText for subsequent tracking
+  if (cached) {
+    cached.text = newText;
+    cached.edited = true;
+  } else if (messageId) {
+    cacheLineMessage(messageId, newText, userId, effectiveDisplayName, targetGroupId);
+  }
+
+  // RULE: Edit message does NOT modify or change bets or records in any way!
+  return {
+    orderNo,
+    status: foundBet ? foundBet.status : null,
+    targetGroupId,
+    originalText,
+    newText,
+    displayName: effectiveDisplayName
+  };
+}
+
+// Backwards compatibility alias
+export async function handleUnsendBet(messageId, userId, displayName, groupId) {
+  return handleUnsendEvent(messageId, userId, displayName, groupId);
 }
 
 export function verifyMockSlipFromClient(depositAmt, realAmt, ref, isQRValid, isDupe) {

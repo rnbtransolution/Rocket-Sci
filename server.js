@@ -267,27 +267,44 @@ async function processSingleWebhookEvent(event) {
   }
 
   const userId = source.userId;
-  if (!userId) {
+  const unsendMessageId = event.unsend?.messageId;
+  const editMessageId = event.message?.id;
+  const lookupMsgId = unsendMessageId || editMessageId;
+  let cachedSender = null;
+  if (lookupMsgId) {
+    cachedSender = db.getCachedMessage(lookupMsgId);
+  }
+
+  const effectiveUserId = userId || (cachedSender ? cachedSender.userId : null);
+  if (!effectiveUserId && event.type !== 'unsend' && event.type !== 'messageEdited') {
     return;
   }
 
   // Get Player profile display name from DB first (cached), fallback to API only if new player
-  let displayName = db.getPlayerNameFromDb(userId);
-  if (!displayName) {
-    const profile = await lineBot.getLineUserProfile(userId);
+  let displayName = effectiveUserId ? db.getPlayerNameFromDb(effectiveUserId) : null;
+  if (!displayName && cachedSender && cachedSender.displayName) {
+    displayName = cachedSender.displayName;
+  }
+  if (!displayName && effectiveUserId) {
+    const profile = await lineBot.getLineUserProfile(effectiveUserId);
     displayName = profile ? profile.displayName : 'ผู้เล่นนิรนาม';
+  }
+  if (!displayName) {
+    displayName = 'ผู้ใช้';
   }
 
   if (event.type === 'message') {
     const message = event.message;
     if (message.type === 'text') {
-      await lineBot.handleTextMessage(message.text, userId, displayName, replyToken, groupId, message.id);
+      await lineBot.handleTextMessage(message.text, effectiveUserId, displayName, replyToken, groupId, message.id);
     } else if (message.type === 'image') {
-      await lineBot.handleImageSlipMessage(message.id, userId, displayName, replyToken);
+      await lineBot.handleImageSlipMessage(message.id, effectiveUserId, displayName, replyToken);
     }
   } else if (event.type === 'unsend') {
-    const unsendMessageId = event.unsend?.messageId;
-    await lineBot.handleUnsendMessage(unsendMessageId, userId, displayName, groupId);
+    await lineBot.handleUnsendMessage(unsendMessageId, effectiveUserId, displayName, groupId);
+  } else if (event.type === 'messageEdited') {
+    const newText = event.message?.text || '';
+    await lineBot.handleMessageEdited(editMessageId, newText, effectiveUserId, displayName, groupId, replyToken);
   }
 }
 

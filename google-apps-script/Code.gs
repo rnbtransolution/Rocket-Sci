@@ -447,7 +447,12 @@ function doPost(e) {
       } else if (event.type === 'unsend') {
         const unsendMessageId = event.unsend ? event.unsend.messageId : null;
         const groupId = event.source.groupId || event.source.roomId || null;
-        handleUnsendOrder(unsendMessageId, userId, displayName, groupId);
+        handleUnsendMessage(unsendMessageId, userId, displayName, groupId);
+      } else if (event.type === 'messageEdited') {
+        const editMessageId = event.message ? event.message.id : null;
+        const newText = event.message ? event.message.text : '';
+        const groupId = event.source.groupId || event.source.roomId || null;
+        handleMessageEdited(editMessageId, newText, userId, displayName, groupId, replyToken);
       }
     }
   } catch (err) {
@@ -764,35 +769,92 @@ function handleCancelBetRequest(userId, orderNo, displayName) {
 }
 
 /**
- * Handle LINE unsend events:
- * 1. If that order has been matched -> Cannot cancel order even if creator unsend message.
- * 2. If not yet matched (pending_match) -> automatically cancel order & refund creator.
+ * Message Caching & Lookup Helpers using Google Apps Script CacheService
  */
-function handleUnsendOrder(unsendMessageId, userId, displayName, groupId) {
-  if (!unsendMessageId && !userId) return;
+function cacheLineMessage(messageId, text, userId, displayName, groupId) {
+  if (!messageId) return;
+  try {
+    var cache = CacheService.getScriptCache();
+    var data = JSON.stringify({
+      text: text || '',
+      userId: cleanUserId(userId),
+      displayName: displayName || 'ผู้ใช้',
+      groupId: groupId || '',
+      time: Date.now()
+    });
+    cache.put('msg_' + messageId, data, 21600); // 6 hours
+  } catch (e) {
+    Logger.log('[cacheLineMessage] Exception: ' + e.toString());
+  }
+}
+
+function linkOrderToMessage(messageId, orderNo) {
+  if (!messageId || !orderNo) return;
+  try {
+    var cache = CacheService.getScriptCache();
+    cache.put('msg_order_' + messageId, orderNo.toString(), 21600);
+  } catch (e) {}
+}
+
+function getCachedMessage(messageId) {
+  if (!messageId) return null;
+  try {
+    var cache = CacheService.getScriptCache();
+    var raw = cache.get('msg_' + messageId);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return null;
+}
+
+function getOrderNoByMessageId(messageId) {
+  if (!messageId) return null;
+  try {
+    var cache = CacheService.getScriptCache();
+    var orderNo = cache.get('msg_order_' + messageId);
+    if (orderNo) return orderNo;
+  } catch (e) {}
+  return null;
+}
+
+/**
+ * Handle LINE unsend events:
+ * Detects unsent message and broadcasts an alert to the group.
+ * RULE: Unsend does NOT cancel or modify orders or records in any way!
+ * Cancellation can ONLY be done via the interactive Flex Order Card.
+ */
+function handleUnsendMessage(unsendMessageId, userId, displayName, groupId) {
   var searchId = cleanUserId(userId);
+  var cached = unsendMessageId ? getCachedMessage(unsendMessageId) : null;
+  var orderNo = unsendMessageId ? getOrderNoByMessageId(unsendMessageId) : null;
+  var originalText = cached ? cached.text : null;
+  var targetGroupId = groupId || (cached ? cached.groupId : null);
+  var effectiveDisplayName = displayName || (cached ? cached.displayName : null);
+
   var ss = SpreadsheetApp.openById(SHEET_ID);
   var sheet = ss.getSheetByName('Bets');
-  if (!sheet) return;
-  var data = sheet.getDataRange().getValues();
-  var foundRow = -1;
-  var targetBet = null;
-
-  // 1. First priority: match by LINE message ID in column 14
-  if (unsendMessageId) {
-    var searchMsgId = unsendMessageId.toString().trim();
+  if (sheet && (!orderNo || !originalText)) {
+    var data = sheet.getDataRange().getValues();
+    var searchMsgId = unsendMessageId ? unsendMessageId.toString().trim() : '';
     for (var i = data.length - 1; i >= 1; i--) {
-      var rowMsgId = data[i][13] ? data[i][13].toString().trim() : '';
-      if (rowMsgId && rowMsgId === searchMsgId) {
-        foundRow = i + 1;
-        targetBet = data[i];
+      var row = data[i];
+      var rowMsgId = row[13] ? row[13].toString().trim() : '';
+      if (searchMsgId && rowMsgId === searchMsgId) {
+        orderNo = row[0].toString().trim();
+        originalText = originalText || ('Order #' + orderNo);
+        if (!effectiveDisplayName) {
+          effectiveDisplayName = row[2] || row[4] || 'ผู้เล่น';
+        }
+        if (!targetGroupId) {
+          targetGroupId = row[12] ? row[12].toString().trim() : null;
+        }
         break;
       }
     }
   }
 
-  // 2. Fallback: match by creator ID & group within last 15 minutes
-  if (foundRow === -1 && searchId) {
+  // Fallback: match by creator ID & group within last 15 minutes if not found yet
+  if (!orderNo && searchId && sheet) {
+    var data = sheet.getDataRange().getValues();
     for (var i = data.length - 1; i >= 1; i--) {
       var row = data[i];
       var pLowId = cleanUserId(row[1]);
@@ -804,51 +866,92 @@ function handleUnsendOrder(unsendMessageId, userId, displayName, groupId) {
       if (isCreator) {
         var rowTime = row[11] ? new Date(row[11]).getTime() : 0;
         if (Date.now() - rowTime < 15 * 60 * 1000) {
-          foundRow = i + 1;
-          targetBet = row;
+          orderNo = row[0].toString().trim();
+          originalText = originalText || ('Order #' + orderNo);
+          if (!targetGroupId) {
+            targetGroupId = row[12] ? row[12].toString().trim() : null;
+          }
           break;
         }
       }
     }
   }
 
-  if (foundRow === -1 || !targetBet) {
-    Logger.log('[UNSEND] No matching bet found for unsendMessageId: ' + unsendMessageId);
-    return;
+  effectiveDisplayName = effectiveDisplayName || 'ผู้ใช้';
+  targetGroupId = targetGroupId || getActiveGroupId();
+
+  // RULE: Unsend does NOT cancel or modify orders in any way!
+  var alertFlex = constructUnsendAlertFlex(effectiveDisplayName, originalText, orderNo);
+  if (targetGroupId) {
+    pushLineGroupMessage(targetGroupId, alertFlex);
+  } else if (userId) {
+    pushToLine(userId, alertFlex);
   }
+}
 
-  var orderNo = targetBet[0].toString().trim();
-  var status = targetBet[9].toString().trim();
-  var amount = Number(targetBet[5]) || 0;
-  var pLowId = cleanUserId(targetBet[1]);
-  var pHighId = cleanUserId(targetBet[3]);
-  var creatorId = pLowId || pHighId || searchId;
-  var creatorName = (pLowId ? targetBet[2] : targetBet[4]) || displayName || 'ผู้เล่น';
-  var targetGroupId = groupId || (targetBet[12] ? targetBet[12].toString().trim() : getActiveGroupId());
+// Backwards compatibility alias
+function handleUnsendOrder(unsendMessageId, userId, displayName, groupId) {
+  handleUnsendMessage(unsendMessageId, userId, displayName, groupId);
+}
 
-  // Rule 1: If matched -> Cannot cancel order even creator unsend message.
-  if (status === 'matched' || status === 'resolved') {
-    Logger.log('[UNSEND] Order #' + orderNo + ' is already ' + status + '. Cannot cancel.');
-    return;
-  }
+/**
+ * Handle LINE messageEdited events:
+ * Detects edited messages in group chats and broadcasts an alert.
+ * RULE: Editing does NOT modify bets or records in any way!
+ */
+function handleMessageEdited(editMessageId, newText, userId, displayName, groupId, replyToken) {
+  var searchId = cleanUserId(userId);
+  var cached = editMessageId ? getCachedMessage(editMessageId) : null;
+  var orderNo = editMessageId ? getOrderNoByMessageId(editMessageId) : null;
+  var originalText = cached ? cached.text : null;
+  var targetGroupId = groupId || (cached ? cached.groupId : null);
+  var effectiveDisplayName = displayName || (cached ? cached.displayName : null);
 
-  // Rule 2: If not yet matched (pending_match) -> automatically cancel
-  if (status === 'pending_match') {
-    sheet.getRange(foundRow, 10).setValue('cancelled');
-    // Refund credit to the creator
-    adjustPlayerBalance(creatorId, amount, creatorName);
-    
-    // Invalidate dashboard cache
-    invalidateDashboardCache();
-    
-    // Push the 2-row cancel Flex Card
-    var cancelFlex = constructCancelOrderMiniFlex(orderNo);
-    if (targetGroupId) {
-      pushLineGroupMessage(targetGroupId, cancelFlex);
-    } else if (userId) {
-      pushToLine(userId, cancelFlex);
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName('Bets');
+  if (sheet && (!orderNo || !originalText)) {
+    var data = sheet.getDataRange().getValues();
+    var searchMsgId = editMessageId ? editMessageId.toString().trim() : '';
+    for (var i = data.length - 1; i >= 1; i--) {
+      var row = data[i];
+      var rowMsgId = row[13] ? row[13].toString().trim() : '';
+      if (searchMsgId && rowMsgId === searchMsgId) {
+        orderNo = row[0].toString().trim();
+        originalText = originalText || ('Order #' + orderNo);
+        if (!effectiveDisplayName) {
+          effectiveDisplayName = row[2] || row[4] || 'ผู้เล่น';
+        }
+        if (!targetGroupId) {
+          targetGroupId = row[12] ? row[12].toString().trim() : null;
+        }
+        break;
+      }
     }
-    Logger.log('[UNSEND] Successfully auto-cancelled unmatched Order #' + orderNo);
+  }
+
+  effectiveDisplayName = effectiveDisplayName || 'ผู้ใช้';
+  targetGroupId = targetGroupId || getActiveGroupId();
+
+  // Update cached text with newText for subsequent tracking
+  if (editMessageId) {
+    cacheLineMessage(editMessageId, newText, userId, effectiveDisplayName, targetGroupId);
+  }
+
+  // RULE: Edit message does NOT modify or change bets in any way!
+  var alertFlex = constructEditAlertFlex(effectiveDisplayName, originalText, newText, orderNo);
+  if (replyToken && replyToken !== 'MOCK_REPLY_TOKEN') {
+    try {
+      replyToLine(replyToken, alertFlex, userId);
+      return;
+    } catch (e) {
+      Logger.log('[handleMessageEdited] replyToLine failed: ' + e);
+    }
+  }
+
+  if (targetGroupId) {
+    pushLineGroupMessage(targetGroupId, alertFlex);
+  } else if (userId) {
+    pushToLine(userId, alertFlex);
   }
 }
 
@@ -859,6 +962,9 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   userId = getOrCreateShortUserId(userId, displayName);
   // Log user message
   logLineChatMessage(userId, displayName, 'player', text, 'text');
+  if (messageId) {
+    cacheLineMessage(messageId, text, userId, displayName, groupId);
+  }
   
   if (groupId) {
     recordGroupActivity(groupId, null, userId, displayName, text);
@@ -1703,6 +1809,9 @@ function saveOpenBet(orderNo, userId, displayName, side, amount, type, rMin, rMa
     targetGroupId || '',
     messageId || ''
   ]);
+  if (messageId) {
+    linkOrderToMessage(messageId, orderNo);
+  }
 }
 
 /**
@@ -2914,6 +3023,207 @@ function constructCancelOrderMiniFlex(orderNo) {
           "size": "md",
           "align": "center",
           "wrap": true
+        }
+      ]
+    }
+  };
+}
+
+function constructUnsendAlertFlex(displayName, originalText, orderNo) {
+  var contents = [
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        { "type": "text", "text": "👤 ผู้ใช้:", "size": "xs", "color": "#64748B", "flex": 2 },
+        { "type": "text", "text": "@" + displayName, "size": "xs", "color": "#1E293B", "weight": "bold", "flex": 5, "wrap": true }
+      ]
+    }
+  ];
+
+  if (orderNo) {
+    contents.push({
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        { "type": "text", "text": "📝 รายการ:", "size": "xs", "color": "#64748B", "flex": 2 },
+        { "type": "text", "text": "Order #" + orderNo, "size": "xs", "color": "#DC2626", "weight": "bold", "flex": 5 }
+      ]
+    });
+  }
+
+  if (originalText) {
+    contents.push({
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        { "type": "text", "text": "💬 ข้อความ:", "size": "xs", "color": "#64748B", "flex": 2 },
+        { "type": "text", "text": '"' + originalText + '"', "size": "xs", "color": "#334155", "weight": "bold", "flex": 5, "wrap": true }
+      ]
+    });
+  }
+
+  return {
+    "type": "bubble",
+    "size": "kilo",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#DC2626",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "🚨 ตรวจพบการ Unsend ข้อความ",
+          "weight": "bold",
+          "color": "#FFFFFF",
+          "size": "sm",
+          "align": "center"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FEF2F2",
+      "paddingAll": "md",
+      "spacing": "xs",
+      "contents": [
+        {
+          "type": "box",
+          "layout": "vertical",
+          "spacing": "xs",
+          "contents": contents
+        },
+        { "type": "separator", "margin": "sm", "color": "#FECACA" },
+        {
+          "type": "box",
+          "layout": "vertical",
+          "margin": "sm",
+          "spacing": "xxs",
+          "contents": [
+            {
+              "type": "text",
+              "text": "⛔ การ Unsend ไม่มีผลต่อข้อมูลหรือผลเดิมพันในระบบ!",
+              "color": "#991B1B",
+              "weight": "bold",
+              "size": "xs",
+              "wrap": true
+            },
+            {
+              "type": "text",
+              "text": "💡 ยกเลิกคำสั่งเดิมพันได้ผ่านปุ่ม [⛔ ยกเลิก] บนการ์ด Order เท่านั้น",
+              "color": "#475569",
+              "size": "xxs",
+              "wrap": true
+            }
+          ]
+        }
+      ]
+    }
+  };
+}
+
+function constructEditAlertFlex(displayName, originalText, newText, orderNo) {
+  var contents = [
+    {
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        { "type": "text", "text": "👤 ผู้ใช้:", "size": "xs", "color": "#64748B", "flex": 2 },
+        { "type": "text", "text": "@" + displayName, "size": "xs", "color": "#1E293B", "weight": "bold", "flex": 5, "wrap": true }
+      ]
+    }
+  ];
+
+  if (orderNo) {
+    contents.push({
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        { "type": "text", "text": "📝 รายการ:", "size": "xs", "color": "#64748B", "flex": 2 },
+        { "type": "text", "text": "Order #" + orderNo, "size": "xs", "color": "#D97706", "weight": "bold", "flex": 5 }
+      ]
+    });
+  }
+
+  if (originalText) {
+    contents.push({
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        { "type": "text", "text": "❌ เดิม:", "size": "xs", "color": "#94A3B8", "flex": 2 },
+        { "type": "text", "text": '"' + originalText + '"', "size": "xs", "color": "#64748B", "decoration": "line-through", "flex": 5, "wrap": true }
+      ]
+    });
+  }
+
+  if (newText) {
+    contents.push({
+      "type": "box",
+      "layout": "horizontal",
+      "contents": [
+        { "type": "text", "text": "✏️ แก้เป็น:", "size": "xs", "color": "#D97706", "weight": "bold", "flex": 2 },
+        { "type": "text", "text": '"' + newText + '"', "size": "xs", "color": "#B45309", "weight": "bold", "flex": 5, "wrap": true }
+      ]
+    });
+  }
+
+  return {
+    "type": "bubble",
+    "size": "kilo",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#D97706",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "text",
+          "text": "✏️ ตรวจพบการแก้ไขข้อความ (Edited)",
+          "weight": "bold",
+          "color": "#FFFFFF",
+          "size": "sm",
+          "align": "center"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FFFBEB",
+      "paddingAll": "md",
+      "spacing": "xs",
+      "contents": [
+        {
+          "type": "box",
+          "layout": "vertical",
+          "spacing": "xs",
+          "contents": contents
+        },
+        { "type": "separator", "margin": "sm", "color": "#FDE68A" },
+        {
+          "type": "box",
+          "layout": "vertical",
+          "margin": "sm",
+          "spacing": "xxs",
+          "contents": [
+            {
+              "type": "text",
+              "text": "⛔ การแก้ไขข้อความไม่มีผลต่อข้อมูลหรือคำสั่งเดิมพันในระบบ!",
+              "color": "#92400E",
+              "weight": "bold",
+              "size": "xs",
+              "wrap": true
+            },
+            {
+              "type": "text",
+              "text": "💡 คำสั่งเดิมพันยึดตามข้อความเริ่มต้น ยกเลิกผ่านปุ่ม [⛔ ยกเลิก] บนการ์ด Order เท่านั้น",
+              "color": "#475569",
+              "size": "xxs",
+              "wrap": true
+            }
+          ]
         }
       ]
     }
