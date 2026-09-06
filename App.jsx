@@ -27,7 +27,9 @@ import {
   Zap,
   Info,
   Wallet,
-  ShieldAlert
+  ShieldAlert,
+  Trophy,
+  Search
 } from 'lucide-react';
 
 const INITIAL_PLAYERS = [];
@@ -187,9 +189,11 @@ export default function App() {
   
   const [flights, setFlights] = useState([]);
   
-  // Dashboard & Navigation controls (default to rocket telemetry first)
+  // Dashboard & Navigation controls (default to quote setup first)
   const [lineChatType, setLineChatType] = useState('private'); // 'private' | 'group'
-  const [adminTab, setAdminTab] = useState('rocket'); // 'rocket' | 'review' | 'players' | 'logs' | 'line'
+  const [adminTab, setAdminTab] = useState('quote'); // 'quote' | 'settle' | 'bets' | 'review' | 'players' | 'logs'
+  const [betStatusFilter, setBetStatusFilter] = useState('all'); // 'all' | 'matched' | 'pending_match' | 'cancelled' | 'resolved'
+  const [betSearchQuery, setBetSearchQuery] = useState('');
   const [toasts, setToasts] = useState([]);
 
   // Transaction filtering & search & detail modal states
@@ -1899,73 +1903,94 @@ export default function App() {
         </div>
 
         {/* Tab Selection Bar stretching 100% width */}
-        <div className="glass-panel p-1 flex text-sm font-bold tracking-wide shrink-0 overflow-x-auto">
+        <div className="glass-panel p-1.5 flex text-xs md:text-sm font-bold tracking-wide shrink-0 overflow-x-auto gap-1.5 bg-slate-100/80 border border-slate-200/80">
           <button 
-            onClick={() => setAdminTab('rocket')}
-            className={`flex-1 py-2.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
-              adminTab === 'rocket' ? 'bg-sky-100 border border-sky-200 text-sky-800' : 'text-slate-500 hover:text-slate-800'
+            onClick={() => setAdminTab('quote')}
+            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
+              (adminTab === 'quote' || adminTab === 'rocket') ? 'bg-emerald-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
             }`}
           >
-            <Rocket size={14} />
-            ป้อนผลจรวด {bets.filter(b => b.status === 'matched').length > 0 && <span className="bg-sky-600 text-white text-[10px] px-1.5 py-0.5 rounded-full">{bets.filter(b => b.status === 'matched').length}</span>}
+            <Rocket size={15} className={(adminTab === 'quote' || adminTab === 'rocket') ? 'text-emerald-200' : 'text-emerald-600'} />
+            <span>ออกราคาช่าง</span>
           </button>
           <button 
-            onClick={() => setAdminTab('review')}
-            className={`flex-1 py-2.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
-              adminTab === 'review' ? 'bg-sky-100 border border-sky-200 text-sky-800' : 'text-slate-500 hover:text-slate-800'
+            onClick={() => setAdminTab('settle')}
+            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
+              adminTab === 'settle' ? 'bg-sky-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
             }`}
           >
-            <FileText size={14} />
-            สลิปค้างรีวิว {transactions.filter(t => t.status === 'escalated').length > 0 && <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{transactions.filter(t => t.status === 'escalated').length}</span>}
+            <Zap size={15} className={adminTab === 'settle' ? 'text-sky-200' : 'text-sky-600'} />
+            <span>ป้อนผลเวลา</span>
+          </button>
+          <button 
+            onClick={() => setAdminTab('bets')}
+            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
+              adminTab === 'bets' ? 'bg-indigo-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            }`}
+          >
+            <Trophy size={15} className={adminTab === 'bets' ? 'text-indigo-200' : 'text-indigo-600'} />
+            <span>กระดานดวลสด</span>
+            {bets.filter(b => b.status === 'matched' || b.status === 'pending_match').length > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${adminTab === 'bets' ? 'bg-white text-indigo-800' : 'bg-indigo-600 text-white'}`}>
+                {bets.filter(b => b.status === 'matched' || b.status === 'pending_match').length}
+              </span>
+            )}
+          </button>
+          <button 
+            onClick={() => { setAdminTab('review'); setTxStatusFilter('escalated'); }}
+            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
+              adminTab === 'review' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            }`}
+          >
+            <FileText size={15} className={adminTab === 'review' ? 'text-amber-200' : 'text-amber-600'} />
+            <span>สลิปค้างรีวิว</span>
+            {transactions.filter(t => t.status === 'escalated').length > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${adminTab === 'review' ? 'bg-white text-amber-800' : 'bg-amber-500 text-white'}`}>
+                {transactions.filter(t => t.status === 'escalated').length}
+              </span>
+            )}
           </button>
           <button 
             onClick={() => setAdminTab('players')}
-            className={`flex-1 py-2.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
-              adminTab === 'players' ? 'bg-sky-100 border border-sky-200 text-sky-800' : 'text-slate-500 hover:text-slate-800'
+            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
+              adminTab === 'players' ? 'bg-teal-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
             }`}
           >
-            <Users size={14} />
-            เครดิตผู้เล่น
+            <Users size={15} className={adminTab === 'players' ? 'text-teal-200' : 'text-teal-600'} />
+            <span>เครดิตผู้เล่น</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${adminTab === 'players' ? 'bg-teal-900/60 text-teal-100' : 'bg-slate-200 text-slate-700'}`}>
+              {players.length}
+            </span>
           </button>
           <button 
-            onClick={() => setAdminTab('logs')}
-            className={`flex-1 py-2.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
-              adminTab === 'logs' ? 'bg-sky-100 border border-sky-200 text-sky-800' : 'text-slate-500 hover:text-slate-800'
+            onClick={() => { setAdminTab('logs'); setTxStatusFilter('all'); }}
+            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
+              adminTab === 'logs' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
             }`}
           >
-            <Database size={14} />
-            ทรานแซคชัน
+            <Database size={15} className={adminTab === 'logs' ? 'text-slate-300' : 'text-slate-500'} />
+            <span>ทรานแซคชัน</span>
           </button>
-          <button 
-            onClick={() => setAdminTab('line')}
-            className={`flex-1 py-2.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
-              adminTab === 'line' ? 'bg-sky-100 border border-sky-200 text-sky-800' : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <MessageSquare size={14} />
-            แชท LINE OA
-          </button>
-
         </div>
 
         {/* Tab panels contents container */}
         <div className="w-full space-y-6">
 
-          {/* TAB 1: ONSITE TELEMETRY RECEIVER */}
-          {adminTab === 'rocket' && (
+          {/* TAB 1: ONSITE TELEMETRY RECEIVER & MECHANIC QUOTE SETUP */}
+          {(adminTab === 'quote' || adminTab === 'rocket') && (
             <div className="glass-panel p-5 space-y-5 relative overflow-hidden group">
               {/* Watermark Icon */}
-              <Rocket size={140} className="absolute -bottom-10 -right-10 text-slate-100/30 group-hover:text-sky-100/40 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
+              <Rocket size={140} className="absolute -bottom-10 -right-10 text-slate-100/30 group-hover:text-emerald-100/40 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
               
               <div className="relative z-10">
-                <div className="card-header-ref card-header-dot-sky">
+                <div className="card-header-ref card-header-dot-emerald">
                   <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center justify-center gap-2 font-heading">
-                    <Rocket size={14} className="text-sky-600 animate-pulse" />
-                    หอบังคับการป้อนเวลาขีปนาวุธ (Onsite Rocket Telemetry Inputs)
+                    <Rocket size={14} className="text-emerald-600 animate-pulse" />
+                    ศูนย์ออกราคาช่างเปิดรับดวล (Original Mechanic Quote Setup & Broadcast)
                   </h3>
                 </div>
                 <p className="text-[11px] text-slate-500 text-center font-sans mt-2">
-                  ระบบจัดการและสรุปผลเวลาขีปนาวุธ แยกการตั้งค่าราคาช่างต้นทางและสรุปผลเคลียร์แต้มอิสระจากกัน
+                  ตั้งค่าชื่อค่ายช่าง บั้งไฟ ช่วงราคาช่างเปิด และบรอดแคสต์ส่งการ์ดราคาดวลสดลงกลุ่ม LINE OA ทันที
                 </p>
               </div>
 
@@ -2276,6 +2301,26 @@ export default function App() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* TAB 2: FINAL RESULT TELEMETRY & ROUND SETTLEMENT */}
+          {adminTab === 'settle' && (
+            <div className="glass-panel p-5 space-y-5 relative overflow-hidden group">
+              {/* Watermark Icon */}
+              <Zap size={140} className="absolute -bottom-10 -right-10 text-slate-100/30 group-hover:text-sky-100/40 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
+              
+              <div className="relative z-10">
+                <div className="card-header-ref card-header-dot-sky">
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center justify-center gap-2 font-heading">
+                    <Zap size={14} className="text-sky-600 animate-pulse" />
+                    ป้อนผลเวลาบินจริง & ชำระแต้มดวล (Final Flight Time & Round Settlement)
+                  </h3>
+                </div>
+                <p className="text-[11px] text-slate-500 text-center font-sans mt-2">
+                  ป้อนผลเวลาวินาทีที่จรวดบินสำเร็จจริง เพื่อให้ระบบคำนวณผู้ชนะและโอนจ่ายแต้มผลการท้าดวลทั้งหมดในรอบนี้
+                </p>
+              </div>
 
               {/* CARD 2: Final Result Telemetry & Round Settlement Card */}
               <div className="p-5 bg-gradient-to-br from-sky-50/80 via-white to-indigo-50/50 rounded-2xl border border-sky-200 shadow-sm space-y-4">
@@ -2286,7 +2331,7 @@ export default function App() {
                     </span>
                     <div>
                       <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider font-heading">
-                        CARD 2: 🎯 ป้อนผลเวลาบินจริง & ชำระแต้มดวล (Final Flight Time & Round Settlement)
+                        🎯 ป้อนผลเวลาบินจริง & ชำระแต้มดวล (Final Flight Time & Round Settlement)
                       </h3>
                       <p className="text-[11px] text-slate-500 font-sans">
                         ป้อนผลเวลาวินาทีที่จรวดบินสำเร็จจริง เพื่อให้ระบบคำนวณผู้ชนะและโอนจ่ายแต้มผลการท้าดวลทั้งหมดในรอบนี้
@@ -2395,7 +2440,234 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 2 & TAB 4: HIGH-DENSITY ENTERPRISE TRANSACTION CONTROL SUITE */}
+          {/* TAB 3: DEDICATED LIVE BETS & GAME CONTRACTS BOARD */}
+          {adminTab === 'bets' && (() => {
+            const filteredBets = bets.filter(b => {
+              if (betStatusFilter === 'matched' && b.status !== 'matched') return false;
+              if (betStatusFilter === 'pending_match' && b.status !== 'pending_match') return false;
+              if (betStatusFilter === 'pending_cancel' && b.status !== 'pending_cancel') return false;
+              if (betStatusFilter === 'cancelled' && b.status !== 'cancelled') return false;
+              if (betStatusFilter === 'resolved' && b.status !== 'resolved') return false;
+              if (betSearchQuery && betSearchQuery.trim()) {
+                const q = betSearchQuery.trim().toLowerCase();
+                const matchOrder = b.orderNumber && b.orderNumber.toString().toLowerCase().includes(q);
+                const matchLow = b.playerLowName && b.playerLowName.toLowerCase().includes(q);
+                const matchHigh = b.playerHighName && b.playerHighName.toLowerCase().includes(q);
+                if (!matchOrder && !matchLow && !matchHigh) return false;
+              }
+              return true;
+            });
+
+            const matchedCount = bets.filter(b => b.status === 'matched').length;
+            const pendingCount = bets.filter(b => b.status === 'pending_match').length;
+            const cancelCount = bets.filter(b => b.status === 'pending_cancel' || b.status === 'cancelled').length;
+            const resolvedCount = bets.filter(b => b.status === 'resolved').length;
+            const totalBetVolume = bets.reduce((sum, b) => sum + (b.amount || 0), 0);
+
+            return (
+              <div className="glass-panel p-5 space-y-5 relative overflow-hidden group">
+                {/* Watermark Icon */}
+                <Trophy size={140} className="absolute -bottom-10 -right-10 text-slate-100/30 group-hover:text-indigo-100/40 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
+
+                <div className="relative z-10 space-y-3">
+                  <div className="card-header-ref card-header-dot-indigo">
+                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center justify-center gap-2 font-heading">
+                      <Trophy size={14} className="text-indigo-600 animate-pulse" />
+                      กระดานดวลสด & สัญญาแข่งขัน (Live Game Contracts & Bets Board)
+                    </h3>
+                  </div>
+                  <p className="text-[11px] text-slate-500 text-center font-sans">
+                    ตรวจสอบคู่ดวลที่จับคู่แล้ว บิลที่รอคู่ดวล หรือจัดการถอนแผลคืนเครดิตให้ผู้เล่นได้แบบเรียลไทม์
+                  </p>
+
+                  {/* Summary Metric Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-sans">
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block">สัญญาทั้งหมด</span>
+                      <span className="text-lg font-black text-slate-800 font-mono">{bets.length}</span>
+                      <span className="text-[10px] text-slate-500 block">รายการ</span>
+                    </div>
+                    <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-3 text-center">
+                      <span className="text-[10px] text-indigo-600 font-bold uppercase block">กำลังดวลสด</span>
+                      <span className="text-lg font-black text-indigo-900 font-mono">{matchedCount}</span>
+                      <span className="text-[10px] text-indigo-500 block">คู่ดวล</span>
+                    </div>
+                    <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 text-center">
+                      <span className="text-[10px] text-amber-600 font-bold uppercase block">รอคู่ดวล</span>
+                      <span className="text-lg font-black text-amber-900 font-mono">{pendingCount}</span>
+                      <span className="text-[10px] text-amber-500 block">รอรับแผล</span>
+                    </div>
+                    <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 text-center">
+                      <span className="text-[10px] text-emerald-600 font-bold uppercase block">มูลค่าดวลรวม</span>
+                      <span className="text-lg font-black text-emerald-900 font-mono">{totalBetVolume.toLocaleString()}</span>
+                      <span className="text-[10px] text-emerald-600 block">แต้ม (pt)</span>
+                    </div>
+                  </div>
+
+                  {/* Filter & Search Bar */}
+                  <div className="flex items-center justify-between gap-3 flex-wrap bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <div className="flex items-center gap-1.5 flex-wrap text-xs font-bold font-sans">
+                      <span className="text-slate-400 text-[11px] uppercase tracking-wider mr-1">สถานะ:</span>
+                      <button
+                        onClick={() => setBetStatusFilter('all')}
+                        className={`px-2.5 py-1 rounded-lg transition-all ${betStatusFilter === 'all' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}`}
+                      >
+                        ทั้งหมด ({bets.length})
+                      </button>
+                      <button
+                        onClick={() => setBetStatusFilter('matched')}
+                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${betStatusFilter === 'matched' ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-50'}`}
+                      >
+                        <span>⚔️ ดวลกันอยู่</span>
+                        {matchedCount > 0 && <span className="bg-indigo-200 text-indigo-950 text-[10px] px-1.5 py-0.2 rounded-full font-black">{matchedCount}</span>}
+                      </button>
+                      <button
+                        onClick={() => setBetStatusFilter('pending_match')}
+                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${betStatusFilter === 'pending_match' ? 'bg-amber-600 text-white' : 'bg-white text-amber-700 border border-amber-200 hover:bg-amber-50'}`}
+                      >
+                        <span>⏳ รอคู่ดวล</span>
+                        {pendingCount > 0 && <span className="bg-amber-200 text-amber-950 text-[10px] px-1.5 py-0.2 rounded-full font-black">{pendingCount}</span>}
+                      </button>
+                      <button
+                        onClick={() => setBetStatusFilter('resolved')}
+                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${betStatusFilter === 'resolved' ? 'bg-emerald-600 text-white' : 'bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50'}`}
+                      >
+                        ✅ สรุปผลแล้ว ({resolvedCount})
+                      </button>
+                      <button
+                        onClick={() => setBetStatusFilter('cancelled')}
+                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${betStatusFilter === 'cancelled' ? 'bg-rose-600 text-white' : 'bg-white text-rose-700 border border-rose-200 hover:bg-rose-50'}`}
+                      >
+                        ❌ ขอยกเลิก ({cancelCount})
+                      </button>
+                    </div>
+
+                    <div className="relative w-full sm:w-64">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="ค้นหา Order # หรือชื่อผู้เล่น..."
+                        value={betSearchQuery}
+                        onChange={(e) => setBetSearchQuery(e.target.value)}
+                        className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Bets Table */}
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-left font-sans text-xs border-collapse min-w-[700px]">
+                      <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
+                        <tr>
+                          <th className="py-2.5 px-3">Order #</th>
+                          <th className="py-2.5 px-3">ฝั่งต่ำ (Low / ชล)</th>
+                          <th className="py-2.5 px-3">ฝั่งสูง (High / ชถ)</th>
+                          <th className="py-2.5 px-3 text-right">ยอดดวล</th>
+                          <th className="py-2.5 px-3 text-center">ประเภทราคา</th>
+                          <th className="py-2.5 px-3 text-center">สถานะ</th>
+                          <th className="py-2.5 px-3 text-right">จัดการแผล</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {filteredBets.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="py-10 text-center text-slate-400 text-xs italic">
+                              -- ไม่พบบันทึกการดวลที่ตรงกับเงื่อนไข --
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredBets.slice().reverse().map(b => (
+                            <tr key={b.id} className="hover:bg-indigo-50/20 transition-colors">
+                              <td className="py-3 px-3 font-bold text-slate-800 font-mono">
+                                Order #{b.orderNumber}
+                                <div className="text-[10px] text-slate-400 font-sans font-normal">{b.timestamp || ''}</div>
+                              </td>
+                              <td className="py-3 px-3">
+                                {b.playerLowName ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-sky-500 shrink-0"></span>
+                                    <span className="text-sky-800 font-black">{b.playerLowName}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-300 italic font-sans">-- รอผู้เล่น --</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3">
+                                {b.playerHighName ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0"></span>
+                                    <span className="text-rose-800 font-black">{b.playerHighName}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-300 italic font-sans">-- รอผู้เล่น --</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3 text-right font-black text-slate-900 font-mono text-sm">
+                                {b.amount?.toLocaleString()} <span className="text-[10px] text-slate-400 font-normal">pt</span>
+                              </td>
+                              <td className="py-3 px-3 text-center font-mono">
+                                {b.type === 'range' ? (
+                                  <span className="px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 font-extrabold rounded text-[10.5px]">
+                                    🤝 P2P ({b.rangeMin > 1000 ? (b.rangeMin/100) : b.rangeMin}-{b.rangeMax > 1000 ? (b.rangeMax/100) : b.rangeMax}s)
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 bg-sky-50 border border-sky-200 text-sky-800 font-bold rounded text-[10.5px]">
+                                    🏛️ ราคาช่าง ({targetMin}-{targetMax}s)
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3 text-center font-sans font-bold text-[10.5px]">
+                                {b.status === 'matched' && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-full font-bold">
+                                    ⚔️ ดวลกันอยู่
+                                  </span>
+                                )}
+                                {b.status === 'pending_match' && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-full font-bold animate-pulse">
+                                    ⏳ รอคู่ดวล
+                                  </span>
+                                )}
+                                {b.status === 'pending_cancel' && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-full font-bold">
+                                    ⚠️ รอถอนแผล
+                                  </span>
+                                )}
+                                {b.status === 'cancelled' && (
+                                  <span className="px-2 py-0.5 text-slate-400 line-through font-mono">
+                                    ✕ ขอยกเลิก
+                                  </span>
+                                )}
+                                {b.status === 'resolved' && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-bold">
+                                    🏆 {b.winnerName ? b.winnerName.split(' ')[0] : 'จบแล้ว'}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3 text-right">
+                                {(b.status === 'matched' || b.status === 'pending_match' || b.status === 'pending_cancel') ? (
+                                  <button
+                                    onClick={() => handleRequestCancelBet(b.id)}
+                                    className="px-2.5 py-1 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-700 text-[10.5px] rounded-lg font-bold transition-all active:scale-95"
+                                    title="ยกเลิกการดวลและคืนแต้มเข้าบัญชี"
+                                  >
+                                    ถอนดีลสด
+                                  </button>
+                                ) : (
+                                  <span className="text-slate-300 text-[11px]">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* TAB 4 & TAB 6: HIGH-DENSITY ENTERPRISE TRANSACTION CONTROL SUITE */}
           {(adminTab === 'review' || adminTab === 'logs') && (() => {
             const isReviewOnly = adminTab === 'review';
             const effectiveStatusFilter = isReviewOnly && txStatusFilter === 'all' ? 'escalated' : txStatusFilter;
@@ -2756,68 +3028,6 @@ export default function App() {
                 {players.length === 0 && (
                   <div className="py-10 text-center text-slate-400 text-sm">ยังไม่มีผู้เล่นในระบบ — กด «เพิ่มผู้เล่น» เพื่อเริ่มต้น</div>
                 )}
-              </div>
-
-              {/* Active Bets Summary */}
-              <div className="space-y-2">
-                <span className="text-xs font-black text-slate-800 uppercase tracking-wider block border-b border-slate-200 pb-1.5 font-heading">
-                  ตารางสรุปดีลดวลที่กำลังดำเนินการ (Active Game Contracts)
-                </span>
-                <div className="overflow-x-auto" style={{ wordBreak: 'keep-all' }}>
-                  <table className="w-full text-left font-sans text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-200 text-slate-500 font-bold">
-                        <th className="py-2 px-1">Order #</th>
-                        <th className="py-2 px-1">ฝั่งต่ำ (Low)</th>
-                        <th className="py-2 px-1">ฝั่งสูง (High)</th>
-                        <th className="py-2 px-1 text-right">ยอดดวล</th>
-                        <th className="py-2 px-1 text-center">ประเภท</th>
-                        <th className="py-2 px-1 text-center">สถานะ</th>
-                        <th className="py-2 px-1 text-right">ยกเลิกแผล</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-700">
-                      {bets.map(b => (
-                        <tr key={b.id} className="hover:bg-slate-50/50">
-                          <td className="py-2.5 px-1 font-bold text-slate-800 font-mono">{b.orderNumber}</td>
-                          <td className="py-2.5 px-1">
-                            {b.playerLowName
-                              ? <span className="text-sky-700 font-bold">{b.playerLowName}</span>
-                              : <span className="text-slate-400 italic">-- ว่าง --</span>}
-                          </td>
-                          <td className="py-2.5 px-1">
-                            {b.playerHighName
-                              ? <span className="text-rose-700 font-bold">{b.playerHighName}</span>
-                              : <span className="text-slate-400 italic">-- ว่าง --</span>}
-                          </td>
-                          <td className="py-2.5 px-1 text-right font-bold text-slate-800 font-mono">{b.amount} pt</td>
-                          <td className="py-2.5 px-1 text-center font-mono">
-                            {b.type === 'range'
-                              ? <span className="px-1.5 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 font-extrabold rounded text-[10px]">🤝 P2P ({b.rangeMin > 1000 ? (b.rangeMin/100) : b.rangeMin}-{b.rangeMax > 1000 ? (b.rangeMax/100) : b.rangeMax}s)</span>
-                              : <span className="px-1.5 py-0.5 bg-sky-50 border border-sky-200 text-sky-800 font-bold rounded text-[10px]">🏛️ ราคาช่าง ({targetMin}-{targetMax}s)</span>}
-                          </td>
-                          <td className="py-2.5 px-1 text-center font-sans font-bold text-[10.5px]">
-                            {b.status === 'matched' && <span className="badge-success px-1.5 py-0.5 rounded-lg">ดวลกันอยู่</span>}
-                            {b.status === 'pending_match' && <span className="badge-warning px-1.5 py-0.5 rounded-lg animate-pulse">รอคู่ดวล</span>}
-                            {b.status === 'pending_cancel' && <span className="badge-high px-1.5 py-0.5 rounded-lg">รอถอนแผล</span>}
-                            {b.status === 'cancelled' && <span className="px-1.5 py-0.5 text-slate-400 line-through">ขอยกเลิก</span>}
-                            {b.status === 'resolved' && <span className="badge-low px-1.5 py-0.5 rounded-lg">สรุป ➔ {b.winnerName?.split(' ')[0]}</span>}
-                          </td>
-                          <td className="py-2.5 px-1 text-right">
-                            {b.status === 'matched' && (
-                              <button
-                                onClick={() => handleRequestCancelBet(b.id)}
-                                className="px-2.5 py-1 bg-rose-50 border border-rose-200 text-rose-700 text-[10.5px] rounded-lg font-bold transition-all active:scale-95"
-                              >
-                                ถอนดีลสด
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
               </div>
             </div>
           )}
@@ -3240,331 +3450,6 @@ export default function App() {
               </div>
             );
           })()}
-
-          {/* TAB 5: LINE OA VIRTUAL CHAT */}
-          {adminTab === 'line' && (
-            <div className="glass-panel p-0 overflow-hidden flex flex-col md:flex-row h-[600px] border border-slate-200 rounded-2xl shadow-xl relative group">
-              {/* Watermark Icon */}
-              <MessageSquare size={140} className="absolute -bottom-10 -right-10 text-slate-100/20 group-hover:text-sky-100/30 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
-              
-              {/* Left sidebar: Players & Groups list */}
-              <div className="w-full md:w-80 border-r border-slate-200 bg-slate-50 flex flex-col h-1/3 md:h-full shrink-0 relative z-10">
-                <div className="p-3 border-b border-slate-200 bg-white shrink-0 space-y-2">
-                  <div className="card-header-ref card-header-dot-sky !pb-1 !mb-1">
-                    <h3 className="font-heading font-black text-xs text-slate-800 uppercase tracking-wider text-center">มอนิเตอร์แชต LINE OA & Groups</h3>
-                  </div>
-                  {/* Mode Selector: Groups vs 1-on-1 */}
-                  <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-xl text-[10.5px] font-bold">
-                    <button
-                      onClick={() => setChatTypeMode('group')}
-                      className={`py-1 rounded-lg text-center transition-all ${
-                        chatTypeMode === 'group'
-                          ? 'bg-emerald-600 text-white shadow-sm font-extrabold'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      👥 กลุ่มดวลสด ({lineGroups.length || (activeGroupId ? 1 : 0)})
-                    </button>
-                    <button
-                      onClick={() => setChatTypeMode('private')}
-                      className={`py-1 rounded-lg text-center transition-all ${
-                        chatTypeMode === 'private'
-                          ? 'bg-sky-600 text-white shadow-sm font-extrabold'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      👤 ส่วนตัว 1:1
-                    </button>
-                  </div>
-                </div>
-                
-                <div className="flex-1 overflow-y-auto divide-y divide-slate-100 p-2 space-y-1">
-                  {/* Live Group Chat Stream Item at top of sidebar */}
-                  <button
-                    onClick={() => {
-                      setChatTypeMode('group');
-                      setSelectedChatPlayerId('GROUP_STREAM');
-                    }}
-                    className={`w-full text-left p-3 rounded-xl transition-all flex items-center gap-3 border mb-2 ${
-                      selectedChatPlayerId === 'GROUP_STREAM'
-                        ? 'bg-emerald-700 border-emerald-700 text-white shadow-md'
-                        : 'bg-emerald-50/70 border-emerald-200 hover:bg-emerald-100/60 text-emerald-900'
-                    }`}
-                  >
-                    <div className="text-2xl w-10 h-10 rounded-full bg-emerald-600/20 flex items-center justify-center shrink-0">
-                      🌐
-                    </div>
-                    <div className="flex-1 min-w-0 space-y-0.5">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs truncate block">รวมแชตกลุ่มดวลสด (Live Group Stream)</span>
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 bg-emerald-500 text-white animate-pulse">
-                          LIVE
-                        </span>
-                      </div>
-                      <p className={`text-[10px] truncate ${selectedChatPlayerId === 'GROUP_STREAM' ? 'text-emerald-100' : 'text-emerald-700'}`}>
-                        {chatLogs.length > 0 ? chatLogs[chatLogs.length - 1].text : 'รอข้อความจากกลุ่ม...'}
-                      </p>
-                    </div>
-                  </button>
-
-                  {chatTypeMode === 'group' ? (
-                    // Connected LINE Groups
-                    (() => {
-                      const groupsToRender = lineGroups.length > 0 ? lineGroups : (activeGroupId ? [{ id: activeGroupId, name: `🚀 กลุ่มดวลสด LINE (#${activeGroupId.slice(-4)})`, lastMessage: 'เชื่อมต่อกลุ่มแล้ว', timestamp: 'Live' }] : []);
-                      if (groupsToRender.length === 0) {
-                        return (
-                          <div className="text-center py-6 text-xs text-slate-400 italic font-sans space-y-1">
-                            <div>👥 ยังไม่มีกลุ่ม LINE ดวลสดที่เชื่อมต่อ</div>
-                            <div className="text-[10px] text-amber-600 font-normal">เชิญบอทเข้ากลุ่ม หรือพิมพ์ข้อความในกลุ่มเพื่อเชื่อมต่อ</div>
-                          </div>
-                        );
-                      }
-                      return groupsToRender.map(g => {
-                        const isSelected = selectedChatPlayerId === g.id;
-                        return (
-                          <button
-                            key={g.id}
-                            onClick={() => setSelectedChatPlayerId(g.id)}
-                            className={`w-full text-left p-3 rounded-xl transition-all flex items-center gap-3 border ${
-                              isSelected 
-                                ? 'bg-emerald-600 border-emerald-600 text-white shadow-md' 
-                                : 'bg-white border-slate-100 hover:bg-slate-50 text-slate-700'
-                            }`}
-                          >
-                            <div className="text-xl w-10 h-10 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center shrink-0 shadow-inner">
-                              👥
-                            </div>
-                            <div className="flex-1 min-w-0 space-y-0.5">
-                              <div className="flex items-center justify-between">
-                                <span className="font-bold text-xs truncate block">{g.name}</span>
-                                <span className={`text-[8.5px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
-                                  isSelected ? 'bg-emerald-500 text-white' : 'bg-emerald-50 text-emerald-700'
-                                }`}>
-                                  GROUP
-                                </span>
-                              </div>
-                              <p className={`text-[10px] truncate ${isSelected ? 'text-emerald-100' : 'text-slate-400'}`}>
-                                {g.lastMessage}
-                              </p>
-                            </div>
-                          </button>
-                        );
-                      });
-                    })()
-                  ) : (
-                    // Private 1:1 Chats
-                    (() => {
-                      const uniquePlayers = [];
-                      chatLogs.forEach(log => {
-                        if (log.userId && log.userId !== 'GROUP_STREAM' && !uniquePlayers.some(p => p.id === log.userId)) {
-                          const pDb = players.find(p => p.id === log.userId);
-                          uniquePlayers.push({
-                            id: log.userId,
-                            name: pDb ? pDb.name : log.displayName || 'ผู้เล่น LINE',
-                            avatar: pDb ? pDb.avatar : '🐉',
-                            balance: pDb ? pDb.balance : 0
-                          });
-                        }
-                      });
-                      
-                      players.forEach(p => {
-                        if (p.id !== 'user' && !uniquePlayers.some(up => up.id === p.id)) {
-                          uniquePlayers.push({
-                            id: p.id,
-                            name: p.name,
-                            avatar: p.avatar || '🐉',
-                            balance: p.balance
-                          });
-                        }
-                      });
-
-                      if (uniquePlayers.length === 0) {
-                        return <div className="text-center py-6 text-xs text-slate-400 italic font-sans">ไม่มีผู้เล่นในรายชื่อแชท 1:1</div>;
-                      }
-
-                      return uniquePlayers.map(p => {
-                        const isSelected = selectedChatPlayerId === p.id;
-                        const playerLogs = chatLogs.filter(log => log.userId === p.id);
-                        const lastLog = playerLogs[playerLogs.length - 1];
-                        const lastMsgText = lastLog ? (lastLog.text.length > 25 ? lastLog.text.substring(0, 25) + '...' : lastLog.text) : 'ยังไม่มีข้อความ';
-                        
-                        return (
-                          <button
-                            key={p.id}
-                            onClick={() => setSelectedChatPlayerId(p.id)}
-                            className={`w-full text-left p-3 rounded-xl transition-all flex items-center gap-3 border ${
-                              isSelected 
-                                ? 'bg-sky-600 border-sky-600 text-white shadow-md' 
-                                : 'bg-white border-slate-100 hover:bg-slate-50 text-slate-700'
-                            }`}
-                          >
-                            <div className="text-2xl w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0 shadow-inner">
-                              {p.avatar}
-                            </div>
-                            <div className="flex-1 min-w-0 space-y-0.5">
-                              <div className="flex items-center justify-between">
-                                <span className="font-bold text-xs truncate block">{p.name}</span>
-                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
-                                  isSelected ? 'bg-sky-500 text-white' : 'bg-slate-100 text-slate-500'
-                                }`}>
-                                  {p.balance} pt
-                                </span>
-                              </div>
-                              <p className={`text-[10px] truncate ${isSelected ? 'text-sky-100' : 'text-slate-400'}`}>
-                                {lastMsgText}
-                              </p>
-                            </div>
-                          </button>
-                        );
-                      });
-                    })()
-                  )}
-                </div>
-              </div>
-              
-              {/* Right main pane: chat messages & action interface */}
-                <div className="flex-1 flex flex-col bg-white h-2/3 md:h-full">
-                  {selectedChatPlayerId ? (
-                    <>
-                      {/* Header showing player details or group info */}
-                      <div className="p-4 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-50">
-                        <div className="flex items-center gap-2.5">
-                          <div className="text-xl">
-                            {selectedChatPlayerId === 'GROUP_STREAM' ? '🌐' : (players.find(p => p.id === selectedChatPlayerId)?.avatar || '🐉')}
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-xs text-slate-800">
-                              {selectedChatPlayerId === 'GROUP_STREAM' 
-                                ? 'รวมแชตกลุ่มดวลสด (Live Group Stream)' 
-                                : (players.find(p => p.id === selectedChatPlayerId)?.name || 'ผู้เล่น LINE')}
-                            </h4>
-                            <span className="text-[9px] font-mono text-slate-400">
-                              {selectedChatPlayerId === 'GROUP_STREAM'
-                                ? `Active Group: ${activeGroupId ? '...' + activeGroupId.slice(-10) : 'ทุกกลุ่ม'}`
-                                : `ID: ${selectedChatPlayerId}`}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-[10px] font-sans font-bold bg-emerald-50 text-emerald-700 border border-emerald-100 px-2.5 py-1 rounded-full">
-                            {selectedChatPlayerId === 'GROUP_STREAM' 
-                              ? `กลุ่มที่เชื่อมต่อ: ${lineGroups.length} กลุ่ม`
-                              : `เครดิต: ${players.find(p => p.id === selectedChatPlayerId)?.balance || 0} pt`}
-                          </span>
-                        </div>
-                      </div>
-                      
-                      {/* Message body container (scrollable) */}
-                      <div 
-                        ref={liveChatContainerRef}
-                        className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50"
-                      >
-                        {(selectedChatPlayerId === 'GROUP_STREAM' ? chatLogs : chatLogs.filter(log => log.userId === selectedChatPlayerId)).length === 0 ? (
-                          <div className="text-center py-20 text-xs text-slate-400 italic font-sans">
-                            {selectedChatPlayerId === 'GROUP_STREAM' 
-                              ? '-- ยังไม่มีข้อความในกลุ่มดวลสด --' 
-                              : '-- เริ่มการสนทนากับผู้เล่น (แอดมินสามารถส่งข้อความตรงหรือปุ่ม Flex ได้ทันที) --'}
-                          </div>
-                        ) : (
-                          (selectedChatPlayerId === 'GROUP_STREAM' ? chatLogs : chatLogs.filter(log => log.userId === selectedChatPlayerId)).map((log, index) => {
-                            const isAdmin = log.sender === 'admin';
-                            const isBot = log.sender === 'bot';
-                            
-                            let bubbleBg = 'bg-white text-slate-800 border border-slate-200';
-                            let containerClass = 'flex justify-start';
-                            let nameColor = 'text-slate-500';
-                            
-                            if (isAdmin) {
-                              bubbleBg = 'bg-sky-600 text-white shadow-sm';
-                              containerClass = 'flex justify-end';
-                              nameColor = 'text-sky-600 text-right';
-                            } else if (isBot) {
-                              bubbleBg = 'bg-purple-600 text-white shadow-sm';
-                              containerClass = 'flex justify-end';
-                              nameColor = 'text-purple-600 text-right';
-                            }
-                            
-                            return (
-                              <div key={index} className={`w-full ${containerClass} animate-fade-in`}>
-                                <div className="max-w-[75%] space-y-0.5">
-                                  <span className={`text-[9px] block font-bold ${nameColor}`}>
-                                    {isAdmin ? 'แอดมิน (Admin)' : isBot ? 'ระบบบอท (Automation)' : log.displayName}
-                                    <span className="font-normal text-slate-400 ml-1.5">{log.timestamp}</span>
-                                  </span>
-                                  <div className={`p-3 rounded-2xl text-xs whitespace-pre-wrap font-sans ${bubbleBg}`}>
-                                    {log.text}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-                        <div ref={liveChatEndRef} />
-                      </div>
-                    
-                    {/* Footer input and quick action shortcuts */}
-                    <div className="p-4 border-t border-slate-200 bg-white shrink-0 space-y-3">
-                      {/* Flex Action Buttons */}
-                      <div className="flex flex-wrap gap-2">
-                        <span className="text-[10px] text-slate-400 font-bold self-center mr-1">ส่งปุ่มด่วน (Flex Card):</span>
-                        <button
-                          onClick={() => handleSendAdminChatMessage('เมนู')}
-                          className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-[10px] font-bold transition-all active:scale-95 flex items-center gap-1"
-                        >
-                          📋 ส่งเมนูหลัก
-                        </button>
-                        <button
-                          onClick={() => handleSendAdminChatMessage('เช็คยอด')}
-                          className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-lg text-[10px] font-bold transition-all active:scale-95 flex items-center gap-1"
-                        >
-                          💳 ส่งเช็คยอด
-                        </button>
-                        <button
-                          onClick={() => handleSendAdminChatMessage('ฝากเงิน')}
-                          className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[10px] font-bold transition-all active:scale-95 flex items-center gap-1"
-                        >
-                          📥 ส่งปุ่มฝาก
-                        </button>
-                        <button
-                          onClick={() => handleSendAdminChatMessage('ถอนเงิน')}
-                          className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[10px] font-bold transition-all active:scale-95 flex items-center gap-1"
-                        >
-                          📤 ส่งปุ่มถอน
-                        </button>
-                      </div>
-                      
-                      {/* Chat text input bar */}
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={adminChatInput}
-                          onChange={(e) => setAdminChatInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleSendAdminChatMessage();
-                          }}
-                          placeholder="พิมพ์ข้อความคุยกับผู้เล่น หรือพิมพ์คำสั่งส่ง Flex..."
-                          className="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-xs focus:ring-1 focus:ring-sky-500 focus:outline-none placeholder-slate-400"
-                        />
-                        <button
-                          onClick={() => handleSendAdminChatMessage()}
-                          className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition-all active:scale-95 shadow-md flex items-center gap-1 shrink-0"
-                        >
-                          <Send size={12} />
-                          ส่ง
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center text-center p-6 bg-slate-50/50">
-                    <div className="text-4xl animate-bounce mb-3">💬</div>
-                    <h4 className="font-heading font-black text-sm text-slate-700">กรุณาเลือกผู้เล่นจากคอลัมน์ด้านซ้าย</h4>
-                    <p className="text-xs text-slate-400 font-sans max-w-xs mt-1">เพื่ออ่านบทสนทนาและโต้ตอบโดยส่งข้อความหรือ Flex Cards ควบคุมไปยังผู้เล่นคนดังกล่าว</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
 
         </div>
       </main>
