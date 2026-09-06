@@ -6,7 +6,7 @@ import { PNG } from 'pngjs';
 import NodeCache from 'node-cache';
 
 const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=';
-const SLIP_API_KEY = process.env.SLIP_API_KEY || '697ef678-60df-4955-a13a-6ed4e26a38c0';
+const SLIP_API_KEY = process.env.SLIP_API_KEY || '504a6b5f-d1ba-4859-b5dd-512e6ed11d01';
 const SLIP_API_URL = process.env.SLIP_API_URL || 'https://api.easyslip.com/v2/verify/bank';
 const APP_URL = process.env.APP_URL || 'http://localhost:3001';
 

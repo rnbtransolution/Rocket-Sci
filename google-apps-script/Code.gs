@@ -5,7 +5,7 @@
 
 // CONFIGURATION CONSTANTS (Update these in your GAS environment)
 const LINE_CHANNEL_ACCESS_TOKEN = '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=';
-const SLIP_API_KEY = '697ef678-60df-4955-a13a-6ed4e26a38c0'; // SlipOk or EasySlip
+const SLIP_API_KEY = '504a6b5f-d1ba-4859-b5dd-512e6ed11d01'; // SlipOk or EasySlip
 const SLIP_API_URL = 'https://api.easyslip.com/v2/verify/bank'; // EasySlip bank verification endpoint
 let SHEET_ID = '1NaQbaUz8fcgd32sCAfxxKNBnpmFA5vu0_YVSehhdCEQ';
 try {
