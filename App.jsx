@@ -3331,9 +3331,12 @@ export default function App() {
               onClick={e => { if (e.target === e.currentTarget) setPlayerEditModal(null); }}
             >
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-                <div className="bg-gradient-to-r from-sky-600 to-sky-700 px-6 py-4">
-                  <h3 className="text-white font-bold text-base">✏️ แก้ไขข้อมูลผู้เล่น</h3>
-                  <p className="text-sky-100 text-xs mt-0.5 font-mono">{playerEditModal.player.id}</p>
+                <div 
+                  className="bg-sky-600 bg-gradient-to-r from-sky-600 to-sky-700 px-6 py-4"
+                  style={{ backgroundColor: '#0284c7', color: '#ffffff' }}
+                >
+                  <h3 className="font-bold text-base" style={{ color: '#ffffff' }}>✏️ แก้ไขข้อมูลผู้เล่น</h3>
+                  <p className="text-xs mt-0.5 font-mono" style={{ color: '#e0f2fe' }}>{playerEditModal.player.id}</p>
                 </div>
                 <div className="px-6 py-5 space-y-4">
                   <div className="space-y-1.5">
@@ -3404,9 +3407,14 @@ export default function App() {
             >
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
                 {/* Modal Header */}
-                <div className="bg-gradient-to-r from-teal-600 to-teal-700 px-6 py-4">
-                  <h3 className="text-white font-bold text-base">🏦 ลงทะเบียนบัญชีธนาคาร</h3>
-                  <p className="text-teal-100 text-xs mt-0.5">{bankEditModal.player.name} · <span className="font-mono opacity-70">{bankEditModal.player.id.slice(0, 18)}…</span></p>
+                <div 
+                  className="bg-teal-700 bg-gradient-to-r from-teal-600 to-teal-700 px-6 py-4"
+                  style={{ backgroundColor: '#0f766e', color: '#ffffff' }}
+                >
+                  <h3 className="font-bold text-base" style={{ color: '#ffffff' }}>🏦 ลงทะเบียนบัญชีธนาคาร</h3>
+                  <p className="text-xs mt-0.5" style={{ color: '#ccfbf1' }}>
+                    {bankEditModal.player.name} · <span className="font-mono" style={{ color: '#99f6e4' }}>{bankEditModal.player.id.slice(0, 18)}…</span>
+                  </p>
                 </div>
 
                 {/* Modal Body */}
@@ -3486,7 +3494,11 @@ export default function App() {
                         addToast('❌ เกิดข้อผิดพลาด: ' + (err.message || err), 'error');
                       }
                     }}
-                    className="flex-1 px-4 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition-all active:scale-95 shadow-md"
+                    className="flex-1 px-4 py-2.5 text-white text-sm font-bold rounded-xl transition-all active:scale-95 disabled:cursor-not-allowed"
+                    style={{ 
+                      backgroundColor: (bankEditSaving || !bankEditForm.bankName || !bankEditForm.bankAccount || !bankEditForm.accountName) ? '#94a3b8' : '#0f766e', 
+                      color: '#ffffff' 
+                    }}
                   >
                     {bankEditSaving ? '⏳ กำลังบันทึก...' : '💾 บันทึกบัญชี'}
                   </button>
@@ -3502,9 +3514,12 @@ export default function App() {
               onClick={e => { if (e.target === e.currentTarget) setCreatePlayerModal(false); }}
             >
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-                <div className="bg-gradient-to-r from-teal-600 to-teal-700 px-6 py-4">
-                  <h3 className="text-white font-bold text-base">＋ เพิ่มผู้เล่นใหม่</h3>
-                  <p className="text-teal-100 text-xs mt-0.5">สร้างบัญชีผู้เล่นใหม่ในระบบ</p>
+                <div 
+                  className="bg-teal-700 bg-gradient-to-r from-teal-600 to-teal-700 px-6 py-4"
+                  style={{ backgroundColor: '#0f766e', color: '#ffffff' }}
+                >
+                  <h3 className="font-bold text-base" style={{ color: '#ffffff' }}>＋ เพิ่มผู้เล่นใหม่</h3>
+                  <p className="text-xs mt-0.5" style={{ color: '#ccfbf1' }}>สร้างบัญชีผู้เล่นใหม่ในระบบ</p>
                 </div>
                 <div className="px-6 py-5 space-y-4">
                   <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-xs">
@@ -3561,7 +3576,11 @@ export default function App() {
                         addToast('❌ ' + (err.message || err), 'error');
                       }
                     }}
-                    className="flex-1 px-4 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition-all active:scale-95 shadow-md"
+                    className="flex-1 px-4 py-2.5 text-white text-sm font-bold rounded-xl transition-all active:scale-95 disabled:cursor-not-allowed"
+                    style={{ 
+                      backgroundColor: (createPlayerSaving || !createPlayerForm.lineId.trim() || !createPlayerForm.name.trim()) ? '#94a3b8' : '#0f766e', 
+                      color: '#ffffff' 
+                    }}
                   >
                     {createPlayerSaving ? '⏳ กำลังสร้าง...' : '🎉 สร้างบัญชี'}
                   </button>
@@ -3633,17 +3652,21 @@ export default function App() {
               >
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 max-h-[90vh] flex flex-col">
                   {/* Modal Header */}
-                  <div className={`px-6 py-4 flex items-center justify-between text-white ${isWithdrawal ? 'bg-gradient-to-r from-rose-600 to-red-700' : 'bg-gradient-to-r from-emerald-600 to-teal-700'}`}>
+                  <div 
+                    className={`px-6 py-4 flex items-center justify-between text-white ${isWithdrawal ? 'bg-rose-700 bg-gradient-to-r from-rose-600 to-red-700' : 'bg-teal-700 bg-gradient-to-r from-emerald-600 to-teal-700'}`}
+                    style={{ backgroundColor: isWithdrawal ? '#be123c' : '#047857', color: '#ffffff' }}
+                  >
                     <div>
-                      <h3 className="font-extrabold text-base flex items-center gap-2">
+                      <h3 className="font-extrabold text-base flex items-center gap-2" style={{ color: '#ffffff' }}>
                         {isWithdrawal ? '📤 รายละเอียดคำขอถอนเงิน' : '📥 รายละเอียดการแจ้งสลิปเติมเงิน'}
-                        <span className="bg-white/20 px-2 py-0.5 rounded font-mono text-xs">{tx.id}</span>
+                        <span className="bg-white/20 px-2 py-0.5 rounded font-mono text-xs" style={{ color: '#ffffff' }}>{tx.id}</span>
                       </h3>
-                      <p className="text-white/80 text-xs mt-0.5">ผู้เล่น: {tx.playerName} ({tx.playerId})</p>
+                      <p className="text-xs mt-0.5" style={{ color: 'rgba(255, 255, 255, 0.9)' }}>ผู้เล่น: {tx.playerName} ({tx.playerId})</p>
                     </div>
                     <button 
                       onClick={() => setTxDetailModal(null)}
-                      className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center font-bold text-white transition-all"
+                      className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center font-bold transition-all"
+                      style={{ color: '#ffffff' }}
                     >
                       ✕
                     </button>

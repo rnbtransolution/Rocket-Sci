@@ -67,6 +67,9 @@ for match in import_pattern.finditer(css_content):
 # Remove all @import lines from the inlined CSS block
 css_content_clean = import_pattern.sub('', css_content).strip()
 
+# Strip ' in oklab' from linear-gradient to ensure 100% cross-browser backwards compatibility
+css_content_clean = re.sub(r'\s+in\s+oklab', '', css_content_clean)
+
 if not font_link_tags:
     print("  Warning: No @import rules found in CSS.")
 
