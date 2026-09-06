@@ -6,8 +6,8 @@ import { PNG } from 'pngjs';
 import NodeCache from 'node-cache';
 
 const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=';
-const SLIP_API_KEY = process.env.SLIP_API_KEY || '504a6b5f-d1ba-4859-b5dd-512e6ed11d01';
-const SLIP_API_URL = process.env.SLIP_API_URL || 'https://api.easyslip.com/v2/verify/bank';
+const SLIP_API_KEY = process.env.SLIP_API_KEY || 'WNsIQaS1CqRpyHwPHb0SA5wcdh55sQYZT6cSNLSSssY=';
+const SLIP_API_URL = process.env.SLIP_API_URL || 'https://connect.slip2go.com/api/verify-slip/qr-base64/info';
 const APP_URL = process.env.APP_URL || 'http://localhost:3001';
 
 // --- LOCAL QR & EMVCO SLIP PARSER ENGINE ---
@@ -751,23 +751,41 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
   let apiSuccess = false;
   if (SLIP_API_KEY && SLIP_API_KEY.trim() !== '') {
     try {
-      const formData = new FormData();
-      formData.append('image', imageBuffer, { filename: 'payslip.jpg', contentType: 'image/jpeg' });
-      formData.append('file', imageBuffer, { filename: 'payslip.jpg', contentType: 'image/jpeg' });
+      let apiResponse;
+      if (SLIP_API_URL.includes('slip2go.com')) {
+        const base64Image = imageBuffer.toString('base64');
+        const dataUri = `data:image/jpeg;base64,${base64Image}`;
+        apiResponse = await fetch(SLIP_API_URL, {
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer " + SLIP_API_KEY,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            payload: {
+              imageBase64: dataUri
+            }
+          })
+        });
+      } else {
+        const formData = new FormData();
+        formData.append('image', imageBuffer, { filename: 'payslip.jpg', contentType: 'image/jpeg' });
+        formData.append('file', imageBuffer, { filename: 'payslip.jpg', contentType: 'image/jpeg' });
 
-      const apiResponse = await fetch(SLIP_API_URL, {
-        method: "POST",
-        headers: { 
-          "Authorization": "Bearer " + SLIP_API_KEY,
-          ...formData.getHeaders()
-        },
-        body: formData
-      });
+        apiResponse = await fetch(SLIP_API_URL, {
+          method: "POST",
+          headers: { 
+            "Authorization": "Bearer " + SLIP_API_KEY,
+            ...formData.getHeaders()
+          },
+          body: formData
+        });
+      }
 
-      if (apiResponse.ok) {
+      if (apiResponse && apiResponse.ok) {
         const responseText = await apiResponse.text();
         const slipData = JSON.parse(responseText);
-        if (slipData && (slipData.success || slipData.data)) {
+        if (slipData && (slipData.code === "200000" || slipData.success || (slipData.data && slipData.data.transRef))) {
           apiSuccess = true;
           const data = slipData.data || slipData;
 
@@ -780,10 +798,13 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
             senderBank = data.rawSlip.sender?.bank?.displayName || data.rawSlip.sender?.bank?.name || '';
             slipDateStr = data.rawSlip.date || data.rawSlip.transDate || '';
           } else {
-            refCode = data.transRef || data.transactionId || '';
-            actualAmount = Number(data.amountInSlip || data.amount) || 0;
-            receiverName = data.receiver?.name || '';
-            slipDateStr = data.date || data.transDate || '';
+            refCode = data.transRef || data.referenceId || data.transactionId || '';
+            actualAmount = Number(data.amount || data.amountInSlip) || 0;
+            receiverName = data.receiver?.account?.name || data.receiver?.name || '';
+            senderName = data.sender?.account?.name || '';
+            senderAccount = data.sender?.account?.bank?.account || data.sender?.account?.value || '';
+            senderBank = data.sender?.bank?.name || '';
+            slipDateStr = data.dateTime || data.date || data.transDate || '';
           }
         }
       }

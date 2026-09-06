@@ -5,8 +5,8 @@
 
 // CONFIGURATION CONSTANTS (Update these in your GAS environment)
 const LINE_CHANNEL_ACCESS_TOKEN = '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=';
-const SLIP_API_KEY = '504a6b5f-d1ba-4859-b5dd-512e6ed11d01'; // SlipOk or EasySlip
-const SLIP_API_URL = 'https://api.easyslip.com/v2/verify/bank'; // EasySlip bank verification endpoint
+const SLIP_API_KEY = 'WNsIQaS1CqRpyHwPHb0SA5wcdh55sQYZT6cSNLSSssY='; // Slip2Go API Secret
+const SLIP_API_URL = 'https://connect.slip2go.com/api/verify-slip/qr-base64/info'; // Slip2Go base64 verification endpoint
 let SHEET_ID = '1NaQbaUz8fcgd32sCAfxxKNBnpmFA5vu0_YVSehhdCEQ';
 try {
   var activeSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
@@ -1527,16 +1527,37 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
   const imageResponse = UrlFetchApp.fetch(imageUrl, { method: "get", headers: headers });
   const imageBlob = imageResponse.getBlob().setName("payslip.jpg");
   
-  // 2. HTTP POST file bytes to Thai Slip Checking API (supporting both 'image' and 'file' payload parameters)
-  const options = {
-    method: "post",
-    headers: { "Authorization": "Bearer " + SLIP_API_KEY },
-    payload: { 
-      image: imageBlob,
-      file: imageBlob
-    },
-    muteHttpExceptions: true
-  };
+  // 2. HTTP POST file bytes to Thai Slip Checking API (Supports Slip2Go Base64 JSON & EasySlip Multipart)
+  const isSlip2Go = SLIP_API_URL.indexOf("slip2go.com") !== -1;
+  let options;
+  if (isSlip2Go) {
+    const base64Image = Utilities.base64Encode(imageBlob.getBytes());
+    const mimeType = imageBlob.getContentType() || "image/jpeg";
+    const dataUri = "data:" + mimeType + ";base64," + base64Image;
+    options = {
+      method: "post",
+      headers: {
+        "Authorization": "Bearer " + SLIP_API_KEY,
+        "Content-Type": "application/json"
+      },
+      payload: JSON.stringify({
+        payload: {
+          imageBase64: dataUri
+        }
+      }),
+      muteHttpExceptions: true
+    };
+  } else {
+    options = {
+      method: "post",
+      headers: { "Authorization": "Bearer " + SLIP_API_KEY },
+      payload: { 
+        image: imageBlob,
+        file: imageBlob
+      },
+      muteHttpExceptions: true
+    };
+  }
   
   let slipData;
   let responseCode = 200;
@@ -1575,21 +1596,30 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
     return;
   }
   
-  // 3. Process slip parameters (EasySlip API v2)
-  if (!slipData.success || !slipData.data) {
-    const apiMessage = slipData.message || (slipData.error ? slipData.error.message : 'No QR code readable');
+  // 3. Process slip parameters (Slip2Go & EasySlip)
+  const isSuccessSlip = isSlip2Go
+    ? (slipData && (slipData.code === "200000" || (slipData.data && (slipData.data.transRef || slipData.data.referenceId))))
+    : (slipData && (slipData.success || slipData.data));
+
+  if (!isSuccessSlip) {
+    let apiMessage = (slipData && slipData.message) || (slipData && slipData.error ? slipData.error.message : 'No QR code readable');
+    if (slipData && slipData.code === "200500") {
+      apiMessage = "ไม่พบข้อมูลสลิปในระบบธนาคาร หรือ QR Code ไม่ชัดเจน";
+    }
     logTransaction(userId, displayName, 0, 0, 'ERR_INVALID_SLIP', 'escalated', 'API check failed: ' + apiMessage);
     replyToLine(replyToken, `❌ สแกนสลิปไม่ผ่าน\nเหตุผล: ${apiMessage}\n\nระบบส่งต่อบิลนี้ให้แอดมินเช็คบัญชีแมนนวลแล้วครับ`);
     return;
   }
   
-  // Robust field extraction supporting both EasySlip v1 (flat) and v2 (nested under rawSlip)
+  // Robust field extraction supporting both Slip2Go and EasySlip (flat & v2)
   var refCode = '';
   if (slipData.data) {
-    if (slipData.data.rawSlip && slipData.data.rawSlip.transRef) {
-      refCode = slipData.data.rawSlip.transRef;
-    } else if (slipData.data.transRef) {
+    if (slipData.data.transRef) {
       refCode = slipData.data.transRef;
+    } else if (slipData.data.rawSlip && slipData.data.rawSlip.transRef) {
+      refCode = slipData.data.rawSlip.transRef;
+    } else if (slipData.data.referenceId) {
+      refCode = slipData.data.referenceId;
     } else if (slipData.data.transactionId) {
       refCode = slipData.data.transactionId;
     }
@@ -1597,19 +1627,19 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
  
   var actualAmount = 0;
   if (slipData.data) {
-    if (slipData.data.amountInSlip !== undefined) {
+    if (slipData.data.amount !== undefined) {
+      if (typeof slipData.data.amount === 'object' && slipData.data.amount !== null) {
+        actualAmount = Number(slipData.data.amount.amount) || 0;
+      } else {
+        actualAmount = Number(slipData.data.amount) || 0;
+      }
+    } else if (slipData.data.amountInSlip !== undefined) {
       actualAmount = Number(slipData.data.amountInSlip) || 0;
     } else if (slipData.data.rawSlip && slipData.data.rawSlip.amount) {
       if (typeof slipData.data.rawSlip.amount === 'object' && slipData.data.rawSlip.amount !== null) {
         actualAmount = Number(slipData.data.rawSlip.amount.amount) || 0;
       } else {
         actualAmount = Number(slipData.data.rawSlip.amount) || 0;
-      }
-    } else if (slipData.data.amount !== undefined) {
-      if (typeof slipData.data.amount === 'object' && slipData.data.amount !== null) {
-        actualAmount = Number(slipData.data.amount.amount) || 0;
-      } else {
-        actualAmount = Number(slipData.data.amount) || 0;
       }
     }
   }
@@ -1631,7 +1661,9 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
   // GUARD 3: Block slips older than 24 hours (stale slip fraud prevention)
   var slipDateStr = '';
   if (slipData.data) {
-    if (slipData.data.rawSlip && slipData.data.rawSlip.date) {
+    if (slipData.data.dateTime) {
+      slipDateStr = slipData.data.dateTime;
+    } else if (slipData.data.rawSlip && slipData.data.rawSlip.date) {
       slipDateStr = slipData.data.rawSlip.date;
     } else if (slipData.data.rawSlip && slipData.data.rawSlip.transDate) {
       slipDateStr = slipData.data.rawSlip.transDate;
@@ -1676,10 +1708,10 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
     if (slipData.data) {
       if (slipData.data.sender) {
         if (slipData.data.sender.bank) {
-          senderBank = slipData.data.sender.bank.abbr || slipData.data.sender.bank.id || '';
+          senderBank = slipData.data.sender.bank.abbr || slipData.data.sender.bank.name || slipData.data.sender.bank.id || '';
         }
         if (slipData.data.sender.account) {
-          senderAccount = slipData.data.sender.account.value || '';
+          senderAccount = (slipData.data.sender.account.bank && slipData.data.sender.account.bank.account) || slipData.data.sender.account.value || '';
           senderName = slipData.data.sender.account.name || '';
         }
       } else if (slipData.data.rawSlip && slipData.data.rawSlip.sender) {
