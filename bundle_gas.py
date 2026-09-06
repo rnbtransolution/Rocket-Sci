@@ -23,7 +23,8 @@ css_name = os.path.basename(css_path)
 js_name = os.path.basename(js_path)
 
 # Read compiled contents
-with open(os.path.join(dist_dir, "index.html"), "r", encoding="utf-8") as f:
+input_html_path = os.path.join(dist_dir, "index.dev.html") if os.path.exists(os.path.join(dist_dir, "index.dev.html")) else os.path.join(dist_dir, "index.html")
+with open(input_html_path, "r", encoding="utf-8") as f:
     html_content = f.read()
 
 with open(css_path, "r", encoding="utf-8") as f:
@@ -131,6 +132,7 @@ error_console_body = """<body>
 html_content = html_content.replace("<body>", error_console_body)
 
 # Save bundled file
+# 1. Google Apps Script output (Index.html & index.html)
 output_path = os.path.join(output_dir, "Index.html")
 with open(output_path, "w", encoding="utf-8") as f:
     f.write(html_content)
@@ -139,4 +141,17 @@ output_path_lower = os.path.join(output_dir, "index.html")
 with open(output_path_lower, "w", encoding="utf-8") as f:
     f.write(html_content)
 
-print(f"\nGAS Bundler complete. Index.html / index.html -> {output_path} ({len(html_content):,} bytes)")
+# 2. GitHub Pages output (Root index.html)
+root_output_path = os.path.join(project_dir, "index.html")
+with open(root_output_path, "w", encoding="utf-8") as f:
+    f.write(html_content)
+
+# 3. Express server / production output (dist/index.html)
+dist_output_path = os.path.join(dist_dir, "index.html")
+with open(dist_output_path, "w", encoding="utf-8") as f:
+    f.write(html_content)
+
+print(f"\nBundler complete:")
+print(f"  -> Google Apps Script: {output_path} ({len(html_content):,} bytes)")
+print(f"  -> GitHub Pages:       {root_output_path} ({len(html_content):,} bytes)")
+print(f"  -> Express / dist:     {dist_output_path} ({len(html_content):,} bytes)")
