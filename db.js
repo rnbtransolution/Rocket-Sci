@@ -4,6 +4,7 @@ import {
   updateRowInSheet,
   overwriteSheet,
   queueWrite,
+  invalidateSheetsCache,
 } from './sheetsHelper.js';
 
 let players = [];
@@ -176,9 +177,9 @@ export function cleanUserId(userId) {
 }
 
 // Initialize and pull all data from Google Sheets into memory
-export async function init(isSilent = false) {
+export async function init(isSilent = false, forceRefresh = false) {
   try {
-    const data = await batchFetchSheets();
+    const data = await batchFetchSheets({ force: forceRefresh });
 
     // 1. Players Sheet (Only update if valid data returned from Sheets)
     if (data.players && data.players.length > 1) {
@@ -1154,9 +1155,7 @@ export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxPara
       try {
         const lineBot = await import('./lineBot.js');
         const roundNotice = `⛔ [ประกาศรอบโมฆะ / ผลช่าง ⛔]: ผลการจุดรอบนี้ไม่มีผล ได้ทำการยกเลิกแผลดวลและคืนแต้มผู้เล่น 100% ทุกแผลเรียบร้อยครับ 🚀`;
-        for (const g of targetGroups) {
-          await lineBot.pushToLine(g.id, roundNotice);
-        }
+        await Promise.allSettled(targetGroups.map(g => lineBot.pushToLine(g.id, roundNotice)));
         logLineChatMessage('SYSTEM', '🤖 Rocket Bot', 'bot', roundNotice, 'text');
       } catch (e) {
         console.error("[DB] Error broadcasting void round result:", e);
@@ -1220,14 +1219,16 @@ export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxPara
         10: winnerName,
       });
 
-      // Send push notifications to winner & loser
+      // Send push notifications to winner & loser concurrently
       if (sendPushCallback) {
         try {
           const winBal = players.find((p) => cleanUserId(p.id) === winnerId)?.balance || 0;
           const loseBal = players.find((p) => cleanUserId(p.id) === loserId)?.balance || 0;
 
-          await sendPushCallback(winnerId, true, bet.orderNumber, amount, finalTime, payout, winBal, winnings, commission);
-          await sendPushCallback(loserId, false, bet.orderNumber, amount, finalTime, 0, loseBal, winnings, commission);
+          await Promise.allSettled([
+            sendPushCallback(winnerId, true, bet.orderNumber, amount, finalTime, payout, winBal, winnings, commission),
+            sendPushCallback(loserId, false, bet.orderNumber, amount, finalTime, 0, loseBal, winnings, commission),
+          ]);
         } catch (err) {
           console.error('[LINE Push] Error sending match results:', err);
         }
@@ -1256,9 +1257,7 @@ export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxPara
     try {
       const lineBot = await import('./lineBot.js');
       const roundFlex = lineBot.constructRoundSummaryFlex(finalTime, targetMin, targetMax, activeRocketRound?.name);
-      for (const g of targetGroups) {
-        await lineBot.pushToLine(g.id, roundFlex);
-      }
+      await Promise.allSettled(targetGroups.map(g => lineBot.pushToLine(g.id, roundFlex)));
       logLineChatMessage('SYSTEM', '🤖 Rocket Bot', 'bot', `🏆 ประกาศผลสรุปดวล: ${finalTime}s`, 'flex');
     } catch (e) {
       console.error("[DB] Error broadcasting round result to groups:", e);

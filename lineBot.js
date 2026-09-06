@@ -3,6 +3,7 @@ import FormData from 'form-data';
 import jsQR from 'jsqr';
 import jpeg from 'jpeg-js';
 import { PNG } from 'pngjs';
+import NodeCache from 'node-cache';
 
 const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=';
 const SLIP_API_KEY = process.env.SLIP_API_KEY || '697ef678-60df-4955-a13a-6ed4e26a38c0';
@@ -64,11 +65,14 @@ function hashCode(str) {
 
 // --- LINE OA COMMUNICATIONS HELPERS ---
 
-const profileCache = new Map();
+// In-Memory Caches for LINE Profiles and Group Metadata (24-hour TTL)
+const profileCache = new NodeCache({ stdTTL: 86400, checkperiod: 3600, useClones: false });
+const groupNameCache = new NodeCache({ stdTTL: 86400, checkperiod: 3600, useClones: false });
 
 export async function getLineUserProfile(userId) {
   if (!userId) return null;
-  if (profileCache.has(userId)) return profileCache.get(userId);
+  const cached = profileCache.get(userId);
+  if (cached) return cached;
 
   const url = `https://api.line.me/v2/bot/profile/${userId}`;
   const controller = new AbortController();
@@ -263,6 +267,9 @@ export async function pushToLine(targetId, text) {
 
 export async function fetchLINEGroupName(groupId) {
   if (!groupId || typeof groupId !== 'string' || !groupId.startsWith('C')) return null;
+  const cached = groupNameCache.get(groupId);
+  if (cached) return cached;
+
   try {
     const url = `https://api.line.me/v2/bot/group/${groupId}/summary`;
     const res = await fetch(url, {
@@ -273,6 +280,7 @@ export async function fetchLINEGroupName(groupId) {
     if (res.ok) {
       const data = await res.json();
       if (data && data.groupName) {
+        groupNameCache.set(groupId, data.groupName);
         return data.groupName;
       }
     }

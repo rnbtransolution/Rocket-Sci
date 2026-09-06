@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import * as db from './db.js';
 import * as lineBot from './lineBot.js';
+import { getCacheStats } from './sheetsHelper.js';
 
 dotenv.config();
 
@@ -16,6 +17,7 @@ const PORT = process.env.PORT || 3001;
 
 // ─── SSE: Real-time push to connected dashboard clients ───────────────────────
 const sseClients = new Set();
+let broadcastTimer = null;
 
 /**
  * Broadcast the latest dashboard snapshot to all connected SSE clients.
@@ -27,6 +29,18 @@ function broadcastUpdate() {
   for (const client of sseClients) {
     try { client.write(payload); } catch (_) { sseClients.delete(client); }
   }
+}
+
+/**
+ * Debounced SSE broadcast: ensures multiple rapid mutations (e.g. webhook batch events)
+ * coalesce into a single payload serialization and push, avoiding event-loop blocking.
+ */
+function scheduleBroadcastUpdate(delay = 80) {
+  if (broadcastTimer) clearTimeout(broadcastTimer);
+  broadcastTimer = setTimeout(() => {
+    broadcastTimer = null;
+    broadcastUpdate();
+  }, delay);
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -169,10 +183,10 @@ app.post('/api/run', async (req, res) => {
         return res.status(404).json({ error: `Function "${functionName}" is not implemented on Node.js server.` });
     }
     
-    // For mutating operations, immediately push updated state to all SSE clients
+    // For mutating operations, push updated state to all SSE clients (debounced)
     const readOnlyFunctions = new Set(['getDashboardData', 'verifyMockSlipFromClient']);
     if (!readOnlyFunctions.has(functionName)) {
-      broadcastUpdate();
+      scheduleBroadcastUpdate(30);
     }
 
     res.json({ success: true, data: result });
@@ -211,55 +225,82 @@ app.get('/api/events', (req, res) => {
 
 // LINE OA Webhook Endpoint
 app.post('/webhook', (req, res) => {
-  // Respond immediately to LINE to prevent timeout and duplicate retries
-  res.json({ status: 'ok' });
+  // 1. Respond with HTTP 200 immediately to LINE to prevent timeouts and retry storms
+  res.status(200).json({ status: 'ok' });
 
-  // Process events in the background asynchronously
-  const events = req.body.events || [];
-  (async () => {
-    for (const event of events) {
-      try {
-        const replyToken = event.replyToken;
-        const source = event.source || {};
-        const groupId = source.groupId || source.roomId || null;
-        if (groupId) {
-          db.saveActiveGroupId(groupId);
-        }
+  const events = req.body?.events;
+  if (!Array.isArray(events) || events.length === 0) {
+    return;
+  }
 
-        const userId = source.userId;
-        if (!userId) {
-          broadcastUpdate();
-          continue;
-        }
-        
-        // Get Player profile display name from DB first (cached), fallback to API only if new player
-        let displayName = db.getPlayerNameFromDb(userId);
-        if (!displayName) {
-          const profile = await lineBot.getLineUserProfile(userId);
-          displayName = profile ? profile.displayName : "ผู้เล่นนิรนาม";
-        }
-        
-        if (event.type === 'message') {
-          const message = event.message;
-          if (message.type === 'text') {
-            if (groupId) {
-              db.recordGroupActivity(groupId, message.id, userId, displayName, message.text);
-            }
-            await lineBot.handleTextMessage(message.text, userId, displayName, replyToken, groupId, message.id);
-          } else if (message.type === 'image') {
-            await lineBot.handleImageSlipMessage(message.id, userId, displayName, replyToken);
+  // 2. Offload event processing into non-blocking asynchronous execution
+  setImmediate(async () => {
+    try {
+      // Process events concurrently so a slow operation (e.g. OCR) doesn't block other messages
+      await Promise.allSettled(
+        events.map(async (event) => {
+          try {
+            await processSingleWebhookEvent(event);
+          } catch (eventErr) {
+            console.error('[Webhook] Error processing single event:', eventErr.message || eventErr);
           }
-        } else if (event.type === 'unsend') {
-          const unsendMessageId = event.unsend?.messageId;
-          await lineBot.handleUnsendMessage(unsendMessageId, userId, displayName, groupId);
-        }
-        // Push update to all SSE dashboard clients immediately after each event
-        broadcastUpdate();
-      } catch (err) {
-        console.error("Error processing event in webhook background:", err);
-      }
+        })
+      );
+
+      // 3. Consolidated SSE broadcast once after all events settle
+      scheduleBroadcastUpdate();
+    } catch (batchErr) {
+      console.error('[Webhook] Critical error in background event batch:', batchErr);
     }
-  })();
+  });
+});
+
+/**
+ * Process a single webhook event safely in isolation
+ */
+async function processSingleWebhookEvent(event) {
+  const replyToken = event.replyToken;
+  const source = event.source || {};
+  const groupId = source.groupId || source.roomId || null;
+  if (groupId) {
+    db.saveActiveGroupId(groupId);
+  }
+
+  const userId = source.userId;
+  if (!userId) {
+    return;
+  }
+
+  // Get Player profile display name from DB first (cached), fallback to API only if new player
+  let displayName = db.getPlayerNameFromDb(userId);
+  if (!displayName) {
+    const profile = await lineBot.getLineUserProfile(userId);
+    displayName = profile ? profile.displayName : 'ผู้เล่นนิรนาม';
+  }
+
+  if (event.type === 'message') {
+    const message = event.message;
+    if (message.type === 'text') {
+      await lineBot.handleTextMessage(message.text, userId, displayName, replyToken, groupId, message.id);
+    } else if (message.type === 'image') {
+      await lineBot.handleImageSlipMessage(message.id, userId, displayName, replyToken);
+    }
+  } else if (event.type === 'unsend') {
+    const unsendMessageId = event.unsend?.messageId;
+    await lineBot.handleUnsendMessage(unsendMessageId, userId, displayName, groupId);
+  }
+}
+
+// Health check and metrics endpoint for uptime monitors and keep-alive pings
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+    connectedClients: sseClients.size,
+    memory: process.memoryUsage(),
+    cache: getCacheStats(),
+  });
 });
 
 // Serve frontend static build files
@@ -274,22 +315,41 @@ app.use((req, res) => {
 async function startServer() {
   console.log('[Server] Initializing database from Google Sheets...');
   try {
-    await db.init();
-    
-    // Background polling: sync local database cache with Google Sheets every 2 seconds
+    // Initial fetch bypasses cache to ensure fresh state on startup
+    await db.init(false, true);
+
+    // Background sync: synchronize local database cache with Google Sheets every 60 seconds
+    // (mutations in the app already write to in-memory state and Google Sheets directly)
     setInterval(async () => {
       try {
-        await db.init(true); // Sync quietly in the background
-        broadcastUpdate();   // Push any Sheets-side changes to connected SSE clients
+        await db.init(true, true); // Sync quietly in the background
+        scheduleBroadcastUpdate(); // Push any external Sheets-side changes to connected SSE clients
       } catch (syncErr) {
-        console.error('[Sync] Error synchronizing local database from Google Sheets:', syncErr);
+        console.error('[Sync] Error synchronizing local database from Google Sheets:', syncErr.message || syncErr);
       }
-    }, 5000);
+    }, 60000);
+
+    // Lightweight keep-alive self-ping for free tier deployments (e.g. Render)
+    if (process.env.KEEP_ALIVE === 'true' || process.env.RENDER) {
+      const pingUrl = process.env.APP_URL ? `${process.env.APP_URL.replace(/\/$/, '')}/health` : `http://localhost:${PORT}/health`;
+      console.log(`[Keep-Alive] Initialized self-ping service targeting ${pingUrl} (every 14m)`);
+      setInterval(async () => {
+        try {
+          const pingRes = await fetch(pingUrl);
+          if (pingRes.ok) {
+            console.log(`[Keep-Alive] Ping successful at ${new Date().toISOString()}`);
+          }
+        } catch (pingErr) {
+          console.warn(`[Keep-Alive] Ping failed:`, pingErr.message);
+        }
+      }, 14 * 60 * 1000); // 14 minutes
+    }
 
     app.listen(PORT, () => {
       console.log(`\n======================================================`);
       console.log(`⚡ Rocket Science Node.js Server is running!`);
       console.log(`🌐 Local URL: http://localhost:${PORT}`);
+      console.log(`🩺 Health Check: http://localhost:${PORT}/health`);
       console.log(`🔗 Webhook Endpoint: http://<your-public-domain>:${PORT}/webhook`);
       console.log(`======================================================\n`);
     });

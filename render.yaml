@@ -4,8 +4,13 @@ services:
     env: node
     buildCommand: npm run build
     startCommand: node server.js
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: 3001
+      - key: NODE_ENV
+        value: production
+      - key: KEEP_ALIVE
+        value: true
       - key: LINE_CHANNEL_ACCESS_TOKEN
         sync: false
