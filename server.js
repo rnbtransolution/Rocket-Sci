@@ -124,7 +124,8 @@ app.post('/api/run', async (req, res) => {
       case 'simulateTextMessageFromDashboard':
         // Run simulator text bot message with target group ID
         const targetGroup = args[3] || db.getActiveGroupId();
-        await lineBot.handleTextMessage(args[0], args[1], args[2], 'MOCK_REPLY_TOKEN', targetGroup);
+        const simMsgId = 'sim_' + Date.now();
+        await lineBot.handleTextMessage(args[0], args[1], args[2], 'MOCK_REPLY_TOKEN', targetGroup, simMsgId);
         result = db.getDashboardData();
         break;
         

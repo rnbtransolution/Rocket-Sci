@@ -504,7 +504,7 @@ export async function handleMessageEdited(messageId, newText, userId, displayNam
 
 // --- LINE BOT CONTROLLER / WEBHOOK HANDLERS ---
 
-export async function handleTextMessage(text, userId, displayName, replyToken, groupId, messageId) {
+export async function handleTextMessage(text, userId, displayName, replyToken, groupId, messageId = null) {
   userId = await db.getOrCreateShortUserId(userId, displayName);
   db.logLineChatMessage(userId, displayName, 'player', text, 'text');
   if (messageId) {
