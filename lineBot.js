@@ -563,7 +563,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   }
 
   // C. ROCKET BETTING, MATCHING, CANCEL & BOARD COMMANDS
-  const isMatchCommand = await parseBetCommand(text, userId, displayName, replyToken, groupId);
+  const isMatchCommand = await parseBetCommand(text, userId, displayName, replyToken, groupId, messageId);
   if (isMatchCommand) return;
 
   // D. INITIATE DEPOSIT
@@ -848,13 +848,23 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
 }
 
 // --- ROCKET BET COMMAND PARSING LOGIC ---
-
-async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
+ 
+async function parseBetCommand(text, userId, displayName, replyToken, groupId, messageId = null) {
   const clean = text.replace(/\s+/g, '').toLowerCase();
   
-  // Keywords definition (Updated: ชล/ไล่/ล -> HIGH (สูง), ชถ/ถอย/ยั่ง -> LOW (ต่ำ))
-  const keywordsHigh = ['ชล', 'a', 'ไล่', 'ล', 'ชสูง', 'ช่างสูง', 'ช่างไล่', '+5ชล', '+5a', '+5ล', '+5ไล่', '-5ชล', '-5a', '-5ล', '-5ไล่', 'ส'];
-  const keywordsLow = ['ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'ต่ำ', 'ชต่ำ', 'ช่างต่ำ', 'ช่างยั่ง', 'ช่างถอย', '+5ชย', '+5ชถ', '+5ย', '+5ถ', '-5ชย', '-5ชถ', '-5ย', '-5ถ', 'ต'];
+  // Keywords definition (Correct mapping: ชล/ไล่/ล -> LOW (ต่ำ), ชถ/ถอย/ยั่ง/ชย -> HIGH (สูง))
+  const keywordsLow = [
+    'ชล', 'a', 'ไล่', 'ล', 'ต่ำ', 'ชต่ำ', 'ช่างต่ำ', 'ช่างไล่',
+    '+5ชล', '+5a', '+5ล', '+5ไล่', '-5ชล', '-5a', '-5ล', '-5ไล่',
+    '+10ชล', '+10a', '+10ล', '+10ไล่', '-10ชล', '-10a', '-10ล', '-10ไล่',
+    'ต'
+  ];
+  const keywordsHigh = [
+    'ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'สูง', 'ชสูง', 'ช่างสูง', 'ช่างยั่ง', 'ช่างถอย',
+    '+5ชย', '+5ชถ', '+5ย', '+5ถ', '-5ชย', '-5ชถ', '-5ย', '-5ถ',
+    '+10ชย', '+10ชถ', '+10ย', '+10ถ', '-10ชย', '-10ชถ', '-10ย', '-10ถ',
+    'ส'
+  ];
   const keywordsAccept = ['ต', 'ตต', 'ติด', 'ครับ', 'เค', 'จ้า', 'ยอมรับ', 'ดีล', 'รับแผล', 'รับ'];
   
   // 0. Pending Deals Board Command ("กระดานดวล", "แผลค้าง", "เปิดรอคู่")
@@ -867,9 +877,10 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId) {
       pendingList.forEach((b, idx) => {
         const creatorName = b.playerLowName || b.playerHighName;
         const sideText = b.playerLowId ? 'ต่ำ' : 'สูง';
-        const rangeText = b.rangeMin && b.rangeMax ? `${b.rangeMin}-${b.rangeMax}s` : '';
+        const rangeText = b.rangeMin && b.rangeMax ? `${b.rangeMin}-${b.rangeMax}s` : (b.type === 'pre_quote' ? 'รอราคาช่าง' : '');
         const shortCode = b.orderNumber.slice(-2);
-        boardMsg += `${idx + 1}. #${b.orderNumber} (${shortCode}) | ${sideText} ${rangeText} | ${b.amount}pt (@${creatorName}) 👉 "ต${shortCode}"\n`;
+        const sideWithRange = rangeText ? `${sideText} ${rangeText}` : sideText;
+        boardMsg += `${idx + 1}. #${b.orderNumber} (${shortCode}) | ${sideWithRange} | ${b.amount}pt (@${creatorName}) 👉 "ต${shortCode}"\n`;
       });
       boardMsg += `💡 พิมพ์ "ต [เลข]" เพื่อรับดวลครับ`;
       replyToLine(replyToken, boardMsg, userId);
@@ -1838,7 +1849,7 @@ export function constructRuleGuideFlex() {
             },
             {
               "type": "text",
-              "text": "• ทายชนะ (สูง): ชล, +5ชล, -5ชล, +10ชล, -10ชล\n• ทายแพ้ (ต่ำ): ชถ, +5ชถ, -5ชถ, +10ชถ, -10ชถ\nเช่น ชล500, +5ชล1000, -10ชถ200",
+              "text": "• ทายต่ำ (ชล): ชล, +5ชล, -5ชล, +10ชล, -10ชล\n• ทายสูง (ชถ): ชถ, +5ชถ, -5ชถ, +10ชถ, -10ชถ\nเช่น ชล500, +5ชล1000, -10ชถ200",
               "color": "#14532D",
               "size": "xxs",
               "wrap": true,
@@ -1945,7 +1956,7 @@ export function constructRuleGuideFlex() {
 }
 
 export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy, userTypedCmd = null, isPreQuote = false) {
-  const sideShort = side === 'high' ? 'ล' : 'ถ';
+  const sideShort = side === 'low' ? 'ล' : 'ถ';
   let cleanCmd = (userTypedCmd && typeof userTypedCmd === 'string') ? userTypedCmd.trim() : `${sideShort}${amount}`;
   cleanCmd = cleanCmd.replace(/^\d+[-/]\d+/, '').trim();
   cleanCmd = cleanCmd.replace(/pt$/i, '').trim();

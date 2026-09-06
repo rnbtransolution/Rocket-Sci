@@ -914,9 +914,10 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
       pendingList.forEach(function(b, idx) {
         const creatorName = b.playerLowName || b.playerHighName || 'ผู้เล่น';
         const sideText = b.playerLowId ? 'ต่ำ' : 'สูง';
-        const rangeText = b.rangeMin && b.rangeMax ? (b.rangeMin + '-' + b.rangeMax + 's') : '';
+        const rangeText = b.rangeMin && b.rangeMax ? (b.rangeMin + '-' + b.rangeMax + 's') : (b.type === 'pre_quote' ? 'รอราคาช่าง' : '');
         const shortCode = b.orderNumber.slice(-2);
-        boardMsg += (idx + 1) + '. #' + b.orderNumber + ' (' + shortCode + ') | ' + sideText + ' ' + rangeText + ' | ' + b.amount + 'pt (@' + creatorName + ') 👉 "ต' + shortCode + '"\n';
+        const sideWithRange = rangeText ? (sideText + ' ' + rangeText) : sideText;
+        boardMsg += (idx + 1) + '. #' + b.orderNumber + ' (' + shortCode + ') | ' + sideWithRange + ' | ' + b.amount + 'pt (@' + creatorName + ') 👉 "ต' + shortCode + '"\n';
       });
       boardMsg += '💡 พิมพ์ "ต [เลข]" เพื่อรับดวลครับ';
       replyToLine(replyToken, boardMsg, userId);
@@ -1144,8 +1145,18 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   var isChotoy = clean.indexOf('ชตย') !== -1 || rawTrimmed.indexOf('ชตย') !== -1;
   var cleanBetText = clean.replace(/ชตย/g, '').trim();
 
-  var keywordsHigh = ['ชล', 'ล', 'ไล่', 'สูง', 'ชสูง', 'ช่างสูง', 'ช่างไล่', 'ส'];
-  var keywordsLow  = ['ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'ต่ำ', 'ชต่ำ', 'ช่างต่ำ', 'ช่างยั่ง', 'ช่างถอย', 'ต'];
+  var keywordsLow  = [
+    'ชล', 'a', 'ไล่', 'ล', 'ต่ำ', 'ชต่ำ', 'ช่างต่ำ', 'ช่างไล่',
+    '+5ชล', '+5a', '+5ล', '+5ไล่', '-5ชล', '-5a', '-5ล', '-5ไล่',
+    '+10ชล', '+10a', '+10ล', '+10ไล่', '-10ชล', '-10a', '-10ล', '-10ไล่',
+    'ต'
+  ];
+  var keywordsHigh = [
+    'ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'สูง', 'ชสูง', 'ช่างสูง', 'ช่างยั่ง', 'ช่างถอย',
+    '+5ชย', '+5ชถ', '+5ย', '+5ถ', '-5ชย', '-5ชถ', '-5ย', '-5ถ',
+    '+10ชย', '+10ชถ', '+10ย', '+10ถ', '-10ชย', '-10ชถ', '-10ย', '-10ถ',
+    'ส'
+  ];
 
   // Detect rate-offset prefix BEFORE keyword matching (supports +-5 and +-10)
   var offsetDelta = 0;
@@ -3521,7 +3532,7 @@ function constructRuleGuideFlex() {
             },
             {
               "type": "text",
-              "text": "• ทายชนะ (สูง): ชล, +5ชล, -5ชล, +10ชล, -10ชล\n• ทายแพ้ (ต่ำ): ชถ, +5ชถ, -5ชถ, +10ชถ, -10ชถ\nเช่น ชล500, +5ชล1000, -10ชถ200",
+              "text": "• ทายต่ำ (ชล): ชล, +5ชล, -5ชล, +10ชล, -10ชล\n• ทายสูง (ชถ): ชถ, +5ชถ, -5ชถ, +10ชถ, -10ชถ\nเช่น ชล500, +5ชล1000, -10ชถ200",
               "color": "#14532D",
               "size": "xxs",
               "wrap": true,
@@ -3625,7 +3636,7 @@ function constructRuleGuideFlex() {
 }
 
 function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy, userTypedCmd, isPreQuote) {
-  var sideShort = side === 'high' ? 'ล' : 'ถ';
+  var sideShort = side === 'low' ? 'ล' : 'ถ';
   var cleanCmd = (userTypedCmd && typeof userTypedCmd === 'string') ? userTypedCmd.trim() : (sideShort + amount);
   // Strip any leading range numbers like "350-450" or "300/380" in front of the betting command
   cleanCmd = cleanCmd.replace(/^\d+[-\/]\d+/, '').trim();
