@@ -3488,22 +3488,22 @@ function constructRuleGuideFlex() {
     "header": {
       "type": "box",
       "layout": "vertical",
-      "backgroundColor": "#E0E7FF",
-      "paddingAll": "sm",
+      "backgroundColor": "#0A3D34",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "text",
           "text": "🚀 ROCKET SCIENCE",
           "weight": "bold",
-          "color": "#4338CA",
+          "color": "#FDE047",
           "size": "xxs",
           "align": "center"
         },
         {
           "type": "text",
-          "text": "📖 กติกา & วิธีการเล่นบั้งไฟ",
+          "text": "📖 คู่มือคีย์เวิร์ด & กติกาการดวล",
           "weight": "bold",
-          "color": "#1E1B4B",
+          "color": "#FFFFFF",
           "size": "sm",
           "align": "center",
           "margin": "xs"
@@ -3519,7 +3519,7 @@ function constructRuleGuideFlex() {
         {
           "type": "box",
           "layout": "vertical",
-          "backgroundColor": "#DCFCE7",
+          "backgroundColor": "#ECFDF5",
           "cornerRadius": "md",
           "paddingAll": "sm",
           "contents": [
@@ -3527,13 +3527,14 @@ function constructRuleGuideFlex() {
               "type": "text",
               "text": "1️⃣ แทงตามราคาช่าง (ปรับได้ ±5 / ±10)",
               "weight": "bold",
-              "color": "#166534",
-              "size": "xs"
+              "color": "#065F46",
+              "size": "xs",
+              "wrap": true
             },
             {
               "type": "text",
-              "text": "• ทายต่ำ (ชล): ชล, +5ชล, -5ชล, +10ชล, -10ชล\n• ทายสูง (ชถ): ชถ, +5ชถ, -5ชถ, +10ชถ, -10ชถ\nเช่น ชล500, +5ชล1000, -10ชถ200",
-              "color": "#14532D",
+              "text": "• ฝั่งต่ำ (ชล / ล): ทายเวลาต่ำกว่าราคาช่าง\n  คีย์เวิร์ด: ชล, ล (ปรับได้: +5ชล, -5ชล, +10ชล, -10ชล)\n• ฝั่งสูง (ชถ / ถ): ทายเวลาสูงกว่าราคาช่าง\n  คีย์เวิร์ด: ชถ, ถ, ชย (ปรับได้: +5ชถ, -5ชถ, +10ชถ, -10ชถ)\n💡 ตัวอย่าง: ชล500, +5ชล1000, ชถ500, -10ชถ200\n(ขั้นต่ำ 100 pt / ไม่ระบุยอดจะตั้งต้นที่ 500 pt)",
+              "color": "#047857",
               "size": "xxs",
               "wrap": true,
               "margin": "xs"
@@ -3543,21 +3544,22 @@ function constructRuleGuideFlex() {
         {
           "type": "box",
           "layout": "vertical",
-          "backgroundColor": "#E0F2FE",
+          "backgroundColor": "#F0F9FF",
           "cornerRadius": "md",
           "paddingAll": "sm",
           "contents": [
             {
               "type": "text",
-              "text": "2️⃣ เปิดราคาเอง (ช่วงห่าง 80 วิพอดี)",
+              "text": "2️⃣ เปิดช่วงราคาเอง (ช่วงห่าง 80 วิพอดี)",
               "weight": "bold",
               "color": "#0369A1",
-              "size": "xs"
+              "size": "xs",
+              "wrap": true
             },
             {
               "type": "text",
-              "text": "• ช่วงเวลาห่าง 80 วิ: 300-380ล500 หรือ 350-430ถ1000\n• เผื่อช่างไม่ต่อย: ใส่ ชตย เช่น 300-380ล500 ชตย",
-              "color": "#0C4A6E",
+              "text": "• รูปแบบ: [เวลาต่ำ]-[เวลาสูง][ฝั่ง][แต้ม]\n  เช่น 300-380ล500 (เปิดต่ำ) หรือ 350-430ถ1000 (เปิดสูง)\n• กติกา: ช่วงราคาต้องห่างกัน 80 วินาทีพอดี และระบุจากน้อยไปมาก\n• เผื่อช่างไม่ต่อย: พิมพ์ \"ชตย\" ต่อท้าย เช่น 300-380ล500 ชตย",
+              "color": "#0284C7",
               "size": "xxs",
               "wrap": true,
               "margin": "xs"
@@ -3567,7 +3569,7 @@ function constructRuleGuideFlex() {
         {
           "type": "box",
           "layout": "vertical",
-          "backgroundColor": "#F3E8FF",
+          "backgroundColor": "#FAF5FF",
           "cornerRadius": "md",
           "paddingAll": "sm",
           "contents": [
@@ -3576,12 +3578,13 @@ function constructRuleGuideFlex() {
               "text": "3️⃣ การรับแผลดวล (ขั้นต่ำ 20%)",
               "weight": "bold",
               "color": "#6B21A8",
-              "size": "xs"
+              "size": "xs",
+              "wrap": true
             },
             {
               "type": "text",
-              "text": "• แตะปุ่มจำนวนแต้มที่ต้องการรับใต้การ์ดแผลดวล\n• หรือพิมพ์: [เลขบิล] [แต้ม] เช่น 4812 200 หรือ ต4812 (รับเต็มยอด)\n• ขั้นต่ำการรับแผลคือ 20% ของยอดแผล",
-              "color": "#581C87",
+              "text": "• วิธีที่ 1: แตะปุ่มแต้มใต้การ์ดแผลดวลได้ทันที (20%, 40%, 80%, 100%)\n• วิธีที่ 2 (พิมพ์คำสั่ง):\n  - รับเต็มยอด: ต [เลขบิล] เช่น ต03 หรือ ต1303\n  - รับบางส่วน: ต [เลขบิล] [แต้ม] เช่น ต03 200 หรือ 03 200\n💡 ขั้นต่ำการรับแผลคือ 20% ของยอดแผลดวล",
+              "color": "#7E22CE",
               "size": "xxs",
               "wrap": true,
               "margin": "xs"
@@ -3591,7 +3594,7 @@ function constructRuleGuideFlex() {
         {
           "type": "box",
           "layout": "vertical",
-          "backgroundColor": "#FFE4E6",
+          "backgroundColor": "#FFF1F2",
           "cornerRadius": "md",
           "paddingAll": "sm",
           "contents": [
@@ -3600,12 +3603,13 @@ function constructRuleGuideFlex() {
               "text": "4️⃣ การยกเลิกแผลดวล",
               "weight": "bold",
               "color": "#9F1239",
-              "size": "xs"
+              "size": "xs",
+              "wrap": true
             },
             {
               "type": "text",
-              "text": "• พิมพ์ ยกเลิก [เลขบิล] เช่น ยกเลิก 4812 (ก่อนมีคู่รับ)",
-              "color": "#881337",
+              "text": "• แตะปุ่ม \"⛔ ยกเลิก\" ใต้การ์ดแผลของตนเอง\n• หรือพิมพ์: ยกเลิก [เลขบิล] เช่น ยกเลิก 03 หรือ ยกเลิก 1303\n💡 ยกเลิกได้เฉพาะเจ้าของแผล และต้องยังไม่มีคู่ดวลมารับ",
+              "color": "#BE123C",
               "size": "xxs",
               "wrap": true,
               "margin": "xs"
@@ -3627,7 +3631,7 @@ function constructRuleGuideFlex() {
             "text": "กระดานดวล"
           },
           "style": "primary",
-          "color": "#334155",
+          "color": "#0A3D34",
           "height": "sm"
         }
       ]
