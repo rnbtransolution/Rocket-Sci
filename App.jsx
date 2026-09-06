@@ -29,7 +29,9 @@ import {
   Wallet,
   ShieldAlert,
   Trophy,
-  Search
+  Search,
+  Radio,
+  Megaphone
 } from 'lucide-react';
 
 const INITIAL_PLAYERS = [];
@@ -191,7 +193,9 @@ export default function App() {
   
   // Dashboard & Navigation controls (default to quote setup first)
   const [lineChatType, setLineChatType] = useState('private'); // 'private' | 'group'
-  const [adminTab, setAdminTab] = useState('quote'); // 'quote' | 'settle' | 'bets' | 'review' | 'players' | 'logs'
+  const [adminTab, setAdminTab] = useState('quote'); // 'quote' | 'settle' | 'bets' | 'review' | 'players' | 'logs' | 'broadcast'
+  const [customBroadcastText, setCustomBroadcastText] = useState('');
+  const [isSendingBroadcast, setIsSendingBroadcast] = useState(false);
   const [betStatusFilter, setBetStatusFilter] = useState('all'); // 'all' | 'matched' | 'pending_match' | 'cancelled' | 'resolved'
   const [betSearchQuery, setBetSearchQuery] = useState('');
   const [toasts, setToasts] = useState([]);
@@ -1971,6 +1975,15 @@ export default function App() {
             <Database size={15} className={adminTab === 'logs' ? 'text-slate-300' : 'text-slate-500'} />
             <span>ทรานแซคชัน</span>
           </button>
+          <button 
+            onClick={() => setAdminTab('broadcast')}
+            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
+              adminTab === 'broadcast' ? 'bg-purple-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            }`}
+          >
+            <Radio size={15} className={adminTab === 'broadcast' ? 'text-purple-200' : 'text-purple-600'} />
+            <span>บรอดแคสต์ & คีย์ลัด</span>
+          </button>
         </div>
 
         {/* Tab panels contents container */}
@@ -2121,91 +2134,6 @@ export default function App() {
                 </div>
 
 
-                {/* ─── Group ID Setup Widget ─── */}
-                {!activeGroupId && (
-                  <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-amber-600 text-base">⚠️</span>
-                      <span className="text-xs font-black text-amber-800 font-heading">ยังไม่มี Group ID — ต้องตั้งค่าก่อนบรอดแคสต์</span>
-                    </div>
-                    <p className="text-[10px] text-amber-700">บอทยังไม่เคยรับ webhook จากกลุ่ม LINE ใด ๆ เลย หรือ ScriptProperties ถูก reset ไป ให้ทดลอง <strong>Discover</strong> จากข้อมูลที่เคยบันทึกไว้ หรือ <strong>Paste Group ID</strong> โดยตรง</p>
-                    <div className="flex gap-2">
-                      <button onClick={async () => {
-                        try {
-                          const res = await runBackendFunction('adminDiscoverGroupIds', []);
-                          if (res && res.discovered && res.discovered.length > 0) {
-                            const first = res.discovered[0];
-                            addToast(`🔍 พบ Group ID: ${first.id.slice(-8)} (${first.source}) — กำลังตั้งค่า...`, 'info');
-                            await runBackendFunction('adminSetActiveGroupId', [first.id]);
-                            const dash = await runBackendFunction('getDashboardData', []);
-                            if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
-                            addToast(`✅ ตั้งค่า Group ID สำเร็จ: ...${first.id.slice(-8)}`, 'success');
-                          } else {
-                            addToast('❌ ไม่พบ Group ID ในระบบ — กรุณา Paste Group ID ด้วยตนเองครับ', 'warning');
-                          }
-                        } catch(e) {
-                          const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
-                          addToast(`❌ Discover Error: ${errStr}`, 'danger');
-                        }
-                      }} className="py-1.5 px-3 bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold rounded-lg transition-all active:scale-95">
-                        🔍 Auto Discover
-                      </button>
-                      <input
-                        type="text"
-                        placeholder="Paste LINE Group ID (Cxxx...)"
-                        className="flex-1 bg-white border border-amber-200 text-slate-700 px-2.5 py-1.5 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-amber-400"
-                        onKeyDown={async (e) => {
-                          if (e.key === 'Enter' && e.target.value.trim().length > 5) {
-                            const gid = e.target.value.trim();
-                            try {
-                              await runBackendFunction('adminSetActiveGroupId', [gid]);
-                              const dash = await runBackendFunction('getDashboardData', []);
-                              if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
-                              addToast(`✅ ตั้งค่า Group ID สำเร็จ: ...${gid.slice(-8)}`, 'success');
-                              e.target.value = '';
-                            } catch(err) {
-                              const errStr = err?.message || (typeof err === 'string' ? err : JSON.stringify(err)) || 'Error';
-                              addToast(`❌ Error: ${errStr}`, 'danger');
-                            }
-                          }
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-                {activeGroupId && (
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 flex items-center justify-between flex-wrap gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-bold text-emerald-800">✅ Active Group ID: <span className="font-mono text-[10px]">...{activeGroupId.slice(-10)}</span></span>
-                      <button onClick={async () => {
-                        const gid = window.prompt('เปลี่ยน Group ID (วาง LINE Group ID ใหม่):');
-                        if (gid && gid.trim().length > 5) {
-                          await runBackendFunction('adminSetActiveGroupId', [gid.trim()]);
-                          const dash = await runBackendFunction('getDashboardData', []);
-                          if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
-                          addToast(`✅ เปลี่ยน Group ID เป็น ...${gid.trim().slice(-8)}`, 'success');
-                        }
-                      }} className="text-[10px] text-emerald-600 hover:text-emerald-800 font-bold underline">เปลี่ยน</button>
-                    </div>
-                    <button onClick={async () => {
-                      addToast('⚡ กำลังทดสอบส่ง Push Message เข้ากลุ่ม...', 'info');
-                      try {
-                        const testRes = await runBackendFunction('adminTestPushGroupMessage', [activeGroupId]);
-                        if (testRes && testRes.success) {
-                          addToast(`✅ ทดสอบส่ง Push สำเร็จ! (HTTP 200) ข้อความเด้งเข้ากลุ่มแล้ว 🚀`, 'success');
-                        } else {
-                          addToast(`⚠️ LINE Push ไม่สำเร็จ: ${testRes?.error || testRes?.body || 'โควตาเต็ม'}`, 'warning');
-                        }
-                      } catch (err) {
-                        const errStr = err?.message || (typeof err === 'string' ? err : JSON.stringify(err)) || 'Error';
-                        addToast(`❌ Error: ${errStr}`, 'danger');
-                      }
-                    }} className="py-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg transition-all active:scale-95 shadow-xs flex items-center gap-1">
-                      ⚡ ทดสอบส่ง Push เข้ากลุ่ม
-                    </button>
-                  </div>
-                )}
-
                 {/* Target Group Broadcast Selector */}
                 <div className="bg-white p-2.5 rounded-xl border border-emerald-200 space-y-1">
                   <div className="flex items-center justify-between">
@@ -2238,67 +2166,21 @@ export default function App() {
                 {/* Broadcast Quote Primary Button */}
                 <button
                   onClick={() => handleBroadcastFastQuote()}
-                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 font-heading tracking-wide"
+                  className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 font-heading tracking-wide"
                 >
                   🚀 ประกาศออกราคาช่าง {targetMin && targetMax ? `${targetMin}-${targetMax}` : '(ระบุช่วงราคา)'} วินาที ลง{broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่มดวลสด' : 'กลุ่มที่เลือก'} (Broadcast Quote)
                 </button>
 
-                {/* Quick Action Commands & Instruction Hot Keys */}
-                <div className="pt-2 border-t border-emerald-100 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block font-heading">⚡ ปุ่มคีย์ลัดแอดมิน & บรอดแคสต์กติกา (Admin Hot Keys & Rule Guide):</span>
-                    <span className="text-[10px] text-emerald-700 font-mono font-bold">💡 ราคาช่างเปิดจากแอดมินไม่ต้องใช้แต้ม</span>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs font-bold">
-                    {/* Rule Guide */}
-                    <button onClick={async () => {
-                      try {
-                        const res = await runBackendFunction('adminBroadcastRuleGuide', [broadcastTargetGroup || 'ALL']);
-                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
-                        else addToast('📖 ประกาศส่งคู่มือคีย์เวิร์ด & กติกาการเล่น เรียบร้อย!', 'info');
-                      } catch(e) {
-                        const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
-                        addToast(`❌ Error: ${errStr}`, 'danger');
-                      }
-                    }} className="py-2.5 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">📖 ประกาศส่งคู่มือคีย์เวิร์ดกติกา</button>
-
-                    {/* Final Call */}
-                    <button onClick={async () => {
-                      try {
-                        const res = await runBackendFunction('adminBroadcastFinalCall', [broadcastTargetGroup || 'ALL']);
-                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
-                        else addToast('⛔ ประกาศปิดรับดวล (Final Call) เรียบร้อย!', 'warning');
-                      } catch(e) {
-                        const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
-                        addToast(`❌ Error: ${errStr}`, 'danger');
-                      }
-                    }} className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm">⛔ ปิดรับดวล (Final Call)</button>
-
-                    {/* Void Round */}
-                    <button onClick={async () => {
-                      if (!window.confirm("⛔ คุณต้องการประกาศ 'ช่าง ⛔' (โมฆะรอบ) และยกเลิกคืนแต้มแผลดวลทั้งหมดใช่หรือไม่?")) return;
-                      try {
-                        const res = await runBackendFunction('adminBroadcastVoidRound', [broadcastTargetGroup || 'ALL']);
-                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
-                        else addToast('⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ) และคืนแต้มผู้เล่นเรียบร้อย!', 'danger');
-                      } catch(e) {
-                        const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
-                        addToast(`❌ Error: ${errStr}`, 'danger');
-                      }
-                    }} className="py-2.5 px-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ)</button>
-
-                    {/* Scam Warning */}
-                    <button onClick={async () => {
-                      try {
-                        const res = await runBackendFunction('adminBroadcastScamWarning', [broadcastTargetGroup || 'ALL']);
-                        if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
-                        else addToast('🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพเรียบร้อย!', 'info');
-                      } catch(e) {
-                        const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
-                        addToast(`❌ Error: ${errStr}`, 'danger');
-                      }
-                    }} className="py-2.5 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-95">🚨 เตือนมิจฉาชีพ</button>
-                  </div>
+                {/* Tab 1 Footer Note & Shortcut to Broadcast Tab */}
+                <div className="pt-2 border-t border-emerald-100 flex items-center justify-between text-[11px] font-sans flex-wrap gap-2">
+                  <span className="text-emerald-700 font-bold">💡 ราคาช่างเปิดจากแอดมินไม่ต้องใช้แต้ม</span>
+                  <button 
+                    onClick={() => setAdminTab('broadcast')}
+                    className="text-purple-700 hover:text-purple-900 font-bold underline flex items-center gap-1 transition-all active:scale-95"
+                  >
+                    <Radio size={13} className="text-purple-600 animate-pulse" />
+                    ไปยังศูนย์บรอดแคสต์ & คีย์ลัดแอดมิน (Final Call / โมฆะรอบ) ➜
+                  </button>
                 </div>
               </div>
             </div>
@@ -3028,6 +2910,416 @@ export default function App() {
                 {players.length === 0 && (
                   <div className="py-10 text-center text-slate-400 text-sm">ยังไม่มีผู้เล่นในระบบ — กด «เพิ่มผู้เล่น» เพื่อเริ่มต้น</div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 7: BROADCAST HUB & FIELD ADMIN HOTKEYS */}
+          {adminTab === 'broadcast' && (
+            <div className="glass-panel p-5 space-y-6 relative overflow-hidden group">
+              {/* Watermark Icon */}
+              <Radio size={140} className="absolute -bottom-10 -right-10 text-slate-100/30 group-hover:text-purple-100/40 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
+
+              <div className="relative z-10 space-y-2">
+                <div className="card-header-ref card-header-dot-purple">
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center justify-center gap-2 font-heading">
+                    <Radio size={15} className="text-purple-600 animate-pulse" />
+                    ศูนย์บรอดแคสต์ & คีย์ลัดสั่งการสนาม (Broadcast Hub & Field Controls)
+                  </h3>
+                </div>
+                <p className="text-[11px] text-slate-500 text-center font-sans">
+                  ควบคุมรอบฉุกเฉิน ปิดรับดวล ส่งคู่มือกติกา ประกาศข้อความสนามเข้ากลุ่ม LINE และจัดการการเชื่อมต่อห้องแชต
+                </p>
+              </div>
+
+              {/* Target Group Selector (Applies to all actions in this tab) */}
+              <div className="bg-purple-50/60 border border-purple-200 rounded-xl p-3 flex items-center justify-between flex-wrap gap-3 relative z-10">
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 bg-purple-600 text-white rounded-lg shadow-xs">
+                    <Users size={14} />
+                  </span>
+                  <div>
+                    <span className="text-xs font-black text-purple-950 font-heading block">กลุ่มเป้าหมายการส่งข้อความ (Target Broadcast Audience):</span>
+                    <span className="text-[10px] text-purple-700 font-sans">คำสั่งและประกาศทั้งหมดในหน้านี้จะส่งไปยังกลุ่มที่เลือก</span>
+                  </div>
+                </div>
+                <div className="w-full sm:w-80">
+                  <select
+                    value={broadcastTargetGroup}
+                    onChange={(e) => setBroadcastTargetGroup(e.target.value)}
+                    className="w-full bg-white border border-purple-200 text-purple-950 font-bold px-3 py-1.5 rounded-lg text-xs focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                  >
+                    <option value="ALL">🌐 กระจายทุกกลุ่มดวลสด (Broadcast All Groups)</option>
+                    {lineGroups.map((g, idx) => {
+                      const isRawId = !g.name || g.name.startsWith('C') || g.name.includes(g.id) || !isNaN(g.name);
+                      const displayName = !isRawId ? g.name : `🚀 กลุ่มดวลสด #${idx + 1} (${g.id.slice(-4)})`;
+                      return (
+                        <option key={g.id} value={g.id}>
+                          🎯 เฉพาะกลุ่ม: {displayName}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              </div>
+
+              {/* SECTION 1: FIELD OPERATION & EMERGENCY HOTKEYS */}
+              <div className="space-y-3 relative z-10">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                  <span className="text-xs font-black text-slate-800 uppercase tracking-wider font-heading flex items-center gap-1.5">
+                    <span>⚡ 1. ปุ่มคีย์ลัดสั่งการสนาม & กฎกติกา (Field Operation Hotkeys)</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-sans">ส่งการ์ด Flex แจ้งเตือนด่วนเข้ากลุ่ม LINE ทันที</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {/* Final Call */}
+                  <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-amber-900 font-heading">⛔ ปิดรับดวล</span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-amber-200 text-amber-900 rounded-md">Final Call</span>
+                      </div>
+                      <p className="text-[10.5px] text-amber-800/80 font-sans leading-relaxed">
+                        ประกาศปิดรับออเดอร์ท้าดวลก่อนปล่อยบั้งไฟ บอทจะปฏิเสธทุกบิลหลังจากนี้
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const res = await runBackendFunction('adminBroadcastFinalCall', [broadcastTargetGroup || 'ALL']);
+                          if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
+                          else addToast('⛔ ประกาศปิดรับดวล (Final Call) เข้ากลุ่ม LINE เรียบร้อย!', 'warning');
+                        } catch(e) {
+                          const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
+                          addToast(`❌ Error: ${errStr}`, 'danger');
+                        }
+                      }}
+                      className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                    >
+                      <span>⛔ ส่งประกาศ ปิดรับดวล</span>
+                    </button>
+                  </div>
+
+                  {/* Void Round */}
+                  <div className="bg-rose-50/70 border border-rose-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-rose-900 font-heading">⛔ โมฆะรอบ (ช่าง ⛔)</span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-rose-200 text-rose-900 rounded-md">Emergency</span>
+                      </div>
+                      <p className="text-[10.5px] text-rose-800/80 font-sans leading-relaxed">
+                        กรณีบั้งไฟมีปัญหา ยุติรอบการแข่งขัน ยกเลิกแผลดวลและโอนคืนเครดิตให้ผู้เล่น 100%
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm("⛔ คุณต้องการประกาศ 'ช่าง ⛔' (โมฆะรอบ) และยกเลิกคืนแต้มแผลดวลทั้งหมดใช่หรือไม่?")) return;
+                        try {
+                          const res = await runBackendFunction('adminBroadcastVoidRound', [broadcastTargetGroup || 'ALL']);
+                          if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
+                          else addToast('⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ) และคืนแต้มผู้เล่นเรียบร้อย!', 'danger');
+                        } catch(e) {
+                          const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
+                          addToast(`❌ Error: ${errStr}`, 'danger');
+                        }
+                      }}
+                      className="w-full py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                    >
+                      <span>⛔ สั่งโมฆะรอบ & คืนแต้ม</span>
+                    </button>
+                  </div>
+
+                  {/* Rule Guide */}
+                  <div className="bg-teal-50/70 border border-teal-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-teal-900 font-heading">📖 คู่มือกติกา</span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-teal-200 text-teal-900 rounded-md">Guide</span>
+                      </div>
+                      <p className="text-[10.5px] text-teal-800/80 font-sans leading-relaxed">
+                        ส่ง Flex Card กฎกติกา คีย์เวิร์ดต่ำ/สูง อัตราต่อรอง และวิธีจับคู่ลงกลุ่มดวลสด
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const res = await runBackendFunction('adminBroadcastRuleGuide', [broadcastTargetGroup || 'ALL']);
+                          if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
+                          else addToast('📖 ส่งคู่มือคีย์เวิร์ด & กติกาการเล่น เรียบร้อย!', 'info');
+                        } catch(e) {
+                          const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
+                          addToast(`❌ Error: ${errStr}`, 'danger');
+                        }
+                      }}
+                      className="w-full py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                    >
+                      <span>📖 ส่งคู่มือกติกาเข้ากลุ่ม</span>
+                    </button>
+                  </div>
+
+                  {/* Scam Warning */}
+                  <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-indigo-900 font-heading">🚨 เตือนมิจฉาชีพ</span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-200 text-indigo-900 rounded-md">Security</span>
+                      </div>
+                      <p className="text-[10.5px] text-indigo-800/80 font-sans leading-relaxed">
+                        เตือนภัยผู้เล่นให้ฝาก-ถอนผ่านแชตทางการ 1:1 เท่านั้น ป้องกันบัญชีม้าในกลุ่ม
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const res = await runBackendFunction('adminBroadcastScamWarning', [broadcastTargetGroup || 'ALL']);
+                          if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
+                          else addToast('🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพเรียบร้อย!', 'info');
+                        } catch(e) {
+                          const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
+                          addToast(`❌ Error: ${errStr}`, 'danger');
+                        }
+                      }}
+                      className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                    >
+                      <span>🚨 ส่งเตือนความปลอดภัย</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 2: CUSTOM FIELD ANNOUNCEMENT */}
+              <div className="space-y-3 relative z-10">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                  <span className="text-xs font-black text-slate-800 uppercase tracking-wider font-heading flex items-center gap-1.5">
+                    <span>📢 2. ส่งประกาศอิสระเข้ากลุ่ม LINE (Custom Field Announcement)</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-sans">พิมพ์ข้อความแจ้งเตือนหรือข้อมูลสนามส่งตรงเข้ากลุ่ม</span>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                  {/* Quick Preset Buttons */}
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">ข้อความด่วนแนะนำ (คลิกเพื่อใส่ข้อความ):</span>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => setCustomBroadcastText('☕ ประกาศจากสนาม: ขณะนี้อยู่ในช่วงพักเบรก 15 นาที จะเริ่มเปิดรับดวลรอบถัดไปเร็ว ๆ นี้ครับ')}
+                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95"
+                      >
+                        ☕ พักเบรก 15 นาที
+                      </button>
+                      <button
+                        onClick={() => setCustomBroadcastText('🌧️ ประกาศจากสนาม: เนื่องจากสภาพอากาศมีฝนตก จึงขอพักการปล่อยบั้งไฟชั่วคราว เมื่อพร้อมจะแจ้งให้ทราบครับ')}
+                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95"
+                      >
+                        🌧️ ฝนตก พักการยิงชั่วคราว
+                      </button>
+                      <button
+                        onClick={() => setCustomBroadcastText('🔥 เตรียมพร้อม! บั้งไฟกำลังขึ้นติดตั้งบนแท่นยิง โปรดเตรียมแต้มให้พร้อมสำหรับการท้าดวล')}
+                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95"
+                      >
+                        🔥 บั้งไฟกำลังขึ้นแท่นยิง
+                      </button>
+                      <button
+                        onClick={() => setCustomBroadcastText('🏁 สรุปผลการแข่งขันและการดวลประจำวันเสร็จสิ้นเรียบร้อย ขอบพระคุณสมาชิกทุกท่านที่ร่วมสนุกครับ')}
+                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95"
+                      >
+                        🏁 จบการแข่งขันประจำวัน
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Textarea Input */}
+                  <div className="space-y-1">
+                    <textarea
+                      rows={3}
+                      value={customBroadcastText}
+                      onChange={(e) => setCustomBroadcastText(e.target.value)}
+                      placeholder="พิมพ์ข้อความที่ต้องการประกาศส่งตรงเข้ากลุ่ม LINE..."
+                      className="w-full bg-white border border-slate-200 text-slate-900 px-3 py-2.5 rounded-xl text-xs font-sans focus:ring-2 focus:ring-purple-500 focus:outline-none placeholder-slate-400"
+                    />
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex justify-between items-center gap-3 flex-wrap">
+                    <span className="text-[10px] text-slate-400 font-sans">
+                      ส่งไปยัง: <strong className="text-purple-800">{broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่มดวลสด' : 'กลุ่มที่เลือก'}</strong>
+                    </span>
+                    <div className="flex gap-2">
+                      {customBroadcastText && (
+                        <button
+                          onClick={() => setCustomBroadcastText('')}
+                          className="px-3 py-1.5 border border-slate-300 text-slate-600 rounded-lg text-xs font-bold hover:bg-white transition-all active:scale-95"
+                        >
+                          ล้างข้อความ
+                        </button>
+                      )}
+                      <button
+                        disabled={isSendingBroadcast || !customBroadcastText.trim()}
+                        onClick={async () => {
+                          if (!customBroadcastText.trim()) return;
+                          setIsSendingBroadcast(true);
+                          try {
+                            const res = await runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup || 'ALL', customBroadcastText.trim()]);
+                            if (res && res.success === false) {
+                              addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
+                            } else {
+                              addToast(`📢 ส่งประกาศเข้ากลุ่ม LINE เรียบร้อย!`, 'success');
+                              setCustomBroadcastText('');
+                            }
+                          } catch (err) {
+                            const errStr = err?.message || (typeof err === 'string' ? err : JSON.stringify(err)) || 'Error';
+                            addToast(`❌ Broadcast Error: ${errStr}`, 'danger');
+                          } finally {
+                            setIsSendingBroadcast(false);
+                          }
+                        }}
+                        className="py-2 px-5 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all active:scale-95 shadow-md flex items-center gap-1.5"
+                      >
+                        <Megaphone size={14} />
+                        <span>{isSendingBroadcast ? 'กำลังส่ง...' : '📢 ส่งประกาศเข้ากลุ่ม LINE'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 3: LINE GROUP CONNECTION & DIAGNOSTICS */}
+              <div className="space-y-3 relative z-10">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                  <span className="text-xs font-black text-slate-800 uppercase tracking-wider font-heading flex items-center gap-1.5">
+                    <span>📡 3. จัดการการเชื่อมต่อกลุ่ม LINE (LINE Group Connection & Diagnostics)</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-sans">ตรวจสอบสถานะ Webhook และทดสอบการส่งข้อความ</span>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                  {/* Status Bar */}
+                  <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-slate-200">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2.5 h-2.5 rounded-full ${activeGroupId ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
+                      <span className="text-xs font-bold text-slate-700">
+                        สถานะ Active Group ID:
+                      </span>
+                      {activeGroupId ? (
+                        <span className="px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded font-mono text-[11px] font-bold">
+                          {activeGroupId}
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 rounded text-[10.5px] font-bold">
+                          ยังไม่มี Group ID หลัก
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {activeGroupId && (
+                        <button
+                          onClick={async () => {
+                            const gid = window.prompt('เปลี่ยน Group ID (วาง LINE Group ID ใหม่):', activeGroupId);
+                            if (gid && gid.trim().length > 5) {
+                              await runBackendFunction('adminSetActiveGroupId', [gid.trim()]);
+                              const dash = await runBackendFunction('getDashboardData', []);
+                              if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
+                              addToast(`✅ เปลี่ยน Group ID เป็น ...${gid.trim().slice(-8)}`, 'success');
+                            }
+                          }}
+                          className="px-2.5 py-1 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-[10.5px] font-bold transition-all active:scale-95"
+                        >
+                          ✏️ เปลี่ยน Group ID
+                        </button>
+                      )}
+                      <button
+                        onClick={async () => {
+                          addToast('⚡ กำลังทดสอบส่ง Push Message เข้ากลุ่ม...', 'info');
+                          try {
+                            const testRes = await runBackendFunction('adminTestPushGroupMessage', [activeGroupId || 'ALL']);
+                            if (testRes && testRes.success) {
+                              addToast(`✅ ทดสอบส่ง Push สำเร็จ! (HTTP 200) ข้อความเด้งเข้ากลุ่มแล้ว 🚀`, 'success');
+                            } else {
+                              addToast(`⚠️ LINE Push ไม่สำเร็จ: ${testRes?.error || testRes?.body || 'โควตาเต็ม'}`, 'warning');
+                            }
+                          } catch (err) {
+                            const errStr = err?.message || (typeof err === 'string' ? err : JSON.stringify(err)) || 'Error';
+                            addToast(`❌ Error: ${errStr}`, 'danger');
+                          }
+                        }}
+                        className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10.5px] font-bold transition-all active:scale-95 shadow-xs flex items-center gap-1"
+                      >
+                        <span>⚡ ทดสอบส่ง Push เข้ากลุ่ม</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Auto Discover & Paste Bar */}
+                  <div className="flex gap-2 flex-wrap sm:flex-nowrap pt-1">
+                    <button
+                      onClick={async () => {
+                        try {
+                          const res = await runBackendFunction('adminDiscoverGroupIds', []);
+                          if (res && res.discovered && res.discovered.length > 0) {
+                            const first = res.discovered[0];
+                            addToast(`🔍 พบ Group ID: ${first.id.slice(-8)} (${first.source}) — กำลังตั้งค่า...`, 'info');
+                            await runBackendFunction('adminSetActiveGroupId', [first.id]);
+                            const dash = await runBackendFunction('getDashboardData', []);
+                            if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
+                            addToast(`✅ ตั้งค่า Group ID สำเร็จ: ...${first.id.slice(-8)}`, 'success');
+                          } else {
+                            addToast('❌ ไม่พบ Group ID ในระบบ — กรุณา Paste Group ID ด้วยตนเองครับ', 'warning');
+                          }
+                        } catch(e) {
+                          const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
+                          addToast(`❌ Discover Error: ${errStr}`, 'danger');
+                        }
+                      }}
+                      className="py-2 px-3.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-all active:scale-95 whitespace-nowrap"
+                    >
+                      🔍 Auto Discover
+                    </button>
+                    <input
+                      type="text"
+                      placeholder="หรือวาง LINE Group ID ด้วยตนเอง (เช่น C1234567890abcdef...) แล้วกด Enter"
+                      className="flex-1 bg-white border border-slate-200 text-slate-700 px-3 py-2 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-purple-400"
+                      onKeyDown={async (e) => {
+                        if (e.key === 'Enter' && e.target.value.trim().length > 5) {
+                          const gid = e.target.value.trim();
+                          try {
+                            await runBackendFunction('adminSetActiveGroupId', [gid]);
+                            const dash = await runBackendFunction('getDashboardData', []);
+                            if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
+                            addToast(`✅ ตั้งค่า Group ID สำเร็จ: ...${gid.slice(-8)}`, 'success');
+                            e.target.value = '';
+                          } catch(err) {
+                            const errStr = err?.message || (typeof err === 'string' ? err : JSON.stringify(err)) || 'Error';
+                            addToast(`❌ Error: ${errStr}`, 'danger');
+                          }
+                        }
+                      }}
+                    />
+                  </div>
+
+                  {/* Connected Groups List */}
+                  {lineGroups.length > 0 && (
+                    <div className="pt-2">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                        กลุ่ม LINE ทั้งหมดที่บอทเชื่อมต่อ ({lineGroups.length} กลุ่ม):
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {lineGroups.map((g, i) => (
+                          <div key={g.id || i} className="p-2.5 bg-white border border-slate-200 rounded-lg flex items-center justify-between text-xs">
+                            <div className="min-w-0">
+                              <span className="font-bold text-slate-800 block truncate">{g.name || `กลุ่ม #${i + 1}`}</span>
+                              <span className="text-[9px] text-slate-400 font-mono block">{g.id}</span>
+                            </div>
+                            <span className="text-[9.5px] px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md font-bold shrink-0">
+                              Connected
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
