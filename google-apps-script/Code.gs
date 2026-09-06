@@ -1567,6 +1567,8 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
     // Check if it is a Bangkok Bank pending transaction to avoid showing scary server errors to the player
     if (errorDetail.indexOf("Bangkok Bank") !== -1 && errorDetail.indexOf("pending") !== -1) {
       replyToLine(replyToken, `🏦 สลิปธนาคารกรุงเทพอยู่ระหว่างประมวลผล\nเนื่องจากระบบธนาคารกรุงเทพมีความล่าช้าชั่วคราวในการอัพเดทข้อมูลธุรกรรม ทำให้ระบบออโต้ยังไม่สามารถตรวจสอบได้ในขณะนี้\n\nบิลของคุณได้ส่งถึงแอดมินเรียบร้อยแล้ว กำลังดำเนินการตรวจสอบแมนนวลหลังบ้านและจะปรับเครดิตให้คุณโดยเร็วที่สุดครับ`);
+    } else if (responseCode === 403 || errorDetail.indexOf("expired") !== -1 || errorDetail.indexOf("SERVICE_EXPIRED") !== -1) {
+      replyToLine(replyToken, `📥 ได้รับสลิปเรียบร้อยแล้วครับ\nขณะนี้ระบบสแกนสลิปออโต้อยู่ระหว่างรอบบำรุงรักษาระบบ รายการเติมเงินของคุณได้ส่งต่อให้ แอดมิน ตรวจสอบและปรับเครดิตให้ในระบบหลังบ้านโดยเร็วที่สุดครับ 🙏`);
     } else {
       replyToLine(replyToken, `⚠️ ระบบเช็คสลิปขัดข้อง (HTTP ${responseCode})\nรายละเอียด: ${errorDetail}\n\nแอดมินได้รับบิลนี้เรียบร้อย กำลังตรวจสอบแมนนวลให้ในระบบหลังบ้านครับ`);
     }
