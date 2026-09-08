@@ -900,39 +900,26 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
 async function parseBetCommand(text, userId, displayName, replyToken, groupId, messageId = null) {
   const clean = text.replace(/\s+/g, '').toLowerCase();
   
-  // Keywords definition (Correct mapping: ชล/ไล่/ล -> LOW (ต่ำ), ชถ/ถอย/ยั่ง/ชย -> HIGH (สูง))
+  // Keywords definition (Correct mapping: ชล/ไล่/ล -> HIGH (สูง), ชถ/ถอย/ยั่ง/ชย/ถ -> LOW (ต่ำ))
   const keywordsLow = [
-    'ชล', 'a', 'ไล่', 'ล', 'ต่ำ', 'ชต่ำ', 'ช่างต่ำ', 'ช่างไล่',
-    '+5ชล', '+5a', '+5ล', '+5ไล่', '-5ชล', '-5a', '-5ล', '-5ไล่',
-    '+10ชล', '+10a', '+10ล', '+10ไล่', '-10ชล', '-10a', '-10ล', '-10ไล่',
-    'ต'
-  ];
-  const keywordsHigh = [
-    'ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'สูง', 'ชสูง', 'ช่างสูง', 'ช่างยั่ง', 'ช่างถอย',
+    'ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'ต่ำ', 'ชต่ำ', 'ช่างต่ำ', 'ช่างยั่ง', 'ช่างถอย',
     '+5ชย', '+5ชถ', '+5ย', '+5ถ', '-5ชย', '-5ชถ', '-5ย', '-5ถ',
     '+10ชย', '+10ชถ', '+10ย', '+10ถ', '-10ชย', '-10ชถ', '-10ย', '-10ถ',
-    'ส'
+    'low', 'l'
+  ];
+  const keywordsHigh = [
+    'ชล', 'a', 'ไล่', 'ล', 'ลง', 'สูง', 'ชสูง', 'ช่างสูง', 'ช่างไล่',
+    '+5ชล', '+5a', '+5ล', '+5ไล่', '-5ชล', '-5a', '-5ล', '-5ไล่',
+    '+10ชล', '+10a', '+10ล', '+10ไล่', '-10ชล', '-10a', '-10ล', '-10ไล่',
+    'ส', 'high', 'h'
   ];
   const keywordsAccept = ['ต', 'ตต', 'ติด', 'ครับ', 'เค', 'จ้า', 'ยอมรับ', 'ดีล', 'รับแผล', 'รับ'];
   
   // 0. Pending Deals Board Command ("กระดานดวล", "แผลค้าง", "เปิดรอคู่")
   if (clean === 'กระดานดวล' || clean === 'แผลค้าง' || clean === 'เปิดรอคู่' || clean === 'รอคู่') {
     const pendingList = db.getPendingBetsList();
-    if (pendingList.length === 0) {
-      replyToLine(replyToken, `📊 [กระดานดวล]: ไม่มีแผลดวลค้างครับ 🚀`, userId);
-    } else {
-      let boardMsg = `📊 [กระดานดวล (${pendingList.length} แผล)]:\n`;
-      pendingList.forEach((b, idx) => {
-        const creatorName = b.playerLowName || b.playerHighName;
-        const sideText = b.playerLowId ? 'ต่ำ' : 'สูง';
-        const rangeText = b.rangeMin && b.rangeMax ? `${b.rangeMin}-${b.rangeMax}s` : (b.type === 'pre_quote' ? 'รอราคาช่าง' : '');
-        const shortCode = b.orderNumber.slice(-2);
-        const sideWithRange = rangeText ? `${sideText} ${rangeText}` : sideText;
-        boardMsg += `${idx + 1}. #${b.orderNumber} (${shortCode}) | ${sideWithRange} | ${b.amount}pt (@${creatorName}) 👉 "ต${shortCode}"\n`;
-      });
-      boardMsg += `💡 พิมพ์ "ต [เลข]" เพื่อรับดวลครับ`;
-      replyToLine(replyToken, boardMsg, userId);
-    }
+    const boardFlex = constructPendingBetsFlex(pendingList);
+    await replyToLine(replyToken, boardFlex, userId);
     return true;
   }
 
@@ -2402,10 +2389,314 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
   };
 }
 
+export function constructPendingBetsFlex(pendingList) {
+  if (!pendingList || pendingList.length === 0) {
+    return {
+      "type": "bubble",
+      "size": "kilo",
+      "header": {
+        "type": "box",
+        "layout": "vertical",
+        "backgroundColor": "#0F172A",
+        "paddingAll": "md",
+        "contents": [
+          {
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+              {
+                "type": "text",
+                "text": "📊 กระดานดวลสด",
+                "weight": "bold",
+                "color": "#FFFFFF",
+                "size": "sm",
+                "flex": 1
+              },
+              {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#334155",
+                "cornerRadius": "sm",
+                "paddingStart": "6px",
+                "paddingEnd": "6px",
+                "paddingTop": "2px",
+                "paddingBottom": "2px",
+                "contents": [
+                  { "type": "text", "text": "ว่าง 0 แผล", "color": "#94A3B8", "size": "xxs", "weight": "bold" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "body": {
+        "type": "box",
+        "layout": "vertical",
+        "paddingAll": "lg",
+        "spacing": "sm",
+        "contents": [
+          {
+            "type": "text",
+            "text": "ไม่มีแผลดวลค้างในขณะนี้ 🚀",
+            "weight": "bold",
+            "color": "#334155",
+            "size": "sm",
+            "align": "center"
+          },
+          {
+            "type": "text",
+            "text": "ท่านสามารถพิมพ์ ชล หรือ ชถ เพื่อเปิดแผลดวลใหม่ได้ทันทีครับ",
+            "color": "#64748B",
+            "size": "xs",
+            "align": "center",
+            "wrap": true
+          }
+        ]
+      },
+      "footer": {
+        "type": "box",
+        "layout": "horizontal",
+        "spacing": "xs",
+        "paddingAll": "sm",
+        "contents": [
+          {
+            "type": "button",
+            "style": "secondary",
+            "height": "sm",
+            "color": "#F1F5F9",
+            "action": {
+              "type": "message",
+              "label": "📖 ดูกติกา",
+              "text": "กติกา"
+            }
+          },
+          {
+            "type": "button",
+            "style": "primary",
+            "height": "sm",
+            "color": "#0D9488",
+            "action": {
+              "type": "message",
+              "label": "⚡ เปิดราคาช่าง",
+              "text": "ชล500"
+            }
+          }
+        ]
+      }
+    };
+  }
+
+  const displayItems = pendingList.slice(0, 8);
+  const itemBoxes = displayItems.map((b) => {
+    const creatorName = b.playerLowName || b.playerHighName || 'ผู้เล่น';
+    const isLow = Boolean(b.playerLowId);
+    const sideText = isLow ? '🔻 ต่ำ' : '🔺 สูง';
+    const sideColor = isLow ? '#DC2626' : '#16A34A';
+    const sideBg = isLow ? '#FEF2F2' : '#F0FDF4';
+    const sideBorder = isLow ? '#FECACA' : '#BBF7D0';
+    
+    const rangeText = (b.rangeMin && b.rangeMax) 
+      ? `${b.rangeMin}-${b.rangeMax}s` 
+      : (b.type === 'pre_quote' ? 'รอราคาช่าง' : '');
+    const shortCode = b.orderNumber.toString().slice(-2);
+    const amtStr = Number(b.amount || 0).toLocaleString('th-TH');
+
+    return {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": sideBg,
+      "borderColor": sideBorder,
+      "borderWidth": "1px",
+      "cornerRadius": "md",
+      "paddingAll": "sm",
+      "spacing": "xs",
+      "contents": [
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            {
+              "type": "text",
+              "text": `#${b.orderNumber} (${shortCode})`,
+              "weight": "bold",
+              "color": "#0F172A",
+              "size": "xs",
+              "flex": 5
+            },
+            {
+              "type": "text",
+              "text": `👤 @${creatorName}`,
+              "weight": "bold",
+              "color": "#475569",
+              "size": "xxs",
+              "align": "end",
+              "flex": 5,
+              "wrap": true
+            }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            {
+              "type": "text",
+              "text": `${sideText} ${rangeText}`,
+              "weight": "bold",
+              "color": sideColor,
+              "size": "xs",
+              "flex": 6
+            },
+            {
+              "type": "text",
+              "text": `${amtStr} pt`,
+              "weight": "bold",
+              "color": "#0284C7",
+              "size": "xs",
+              "align": "end",
+              "flex": 4
+            }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "spacing": "xs",
+          "margin": "xs",
+          "contents": [
+            {
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": isLow ? "#16A34A" : "#DC2626",
+              "cornerRadius": "sm",
+              "paddingTop": "4px",
+              "paddingBottom": "4px",
+              "flex": 1,
+              "action": {
+                "type": "message",
+                "label": `ต${shortCode}`,
+                "text": `ต${shortCode}`
+              },
+              "contents": [
+                {
+                  "type": "text",
+                  "text": `⚡ รับดวล (ต${shortCode})`,
+                  "color": "#FFFFFF",
+                  "weight": "bold",
+                  "size": "xxs",
+                  "align": "center"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+  });
+
+  const overflowNotice = pendingList.length > 8 ? [
+    {
+      "type": "text",
+      "text": `... และอีก ${pendingList.length - 8} แผลดวล`,
+      "size": "xxs",
+      "color": "#94A3B8",
+      "align": "center",
+      "margin": "xs"
+    }
+  ] : [];
+
+  return {
+    "type": "bubble",
+    "size": "kilo",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#0F172A",
+      "paddingAll": "md",
+      "contents": [
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            {
+              "type": "text",
+              "text": "📊 กระดานดวลสด",
+              "weight": "bold",
+              "color": "#FFFFFF",
+              "size": "sm",
+              "flex": 1
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": "#059669",
+              "cornerRadius": "sm",
+              "paddingStart": "8px",
+              "paddingEnd": "8px",
+              "paddingTop": "2px",
+              "paddingBottom": "2px",
+              "contents": [
+                { "type": "text", "text": `รอคู่ ${pendingList.length} แผล`, "color": "#FFFFFF", "size": "xxs", "weight": "bold" }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "แตะปุ่มเพื่อรับดวล หรือพิมพ์ ต[เลข] ได้ทันที 🚀",
+          "color": "#94A3B8",
+          "size": "xxs",
+          "margin": "xs"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "sm",
+      "contents": [
+        ...itemBoxes,
+        ...overflowNotice
+      ]
+    },
+    "footer": {
+      "type": "box",
+      "layout": "horizontal",
+      "spacing": "xs",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "button",
+          "style": "secondary",
+          "height": "sm",
+          "color": "#F1F5F9",
+          "action": {
+            "type": "message",
+            "label": "🔄 รีเฟรช",
+            "text": "กระดานดวล"
+          }
+        },
+        {
+          "type": "button",
+          "style": "secondary",
+          "height": "sm",
+          "color": "#F1F5F9",
+          "action": {
+            "type": "message",
+            "label": "📖 กติกา",
+            "text": "กติกา"
+          }
+        }
+      ]
+    }
+  };
+}
+
 export function constructRoundSummaryFlex(finalTime, targetMin, targetMax, rocketName) {
   const isLowWin = finalTime < targetMin;
   const isHighWin = finalTime > targetMax;
-  const outcomeTitle = isLowWin ? "🔻 ฝั่งต่ำ (ชล)" : (isHighWin ? "🔺 ฝั่งสูง (ชถ)" : "🎯 ในราคาช่าง (คืนแต้ม)");
+  const outcomeTitle = isLowWin ? "🔻 ฝั่งต่ำ (ชถ/ชย)" : (isHighWin ? "🔺 ฝั่งสูง (ชล/ไล่)" : "🎯 ในราคาช่าง (คืนแต้ม)");
   const outcomeColor = isLowWin ? "#DC2626" : (isHighWin ? "#16A34A" : "#D97706");
 
   const bodyContents = [

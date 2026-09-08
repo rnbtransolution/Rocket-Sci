@@ -609,13 +609,19 @@ export async function matchExistingOpenBet(userId, displayName, targetOrderNo = 
   const matcherBal = matcherPlayer ? matcherPlayer.balance : 0;
   const cleanTargetOrder = targetOrderNo ? targetOrderNo.toString().trim().replace(/#/g, '') : null;
 
-  // Search by target order first if specified
+  // Search by target order first if specified (prioritize pending_match so partially matched orders can be matched further)
   let targetBet = null;
   if (cleanTargetOrder) {
     targetBet = bets.find((b) => {
       const orderStr = b.orderNumber.toString();
-      return orderStr === cleanTargetOrder || orderStr.endsWith(cleanTargetOrder);
+      return (orderStr === cleanTargetOrder || orderStr.endsWith(cleanTargetOrder)) && b.status === 'pending_match';
     });
+    if (!targetBet) {
+      targetBet = bets.find((b) => {
+        const orderStr = b.orderNumber.toString();
+        return orderStr === cleanTargetOrder || orderStr.endsWith(cleanTargetOrder);
+      });
+    }
   }
 
   if (cleanTargetOrder && !targetBet) {
@@ -683,10 +689,43 @@ export async function matchExistingOpenBet(userId, displayName, targetOrderNo = 
       await adjustPlayerBalance(searchId, -matchAmt, displayName);
 
       if (remainingAmt >= 100) {
-        const splitOrderNo = Math.floor(Math.random() * 9000 + 1000);
         const creatorSide = targetBet.playerLowId === searchId ? 'high' : 'low';
         const creatorName = targetBet.playerLowId === searchId ? targetBet.playerHighName : targetBet.playerLowName;
-        saveOpenBet(splitOrderNo, creatorId, creatorName, creatorSide, remainingAmt, targetBet.type, targetBet.rangeMin, targetBet.rangeMax, targetBet.groupId, targetBet.groupName, targetBet.userTypedCmd, targetBet.type === 'pre_quote');
+        // Keep the original order number so the group and dashboard retain the consistent order ID
+        const remainingBet = {
+          id: 'bet_' + targetBet.orderNumber + '_' + Date.now(),
+          orderNumber: targetBet.orderNumber,
+          playerLowId: creatorSide === 'low' ? creatorId : '',
+          playerLowName: creatorSide === 'low' ? creatorName : '',
+          playerHighId: creatorSide === 'high' ? creatorId : '',
+          playerHighName: creatorSide === 'high' ? creatorName : '',
+          amount: remainingAmt,
+          type: targetBet.type,
+          rangeMin: targetBet.rangeMin,
+          rangeMax: targetBet.rangeMax,
+          status: 'pending_match',
+          winnerName: '',
+          timestamp: formatTime(new Date()),
+          groupId: targetBet.groupId,
+          groupName: targetBet.groupName,
+          userTypedCmd: targetBet.userTypedCmd,
+        };
+        bets.push(remainingBet);
+        appendRowToSheet('Bets', [
+          remainingBet.orderNumber,
+          remainingBet.playerLowId,
+          remainingBet.playerLowName,
+          remainingBet.playerHighId,
+          remainingBet.playerHighName,
+          remainingBet.amount,
+          remainingBet.type,
+          remainingBet.rangeMin || '',
+          remainingBet.rangeMax || '',
+          'pending_match',
+          '',
+          remainingBet.timestamp,
+          remainingBet.groupId || ''
+        ]);
       } else {
         await adjustPlayerBalance(creatorId, remainingAmt, 'Partial match credit refund');
       }

@@ -1013,21 +1013,8 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   // ─────────────────────────────────────────────────────────────
   if (clean === 'กระดานดวล' || clean === 'แผลค้าง' || clean === 'เปิดรอคู่' || clean === 'รอคู่') {
     const pendingList = getPendingBetsList();
-    if (pendingList.length === 0) {
-      replyToLine(replyToken, '📊 [กระดานดวล]: ไม่มีแผลดวลค้างครับ 🚀', userId);
-    } else {
-      let boardMsg = '📊 [กระดานดวล (' + pendingList.length + ' แผล)]:\n';
-      pendingList.forEach(function(b, idx) {
-        const creatorName = b.playerLowName || b.playerHighName || 'ผู้เล่น';
-        const sideText = b.playerLowId ? 'ต่ำ' : 'สูง';
-        const rangeText = b.rangeMin && b.rangeMax ? (b.rangeMin + '-' + b.rangeMax + 's') : (b.type === 'pre_quote' ? 'รอราคาช่าง' : '');
-        const shortCode = b.orderNumber.slice(-2);
-        const sideWithRange = rangeText ? (sideText + ' ' + rangeText) : sideText;
-        boardMsg += (idx + 1) + '. #' + b.orderNumber + ' (' + shortCode + ') | ' + sideWithRange + ' | ' + b.amount + 'pt (@' + creatorName + ') 👉 "ต' + shortCode + '"\n';
-      });
-      boardMsg += '💡 พิมพ์ "ต [เลข]" เพื่อรับดวลครับ';
-      replyToLine(replyToken, boardMsg, userId);
-    }
+    var boardFlex = constructPendingBetsFlex(pendingList);
+    replyToLine(replyToken, boardFlex, userId);
     return;
   }
 
@@ -1252,16 +1239,16 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   var cleanBetText = clean.replace(/ชตย/g, '').trim();
 
   var keywordsLow  = [
-    'ชล', 'a', 'ไล่', 'ล', 'ต่ำ', 'ชต่ำ', 'ช่างต่ำ', 'ช่างไล่',
-    '+5ชล', '+5a', '+5ล', '+5ไล่', '-5ชล', '-5a', '-5ล', '-5ไล่',
-    '+10ชล', '+10a', '+10ล', '+10ไล่', '-10ชล', '-10a', '-10ล', '-10ไล่',
-    'ต'
-  ];
-  var keywordsHigh = [
-    'ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'สูง', 'ชสูง', 'ช่างสูง', 'ช่างยั่ง', 'ช่างถอย',
+    'ชย', 'ชถ', 'ย', 'ถ', 'ยั่ง', 'ถอย', 'ต่ำ', 'ชต่ำ', 'ช่างต่ำ', 'ช่างยั่ง', 'ช่างถอย',
     '+5ชย', '+5ชถ', '+5ย', '+5ถ', '-5ชย', '-5ชถ', '-5ย', '-5ถ',
     '+10ชย', '+10ชถ', '+10ย', '+10ถ', '-10ชย', '-10ชถ', '-10ย', '-10ถ',
-    'ส'
+    'low', 'l'
+  ];
+  var keywordsHigh = [
+    'ชล', 'a', 'ไล่', 'ล', 'ลง', 'สูง', 'ชสูง', 'ช่างสูง', 'ช่างไล่',
+    '+5ชล', '+5a', '+5ล', '+5ไล่', '-5ชล', '-5a', '-5ล', '-5ไล่',
+    '+10ชล', '+10a', '+10ล', '+10ไล่', '-10ชล', '-10a', '-10ล', '-10ไล่',
+    'ส', 'high', 'h'
   ];
 
   // Detect rate-offset prefix BEFORE keyword matching (supports +-5 and +-10)
@@ -1877,122 +1864,141 @@ function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmo
   var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Bets');
   var data = sheet.getDataRange().getValues();
   
-  // 1. Search by target order first if specified
+  // 1. Search by target order first if specified (prioritizing pending_match)
   if (cleanTargetOrder) {
+    var foundIndex = -1;
+    var foundRow = null;
+    var hasMatched = false;
+    var hasCancelled = false;
+
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
       const orderNo = row[0].toString().trim();
       if (orderNo === cleanTargetOrder || orderNo.endsWith(cleanTargetOrder)) {
         const status = row[9];
-        let playerLowId = row[1] ? row[1].toString().trim() : '';
-        let playerLowName = row[2] ? row[2].toString().trim() : '';
-        let playerHighId = row[3] ? row[3].toString().trim() : '';
-        let playerHighName = row[4] ? row[4].toString().trim() : '';
-        const totalAmount = Number(row[5]) || 0;
-        const betType = row[6] || 'range';
-        const rMin = row[7];
-        const rMax = row[8];
-        const targetGroupId = row[12] || '';
-        
-        const creatorId = playerLowId ? playerLowId : playerHighId;
-        const creatorName = playerLowId ? playerLowName : playerHighName;
-        const creatorSide = playerLowId ? 'low' : 'high';
-
-        // 1. OWN_BET GUARD: Check clean ID, raw ID, and displayName
-        if (creatorId === searchId || creatorId === cleanUserId(userId) || (creatorName && displayName && creatorName === displayName)) {
-          return { error: 'OWN_BET', orderNumber: orderNo };
+        if (status === 'pending_match') {
+          foundIndex = i;
+          foundRow = row;
+          break;
+        } else if (status === 'matched' || status === 'resolved') {
+          hasMatched = true;
+        } else if (status === 'cancelled' || status === 'void') {
+          hasCancelled = true;
         }
-
-        // 2. STATUS GUARDS: Distinguish cancelled from matched
-        if (status === 'cancelled' || status === 'void') {
-          return { error: 'CANCELLED', orderNumber: orderNo };
-        }
-        if (status === 'matched' || status === 'resolved') {
-          return { error: 'ALREADY_MATCHED', orderNumber: orderNo };
-        }
-        
-        if (matchAmt !== null) {
-          var min20Percent = Math.max(1, Math.round(totalAmount * 0.20));
-          if (matchAmt < min20Percent) {
-            return { error: 'BELOW_MIN_PERCENT_LIMIT', minAllowed: min20Percent, percent: 20, provided: matchAmt, orderNumber: orderNo };
-          }
-          if (matchAmt > totalAmount) {
-            return { error: 'EXCEEDS_ORDER_AMOUNT', maxAllowed: totalAmount, provided: matchAmt, orderNumber: orderNo };
-          }
-        }
-        var finalMatchAmt = matchAmt !== null ? matchAmt : totalAmount;
-        if (matcherBal < finalMatchAmt) {
-          return { error: 'INSUFFICIENT_BALANCE', required: finalMatchAmt, current: matcherBal, orderNumber: orderNo };
-        }
-
-        var isSplit = finalMatchAmt < totalAmount;
-        var remainingAmount = totalAmount - finalMatchAmt;
-        var splitOrderNumber = null;
-        
-        if (!playerLowId) {
-          playerLowId = searchId;
-          playerLowName = displayName;
-        } else {
-          playerHighId = searchId;
-          playerHighName = displayName;
-        }
-        
-        // Update matched portion in sheet
-        sheet.getRange(i + 1, 2).setValue(playerLowId);
-        sheet.getRange(i + 1, 3).setValue(playerLowName);
-        sheet.getRange(i + 1, 4).setValue(playerHighId);
-        sheet.getRange(i + 1, 5).setValue(playerHighName);
-        sheet.getRange(i + 1, 6).setValue(finalMatchAmt);
-        sheet.getRange(i + 1, 10).setValue('matched');
-        
-        adjustPlayerBalance(searchId, -finalMatchAmt, displayName);
-
-        // If partial match: create Child split order for the remaining amount
-        if (isSplit && remainingAmount >= 100) {
-          splitOrderNumber = (Math.floor(Math.random() * 9000) + 1000).toString();
-          sheet.appendRow([
-            splitOrderNumber,
-            creatorSide === 'low' ? creatorId : '',
-            creatorSide === 'low' ? creatorName : '',
-            creatorSide === 'high' ? creatorId : '',
-            creatorSide === 'high' ? creatorName : '',
-            remainingAmount,
-            betType,
-            rMin || '',
-            rMax || '',
-            'pending_match',
-            '',
-            new Date(),
-            targetGroupId || ''
-          ]);
-        }
-
-        var rangeInfoStr = (rMin && rMax) ? (rMin + '-' + rMax + 's') : '';
-
-        return {
-          orderNumber: orderNo,
-          amount: finalMatchAmt,
-          playerLowName: playerLowName,
-          playerHighName: playerHighName,
-          creatorId: creatorId,
-          creatorName: creatorName,
-          matcherId: searchId,
-          rangeInfo: rangeInfoStr,
-          isSplit: isSplit,
-          remainingAmount: remainingAmount,
-          splitOrderNumber: splitOrderNumber,
-          splitSide: creatorSide
-        };
       }
     }
-    return { error: 'NOT_FOUND', targetOrderNo: cleanTargetOrder };
+
+    if (foundIndex === -1) {
+      if (hasCancelled && !hasMatched) {
+        return { error: 'CANCELLED', orderNumber: cleanTargetOrder };
+      }
+      if (hasMatched) {
+        return { error: 'ALREADY_MATCHED', orderNumber: cleanTargetOrder };
+      }
+      return { error: 'NOT_FOUND', targetOrderNo: cleanTargetOrder };
+    }
+
+    const i = foundIndex;
+    const row = foundRow;
+    const orderNo = row[0].toString().trim();
+    let playerLowId = row[1] ? row[1].toString().trim() : '';
+    let playerLowName = row[2] ? row[2].toString().trim() : '';
+    let playerHighId = row[3] ? row[3].toString().trim() : '';
+    let playerHighName = row[4] ? row[4].toString().trim() : '';
+    const totalAmount = Number(row[5]) || 0;
+    const betType = row[6] || 'range';
+    const rMin = row[7];
+    const rMax = row[8];
+    const targetGroupId = row[12] || '';
+    
+    const creatorId = playerLowId ? playerLowId : playerHighId;
+    const creatorName = playerLowId ? playerLowName : playerHighName;
+    const creatorSide = playerLowId ? 'low' : 'high';
+
+    // 1. OWN_BET GUARD: Check clean ID, raw ID, and displayName
+    if (creatorId === searchId || creatorId === cleanUserId(userId) || (creatorName && displayName && creatorName === displayName)) {
+      return { error: 'OWN_BET', orderNumber: orderNo };
+    }
+
+    if (matchAmt !== null) {
+      var min20Percent = Math.max(1, Math.round(totalAmount * 0.20));
+      if (matchAmt < min20Percent) {
+        return { error: 'BELOW_MIN_PERCENT_LIMIT', minAllowed: min20Percent, percent: 20, provided: matchAmt, orderNumber: orderNo };
+      }
+      if (matchAmt > totalAmount) {
+        return { error: 'EXCEEDS_ORDER_AMOUNT', maxAllowed: totalAmount, provided: matchAmt, orderNumber: orderNo };
+      }
+    }
+    var finalMatchAmt = matchAmt !== null ? matchAmt : totalAmount;
+    if (matcherBal < finalMatchAmt) {
+      return { error: 'INSUFFICIENT_BALANCE', required: finalMatchAmt, current: matcherBal, orderNumber: orderNo };
+    }
+
+    var isSplit = finalMatchAmt < totalAmount;
+    var remainingAmount = totalAmount - finalMatchAmt;
+    var splitOrderNumber = null;
+    
+    if (!playerLowId) {
+      playerLowId = searchId;
+      playerLowName = displayName;
+    } else {
+      playerHighId = searchId;
+      playerHighName = displayName;
+    }
+    
+    // Update matched portion in sheet
+    sheet.getRange(i + 1, 2).setValue(playerLowId);
+    sheet.getRange(i + 1, 3).setValue(playerLowName);
+    sheet.getRange(i + 1, 4).setValue(playerHighId);
+    sheet.getRange(i + 1, 5).setValue(playerHighName);
+    sheet.getRange(i + 1, 6).setValue(finalMatchAmt);
+    sheet.getRange(i + 1, 10).setValue('matched');
+    
+    adjustPlayerBalance(searchId, -finalMatchAmt, displayName);
+
+    // If partial match: create Child split order keeping original orderNo for the remaining amount
+    if (isSplit && remainingAmount >= 100) {
+      splitOrderNumber = orderNo;
+      sheet.appendRow([
+        splitOrderNumber,
+        creatorSide === 'low' ? creatorId : '',
+        creatorSide === 'low' ? creatorName : '',
+        creatorSide === 'high' ? creatorId : '',
+        creatorSide === 'high' ? creatorName : '',
+        remainingAmount,
+        betType,
+        rMin || '',
+        rMax || '',
+        'pending_match',
+        '',
+        new Date(),
+        targetGroupId || ''
+      ]);
+    }
+
+    var rangeInfoStr = (rMin && rMax) ? (rMin + '-' + rMax + 's') : '';
+
+    return {
+      orderNumber: orderNo,
+      amount: finalMatchAmt,
+      playerLowName: playerLowName,
+      playerHighName: playerHighName,
+      creatorId: creatorId,
+      creatorName: creatorName,
+      matcherId: searchId,
+      rangeInfo: rangeInfoStr,
+      isSplit: isSplit,
+      remainingAmount: remainingAmount,
+      splitOrderNumber: splitOrderNumber,
+      splitSide: creatorSide
+    };
   }
   
   // 2. Search first open pending bet
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     if (row[9] === 'pending_match') {
-      const orderNo = row[0];
+      const orderNo = row[0].toString().trim();
       const totalAmount = Number(row[5]) || 0;
       const betType = row[6] || 'range';
       const rMin = row[7];
@@ -2005,7 +2011,7 @@ function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmo
       let playerHighName = row[4];
       
       const creatorId = playerLowId ? playerLowId : playerHighId;
-      const creatorName = playerLowId ? playerLowName : playerHighName;
+      const creatorName = playerLowName ? playerLowName : playerHighName;
       const creatorSide = playerLowId ? 'low' : 'high';
       if (creatorId === searchId) continue;
 
@@ -2036,7 +2042,7 @@ function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmo
       adjustPlayerBalance(searchId, -finalMatchAmtAuto, displayName);
 
       if (isSplitAuto && remainingAmountAuto >= 100) {
-        splitOrderNumberAuto = (Math.floor(Math.random() * 9000) + 1000).toString();
+        splitOrderNumberAuto = orderNo;
         sheet.appendRow([
           splitOrderNumberAuto,
           creatorSide === 'low' ? creatorId : '',
@@ -4160,10 +4166,311 @@ function constructMatchNotificationFlex(orderNo, amount, playerLowName, playerHi
   };
 }
 
+function constructPendingBetsFlex(pendingList) {
+  if (!pendingList || pendingList.length === 0) {
+    return {
+      "type": "bubble",
+      "size": "kilo",
+      "header": {
+        "type": "box",
+        "layout": "vertical",
+        "backgroundColor": "#0F172A",
+        "paddingAll": "md",
+        "contents": [
+          {
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+              {
+                "type": "text",
+                "text": "📊 กระดานดวลสด",
+                "weight": "bold",
+                "color": "#FFFFFF",
+                "size": "sm",
+                "flex": 1
+              },
+              {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#334155",
+                "cornerRadius": "sm",
+                "paddingStart": "6px",
+                "paddingEnd": "6px",
+                "paddingTop": "2px",
+                "paddingBottom": "2px",
+                "contents": [
+                  { "type": "text", "text": "ว่าง 0 แผล", "color": "#94A3B8", "size": "xxs", "weight": "bold" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "body": {
+        "type": "box",
+        "layout": "vertical",
+        "paddingAll": "lg",
+        "spacing": "sm",
+        "contents": [
+          {
+            "type": "text",
+            "text": "ไม่มีแผลดวลค้างในขณะนี้ 🚀",
+            "weight": "bold",
+            "color": "#334155",
+            "size": "sm",
+            "align": "center"
+          },
+          {
+            "type": "text",
+            "text": "ท่านสามารถพิมพ์ ชล หรือ ชถ เพื่อเปิดแผลดวลใหม่ได้ทันทีครับ",
+            "color": "#64748B",
+            "size": "xs",
+            "align": "center",
+            "wrap": true
+          }
+        ]
+      },
+      "footer": {
+        "type": "box",
+        "layout": "horizontal",
+        "spacing": "xs",
+        "paddingAll": "sm",
+        "contents": [
+          {
+            "type": "button",
+            "style": "secondary",
+            "height": "sm",
+            "color": "#F1F5F9",
+            "action": {
+              "type": "message",
+              "label": "📖 ดูกติกา",
+              "text": "กติกา"
+            }
+          },
+          {
+            "type": "button",
+            "style": "primary",
+            "height": "sm",
+            "color": "#0D9488",
+            "action": {
+              "type": "message",
+              "label": "⚡ เปิดราคาช่าง",
+              "text": "ชล500"
+            }
+          }
+        ]
+      }
+    };
+  }
+
+  var displayItems = pendingList.slice(0, 8);
+  var itemBoxes = displayItems.map(function(b) {
+    var creatorName = b.playerLowName || b.playerHighName || 'ผู้เล่น';
+    var isLow = Boolean(b.playerLowId);
+    var sideText = isLow ? '🔻 ต่ำ' : '🔺 สูง';
+    var sideColor = isLow ? '#DC2626' : '#16A34A';
+    var sideBg = isLow ? '#FEF2F2' : '#F0FDF4';
+    var sideBorder = isLow ? '#FECACA' : '#BBF7D0';
+    
+    var rangeText = (b.rangeMin && b.rangeMax) 
+      ? (b.rangeMin + '-' + b.rangeMax + 's') 
+      : (b.type === 'pre_quote' ? 'รอราคาช่าง' : '');
+    var shortCode = b.orderNumber.toString().slice(-2);
+    var amtStr = Number(b.amount || 0).toLocaleString('th-TH');
+
+    return {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": sideBg,
+      "borderColor": sideBorder,
+      "borderWidth": "1px",
+      "cornerRadius": "md",
+      "paddingAll": "sm",
+      "spacing": "xs",
+      "contents": [
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            {
+              "type": "text",
+              "text": '#' + b.orderNumber + ' (' + shortCode + ')',
+              "weight": "bold",
+              "color": "#0F172A",
+              "size": "xs",
+              "flex": 5
+            },
+            {
+              "type": "text",
+              "text": '👤 @' + creatorName,
+              "weight": "bold",
+              "color": "#475569",
+              "size": "xxs",
+              "align": "end",
+              "flex": 5,
+              "wrap": true
+            }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            {
+              "type": "text",
+              "text": sideText + ' ' + rangeText,
+              "weight": "bold",
+              "color": sideColor,
+              "size": "xs",
+              "flex": 6
+            },
+            {
+              "type": "text",
+              "text": amtStr + ' pt',
+              "weight": "bold",
+              "color": "#0284C7",
+              "size": "xs",
+              "align": "end",
+              "flex": 4
+            }
+          ]
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "spacing": "xs",
+          "margin": "xs",
+          "contents": [
+            {
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": isLow ? "#16A34A" : "#DC2626",
+              "cornerRadius": "sm",
+              "paddingTop": "4px",
+              "paddingBottom": "4px",
+              "flex": 1,
+              "action": {
+                "type": "message",
+                "label": 'ต' + shortCode,
+                "text": 'ต' + shortCode
+              },
+              "contents": [
+                {
+                  "type": "text",
+                  "text": '⚡ รับดวล (ต' + shortCode + ')',
+                  "color": "#FFFFFF",
+                  "weight": "bold",
+                  "size": "xxs",
+                  "align": "center"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+  });
+
+  var overflowNotice = pendingList.length > 8 ? [
+    {
+      "type": "text",
+      "text": '... และอีก ' + (pendingList.length - 8) + ' แผลดวล',
+      "size": "xxs",
+      "color": "#94A3B8",
+      "align": "center",
+      "margin": "xs"
+    }
+  ] : [];
+
+  return {
+    "type": "bubble",
+    "size": "kilo",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#0F172A",
+      "paddingAll": "md",
+      "contents": [
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            {
+              "type": "text",
+              "text": "📊 กระดานดวลสด",
+              "weight": "bold",
+              "color": "#FFFFFF",
+              "size": "sm",
+              "flex": 1
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "backgroundColor": "#059669",
+              "cornerRadius": "sm",
+              "paddingStart": "8px",
+              "paddingEnd": "8px",
+              "paddingTop": "2px",
+              "paddingBottom": "2px",
+              "contents": [
+                { "type": "text", "text": 'รอคู่ ' + pendingList.length + ' แผล', "color": "#FFFFFF", "size": "xxs", "weight": "bold" }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "แตะปุ่มเพื่อรับดวล หรือพิมพ์ ต[เลข] ได้ทันที 🚀",
+          "color": "#94A3B8",
+          "size": "xxs",
+          "margin": "xs"
+        }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "spacing": "xs",
+      "paddingAll": "sm",
+      "contents": itemBoxes.concat(overflowNotice)
+    },
+    "footer": {
+      "type": "box",
+      "layout": "horizontal",
+      "spacing": "xs",
+      "paddingAll": "sm",
+      "contents": [
+        {
+          "type": "button",
+          "style": "secondary",
+          "height": "sm",
+          "color": "#F1F5F9",
+          "action": {
+            "type": "message",
+            "label": "🔄 รีเฟรช",
+            "text": "กระดานดวล"
+          }
+        },
+        {
+          "type": "button",
+          "style": "secondary",
+          "height": "sm",
+          "color": "#F1F5F9",
+          "action": {
+            "type": "message",
+            "label": "📖 กติกา",
+            "text": "กติกา"
+          }
+        }
+      ]
+    }
+  };
+}
+
 function constructRoundSummaryFlex(finalTime, targetMin, targetMax, rocketName) {
   var isLowWin = finalTime < targetMin;
   var isHighWin = finalTime > targetMax;
-  var outcomeTitle = isLowWin ? "🔻 ฝั่งต่ำ (ชล)" : (isHighWin ? "🔺 ฝั่งสูง (ชถ)" : "🎯 ในราคาช่าง (คืนแต้ม)");
+  var outcomeTitle = isLowWin ? "🔻 ฝั่งต่ำ (ชถ/ชย)" : (isHighWin ? "🔺 ฝั่งสูง (ชล/ไล่)" : "🎯 ในราคาช่าง (คืนแต้ม)");
   var outcomeColor = isLowWin ? "#DC2626" : (isHighWin ? "#16A34A" : "#D97706");
 
   var bodyContents = [

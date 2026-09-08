@@ -891,11 +891,11 @@ export default function App() {
       let creatorAvatar = '👤';
       
       if (b.type === 'range') {
-        const sideText = b.playerLowId ? 'ล' : 'ถ';
+        const sideText = b.playerLowId ? 'ถ' : 'ล';
         creatorText = `${b.rangeMin}-${b.rangeMax}${sideText}${b.amount} 🚀`;
         creatorName = b.playerLowId ? b.playerLowName : b.playerHighName;
       } else {
-        const prefix = b.playerLowId ? 'ชล' : 'ชย';
+        const prefix = b.playerLowId ? 'ชถ' : 'ชล';
         creatorText = `${prefix}${b.amount} 🚀`;
         creatorName = b.playerLowId ? b.playerLowName : b.playerHighName;
       }
@@ -1384,13 +1384,13 @@ export default function App() {
       const match = clean.match(rangeRegex);
       rangeMin = parseInt(match[1]);
       rangeMax = parseInt(match[2]);
-      side = ['ล', 'ต', 'ต่ำ'].includes(match[3]) ? 'low' : 'high';
+      side = ['ถ', 'ต', 'ต่ำ'].includes(match[3]) ? 'low' : 'high';
       amount = parseInt(match[4]);
       betType = 'range';
     } else if (simpleRegex.test(clean)) {
       const match = clean.match(simpleRegex);
       const sub = match[1];
-      side = ['ชล', 'ล', 'ไล่', 'ต', 'ต่ำ'].includes(sub) ? 'low' : 'high';
+      side = ['ชถ', 'ชย', 'ถอย', 'ยั่ง', 'ถ', 'ย', 'ต่ำ'].includes(sub) ? 'low' : 'high';
       amount = parseInt(match[2]);
       betType = 'high_low';
     } else {
@@ -2254,9 +2254,9 @@ export default function App() {
                     <div className="flex justify-between items-center text-xs font-bold">
                       <span>คาดการณ์ผลชนะ:</span>
                       {Number(customRocketTime || 0) < Number(targetMin || 330) ? (
-                        <span className="px-2.5 py-1 bg-blue-100 text-blue-800 font-black rounded-lg text-xs flex items-center gap-1">🔵 ฝั่งต่ำ (LOW / ชล) ชนะ</span>
+                        <span className="px-2.5 py-1 bg-blue-100 text-blue-800 font-black rounded-lg text-xs flex items-center gap-1">🔵 ฝั่งต่ำ (LOW / ชถ) ชนะ</span>
                       ) : Number(customRocketTime || 0) > Number(targetMax || 380) ? (
-                        <span className="px-2.5 py-1 bg-rose-100 text-rose-800 font-black rounded-lg text-xs flex items-center gap-1">🔴 ฝั่งสูง (HIGH / ชถ) ชนะ</span>
+                        <span className="px-2.5 py-1 bg-rose-100 text-rose-800 font-black rounded-lg text-xs flex items-center gap-1">🔴 ฝั่งสูง (HIGH / ชล) ชนะ</span>
                       ) : (
                         <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-black rounded-lg text-xs flex items-center gap-1">🎯 ในราคาช่าง (RANGE)</span>
                       )}
@@ -2442,8 +2442,8 @@ export default function App() {
                       <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
                         <tr>
                           <th className="py-2.5 px-3">Order #</th>
-                          <th className="py-2.5 px-3">ฝั่งต่ำ (Low / ชล)</th>
-                          <th className="py-2.5 px-3">ฝั่งสูง (High / ชถ)</th>
+                          <th className="py-2.5 px-3">ฝั่งต่ำ (Low / ชถ)</th>
+                          <th className="py-2.5 px-3">ฝั่งสูง (High / ชล)</th>
                           <th className="py-2.5 px-3 text-right">ยอดดวล</th>
                           <th className="py-2.5 px-3 text-center">ประเภทราคา</th>
                           <th className="py-2.5 px-3 text-center">สถานะ</th>
