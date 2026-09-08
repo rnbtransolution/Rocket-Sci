@@ -351,8 +351,7 @@ export async function adminBroadcastVoidRound(targetId) {
 }
 
 export async function adminBroadcastRuleGuide(targetId) {
-  const ruleGuideFlex = constructRuleGuideFlex();
-  return await sendAdminMessageToLine(targetId || 'ALL', ruleGuideFlex);
+  return await sendAdminMessageToLine(targetId || 'ALL', RULE_GUIDE_TEXT);
 }
 
 export async function adminBroadcastScamWarning(targetId) {
@@ -696,8 +695,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
 
   // H. RULE / GUIDE COMMAND ("กติกา", "rule", "rules", "วิธีเล่น", "คู่มือ")
   if (clean === 'กติกา' || clean === 'rule' || clean === 'rules' || clean === 'วิธีเล่น' || clean === 'คู่มือ') {
-    const ruleFlex = constructRuleGuideFlex();
-    await replyToLine(replyToken, ruleFlex, userId);
+    await replyToLine(replyToken, RULE_GUIDE_TEXT, userId);
     return;
   }
 
@@ -1095,11 +1093,11 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
     }
   }
 
-  // 2. Betting commands (e.g., "ล200", "ถ500", "+5ชล200", "+10ชล100", "-10ชถ500", "300-380ล", "300-380ล500 ชตย")
+  // 2. Betting commands (e.g., "ล200", "ถ500", "+5ชล200", "+10ชล100", "-10ชถ500", "330-380ล", "330-380ล500 ชตย")
   const isChotoy = clean.includes('ชตย') || text.includes('ชตย');
   const cleanBetText = clean.replace(/ชตย/g, '').trim();
 
-  // Format 1: Custom Range [Min][- or /][Max][keywords][amount?] (e.g. "300-380ล", "300-380ถ", "300-380ล1000", "300-380ล500 ชตย")
+  // Format 1: Custom Range [Min][- or /][Max][keywords][amount?] (e.g. "300-350ล", "350-400ถ", "300-350ล1000", "300-350ล500 ชตย")
   const rangeBetRegex = /^(\d+)[-/](\d+)([a-zA-Z\u0e00-\u0e7f]+)(\d*)?$/;
   if (rangeBetRegex.test(cleanBetText)) {
     const match = cleanBetText.match(rangeBetRegex);
@@ -1116,18 +1114,18 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
       // 1. Check low-to-high order (minVal must be strictly less than maxVal)
       if (minVal >= maxVal) {
         const orderErrMsg = groupId
-          ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-380${cmd} (คุณระบุ ${minVal}-${maxVal})`
-          : `⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-380${cmd} (คุณระบุ ${minVal}-${maxVal})`;
+          ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-350${cmd} (คุณระบุ ${minVal}-${maxVal})`
+          : `⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-350${cmd} (คุณระบุ ${minVal}-${maxVal})`;
         await replyToLine(replyToken, orderErrMsg, userId);
         return true;
       }
 
-      // 2. Check strict 80-second range window
-      if (maxVal - minVal !== 80) {
+      // 2. Check strict 50-second range window
+      if (maxVal - minVal !== 50) {
         const diff = maxVal - minVal;
         const windowErrMsg = groupId
-          ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ช่วงราคาต้องห่างกัน 80 วินาทีพอดีครับ เช่น 300-380${cmd} (คุณระบุ ${minVal}-${maxVal} ห่าง ${diff} วิ)`
-          : `⚠️ ช่วงราคาต้องห่างกัน 80 วินาทีพอดีครับ เช่น 300-380${cmd} (คุณระบุ ${minVal}-${maxVal} ห่าง ${diff} วิ)`;
+          ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ช่วงราคาต้องห่างกัน 50 วินาทีพอดีครับ เช่น 300-350${cmd} (คุณระบุ ${minVal}-${maxVal} ห่าง ${diff} วิ)`
+          : `⚠️ ช่วงราคาต้องห่างกัน 50 วินาทีพอดีครับ เช่น 300-350${cmd} (คุณระบุ ${minVal}-${maxVal} ห่าง ${diff} วิ)`;
         await replyToLine(replyToken, windowErrMsg, userId);
         return true;
       }
@@ -2054,7 +2052,7 @@ export function constructRuleGuideFlex() {
       "type": "box",
       "layout": "vertical",
       "backgroundColor": "#0A3D34",
-      "paddingAll": "md",
+      "paddingAll": "sm",
       "contents": [
         {
           "type": "text",
@@ -2066,7 +2064,7 @@ export function constructRuleGuideFlex() {
         },
         {
           "type": "text",
-          "text": "📖 คู่มือคีย์เวิร์ด & กติกาการดวล",
+          "text": "📖 คู่มือคีย์เวิร์ดกติกาการเล่น",
           "weight": "bold",
           "color": "#FFFFFF",
           "size": "sm",
@@ -2078,7 +2076,7 @@ export function constructRuleGuideFlex() {
     "body": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "sm",
+      "spacing": "xs",
       "paddingAll": "sm",
       "contents": [
         {
@@ -2090,7 +2088,7 @@ export function constructRuleGuideFlex() {
           "contents": [
             {
               "type": "text",
-              "text": "1️⃣ แทงตามราคาช่าง (ปรับได้ ±5 / ±10)",
+              "text": "📌 กฏที่ 1: เล่นราคาช่าง",
               "weight": "bold",
               "color": "#065F46",
               "size": "xs",
@@ -2098,7 +2096,7 @@ export function constructRuleGuideFlex() {
             },
             {
               "type": "text",
-              "text": "• ฝั่งต่ำ (ชล / ล): ทายเวลาต่ำกว่าราคาช่าง\n  คีย์เวิร์ด: ชล, ล (ปรับได้: +5ชล, -5ชล, +10ชล, -10ชล)\n• ฝั่งสูง (ชถ / ถ): ทายเวลาสูงกว่าราคาช่าง\n  คีย์เวิร์ด: ชถ, ถ, ชย (ปรับได้: +5ชถ, -5ชถ, +10ชถ, -10ชถ)\n💡 ตัวอย่าง: ชล500, +5ชล1000, ชถ500, -10ชถ200\n(ขั้นต่ำ 100 pt / ไม่ระบุยอดจะตั้งต้นที่ 500 pt)",
+              "text": "🎉 ทายว่าชนะ (สูง):\n• ช่างไล่ / ชล / ไล่ / ลง (ปรับ ±5: +5ชล, -5ชล)\n💵 เช่น ชล100, ชล1000, +5ชล500\n\n👊 ทายว่าแพ้ (ต่ำ):\n• ช่างยั่ง / ช่างถอย / ชย / ชถ / ถอย (ปรับ ±5: +5ชถ, -5ชถ)\nเช่น ชถ100, ชถ1000, -5ชถ500",
               "color": "#047857",
               "size": "xxs",
               "wrap": true,
@@ -2115,7 +2113,7 @@ export function constructRuleGuideFlex() {
           "contents": [
             {
               "type": "text",
-              "text": "2️⃣ เปิดช่วงราคาเอง (ช่วงห่าง 80 วิพอดี)",
+              "text": "📌 กฏที่ 2: การเปิดราคาเอง (ช่วงห่าง 50 วิพอดี)",
               "weight": "bold",
               "color": "#0369A1",
               "size": "xs",
@@ -2123,58 +2121,8 @@ export function constructRuleGuideFlex() {
             },
             {
               "type": "text",
-              "text": "• รูปแบบ: [เวลาต่ำ]-[เวลาสูง][ฝั่ง][แต้ม]\n  เช่น 300-380ล500 (เปิดต่ำ) หรือ 350-430ถ1000 (เปิดสูง)\n• กติกา: ช่วงราคาต้องห่างกัน 80 วินาทีพอดี และระบุจากน้อยไปมาก\n• เผื่อช่างไม่ต่อย: พิมพ์ \"ชตย\" ต่อท้าย เช่น 300-380ล500 ชตย",
+              "text": "💰 เปิดราคาเอง (ช่วงห่าง 50 วิพอดี):\n• 300-350ล500 | 300-350ถ500\n• 350-400ล500 | 350-400ถ500\n\n⬆️ ช่างต่อยยกเลิก (ชตย):\nใส่ ชตย หลังจำนวนเงิน เช่น\n• 300-350ล500 ชตย | 350-400ถ500 ชตย",
               "color": "#0284C7",
-              "size": "xxs",
-              "wrap": true,
-              "margin": "xs"
-            }
-          ]
-        },
-        {
-          "type": "box",
-          "layout": "vertical",
-          "backgroundColor": "#FAF5FF",
-          "cornerRadius": "md",
-          "paddingAll": "sm",
-          "contents": [
-            {
-              "type": "text",
-              "text": "3️⃣ การรับแผลดวล (ขั้นต่ำ 20%)",
-              "weight": "bold",
-              "color": "#6B21A8",
-              "size": "xs",
-              "wrap": true
-            },
-            {
-              "type": "text",
-              "text": "• วิธีที่ 1: แตะปุ่มแต้มใต้การ์ดแผลดวลได้ทันที (20%, 40%, 80%, 100%)\n• วิธีที่ 2 (พิมพ์คำสั่ง):\n  - รับเต็มยอด: ต [เลขบิล] เช่น ต03 หรือ ต1303\n  - รับบางส่วน: ต [เลขบิล] [แต้ม] เช่น ต03 200 หรือ 03 200\n💡 ขั้นต่ำการรับแผลคือ 20% ของยอดแผลดวล",
-              "color": "#7E22CE",
-              "size": "xxs",
-              "wrap": true,
-              "margin": "xs"
-            }
-          ]
-        },
-        {
-          "type": "box",
-          "layout": "vertical",
-          "backgroundColor": "#FFF1F2",
-          "cornerRadius": "md",
-          "paddingAll": "sm",
-          "contents": [
-            {
-              "type": "text",
-              "text": "4️⃣ การยกเลิกแผลดวล",
-              "weight": "bold",
-              "color": "#9F1239",
-              "size": "xs",
-              "wrap": true
-            },
-            {
-              "type": "text",
-              "text": "• แตะปุ่ม \"⛔ ยกเลิก\" ใต้การ์ดแผลของตนเอง\n• หรือพิมพ์: ยกเลิก [เลขบิล] เช่น ยกเลิก 03 หรือ ยกเลิก 1303\n💡 ยกเลิกได้เฉพาะเจ้าของแผล และต้องยังไม่มีคู่ดวลมารับ",
-              "color": "#BE123C",
               "size": "xxs",
               "wrap": true,
               "margin": "xs"
@@ -2203,6 +2151,35 @@ export function constructRuleGuideFlex() {
     }
   };
 }
+
+export const RULE_GUIDE_TEXT = `📖 [คู่มือคีย์เวิร์ดกติกาการเล่น]
+
+📌 กฏที่ 1: เล่นราคาช่าง
+
+🎉 ทายว่าชนะ (สูง):
+• ช่างไล่ / ชล / ไล่ / ลง
+• ปรับแต้มต่อ: +5ชล, -5ชล
+💵 พิมพ์คีย์เวิร์ดตามด้วยจำนวนเงิน (ตัวเลขเท่านั้น)
+เช่น ชล100 , ชล1000 , ชล10000
+
+👊 ทายว่าแพ้ (ต่ำ):
+• ช่างยั่ง / ช่างถอย / ชย / ชถ / ถอย
+• ปรับแต้มต่อ: +5ชถ, -5ชถ
+เช่น ชถ100 , ชถ1000
+
+-----------------------------
+
+📌 กฏที่ 2: การเปิดราคาเอง (กรณีช่างไม่ต่อย / ต้องมีเครดิตพอ)
+
+💰 การเปิดราคาเอง (เปิดแผลสดใหม่):
+⚠️ ช่วงราคาต้องห่างกัน 50 วิพอดี เช่น
+• 300-350ล500 | 300-350ถ500
+• 350-400ล500 | 350-400ถ500
+
+⬆️ ช่างต่อยยกเลิก (ชตย) 
+ใส่ ชตย หลังจำนวนเงิน เช่น
+• 300-350ล500 ชตย
+• 350-400ถ500 ชตย`;
 
 export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy, userTypedCmd = null, isPreQuote = false) {
   const sideShort = side === 'low' ? 'ล' : 'ถ';
