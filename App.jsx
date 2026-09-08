@@ -379,6 +379,12 @@ export default function App() {
       } else if (data.activeGroupId) {
         setLineGroups([{ id: data.activeGroupId, name: `🚀 กลุ่มดวลสด LINE (#${data.activeGroupId.slice(-4)})`, lastMessage: 'เชื่อมต่อสำเร็จ', timestamp: 'Live' }]);
       }
+      if (data.activeRound) {
+        if (data.activeRound.name) setRocketName(prev => (!prev || prev === 'ช่างบั้งไฟสด') ? data.activeRound.name : prev);
+        if (data.activeRound.targetMin) setTargetMin(prev => (!prev ? String(data.activeRound.targetMin) : prev));
+        if (data.activeRound.targetMax) setTargetMax(prev => (!prev ? String(data.activeRound.targetMax) : prev));
+        if (data.activeRound.isChotoy !== undefined) setQuoteIsChotoy(Boolean(data.activeRound.isChotoy));
+      }
       try {
         if (typeof window !== 'undefined') {
           localStorage.setItem('rocket_sci_dashboard_cache', JSON.stringify(data));
@@ -2249,7 +2255,26 @@ export default function App() {
                   <div className="p-3.5 bg-white rounded-xl border border-slate-200 flex flex-col justify-center space-y-1.5">
                     <div className="flex justify-between items-center text-xs font-bold text-slate-600">
                       <span>ราคาช่างเปรียบเทียบ:</span>
-                      <span className="font-mono text-slate-800">{targetMin || 330} - {targetMax || 380}s</span>
+                      <div className="flex items-center gap-1 font-mono">
+                        <input
+                          type="number"
+                          step="1"
+                          value={targetMin}
+                          onChange={(e) => setTargetMin(e.target.value)}
+                          className="w-14 bg-slate-50 border border-slate-300 text-slate-900 font-bold px-1.5 py-0.5 rounded text-xs text-center focus:ring-1 focus:ring-sky-500 focus:outline-none"
+                          placeholder="330"
+                        />
+                        <span className="text-slate-400">-</span>
+                        <input
+                          type="number"
+                          step="1"
+                          value={targetMax}
+                          onChange={(e) => setTargetMax(e.target.value)}
+                          className="w-14 bg-slate-50 border border-slate-300 text-slate-900 font-bold px-1.5 py-0.5 rounded text-xs text-center focus:ring-1 focus:ring-sky-500 focus:outline-none"
+                          placeholder="380"
+                        />
+                        <span className="text-slate-500 font-bold">s</span>
+                      </div>
                     </div>
                     <div className="flex justify-between items-center text-xs font-bold">
                       <span>คาดการณ์ผลชนะ:</span>

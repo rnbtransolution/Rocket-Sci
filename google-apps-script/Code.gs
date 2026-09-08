@@ -283,11 +283,16 @@ function getLineGroups() {
 function adminOpenRound(name) {
   var ss = SpreadsheetApp.openById(SHEET_ID);
   var rSheet = ss.getSheetByName('Rockets');
+  var activeRound = getActiveRocketRound();
+  var minVal = activeRound.targetMin || 330;
+  var maxVal = activeRound.targetMax || 380;
   if (rSheet) {
     var rData = rSheet.getDataRange().getValues();
     var found = false;
     for (var i = 1; i < rData.length; i++) {
       if (rData[i][0] === name) {
+        rSheet.getRange(i + 1, 2).setValue(minVal);
+        rSheet.getRange(i + 1, 3).setValue(maxVal);
         rSheet.getRange(i + 1, 4).setValue('ACTIVE');
         found = true;
       } else if (rData[i][3] === 'ACTIVE') {
@@ -295,7 +300,7 @@ function adminOpenRound(name) {
       }
     }
     if (!found) {
-      rSheet.appendRow([name, 330, 380, 'ACTIVE']);
+      rSheet.appendRow([name, minVal, maxVal, 'ACTIVE']);
     }
   }
   setRocketRoundStatus('ACTIVE');
@@ -1131,10 +1136,8 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   var openRoundRegex = /^(เปิดรอบ|เปิดรับดวล)$/i;
   if (openRoundRegex.test(clean)) {
     setRocketRoundStatus('ACTIVE');
-    var activeProps = PropertiesService.getScriptProperties();
-    var activeMin = Number(activeProps.getProperty('ACTIVE_MIN')) || 800;
-    var activeMax = Number(activeProps.getProperty('ACTIVE_MAX')) || 880;
-    replyToLine(replyToken, '🚀 เปิดรับดวลแล้วครับ | ราคาปัจจุบัน: ' + (activeMin / 10) + '-' + (activeMax / 10) + 'วิ (window=' + (activeMax - activeMin) + 'cs)', userId);
+    var activeRound = getActiveRocketRound();
+    replyToLine(replyToken, '🚀 เปิดรับดวลแล้วครับ | บั้งไฟ: ' + activeRound.name + ' | ราคาช่าง: ' + activeRound.targetMin + '-' + activeRound.targetMax + ' วิ', userId);
     return;
   }
 
@@ -1144,22 +1147,16 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
     var qm = rawTrimmed.match(adminQuoteRegex) || clean.match(adminQuoteRegex);
     var qMin = parseInt(qm[2]);
     var qMax = parseInt(qm[3]);
-    var qWindow = qMax - qMin;
-    if (qWindow !== 80) {
-      replyToLine(replyToken,
-        '⚠️ ราคาไม่ถูกต้อง! window = ' + qWindow + 'cs\n\nกฤษฎสำคัญ: rMax − rMin ต้อง = 80cs (8.0วิ)\nตัวอย่าง: ราคา800-880 (ช่วง 80.0-88.0วิ)\nหรือ ราคา760-840 (ช่วง 76.0-84.0วิ)',
-        userId
-      );
+    if (qMin >= qMax) {
+      replyToLine(replyToken, '⚠️ ช่วงราคาไม่ถูกต้อง! ค่าเริ่มต้นต้องน้อยกว่าค่าสิ้นสุด (เช่น ราคา330-380)', userId);
       return;
     }
-    PropertiesService.getScriptProperties().setProperties({
-      'ACTIVE_MIN': String(qMin),
-      'ACTIVE_MAX': String(qMax)
-    });
-    var quoteNotice = '📍 [ราคาช่างประกาศ]: ' + (qMin / 10) + 'วิ – ' + (qMax / 10) + 'วิ (window ' + qWindow + 'cs = 8.0s)\n\nตัวเลือกความเสี่ยง:\n• -10: ' + ((qMin - 10) / 10) + '-' + ((qMax - 10) / 10) + 'วิ  → ก่อนราคา − 1.0วิ\n• -5:  ' + ((qMin - 5) / 10) + '-' + ((qMax - 5) / 10) + 'วิ  → ก่อนราคา − 0.5วิ\n• ปกติ: ' + (qMin / 10) + '-' + (qMax / 10) + 'วิ  → ราคาช่าง\n• +5:  ' + ((qMin + 5) / 10) + '-' + ((qMax + 5) / 10) + 'วิ  → หลังราคา +0.5วิ\n• +10: ' + ((qMin + 10) / 10) + '-' + ((qMax + 10) / 10) + 'วิ  → หลังราคา +1.0วิ';
+    var curRound = getActiveRocketRound();
+    setActiveRocketRound(curRound.name, qMin, qMax, curRound.isChotoy);
+    var quoteNotice = '📍 [ราคาช่างประกาศ]: ' + qMin + ' – ' + qMax + ' วิ\n\nตัวเลือกปรับราคา (กติกา 50 วิ):\n• -10: ' + (qMin - 10) + '-' + (qMax - 10) + 'วิ (ชล / ชถ)\n• -5:  ' + (qMin - 5) + '-' + (qMax - 5) + 'วิ (ชล / ชถ)\n• ปกติ: ' + qMin + '-' + qMax + 'วิ (ชล / ชถ)\n• +5:  ' + (qMin + 5) + '-' + (qMax + 5) + 'วิ (ชล / ชถ)\n• +10: ' + (qMin + 10) + '-' + (qMax + 10) + 'วิ (ชล / ชถ)';
     var groupTargetQ = groupId || getActiveGroupId();
     if (groupTargetQ) pushLineGroupMessage(groupTargetQ, quoteNotice);
-    replyToLine(replyToken, '✅ ตั้งราคาช่าง: ' + (qMin / 10) + '-' + (qMax / 10) + 'วิ เรียบร้อยครับ', userId);
+    replyToLine(replyToken, '✅ ตั้งราคาช่าง: ' + qMin + '-' + qMax + ' วิ เรียบร้อยครับ', userId);
     return;
   }
 
@@ -1384,9 +1381,9 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
       return;
     }
 
-    var baseProps = PropertiesService.getScriptProperties();
-    rangeMin = Number(baseProps.getProperty('TARGET_MIN')) || Number(baseProps.getProperty('ACTIVE_MIN')) || 330;
-    rangeMax = Number(baseProps.getProperty('TARGET_MAX')) || Number(baseProps.getProperty('ACTIVE_MAX')) || 380;
+    var activeRound = getActiveRocketRound();
+    rangeMin = Number(activeRound.targetMin) || 330;
+    rangeMax = Number(activeRound.targetMax) || 380;
     rangeMin += offsetDelta;
     rangeMax += offsetDelta;
   }
@@ -1963,8 +1960,23 @@ function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmo
     let playerHighName = row[4] ? row[4].toString().trim() : '';
     const totalAmount = Number(row[5]) || 0;
     const betType = row[6] || 'range';
-    const rMin = row[7];
-    const rMax = row[8];
+    let rMin = row[7];
+    let rMax = row[8];
+    var activeRound = getActiveRocketRound();
+    var curTMin = Number(activeRound.targetMin) || 330;
+    var curTMax = Number(activeRound.targetMax) || 380;
+    if (Number(rMin) >= 700 && curTMin < 600) {
+      var offset = Number(rMin) - 810;
+      if (offset >= -50 && offset <= 50) {
+        rMin = curTMin + offset;
+        rMax = curTMax + offset;
+      } else {
+        rMin = curTMin;
+        rMax = curTMax;
+      }
+      sheet.getRange(i + 1, 8).setValue(rMin);
+      sheet.getRange(i + 1, 9).setValue(rMax);
+    }
     const targetGroupId = row[12] || '';
     
     const creatorId = playerLowId ? playerLowId : playerHighId;
@@ -2057,8 +2069,23 @@ function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmo
       const orderNo = row[0].toString().trim();
       const totalAmount = Number(row[5]) || 0;
       const betType = row[6] || 'range';
-      const rMin = row[7];
-      const rMax = row[8];
+      let rMin = row[7];
+      let rMax = row[8];
+      var activeRoundAuto = getActiveRocketRound();
+      var curTMinAuto = Number(activeRoundAuto.targetMin) || 330;
+      var curTMaxAuto = Number(activeRoundAuto.targetMax) || 380;
+      if (Number(rMin) >= 700 && curTMinAuto < 600) {
+        var offsetAuto = Number(rMin) - 810;
+        if (offsetAuto >= -50 && offsetAuto <= 50) {
+          rMin = curTMinAuto + offsetAuto;
+          rMax = curTMaxAuto + offsetAuto;
+        } else {
+          rMin = curTMinAuto;
+          rMax = curTMaxAuto;
+        }
+        sheet.getRange(i + 1, 8).setValue(rMin);
+        sheet.getRange(i + 1, 9).setValue(rMax);
+      }
       const targetGroupId = row[12] || '';
       
       let playerLowId = row[1] ? row[1].toString().trim() : '';
@@ -2515,7 +2542,9 @@ function getDashboardData(forceFresh) {
     bets: bets,
     chatLogs: chatLogs,
     activeGroupId: getActiveGroupId(),
-    lineGroups: getLineGroups()
+    lineGroups: getLineGroups(),
+    activeRound: getActiveRocketRound(),
+    roundStatus: PropertiesService.getScriptProperties().getProperty('ROUND_STATUS') || 'ACTIVE'
   };
 
   try {
@@ -2632,8 +2661,9 @@ function adminResolveBets(finalTime, targetMin, targetMax) {
   // 2. Read sheet values again to resolve matched bets
   const bData = bSheet.getDataRange().getValues();
   const timeSec = Number(finalTime);
-  const tMin = targetMin ? Number(targetMin) : (Number(PropertiesService.getScriptProperties().getProperty('TARGET_MIN')) || 330);
-  const tMax = targetMax ? Number(targetMax) : (Number(PropertiesService.getScriptProperties().getProperty('TARGET_MAX')) || 380);
+  const activeRound = getActiveRocketRound();
+  let tMin = (targetMin && Number(targetMin) > 0) ? Number(targetMin) : Number(activeRound.targetMin || 330);
+  let tMax = (targetMax && Number(targetMax) > 0) ? Number(targetMax) : Number(activeRound.targetMax || 380);
   
   for (let i = 1; i < bData.length; i++) {
     const row = bData[i];
@@ -2647,8 +2677,22 @@ function adminResolveBets(finalTime, targetMin, targetMax) {
       const pHighName = row[4];
       const amount = Number(row[5]);
       const type = row[6];
-      const rangeMin = row[7] ? Number(row[7]) : tMin;
-      const rangeMax = row[8] ? Number(row[8]) : tMax;
+      let rangeMin = row[7] ? Number(row[7]) : tMin;
+      let rangeMax = row[8] ? Number(row[8]) : tMax;
+      
+      // Self-heal corrupt legacy ranges if stored as >= 700 while tMin < 600
+      if (rangeMin >= 700 && tMin < 600) {
+        var offset = rangeMin - 810;
+        if (offset >= -50 && offset <= 50) {
+          rangeMin = tMin + offset;
+          rangeMax = tMax + offset;
+        } else {
+          rangeMin = tMin;
+          rangeMax = tMax;
+        }
+        bSheet.getRange(i + 1, 8).setValue(rangeMin);
+        bSheet.getRange(i + 1, 9).setValue(rangeMax);
+      }
       
       let isLowWinner = true;
       if (type === 'range' || (rangeMin && rangeMax)) {
@@ -2704,7 +2748,7 @@ function adminResolveBets(finalTime, targetMin, targetMax) {
   // 3. Broadcast Round Summary Flex to all active groups
   try {
     var ssInfo = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Rockets');
-    var rocketName = 'ช่างบั้งไฟสด';
+    var rocketName = (activeRound && activeRound.name) ? activeRound.name : 'ช่างบั้งไฟสด';
     if (ssInfo) {
       var rData = ssInfo.getDataRange().getValues();
       for (var r = 1; r < rData.length; r++) {
@@ -4859,6 +4903,14 @@ function adminDiscoverGroupIds() {
 }
 
 function adminBroadcastQuote(targetId, name, minVal, maxVal, isChotoy) {
+  var numMin = Number(minVal) || 330;
+  var numMax = Number(maxVal) || 380;
+  var roundName = (name && name.trim()) ? name.trim() : 'ช่างบั้งไฟสด';
+  var chotoyBool = (isChotoy === true || isChotoy === 'true');
+
+  setActiveRocketRound(roundName, numMin, numMax, chotoyBool);
+  adminOpenRound(roundName);
+
   var quoteFlex = {
     "type": "bubble",
     "size": "kilo",
@@ -4868,7 +4920,7 @@ function adminBroadcastQuote(targetId, name, minVal, maxVal, isChotoy) {
       "backgroundColor": "#BAE6FD",
       "paddingAll": "md",
       "contents": [
-        { "type": "text", "text": "\uD83D\uDE80 ราคาช่างเปิด \u27A1 " + (name || 'ช่างบั้งไฟสด'), "weight": "bold", "color": "#0369A1", "size": "sm", "align": "center", "wrap": true }
+        { "type": "text", "text": "\uD83D\uDE80 ราคาช่างเปิด \u27A1 " + roundName, "weight": "bold", "color": "#0369A1", "size": "sm", "align": "center", "wrap": true }
       ]
     },
     "body": {
@@ -4878,13 +4930,11 @@ function adminBroadcastQuote(targetId, name, minVal, maxVal, isChotoy) {
       "spacing": "sm",
       "paddingAll": "md",
       "contents": [
-        { "type": "text", "text": "\u23F1\uFE0F ช่วงราคา: " + minVal + "-" + maxVal + " วิ" + (isChotoy ? " (ชตย)" : ""), "weight": "bold", "color": "#0284C7", "size": "sm", "align": "center", "wrap": true },
+        { "type": "text", "text": "\u23F1\uFE0F ช่วงราคา: " + numMin + "-" + numMax + " วิ" + (chotoyBool ? " (ชตย)" : ""), "weight": "bold", "color": "#0284C7", "size": "sm", "align": "center", "wrap": true },
         { "type": "text", "text": "\u26A1 พิมพ์ ชล / ชถ (\u00B15, \u00B110) ได้ทันที", "color": "#64748B", "size": "xs", "align": "center", "wrap": true }
       ]
     }
   };
-  adminOpenRound(name);
-  setTargetMinMax(Number(minVal), Number(maxVal));
   return sendAdminMessageToLine(targetId || 'ALL', quoteFlex);
 }
 
@@ -5443,21 +5493,75 @@ function isRocketRoundClosed() {
 
 /**
  * Returns active round metadata.
- * @returns {{ name: string, status: string }}
+ * @returns {{ name: string, targetMin: number, targetMax: number, isChotoy: boolean, status: string }}
  */
 function getActiveRocketRound() {
-  var status = PropertiesService.getScriptProperties().getProperty('ROUND_STATUS') || 'ACTIVE';
-  return { name: 'ทั่วไป', status: status };
+  var props = PropertiesService.getScriptProperties();
+  var roundJson = props.getProperty('ACTIVE_ROUND_DATA');
+  if (roundJson) {
+    try {
+      var parsed = JSON.parse(roundJson);
+      if (parsed && parsed.name && parsed.targetMin && parsed.targetMax) {
+        return parsed;
+      }
+    } catch(_) {}
+  }
+  var name = props.getProperty('ACTIVE_ROCKET_NAME') || props.getProperty('ROCKET_NAME') || 'ช่างบั้งไฟสด';
+  var minVal = Number(props.getProperty('TARGET_MIN')) || 330;
+  var maxVal = Number(props.getProperty('TARGET_MAX')) || 380;
+  var isChotoy = props.getProperty('ACTIVE_IS_CHOTOY') === 'true';
+  var status = props.getProperty('ROUND_STATUS') || 'ACTIVE';
+  return {
+    name: name,
+    targetMin: minVal,
+    targetMax: maxVal,
+    isChotoy: isChotoy,
+    status: status
+  };
+}
+
+/**
+ * Set the active round details and target min/max in script properties.
+ * Overwrites any legacy keys (like ACTIVE_MIN/ACTIVE_MAX) so old centisecond 800/880 values can never persist.
+ */
+function setActiveRocketRound(name, minVal, maxVal, isChotoy) {
+  var props = PropertiesService.getScriptProperties();
+  var roundName = (name && name.trim()) ? name.trim() : 'ช่างบั้งไฟสด';
+  var numMin = Number(minVal) || 330;
+  var numMax = Number(maxVal) || 380;
+  var chotoyBool = (isChotoy === true || isChotoy === 'true');
+
+  var roundData = {
+    name: roundName,
+    targetMin: numMin,
+    targetMax: numMax,
+    isChotoy: chotoyBool,
+    status: 'ACTIVE',
+    openedAt: new Date().toISOString()
+  };
+
+  props.setProperties({
+    'ACTIVE_ROUND_DATA': JSON.stringify(roundData),
+    'ACTIVE_ROCKET_NAME': roundName,
+    'ROCKET_NAME': roundName,
+    'TARGET_MIN': String(numMin),
+    'TARGET_MAX': String(numMax),
+    'ACTIVE_MIN': String(numMin),
+    'ACTIVE_MAX': String(numMax),
+    'ACTIVE_IS_CHOTOY': String(chotoyBool),
+    'ROUND_STATUS': 'ACTIVE'
+  });
+
+  Logger.log('[ROUND] Set active round: ' + roundName + ' (' + numMin + '-' + numMax + 's, chotoy=' + chotoyBool + ')');
+  return roundData;
 }
 
 /**
  * Set the active target min/max range in script properties.
  */
 function setTargetMinMax(minVal, maxVal) {
-  var props = PropertiesService.getScriptProperties();
-  props.setProperty('TARGET_MIN', String(minVal));
-  props.setProperty('TARGET_MAX', String(maxVal));
-  Logger.log('[ROUND] Target range set: ' + minVal + '-' + maxVal);
+  var cur = getActiveRocketRound();
+  return setActiveRocketRound(cur.name, minVal, maxVal, cur.isChotoy);
 }
 
 /**

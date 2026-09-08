@@ -315,8 +315,12 @@ export async function adminBroadcastQuote(targetId, name, minVal, maxVal, isChot
       ]
     }
   };
-  db.setActiveRocketRound(name || 'ช่างบั้งไฟสด');
-  db.setTargetMinMax(Number(minVal), Number(maxVal));
+  const numMin = Number(minVal) || 330;
+  const numMax = Number(maxVal) || 380;
+  const roundName = (name && name.trim()) ? name.trim() : 'ช่างบั้งไฟสด';
+  const chotoyBool = Boolean(isChotoy);
+  db.setActiveRocketRound(roundName, numMin, numMax, chotoyBool);
+  db.setTargetMinMax(numMin, numMax);
   return await sendAdminMessageToLine(targetId || 'ALL', quoteFlex);
 }
 
@@ -1170,8 +1174,9 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
         return true;
       }
 
-      let activeMin = db.getTargetMin ? db.getTargetMin() : null;
-      let activeMax = db.getTargetMax ? db.getTargetMax() : null;
+      const activeRound = db.getActiveRocketRound ? db.getActiveRocketRound() : null;
+      let activeMin = (db.getTargetMin && db.getTargetMin()) || (activeRound && activeRound.targetMin) || null;
+      let activeMax = (db.getTargetMax && db.getTargetMax()) || (activeRound && activeRound.targetMax) || null;
       let isPreQuote = !activeMin || !activeMax;
 
       if (!isPreQuote) {

@@ -19,16 +19,20 @@ export function setTargetMinMax(minVal, maxVal) {
   if (minVal && maxVal && Number(minVal) < Number(maxVal)) {
     activeTargetMin = Number(minVal);
     activeTargetMax = Number(maxVal);
+    if (activeRocketRound) {
+      activeRocketRound.targetMin = activeTargetMin;
+      activeRocketRound.targetMax = activeTargetMax;
+    }
     applyQuoteToPreQuoteBets(activeTargetMin, activeTargetMax);
   }
 }
 
 export function getTargetMin() {
-  return activeTargetMin;
+  return activeTargetMin || activeRocketRound?.targetMin || null;
 }
 
 export function getTargetMax() {
-  return activeTargetMax;
+  return activeTargetMax || activeRocketRound?.targetMax || null;
 }
 
 // Applies official quote range (minVal, maxVal) to all pending pre_quote bets in current round
@@ -332,6 +336,8 @@ export function getDashboardData() {
     chatLogs: [...chatLogs],
     activeGroupId: activeGroupId,
     lineGroups: [...lineGroups],
+    activeRound: getActiveRocketRound(),
+    roundStatus: activeRocketRound?.status || 'ACTIVE',
   };
 }
 
@@ -1194,14 +1200,14 @@ export async function adminRejectTransaction(txId, reason) {
 
 export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxParam, sendPushCallback) {
   // Support both single target or range target (e.g. 330 - 380)
-  let targetMin = Number(targetMinOrTime) || 350;
-  let targetMax = targetMin;
+  const activeRound = getActiveRocketRound();
+  let targetMin = (targetMinOrTime && Number(targetMinOrTime) > 0) ? Number(targetMinOrTime) : (activeRound?.targetMin || 330);
+  let targetMax = (targetMaxParam && !isNaN(Number(targetMaxParam)) && Number(targetMaxParam) > 0) ? Number(targetMaxParam) : (activeRound?.targetMax || 380);
   let callback = sendPushCallback;
 
-  if (typeof targetMaxParam === 'number' || (typeof targetMaxParam === 'string' && targetMaxParam !== '' && !isNaN(Number(targetMaxParam)))) {
-    targetMax = Number(targetMaxParam);
-  } else if (typeof targetMaxParam === 'function') {
+  if (typeof targetMaxParam === 'function') {
     callback = targetMaxParam;
+    targetMax = activeRound?.targetMax || 380;
   }
 
   const numTime = Number(finalTime);
@@ -1262,8 +1268,23 @@ export async function adminResolveBets(finalTime, targetMinOrTime, targetMaxPara
 
       let isLowWinner = true;
       const timeSec = Number(finalTime);
-      const minSec = (type === 'range' && bet.rangeMin !== null && bet.rangeMax !== null) ? Number(bet.rangeMin) : Number(targetMin);
-      const maxSec = (type === 'range' && bet.rangeMin !== null && bet.rangeMax !== null) ? Number(bet.rangeMax) : Number(targetMax);
+      let minSec = (type === 'range' && bet.rangeMin !== null && bet.rangeMax !== null) ? Number(bet.rangeMin) : Number(targetMin);
+      let maxSec = (type === 'range' && bet.rangeMin !== null && bet.rangeMax !== null) ? Number(bet.rangeMax) : Number(targetMax);
+
+      // Self-heal corrupt legacy ranges
+      if (minSec >= 700 && targetMin < 600) {
+        const offset = minSec - 810;
+        if (offset >= -50 && offset <= 50) {
+          minSec = targetMin + offset;
+          maxSec = targetMax + offset;
+        } else {
+          minSec = targetMin;
+          maxSec = targetMax;
+        }
+        bet.rangeMin = minSec;
+        bet.rangeMax = maxSec;
+        updateRowInSheet('Bets', bet.orderNumber, { 7: minSec, 8: maxSec });
+      }
 
       if (timeSec < minSec) {
         isLowWinner = true; // Lower than min target -> Low (ชล) wins
@@ -1768,7 +1789,7 @@ export function getLineChatLogs() {
 }
 
 // --- ROCKET ROUND & FLOOD DEDUPLICATION HELPERS ---
-let activeRocketRound = { name: 'ทั่วไป', status: 'ACTIVE', startTime: new Date() };
+let activeRocketRound = { name: 'ช่างบั้งไฟสด', targetMin: 330, targetMax: 380, isChotoy: false, status: 'ACTIVE', startTime: new Date() };
 const userMessageHistory = new Map();
 
 export function isDuplicateGroupMessage(userId, text) {
@@ -1796,14 +1817,20 @@ export function isDuplicateGroupMessage(userId, text) {
   return false;
 }
 
-export function setActiveRocketRound(roundName) {
+export function setActiveRocketRound(roundName, minVal, maxVal, isChotoy) {
+  const tMin = minVal ? Number(minVal) : (activeRocketRound.targetMin || 330);
+  const tMax = maxVal ? Number(maxVal) : (activeRocketRound.targetMax || 380);
   activeRocketRound = {
-    name: roundName,
+    name: roundName || activeRocketRound.name || 'ช่างบั้งไฟสด',
+    targetMin: tMin,
+    targetMax: tMax,
+    isChotoy: Boolean(isChotoy),
     status: 'ACTIVE',
     startTime: new Date()
   };
-  activeTargetMin = null;
-  activeTargetMax = null;
+  activeTargetMin = tMin;
+  activeTargetMax = tMax;
+  applyQuoteToPreQuoteBets(tMin, tMax);
   return activeRocketRound;
 }
 
