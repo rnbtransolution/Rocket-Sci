@@ -2526,10 +2526,10 @@ function getDashboardData(forceFresh) {
     });
   }
 
-  // 2. Transactions sheet
+  // 2. Transactions sheet (compacted to 80 most recent)
   const tData = ss.getSheetByName('Transactions').getDataRange().getValues();
   const transactions = [];
-  for (let i = tData.length - 1; i >= 1; i--) { // Reverse order = newest first
+  for (let i = tData.length - 1; i >= 1 && transactions.length < 80; i--) { // Reverse order = newest first
     const row = tData[i];
     transactions.push({
       id: row[0].toString(),
@@ -2545,10 +2545,11 @@ function getDashboardData(forceFresh) {
     });
   }
 
-  // 3. Bets sheet
+  // 3. Bets sheet (compacted to 100 most recent)
   const bData = ss.getSheetByName('Bets').getDataRange().getValues();
   const bets = [];
-  for (let i = 1; i < bData.length; i++) {
+  const startBetIdx = Math.max(1, bData.length - 100);
+  for (let i = startBetIdx; i < bData.length; i++) {
     const row = bData[i];
     bets.push({
       id: 'bet_' + row[0].toString(),
@@ -2571,7 +2572,7 @@ function getDashboardData(forceFresh) {
   const chatLogs = [];
   try {
     const cData = ss.getSheetByName('LineChatLogs').getDataRange().getValues();
-    const startLogIdx = Math.max(1, cData.length - 60);
+    const startLogIdx = Math.max(1, cData.length - 50);
     for (let i = startLogIdx; i < cData.length; i++) {
       const row = cData[i];
       chatLogs.push({

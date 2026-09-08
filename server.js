@@ -382,7 +382,8 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 process.on('uncaughtException', (err) => {
-  console.error('[Server] Uncaught Exception:', err);
+  console.error('[Server] Fatal Uncaught Exception (restarting cleanly via PM2):', err);
+  setTimeout(() => process.exit(1), 1000);
 });
 
 startServer();

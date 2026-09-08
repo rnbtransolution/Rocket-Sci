@@ -414,7 +414,7 @@ export function generatePassportStyleId() {
 }
 
 // Get or create a unique short Passport-style ID mapped to a raw LINE User ID.
-export async function getOrCreateShortUserId(rawLineUserId, displayName) {
+export function getOrCreateShortUserId(rawLineUserId, displayName) {
   if (!rawLineUserId) return '';
   const searchId = rawLineUserId.toString().trim();
   
@@ -479,8 +479,8 @@ export function getRawLineUserId(shortUserId) {
 }
 
 // retrieve a player's balance, registering them if they do not exist
-export async function getPlayerBalance(userId, displayName) {
-  const shortUserId = await getOrCreateShortUserId(userId, displayName);
+export function getPlayerBalance(userId, displayName) {
+  const shortUserId = getOrCreateShortUserId(userId, displayName);
   const searchId = cleanUserId(shortUserId);
   if (!searchId) return 0;
   
@@ -489,8 +489,9 @@ export async function getPlayerBalance(userId, displayName) {
 }
 
 // adjust a player's balance (adds or deducts credits with strict anti-overdraft protection)
-export async function adjustPlayerBalance(userId, delta, displayName) {
-  const shortUserId = await getOrCreateShortUserId(userId, displayName);
+// Synchronous and atomic to prevent microtask yield race conditions during rapid concurrent bets
+export function adjustPlayerBalance(userId, delta, displayName) {
+  const shortUserId = getOrCreateShortUserId(userId, displayName);
   const searchId = cleanUserId(shortUserId);
   if (!searchId) return false;
   

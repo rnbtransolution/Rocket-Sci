@@ -193,17 +193,26 @@ async function flushBatchUpdates() {
     const sheets = await getSheetsClient();
     if (!sheets || !spreadsheetId) return;
 
-    try {
-      await sheets.spreadsheets.values.batchUpdate({
-        spreadsheetId,
-        requestBody: {
-          valueInputOption: 'USER_ENTERED',
-          data: updatesToSend,
-        },
-      });
-      console.log(`[Google Sheets] Successfully flushed ${updatesToSend.length} cell updates via single batchUpdate`);
-    } catch (err) {
-      console.error('[Google Sheets] Error executing coalesced batchUpdate:', err.message || err);
+    let attempts = 0;
+    while (attempts < 3) {
+      try {
+        await sheets.spreadsheets.values.batchUpdate({
+          spreadsheetId,
+          requestBody: {
+            valueInputOption: 'USER_ENTERED',
+            data: updatesToSend,
+          },
+        });
+        console.log(`[Google Sheets] Successfully flushed ${updatesToSend.length} cell updates via single batchUpdate`);
+        break;
+      } catch (err) {
+        attempts++;
+        if (attempts >= 3) {
+          console.error('[Google Sheets] Error executing coalesced batchUpdate after 3 attempts:', err.message || err);
+        } else {
+          await new Promise(r => setTimeout(r, 800 * attempts));
+        }
+      }
     }
   });
 }
@@ -335,35 +344,44 @@ export function appendRowToSheet(sheetName, rowValues) {
     const sheets = await getSheetsClient();
     if (!sheets || !spreadsheetId) return;
 
-    try {
-      const res = await sheets.spreadsheets.values.append({
-        spreadsheetId,
-        range: `${sheetName}!A:A`,
-        valueInputOption: 'USER_ENTERED',
-        insertDataOption: 'INSERT_ROWS',
-        requestBody: {
-          values: [rowValues],
-        },
-      });
+    let attempts = 0;
+    while (attempts < 3) {
+      try {
+        const res = await sheets.spreadsheets.values.append({
+          spreadsheetId,
+          range: `${sheetName}!A:A`,
+          valueInputOption: 'USER_ENTERED',
+          insertDataOption: 'INSERT_ROWS',
+          requestBody: {
+            values: [rowValues],
+          },
+        });
 
-      // Update row index cache with the newly appended row
-      const updatedRange = res.data?.updates?.updatedRange;
-      if (updatedRange && rowValues[0]) {
-        const match = updatedRange.match(/!A(\d+)/);
-        if (match) {
-          const newRowIndex = parseInt(match[1], 10);
-          const cleanId = String(rowValues[0]).trim().toLowerCase();
-          let sheetMap = rowIndexCache.get(sheetName);
-          if (!sheetMap) {
-            sheetMap = new Map();
-            rowIndexCache.set(sheetName, sheetMap);
+        // Update row index cache with the newly appended row
+        const updatedRange = res.data?.updates?.updatedRange;
+        if (updatedRange && rowValues[0]) {
+          const match = updatedRange.match(/!A(\d+)/);
+          if (match) {
+            const newRowIndex = parseInt(match[1], 10);
+            const cleanId = String(rowValues[0]).trim().toLowerCase();
+            let sheetMap = rowIndexCache.get(sheetName);
+            if (!sheetMap) {
+              sheetMap = new Map();
+              rowIndexCache.set(sheetName, sheetMap);
+            }
+            sheetMap.set(cleanId, newRowIndex);
           }
-          sheetMap.set(cleanId, newRowIndex);
+        }
+        console.log(`[Google Sheets] Appended row to ${sheetName}`);
+        break;
+      } catch (err) {
+        attempts++;
+        if (attempts >= 3) {
+          console.error(`[Google Sheets] Error appending row to ${sheetName} after 3 attempts:`, err.message || err);
+        } else {
+          await new Promise(r => setTimeout(r, 800 * attempts));
         }
       }
-      console.log(`[Google Sheets] Appended row to ${sheetName}`);
-    } catch (err) {
-      console.error(`[Google Sheets] Error appending row to ${sheetName}:`, err.message || err);
     }
   });
 }
