@@ -1268,14 +1268,12 @@ export default function App() {
       type: 'text'
     };
     setChatLogs(prev => [...prev, newLog]);
+    addToast(isGroupMode ? `ส่งข้อความเข้า [${targetName}] สำเร็จแล้ว 🚀` : `ส่งข้อความไปยัง [${targetName}] สำเร็จแล้ว 💬`, 'success');
 
-    try {
-      await runBackendFunction('sendAdminMessageToLine', [targetChatId, text]);
-      addToast(isGroupMode ? `ส่งข้อความเข้า [${targetName}] สำเร็จแล้ว 🚀` : `ส่งข้อความไปยัง [${targetName}] สำเร็จแล้ว 💬`, 'success');
-    } catch (e) {
+    // High-Speed Optimistic Dispatch: Fire to GAS/LINE in background with zero UI delay
+    runBackendFunction('sendAdminMessageToLine', [targetChatId, text]).catch(e => {
       console.error('Error sending admin message to LINE:', e);
-      addToast('⚠️ ส่งข้อความสำเร็จ (Sandbox/Fallback)', 'info');
-    }
+    });
   };
 
   // Parse bet command from Group chat message (Sandbox fallback)

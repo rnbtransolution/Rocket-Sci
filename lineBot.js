@@ -287,7 +287,9 @@ export async function fetchLINEGroupName(groupId) {
   } catch (err) {
     console.error(`[LINE Group Summary Error for ${groupId}]:`, err);
   }
-  return null;
+  const fallback = 'ห้องดวลสด #' + groupId.slice(-4);
+  groupNameCache.set(groupId, fallback);
+  return fallback;
 }
 
 export async function adminBroadcastQuote(targetId, name, minVal, maxVal, isChotoy) {

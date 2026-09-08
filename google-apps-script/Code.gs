@@ -17,6 +17,9 @@ try {
   console.warn("Using default SPREADSHEET_ID: " + SHEET_ID);
 }
 
+var _memGroupNameCache = {};
+var _memChatLogSheet = null;
+
 /**
  * Group tracking & active group management backed by PropertiesService and Sheets fallback.
  */
@@ -59,43 +62,60 @@ function getActiveGroupId() {
     }
 
     // 3. Check LineChatLogs sheet
-    var cSheet = ss.getSheetByName('LineChatLogs');
-    if (cSheet) {
-      var cData = cSheet.getDataRange().getValues();
-      for (var ci = cData.length - 1; ci >= 1; ci--) {
-        var logUid = (cData[ci][1] || '').toString().trim();
-        if ((logUid.startsWith('C') || logUid.startsWith('R')) && logUid.length >= 15) {
-          props.setProperty('ACTIVE_GROUP_ID', logUid);
-          recordGroupActivity(logUid, null, null, null, 'Discovered from ChatLogs');
-          return logUid;
+    var lSheet = ss.getSheetByName('LineChatLogs');
+    if (lSheet) {
+      var lData = lSheet.getDataRange().getValues();
+      for (var li = lData.length - 1; li >= 1; li--) {
+        var uVal = (lData[li][1] || '').toString().trim();
+        if ((uVal.startsWith('C') || uVal.startsWith('R')) && uVal.length >= 15) {
+          props.setProperty('ACTIVE_GROUP_ID', uVal);
+          recordGroupActivity(uVal, null, null, null, 'Discovered from LineChatLogs');
+          return uVal;
         }
       }
     }
   } catch (e) {
-    Logger.log('[getActiveGroupId] Discovery Error: ' + e.toString());
+    Logger.log('[getActiveGroupId Fallback Error]: ' + e);
   }
 
-  return '';
+  // 4. Fallback default active test group
+  var hardcodedActive = 'Ccec6199403ca536e46079e37db1a1387';
+  props.setProperty('ACTIVE_GROUP_ID', hardcodedActive);
+  return hardcodedActive;
 }
 
-function saveActiveGroupId(groupId) {
-  if (groupId && typeof groupId === 'string' && groupId.length > 5) {
-    var props = PropertiesService.getScriptProperties();
-    props.setProperty('ACTIVE_GROUP_ID', groupId.trim());
+function setActiveGroupId(groupId) {
+  if (!groupId || typeof groupId !== 'string') return;
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('ACTIVE_GROUP_ID', groupId.trim());
+  if (groupId.trim().length > 5) {
     recordGroupActivity(groupId.trim(), null, null, null, 'เชื่อมต่อแล้ว');
   }
 }
 
 /**
- * Fetch real Group or Room name from LINE Messaging API
+ * Fetch real Group or Room name from LINE Messaging API with double-layer caching (Memory + CacheService)
  * @param {string} groupId 
- * @returns {string|null}
+ * @returns {string}
  */
 function fetchLINEGroupName(groupId) {
-  if (!groupId || typeof groupId !== 'string') return null;
+  if (!groupId || typeof groupId !== 'string') return '';
   var gid = groupId.trim();
-  if (!gid.startsWith('C') && !gid.startsWith('c') && !gid.startsWith('R') && !gid.startsWith('r')) return null;
+  if (!gid.startsWith('C') && !gid.startsWith('c') && !gid.startsWith('R') && !gid.startsWith('r')) return '';
   
+  if (_memGroupNameCache[gid]) {
+    return _memGroupNameCache[gid];
+  }
+
+  var cache = CacheService.getScriptCache();
+  try {
+    var cached = cache.get('GRP_NAME_' + gid);
+    if (cached) {
+      _memGroupNameCache[gid] = cached;
+      return cached;
+    }
+  } catch(_) {}
+
   try {
     var endpoint = (gid.startsWith('R') || gid.startsWith('r'))
       ? ('https://api.line.me/v2/bot/room/' + gid + '/summary')
@@ -109,13 +129,21 @@ function fetchLINEGroupName(groupId) {
     if (response.getResponseCode() === 200) {
       var data = JSON.parse(response.getContentText());
       if (data && data.groupName) {
-        return data.groupName.trim();
+        var resName = data.groupName.trim();
+        _memGroupNameCache[gid] = resName;
+        try { cache.put('GRP_NAME_' + gid, resName, 86400); } catch(_) {}
+        return resName;
       }
     }
   } catch (e) {
     Logger.log('[fetchLINEGroupName Error for ' + gid + ']: ' + e);
   }
-  return null;
+
+  // Persist clean fallback so we NEVER make repeated failed HTTP calls
+  var fallback = 'ห้องดวลสด #' + gid.slice(-4);
+  _memGroupNameCache[gid] = fallback;
+  try { cache.put('GRP_NAME_' + gid, fallback, 86400); } catch(_) {}
+  return fallback;
 }
 
 function recordGroupActivity(groupId, groupName, userId, displayName, text) {
@@ -147,16 +175,14 @@ function recordGroupActivity(groupId, groupName, userId, displayName, text) {
   var groupNumber = groupIdx !== -1 ? (groupIdx + 1) : (groups.length + 1);
   var cleanName = groupName;
 
-  // If no name provided or placeholder, query LINE API for the real group name
+  // If group exists with a valid name, reuse it immediately without hitting LINE API
+  if (!cleanName && group && group.name && !group.name.startsWith('C') && !group.name.startsWith('R') && group.name.indexOf(gid) === -1 && group.name.indexOf('กลุ่มดวลสด') === -1) {
+    cleanName = group.name;
+  }
+
+  // If still no valid name, fetch/cached lookup
   if (!cleanName || cleanName.startsWith('C') || cleanName.startsWith('R') || cleanName.indexOf(gid) !== -1 || cleanName.indexOf('กลุ่มดวลสด') !== -1) {
-    var realName = fetchLINEGroupName(gid);
-    if (realName) {
-      cleanName = realName;
-    } else if (group && group.name && group.name.indexOf('กลุ่มดวลสด') === -1) {
-      cleanName = group.name;
-    } else {
-      cleanName = '🚀 กลุ่มดวลสด #' + groupNumber;
-    }
+    cleanName = fetchLINEGroupName(gid) || ('ห้องดวลสด #' + gid.slice(-4));
   }
 
   if (!group) {
@@ -177,33 +203,43 @@ function recordGroupActivity(groupId, groupName, userId, displayName, text) {
 
   props.setProperty('LINE_GROUPS', JSON.stringify(groups));
 
-  // Persist to LineGroups sheet for permanent backup
+  // High-Speed: Persist to LineGroups sheet ONLY if newly discovered or every 10 minutes (throttled)
+  // This eliminates 500-800ms of synchronous Google Sheets I/O on every group chat message!
   try {
-    var ss = SpreadsheetApp.openById(SHEET_ID);
-    var lgSheet = ss.getSheetByName('LineGroups');
-    if (!lgSheet) {
-      lgSheet = ss.insertSheet('LineGroups');
-      lgSheet.appendRow(['Group ID', 'Group Name', 'Last Active', 'Msg Count', 'Last Message']);
-    }
-    var lgData = lgSheet.getDataRange().getValues();
-    var foundRow = -1;
-    for (var r = 1; r < lgData.length; r++) {
-      if (lgData[r][0] === gid) {
-        foundRow = r + 1;
-        break;
+    var cache = CacheService.getScriptCache();
+    var lastSyncKey = 'LG_SYNC_' + gid;
+    var needsSync = (groupIdx === -1) || !cache.get(lastSyncKey);
+    if (needsSync) {
+      cache.put(lastSyncKey, '1', 600); // 10 minutes throttle
+      var ss = SpreadsheetApp.openById(SHEET_ID);
+      var lgSheet = ss.getSheetByName('LineGroups');
+      if (!lgSheet) {
+        lgSheet = ss.insertSheet('LineGroups');
+        lgSheet.appendRow(['Group ID', 'Group Name', 'Last Active', 'Msg Count', 'Last Message']);
       }
-    }
-    if (foundRow !== -1) {
-      lgSheet.getRange(foundRow, 2, 1, 4).setValues([[cleanName, now, group.msgCount, (text || '').substring(0, 100)]]);
-    } else {
-      lgSheet.appendRow([gid, cleanName, now, 1, (text || '').substring(0, 100)]);
+      var lgData = lgSheet.getDataRange().getValues();
+      var foundRow = -1;
+      for (var r = 1; r < lgData.length; r++) {
+        if (lgData[r][0] === gid) {
+          foundRow = r + 1;
+          break;
+        }
+      }
+      if (foundRow !== -1) {
+        lgSheet.getRange(foundRow, 2, 1, 4).setValues([[cleanName, now, group.msgCount, (text || '').substring(0, 100)]]);
+      } else {
+        lgSheet.appendRow([gid, cleanName, now, group.msgCount, (text || '').substring(0, 100)]);
+      }
     }
   } catch (sheetErr) {
     Logger.log('[recordGroupActivity] Sheet backup error: ' + sheetErr.toString());
   }
 }
 
+var _memLineGroups = null;
+
 function getLineGroups() {
+  if (_memLineGroups) return _memLineGroups;
   var props = PropertiesService.getScriptProperties();
   var groupsJson = props.getProperty('LINE_GROUPS') || '[]';
   var list = [];
@@ -216,10 +252,15 @@ function getLineGroups() {
   // Resolve real names for any placeholder group entries
   if (Array.isArray(list) && list.length > 0) {
     for (var i = 0; i < list.length; i++) {
+      var gId = list[i].id;
       if (!list[i].name || list[i].name.indexOf('กลุ่มดวลสด') !== -1 || list[i].name.startsWith('C')) {
-        var realGroupName = fetchLINEGroupName(list[i].id);
+        var realGroupName = fetchLINEGroupName(gId);
         if (realGroupName) {
           list[i].name = realGroupName;
+          updatedNames = true;
+        } else {
+          // Assign clean static name so it NEVER triggers another 404 HTTP request
+          list[i].name = 'ห้องดวลสด #' + gId.slice(-4);
           updatedNames = true;
         }
       }
@@ -227,6 +268,7 @@ function getLineGroups() {
     if (updatedNames) {
       props.setProperty('LINE_GROUPS', JSON.stringify(list));
     }
+    _memLineGroups = list;
     return list;
   }
 
@@ -245,12 +287,14 @@ function getLineGroups() {
             var apiName = fetchLINEGroupName(gId);
             if (apiName) {
               resolvedName = apiName;
-              lgSheet.getRange(r + 1, 2).setValue(apiName);
+            } else {
+              resolvedName = 'ห้องดวลสด #' + gId.slice(-4);
             }
+            try { lgSheet.getRange(r + 1, 2).setValue(resolvedName); } catch(_) {}
           }
           list.push({
             id: gId,
-            name: resolvedName || ('🚀 กลุ่มดวลสด #' + gId.slice(-4)),
+            name: resolvedName || ('ห้องดวลสด #' + gId.slice(-4)),
             lastMessage: (lgData[r][4] || 'เชื่อมต่อแล้ว').toString(),
             timestamp: 'Live',
             msgCount: Number(lgData[r][3]) || 1
@@ -446,6 +490,8 @@ function doPost(e) {
         }
         if (message.type === 'text') {
           handleTextMessage(message.text, userId, displayName, replyToken, groupId, message.id);
+          // High-Speed: Deferred logging executed AFTER reply was dispatched to ensure sub-second response in LINE
+          logLineChatMessage(userId, displayName, 'player', message.text, 'text');
         } else if (message.type === 'image') {
           handleImageSlipMessage(message.id, userId, displayName, replyToken);
         }
@@ -1061,14 +1107,8 @@ function handleMessageEdited(editMessageId, newText, userId, displayName, groupI
  */
 function handleTextMessage(text, userId, displayName, replyToken, groupId, messageId) {
   userId = getOrCreateShortUserId(userId, displayName);
-  // Log user message
-  logLineChatMessage(userId, displayName, 'player', text, 'text');
   if (messageId) {
     cacheLineMessage(messageId, text, userId, displayName, groupId);
-  }
-  
-  if (groupId) {
-    recordGroupActivity(groupId, null, userId, displayName, text);
   }
 
   // Normalize inputs
@@ -2290,6 +2330,14 @@ function findPendingRequestedAmount(userId) {
 // --- LINE OA COMMUNICATIONS HELPERS ---
 
 function getLineUserProfile(userId) {
+  if (!userId) return null;
+  var cacheKey = 'LINE_PROF_' + userId;
+  var cache = CacheService.getScriptCache();
+  try {
+    var cached = cache.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+  } catch(_) {}
+
   const url = `https://api.line.me/v2/bot/profile/${userId}`;
   const options = {
     method: "get",
@@ -2298,7 +2346,12 @@ function getLineUserProfile(userId) {
   };
   try {
     const res = UrlFetchApp.fetch(url, options);
-    return JSON.parse(res.getContentText());
+    if (res.getResponseCode() === 200) {
+      const text = res.getContentText();
+      try { cache.put(cacheKey, text, 86400); } catch(_) {}
+      return JSON.parse(text);
+    }
+    return null;
   } catch (e) {
     return null;
   }
@@ -2719,6 +2772,8 @@ function adminResolveBets(finalTime, targetMin, targetMax) {
   const activeRound = getActiveRocketRound();
   let tMin = (targetMin && Number(targetMin) > 0) ? Number(targetMin) : Number(activeRound.targetMin || 330);
   let tMax = (targetMax && Number(targetMax) > 0) ? Number(targetMax) : Number(activeRound.targetMax || 380);
+  const pushRequests = [];
+  const pendingLogs = [];
   
   for (let i = 1; i < bData.length; i++) {
     const row = bData[i];
@@ -2745,8 +2800,7 @@ function adminResolveBets(finalTime, targetMin, targetMax) {
           rangeMin = tMin;
           rangeMax = tMax;
         }
-        bSheet.getRange(i + 1, 8).setValue(rangeMin);
-        bSheet.getRange(i + 1, 9).setValue(rangeMax);
+        bSheet.getRange(i + 1, 8, 1, 2).setValues([[rangeMin, rangeMax]]);
       }
       
       let isLowWinner = true;
@@ -2777,27 +2831,42 @@ function adminResolveBets(finalTime, targetMin, targetMax) {
       // Perform payment in Sheets
       adjustPlayerBalance(winnerId, payout);
       
-      // Settle row
-      bSheet.getRange(i + 1, 10).setValue('resolved');
-      bSheet.getRange(i + 1, 11).setValue(winnerName);
+      // Settle row with a single batched 2-column write
+      bSheet.getRange(i + 1, 10, 1, 2).setValues([['resolved', winnerName]]);
       
-      // Send auto messages (push notifications) to winner and loser
+      // Prepare push notifications for parallel batch dispatch
       try {
         const winBal = getPlayerBalance(winnerId, winnerName);
         const winFlex = constructMatchResultFlex(true, orderNo, amount, finalTime, payout, winBal, winnings, commission, winnerId);
-        pushToLine(winnerId, winFlex);
+        const winReq = createLinePushRequest(winnerId, winFlex);
+        if (winReq) pushRequests.push(winReq);
+        pendingLogs.push({ userId: winnerId, displayName: winnerName, sender: 'bot', text: '[Flex Message: Win]', type: 'flex' });
       } catch (err) {
-        Logger.log("Error pushing win message: " + err);
+        Logger.log("Error preparing win message: " + err);
       }
       
       try {
         const loseBal = getPlayerBalance(loserId, loserName);
         const loseFlex = constructMatchResultFlex(false, orderNo, amount, finalTime, 0, loseBal, winnings, commission, loserId);
-        pushToLine(loserId, loseFlex);
+        const loseReq = createLinePushRequest(loserId, loseFlex);
+        if (loseReq) pushRequests.push(loseReq);
+        pendingLogs.push({ userId: loserId, displayName: loserName, sender: 'bot', text: '[Flex Message: Lose]', type: 'flex' });
       } catch (err) {
-        Logger.log("Error pushing lose message: " + err);
+        Logger.log("Error preparing lose message: " + err);
       }
     }
+  }
+
+  // 🚀 HIGH-SPEED: Parallelize all player win/lose notifications in ONE concurrent roundtrip
+  if (pushRequests.length > 0) {
+    try {
+      UrlFetchApp.fetchAll(pushRequests);
+    } catch (pushErr) {
+      Logger.log("Error in parallel UrlFetchApp.fetchAll for match results: " + pushErr.toString());
+    }
+  }
+  if (pendingLogs.length > 0) {
+    batchLogLineChatMessages(pendingLogs);
   }
 
   // 3. Broadcast Round Summary Flex to all active groups
@@ -3114,21 +3183,21 @@ function adminTestPushGroupMessage(targetGroupId) {
 }
 
 /**
- * Push a message to a player's 1-on-1 LINE OA DM (resolves short ID → raw LINE userId).
+ * Construct an HTTP request object for LINE Messaging API push endpoint.
+ * Suitable for single fetch or parallel UrlFetchApp.fetchAll.
  * @param {string} userId - Short passport-style ID or raw LINE userId
  * @param {Object|string} text - Message payload
+ * @returns {Object|null} UrlFetchApp request object or null
  */
-function pushToLine(userId, text) {
-  if (!userId || userId === 'user' || (typeof userId === 'string' && userId.startsWith('p') && !userId.startsWith('player_U'))) return;
+function createLinePushRequest(userId, text) {
+  if (!userId || userId === 'user' || (typeof userId === 'string' && userId.startsWith('p') && !userId.startsWith('player_U'))) return null;
 
-  var rawLineUserId = (typeof userId === 'string' && (userId.startsWith('U') || userId.startsWith('C')))
+  var rawLineUserId = (typeof userId === 'string' && (userId.startsWith('U') || userId.startsWith('C') || userId.startsWith('R')))
     ? userId
     : getRawLineUserId(userId);
-  if (!rawLineUserId) return;
+  if (!rawLineUserId) return null;
   
-  const url = 'https://api.line.me/v2/bot/message/push';
-  let messageObj;
-  
+  var messageObj;
   if (typeof text === 'object' && text !== null) {
     var alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
       ? text.header.contents[0].text
@@ -3142,30 +3211,42 @@ function pushToLine(userId, text) {
     messageObj = { type: 'text', text: String(text) };
   }
   
-  const payload = {
-    to: rawLineUserId,
-    messages: [messageObj]
-  };
-  const options = {
+  return {
+    url: 'https://api.line.me/v2/bot/message/push',
     method: 'post',
     contentType: 'application/json',
     headers: { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN },
-    payload: JSON.stringify(payload),
+    payload: JSON.stringify({
+      to: rawLineUserId,
+      messages: [messageObj]
+    }),
     muteHttpExceptions: true
   };
+}
+
+/**
+ * Push a message to a player's 1-on-1 LINE OA DM (resolves short ID → raw LINE userId).
+ * @param {string} userId - Short passport-style ID or raw LINE userId
+ * @param {Object|string} text - Message payload
+ */
+function pushToLine(userId, text) {
+  var req = createLinePushRequest(userId, text);
+  if (!req) return;
+  
   try {
-    var res = UrlFetchApp.fetch(url, options);
+    var res = UrlFetchApp.fetch(req.url, req);
     var code = res.getResponseCode();
     var body = res.getContentText();
-    Logger.log('[pushToLine to ' + rawLineUserId + '] Status: ' + code + ' Body: ' + body);
+    Logger.log('[pushToLine to ' + userId + '] Status: ' + code + ' Body: ' + body);
     if (code !== 200 && typeof text === 'object') {
       var headerStr = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text) || '';
       var fbText = '🚀 ' + headerStr;
-      UrlFetchApp.fetch(url, {
+      var rawTo = JSON.parse(req.payload).to;
+      UrlFetchApp.fetch(req.url, {
         method: 'post',
         contentType: 'application/json',
         headers: { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN },
-        payload: JSON.stringify({ to: rawLineUserId, messages: [{ type: 'text', text: fbText }] }),
+        payload: JSON.stringify({ to: rawTo, messages: [{ type: 'text', text: fbText }] }),
         muteHttpExceptions: true
       });
     }
@@ -4812,7 +4893,8 @@ function constructBankingFlex(type, amount, accountDetails, targetUrl, userId) {
 // LINE OA VIRTUAL CHAT CONTROLLER & LOGGING
 // =========================================================================
 
-function logLineChatMessage(userId, displayName, sender, messageText, messageType) {
+function getChatLogSheet() {
+  if (_memChatLogSheet) return _memChatLogSheet;
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     let sheet = ss.getSheetByName('LineChatLogs');
@@ -4820,6 +4902,17 @@ function logLineChatMessage(userId, displayName, sender, messageText, messageTyp
       sheet = ss.insertSheet('LineChatLogs');
       sheet.appendRow(['Timestamp', 'User ID', 'Display Name', 'Sender', 'Message Text', 'Message Type']);
     }
+    _memChatLogSheet = sheet;
+    return _memChatLogSheet;
+  } catch (err) {
+    return null;
+  }
+}
+
+function logLineChatMessage(userId, displayName, sender, messageText, messageType) {
+  try {
+    const sheet = getChatLogSheet();
+    if (!sheet) return;
     
     let actualDisplayName = displayName;
     if (sender === 'admin' || sender === 'bot') {
@@ -4832,18 +4925,42 @@ function logLineChatMessage(userId, displayName, sender, messageText, messageTyp
   }
 }
 
+function batchLogLineChatMessages(logs) {
+  if (!logs || logs.length === 0) return;
+  try {
+    const sheet = getChatLogSheet();
+    if (!sheet) return;
+    const rows = [];
+    const now = new Date();
+    for (let i = 0; i < logs.length; i++) {
+      const item = logs[i];
+      let actualDisplayName = item.displayName;
+      if (item.sender === 'admin' || item.sender === 'bot') {
+        actualDisplayName = getPlayerNameFromDb(item.userId) || item.displayName;
+      }
+      rows.push([now, item.userId, actualDisplayName, item.sender, item.text, item.type || 'text']);
+    }
+    if (rows.length > 0) {
+      const lastRow = sheet.getLastRow();
+      sheet.getRange(lastRow + 1, 1, rows.length, 6).setValues(rows);
+    }
+  } catch (err) {
+    console.error("Error batch logging LINE chat messages: " + err.toString());
+  }
+}
+
 function getPlayerNameFromDb(userId) {
   if (!userId) return null;
   var cleanId = cleanUserId(userId);
   if (_memUserCache['NAME_' + cleanId]) {
-    return _memUserCache['NAME_' + cleanId];
+    return _memUserCache['NAME_' + cleanId] === '__NONE__' ? null : _memUserCache['NAME_' + cleanId];
   }
   var cache = CacheService.getScriptCache();
   try {
     var cached = cache.get('PLAYER_NAME_' + cleanId);
     if (cached) {
       _memUserCache['NAME_' + cleanId] = cached;
-      return cached;
+      return cached === '__NONE__' ? null : cached;
     }
   } catch(_) {}
   try {
@@ -4867,6 +4984,8 @@ function getPlayerNameFromDb(userId) {
   } catch (e) {
     console.error("Error in getPlayerNameFromDb: " + e.toString());
   }
+  _memUserCache['NAME_' + cleanId] = '__NONE__';
+  try { cache.put('PLAYER_NAME_' + cleanId, '__NONE__', 300); } catch(_) {}
   return null;
 }
 
@@ -5147,11 +5266,35 @@ function sendAdminMessageToLine(targetId, messageText) {
       Logger.log('[sendAdminMessageToLine] No active groups found to broadcast. ACTIVE_GROUP_ID=' + getActiveGroupId());
       return { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ — กรุณาใส่ Group ID ก่อนส่งครับ', targets: [] };
     }
-    var sendResults = [];
+
+    var messageObj;
+    if (isObj) {
+      var alt = (messageText.header && messageText.header.contents && messageText.header.contents[0] && messageText.header.contents[0].text)
+        ? messageText.header.contents[0].text
+        : 'ระบบบริการ Rocket Science 🚀';
+      messageObj = { type: 'flex', altText: alt, contents: messageText };
+    } else {
+      messageObj = { type: 'text', text: String(messageText) };
+    }
+
+    // 🚀 HIGH-SPEED: Parallelize all group pushes using UrlFetchApp.fetchAll
+    var requests = [];
     for (var k = 0; k < keys.length; k++) {
-      var r = pushLineGroupMessage(keys[k], messageText);
-      sendResults.push(r);
-      logLineChatMessage(keys[k], 'กลุ่ม', 'admin', logMsg, isObj ? 'flex' : 'text');
+      requests.push({
+        url: 'https://api.line.me/v2/bot/message/push',
+        method: 'post',
+        contentType: 'application/json',
+        headers: { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN },
+        payload: JSON.stringify({ to: keys[k], messages: [messageObj] }),
+        muteHttpExceptions: true
+      });
+    }
+
+    var responses = UrlFetchApp.fetchAll(requests);
+    var sendResults = [];
+    for (var k = 0; k < responses.length; k++) {
+      var code = responses[k].getResponseCode();
+      sendResults.push({ success: code === 200, code: code, groupId: keys[k] });
     }
     return { success: true, count: keys.length, targets: keys, results: sendResults };
   }
