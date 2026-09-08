@@ -718,54 +718,110 @@ function handleCancelBetRequest(userId, orderNo, displayName) {
   const data = sheet.getDataRange().getValues();
   const searchOrder = orderNo ? orderNo.toString().trim().replace(/#/g, '') : null;
   
+  // If specific order number was requested
+  if (searchOrder) {
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const curOrderNo = row[0].toString().trim();
+      if (curOrderNo === searchOrder || curOrderNo.endsWith(searchOrder)) {
+        const status = row[9];
+        const playerLowId = row[1] ? row[1].toString().trim() : '';
+        const playerLowName = row[2] ? row[2].toString().trim() : '';
+        const playerHighId = row[3] ? row[3].toString().trim() : '';
+        const playerHighName = row[4] ? row[4].toString().trim() : '';
+        const amount = Number(row[5]) || 0;
+        
+        const creatorId = playerLowId ? cleanUserId(playerLowId) : cleanUserId(playerHighId);
+        const creatorName = playerLowId ? playerLowName : (playerHighName || displayName || 'ผู้เล่น');
+        
+        const isCreator = (creatorId === searchId || creatorId === cleanUserId(userId) || 
+                           playerLowId === searchId || playerHighId === searchId ||
+                           (displayName && (playerLowName === displayName || playerHighName === displayName)));
+        if (!isCreator && searchId !== 'admin') {
+          return "🚫 ขออภัยครับ แผลดวลนี้ไม่ใช่แผลของคุณ";
+        }
+        
+        if (status === 'matched' || status === 'pending_cancel') {
+          return "⚠️ ไม่สามารถยกเลิกได้ครับ แผล Order #" + curOrderNo + " มีคู่ดวลแมตช์แล้ว (กติกาไม่อนุญาตให้ยกเลิกแผลที่แมตช์แล้วทุกกรณีครับ 🚀)";
+        }
+
+        if (status === 'resolved' || status === 'cancelled' || status === 'void') {
+          return "⚠️ แผลดวล Order #" + curOrderNo + " จบหรือถูกยกเลิกแล้วครับ";
+        }
+        
+        if (status === 'pending_match') {
+          // Direct cancel
+          sheet.getRange(i + 1, 10).setValue('cancelled');
+          // Refund credit to the creator
+          adjustPlayerBalance(creatorId || searchId, amount, creatorName);
+          var targetGroupId = (row[12] && row[12].toString().trim()) || (row[7] && row[7].toString().trim()) || getActiveGroupId();
+          return {
+            success: true,
+            flex: constructCancelOrderMiniFlex(curOrderNo),
+            orderNo: curOrderNo,
+            targetGroupId: targetGroupId
+          };
+        }
+      }
+    }
+    return "🚫 ไม่พบแผลดวล Order #" + searchOrder + " ในระบบครับ";
+  }
+
+  // If no order number was specified (user typed "ยกเลิก"):
+  // Pass 1: Look for user's pending_match bet to cancel
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     const curOrderNo = row[0].toString().trim();
-    if (!searchOrder || curOrderNo === searchOrder || curOrderNo.endsWith(searchOrder)) {
-      const status = row[9];
-      const playerLowId = row[1] ? row[1].toString().trim() : '';
-      const playerLowName = row[2] ? row[2].toString().trim() : '';
-      const playerHighId = row[3] ? row[3].toString().trim() : '';
-      const playerHighName = row[4] ? row[4].toString().trim() : '';
-      const amount = Number(row[5]) || 0;
-      
-      const creatorId = playerLowId ? cleanUserId(playerLowId) : cleanUserId(playerHighId);
-      const creatorName = playerLowId ? playerLowName : (playerHighName || displayName || 'ผู้เล่น');
-      
-      const isCreator = (creatorId === searchId || creatorId === cleanUserId(userId) || 
-                         playerLowId === searchId || playerHighId === searchId ||
-                         (displayName && (playerLowName === displayName || playerHighName === displayName)));
-      if (!isCreator && searchId !== 'admin') {
-        if (searchOrder) return "🚫 ขออภัยครับ แผลดวลนี้ไม่ใช่แผลของคุณ";
-        continue;
-      }
-      
-      if (status === 'resolved' || status === 'cancelled' || status === 'void') {
-        if (searchOrder) return "⚠️ แผลดวล Order #" + curOrderNo + " จบหรือถูกยกเลิกแล้วครับ";
-        continue;
-      }
-      
-      if (status === 'pending_match') {
-        // Direct cancel
-        sheet.getRange(i + 1, 10).setValue('cancelled');
-        // Refund credit to the creator
-        adjustPlayerBalance(creatorId || searchId, amount, creatorName);
-        var targetGroupId = (row[12] && row[12].toString().trim()) || (row[7] && row[7].toString().trim()) || getActiveGroupId();
-        return {
-          success: true,
-          flex: constructCancelOrderMiniFlex(curOrderNo),
-          orderNo: curOrderNo,
-          targetGroupId: targetGroupId
-        };
-      }
-      
-      if (status === 'matched') {
-        sheet.getRange(i + 1, 10).setValue('pending_cancel');
-        return "⛔ ร้องขอยกเลิก Order #" + curOrderNo + " (รอคู่ดวลกดยืนยันครับ 🚀)";
-      }
+    const status = row[9];
+    const playerLowId = row[1] ? row[1].toString().trim() : '';
+    const playerLowName = row[2] ? row[2].toString().trim() : '';
+    const playerHighId = row[3] ? row[3].toString().trim() : '';
+    const playerHighName = row[4] ? row[4].toString().trim() : '';
+    const amount = Number(row[5]) || 0;
+    
+    const creatorId = playerLowId ? cleanUserId(playerLowId) : cleanUserId(playerHighId);
+    const creatorName = playerLowId ? playerLowName : (playerHighName || displayName || 'ผู้เล่น');
+    
+    const isCreator = (creatorId === searchId || creatorId === cleanUserId(userId) || 
+                       playerLowId === searchId || playerHighId === searchId ||
+                       (displayName && (playerLowName === displayName || playerHighName === displayName)));
+    if (!isCreator && searchId !== 'admin') continue;
+
+    if (status === 'pending_match') {
+      sheet.getRange(i + 1, 10).setValue('cancelled');
+      adjustPlayerBalance(creatorId || searchId, amount, creatorName);
+      var targetGroupId = (row[12] && row[12].toString().trim()) || (row[7] && row[7].toString().trim()) || getActiveGroupId();
+      return {
+        success: true,
+        flex: constructCancelOrderMiniFlex(curOrderNo),
+        orderNo: curOrderNo,
+        targetGroupId: targetGroupId
+      };
     }
   }
-  return searchOrder ? ("🚫 ไม่พบแผลดวล Order #" + searchOrder + " ในระบบครับ") : "🚫 ไม่มีแผลที่เปิดรอคู่ในระบบครับ";
+
+  // Pass 2: If no pending_match bet, check if user has a matched bet and explain strictly why it cannot be cancelled
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const curOrderNo = row[0].toString().trim();
+    const status = row[9];
+    const playerLowId = row[1] ? row[1].toString().trim() : '';
+    const playerLowName = row[2] ? row[2].toString().trim() : '';
+    const playerHighId = row[3] ? row[3].toString().trim() : '';
+    const playerHighName = row[4] ? row[4].toString().trim() : '';
+    
+    const creatorId = playerLowId ? cleanUserId(playerLowId) : cleanUserId(playerHighId);
+    const isCreator = (creatorId === searchId || creatorId === cleanUserId(userId) || 
+                       playerLowId === searchId || playerHighId === searchId ||
+                       (displayName && (playerLowName === displayName || playerHighName === displayName)));
+    if (!isCreator && searchId !== 'admin') continue;
+
+    if (status === 'matched' || status === 'pending_cancel') {
+      return "⚠️ ไม่สามารถยกเลิกได้ครับ แผล Order #" + curOrderNo + " มีคู่ดวลแมตช์แล้ว (กติกาไม่อนุญาตให้ยกเลิกแผลที่แมตช์แล้วทุกกรณีครับ 🚀)";
+    }
+  }
+
+  return "🚫 ไม่มีแผลที่เปิดรอคู่ในระบบครับ";
 }
 
 /**
@@ -3883,7 +3939,7 @@ function constructRuleGuideFlex() {
             },
             {
               "type": "text",
-              "text": "🎉 ทายว่าชนะ (สูง):\n• ช่างไล่ / ชล / ไล่ / ลง (ปรับ ±5: +5ชล, -5ชล)\n💵 เช่น ชล100, ชล1000, +5ชล500\n\n👊 ทายว่าแพ้ (ต่ำ):\n• ช่างยั่ง / ช่างถอย / ชย / ชถ / ถอย (ปรับ ±5: +5ชถ, -5ชถ)\nเช่น ชถ100, ชถ1000, -5ชถ500",
+              "text": "🎉 ทายว่าชนะ (สูง):\n• ช่างไล่ / ชล / ไล่ / ลง\n• +5ชล / +5ล / +5ไล่\n• -5ชล / -5ล / -5ไล่\n💵 เช่น ชล100, ชล1000, +5ชล500\n\n👊 ทายว่าแพ้ (ต่ำ):\n• ช่างยั่ง / ช่างถอย / ชย\n• ชถ / ยั่ง / ย / ถอย / ถ\n• +5ชย / +5ชถ / +5ย / +5ถ\n• -5ชย / -5ชถ / -5ย / -5ถ\nเช่น ชถ100, ชถ1000, -5ชถ500",
               "color": "#047857",
               "size": "xxs",
               "wrap": true,
@@ -3939,7 +3995,30 @@ function constructRuleGuideFlex() {
   };
 }
 
-var RULE_GUIDE_TEXT = "📖 [คู่มือคีย์เวิร์ดกติกาการเล่น]\\n\\n📌 กฏที่ 1: เล่นราคาช่าง\\n\\n🎉 ทายว่าชนะ (สูง):\\n• ช่างไล่ / ชล / ไล่ / ลง\\n• ปรับแต้มต่อ: +5ชล, -5ชล\\n💵 พิมพ์คีย์เวิร์ดตามด้วยจำนวนเงิน (ตัวเลขเท่านั้น)\\nเช่น ชล100 , ชล1000 , ชล10000\\n\\n👊 ทายว่าแพ้ (ต่ำ):\\n• ช่างยั่ง / ช่างถอย / ชย / ชถ / ถอย\\n• ปรับแต้มต่อ: +5ชถ, -5ชถ\\nเช่น ชถ100 , ชถ1000\\n\\n-----------------------------\\n\\n📌 กฏที่ 2: การเปิดราคาเอง (กรณีช่างไม่ต่อย / ต้องมีเครดิตพอ)\\n\\n💰 การเปิดราคาเอง (เปิดแผลสดใหม่):\\n⚠️ ช่วงราคาต้องห่างกัน 50 วิพอดี เช่น\\n• 300-350ล500 | 300-350ถ500\\n• 350-400ล500 | 350-400ถ500\\n\\n⬆️ ช่างต่อยยกเลิก (ชตย) \\nใส่ ชตย หลังจำนวนเงิน เช่น\\n• 300-350ล500 ชตย\\n• 350-400ถ500 ชตย";
+var RULE_GUIDE_TEXT = "📖 [คู่มือคีย์เวิร์ดกติกาการเล่น]\n\n" +
+  "📌 กฏที่ 1: เล่นราคาช่าง\n\n" +
+  "🎉 ทายว่าชนะ (สูง):\n" +
+  "• ช่างไล่ / ชล / ไล่ / ลง\n" +
+  "• +5ชล / +5ล / +5ไล่\n" +
+  "• -5ชล / -5ล / -5ไล่\n" +
+  "💵 พิมพ์คีย์เวิร์ดตามด้วยจำนวนเงิน (ตัวเลขเท่านั้น)\n" +
+  "เช่น ชล100 , ชล1000 , ชล10000\n\n" +
+  "👊 ทายว่าแพ้ (ต่ำ):\n" +
+  "• ช่างยั่ง / ช่างถอย / ชย\n" +
+  "• ชถ / ยั่ง / ย / ถอย / ถ\n" +
+  "• +5ชย / +5ชถ / +5ย / +5ถ\n" +
+  "• -5ชย / -5ชถ / -5ย / -5ถ\n" +
+  "เช่น ชถ100 , ชถ1000\n\n" +
+  "-----------------------------\n\n" +
+  "📌 กฏที่ 2: การเปิดราคาเอง (กรณีช่างไม่ต่อย / ต้องมีเครดิตพอ)\n\n" +
+  "💰 การเปิดราคาเอง (เปิดแผลสดใหม่):\n" +
+  "⚠️ ช่วงราคาต้องห่างกัน 50 วิพอดี เช่น\n" +
+  "• 300-350ล500 | 300-350ถ500\n" +
+  "• 350-400ล500 | 350-400ถ500\n\n" +
+  "⬆️ ช่างต่อยยกเลิก (ชตย)\n" +
+  "ใส่ ชตย หลังจำนวนเงิน เช่น\n" +
+  "• 300-350ล500 ชตย\n" +
+  "• 350-400ถ500 ชตย";
 
 function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy, userTypedCmd, isPreQuote) {
   var sideShort = side === 'low' ? 'ล' : 'ถ';

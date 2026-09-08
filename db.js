@@ -849,44 +849,79 @@ export async function cancelOpenBet(userId, targetOrderNo = null, isAdmin = fals
   const searchId = cleanUserId(userId);
   const cleanTargetOrder = targetOrderNo ? targetOrderNo.toString().trim().replace(/#/g, '') : null;
 
+  // Pass 1: If specific order requested, verify match
+  if (cleanTargetOrder) {
+    for (const bet of bets) {
+      const orderStr = bet.orderNumber.toString();
+      if (orderStr === cleanTargetOrder || orderStr.endsWith(cleanTargetOrder)) {
+        const creatorId = bet.playerLowId ? cleanUserId(bet.playerLowId) : cleanUserId(bet.playerHighId);
+        const creatorName = bet.playerLowName || bet.playerHighName || 'ผู้เล่น';
+
+        // Authorization Guard: Only bet creator or admin can cancel
+        const isCreator = (creatorId === searchId || creatorId === cleanUserId(userId) || (displayName && (bet.playerLowName === displayName || bet.playerHighName === displayName)));
+        if (!isCreator && !isAdmin) {
+          return { error: 'UNAUTHORIZED', creatorName: creatorName, orderNumber: bet.orderNumber };
+        }
+
+        if (bet.status === 'matched' || bet.status === 'pending_cancel') {
+          return { error: 'ALREADY_MATCHED', orderNumber: bet.orderNumber };
+        }
+
+        if (bet.status === 'resolved' || bet.status === 'cancelled' || bet.status === 'void') {
+          return { error: 'ALREADY_RESOLVED', orderNumber: bet.orderNumber };
+        }
+
+        if (bet.status === 'pending_match') {
+          bet.status = 'cancelled';
+          updateRowInSheet('Bets', bet.orderNumber, { 9: 'cancelled' });
+          await adjustPlayerBalance(creatorId, bet.amount, creatorName);
+          return {
+            success: true,
+            orderNumber: bet.orderNumber,
+            amount: bet.amount,
+            creatorId: creatorId,
+            creatorName: creatorName,
+            groupId: bet.groupId,
+          };
+        }
+      }
+    }
+    return { error: 'NOT_FOUND' };
+  }
+
+  // Pass 2: No specific order requested ("ยกเลิก")
+  // First search for user's pending_match bet
   for (const bet of bets) {
     if (bet.status === 'pending_match') {
       const creatorId = bet.playerLowId ? cleanUserId(bet.playerLowId) : cleanUserId(bet.playerHighId);
       const creatorName = bet.playerLowName || bet.playerHighName || 'ผู้เล่น';
+      const isCreator = (creatorId === searchId || creatorId === cleanUserId(userId) || (displayName && (bet.playerLowName === displayName || bet.playerHighName === displayName)));
 
-      // If specific order requested, verify match
-      if (cleanTargetOrder) {
-        const orderStr = bet.orderNumber.toString();
-        if (orderStr !== cleanTargetOrder && !orderStr.endsWith(cleanTargetOrder)) {
-          continue;
-        }
+      if (isCreator || isAdmin) {
+        bet.status = 'cancelled';
+        updateRowInSheet('Bets', bet.orderNumber, { 9: 'cancelled' });
+        await adjustPlayerBalance(creatorId, bet.amount, creatorName);
+        return {
+          success: true,
+          orderNumber: bet.orderNumber,
+          amount: bet.amount,
+          creatorId: creatorId,
+          creatorName: creatorName,
+          groupId: bet.groupId,
+        };
       }
+    }
+  }
 
-      // Authorization Guard: Only bet creator or admin can cancel an open bet
-      const isCreator = (creatorId === searchId || creatorId === cleanUserId(userId) || (displayName && creatorName === displayName));
-      if (!isCreator && !isAdmin) {
-        return { error: 'UNAUTHORIZED', creatorName: creatorName, orderNumber: bet.orderNumber };
+  // If no pending_match bet, check if user has a matched bet and notify strictly
+  for (const bet of bets) {
+    if (bet.status === 'matched' || bet.status === 'pending_cancel') {
+      const creatorId = bet.playerLowId ? cleanUserId(bet.playerLowId) : cleanUserId(bet.playerHighId);
+      const isCreator = (creatorId === searchId || creatorId === cleanUserId(userId) || (displayName && (bet.playerLowName === displayName || bet.playerHighName === displayName)));
+
+      if (isCreator || isAdmin) {
+        return { error: 'ALREADY_MATCHED', orderNumber: bet.orderNumber };
       }
-
-      // Mark status as cancelled
-      bet.status = 'cancelled';
-
-      // Update in Google Sheets
-      updateRowInSheet('Bets', bet.orderNumber, {
-        9: 'cancelled',
-      });
-
-      // Refund full credit back to creator
-      await adjustPlayerBalance(creatorId, bet.amount, creatorName);
-
-      return {
-        success: true,
-        orderNumber: bet.orderNumber,
-        amount: bet.amount,
-        creatorId: creatorId,
-        creatorName: creatorName,
-        groupId: bet.groupId,
-      };
     }
   }
 
@@ -1461,8 +1496,8 @@ export async function adminRequestCancelBet(betId) {
 export async function handleCancelBetRequest(userId, orderNo) {
   const searchId = cleanUserId(userId);
   if (!searchId || !orderNo) return '🚫 ไม่สามารถทำรายการยกเลิกได้ครับ';
-  const orderStr = orderNo.toString().trim();
-  const bet = bets.find((b) => b.orderNumber === orderStr);
+  const orderStr = orderNo.toString().trim().replace(/#/g, '');
+  const bet = bets.find((b) => b.orderNumber === orderStr || b.orderNumber.endsWith(orderStr));
 
   if (!bet) return `🚫 ไม่พบแผลดวล Order #${orderNo} ในระบบครับ`;
 
@@ -1473,21 +1508,19 @@ export async function handleCancelBetRequest(userId, orderNo) {
     return '🚫 ขออภัยครับ แผลดวลนี้ไม่ใช่แผลของคุณ';
   }
 
-  if (bet.status === 'resolved' || bet.status === 'cancelled') {
+  if (bet.status === 'matched' || bet.status === 'pending_cancel') {
+    return `⚠️ ไม่สามารถยกเลิกได้ครับ แผล Order #${bet.orderNumber} มีคู่ดวลแมตช์แล้ว (กติกาไม่อนุญาตให้ยกเลิกแผลที่แมตช์แล้วทุกกรณีครับ 🚀)`;
+  }
+
+  if (bet.status === 'resolved' || bet.status === 'cancelled' || bet.status === 'void') {
     return `⚠️ แผลดวล Order #${orderNo} จบหรือถูกยกเลิกแล้วครับ`;
   }
 
   if (bet.status === 'pending_match') {
     bet.status = 'cancelled';
-    updateRowInSheet('Bets', orderStr, { 9: 'cancelled' });
+    updateRowInSheet('Bets', bet.orderNumber, { 9: 'cancelled' });
     await adjustPlayerBalance(searchId, bet.amount);
-    return `❌ ยกเลิกแผล Order #${orderNo} สำเร็จ!`;
-  }
-
-  if (bet.status === 'matched') {
-    bet.status = 'pending_cancel';
-    updateRowInSheet('Bets', orderStr, { 9: 'pending_cancel' });
-    return `⛔ ร้องขอยกเลิก Order #${orderNo} (รอคู่ดวลกดยืนยันครับ 🚀)`;
+    return `❌ ยกเลิกแผล Order #${bet.orderNumber} สำเร็จ!`;
   }
 
   return '🚫 ผิดพลาดในการปรับปรุงสถานะแผล';

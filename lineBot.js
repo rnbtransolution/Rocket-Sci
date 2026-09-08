@@ -949,7 +949,10 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
       const msg = `${tagPrefix}⚠️ เฉพาะเจ้าของแผล (@${res.creatorName}) หรือแอดมินเท่านั้นที่ยกเลิกได้ครับ`;
       await replyToLine(replyToken, msg, userId);
     } else if (res.error === 'ALREADY_MATCHED') {
-      const msg = `${tagPrefix}⚠️ แผล Order #${res.orderNumber} มีคู่ดวลแล้ว ไม่สามารถยกเลิกได้ครับ`;
+      const msg = `${tagPrefix}⚠️ ไม่สามารถยกเลิกได้ครับ แผล Order #${res.orderNumber} มีคู่ดวลแมตช์แล้ว (กติกาไม่อนุญาตให้ยกเลิกแผลที่แมตช์แล้วทุกกรณีครับ 🚀)`;
+      await replyToLine(replyToken, msg, userId);
+    } else if (res.error === 'ALREADY_RESOLVED') {
+      const msg = `${tagPrefix}⚠️ แผล Order #${res.orderNumber} จบหรือถูกยกเลิกแล้วครับ`;
       await replyToLine(replyToken, msg, userId);
     } else {
       const notFoundText = targetOrderNo
@@ -2083,7 +2086,7 @@ export function constructRuleGuideFlex() {
             },
             {
               "type": "text",
-              "text": "🎉 ทายว่าชนะ (สูง):\n• ช่างไล่ / ชล / ไล่ / ลง (ปรับ ±5: +5ชล, -5ชล)\n💵 เช่น ชล100, ชล1000, +5ชล500\n\n👊 ทายว่าแพ้ (ต่ำ):\n• ช่างยั่ง / ช่างถอย / ชย / ชถ / ถอย (ปรับ ±5: +5ชถ, -5ชถ)\nเช่น ชถ100, ชถ1000, -5ชถ500",
+              "text": "🎉 ทายว่าชนะ (สูง):\n• ช่างไล่ / ชล / ไล่ / ลง\n• +5ชล / +5ล / +5ไล่\n• -5ชล / -5ล / -5ไล่\n💵 เช่น ชล100, ชล1000, +5ชล500\n\n👊 ทายว่าแพ้ (ต่ำ):\n• ช่างยั่ง / ช่างถอย / ชย\n• ชถ / ยั่ง / ย / ถอย / ถ\n• +5ชย / +5ชถ / +5ย / +5ถ\n• -5ชย / -5ชถ / -5ย / -5ถ\nเช่น ชถ100, ชถ1000, -5ชถ500",
               "color": "#047857",
               "size": "xxs",
               "wrap": true,
@@ -2145,13 +2148,16 @@ export const RULE_GUIDE_TEXT = `📖 [คู่มือคีย์เวิร
 
 🎉 ทายว่าชนะ (สูง):
 • ช่างไล่ / ชล / ไล่ / ลง
-• ปรับแต้มต่อ: +5ชล, -5ชล
+• +5ชล / +5ล / +5ไล่
+• -5ชล / -5ล / -5ไล่
 💵 พิมพ์คีย์เวิร์ดตามด้วยจำนวนเงิน (ตัวเลขเท่านั้น)
 เช่น ชล100 , ชล1000 , ชล10000
 
 👊 ทายว่าแพ้ (ต่ำ):
-• ช่างยั่ง / ช่างถอย / ชย / ชถ / ถอย
-• ปรับแต้มต่อ: +5ชถ, -5ชถ
+• ช่างยั่ง / ช่างถอย / ชย
+• ชถ / ยั่ง / ย / ถอย / ถ
+• +5ชย / +5ชถ / +5ย / +5ถ
+• -5ชย / -5ชถ / -5ย / -5ถ
 เช่น ชถ100 , ชถ1000
 
 -----------------------------
