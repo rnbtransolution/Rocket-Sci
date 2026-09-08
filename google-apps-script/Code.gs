@@ -513,6 +513,9 @@ function generatePassportStyleId(sheet) {
   return 'PL' + Date.now().toString().slice(-6); // fallback
 }
 
+var _memUserCache = {};
+var _memRawLineCache = {};
+
 /**
  * Get or create a unique short Passport-style ID mapped to a raw LINE User ID.
  */
@@ -525,6 +528,19 @@ function getOrCreateShortUserId(rawLineUserId, displayName) {
     return searchId;
   }
   
+  if (_memUserCache[searchId]) {
+    return _memUserCache[searchId];
+  }
+  
+  var cache = CacheService.getScriptCache();
+  try {
+    var cached = cache.get('SHORT_ID_' + searchId);
+    if (cached) {
+      _memUserCache[searchId] = cached;
+      return cached;
+    }
+  } catch(_) {}
+  
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName('Players');
   const data = sheet.getDataRange().getValues();
@@ -533,7 +549,12 @@ function getOrCreateShortUserId(rawLineUserId, displayName) {
   for (let i = 1; i < data.length; i++) {
     const rowLineId = data[i][7] ? data[i][7].toString().trim() : '';
     if (rowLineId === searchId) {
-      return data[i][0] ? data[i][0].toString().trim() : '';
+      var foundShort = data[i][0] ? data[i][0].toString().trim() : '';
+      if (foundShort) {
+        _memUserCache[searchId] = foundShort;
+        try { cache.put('SHORT_ID_' + searchId, foundShort, 21600); } catch(_) {}
+        return foundShort;
+      }
     }
   }
   
@@ -541,8 +562,9 @@ function getOrCreateShortUserId(rawLineUserId, displayName) {
   for (let i = 1; i < data.length; i++) {
     const rowId = data[i][0] ? data[i][0].toString().trim() : '';
     if (rowId === searchId) {
-      // If legacy player, update their LINE User ID in column 8 (column index 7)
       sheet.getRange(i + 1, 8).setValue(searchId);
+      _memUserCache[searchId] = rowId;
+      try { cache.put('SHORT_ID_' + searchId, rowId, 21600); } catch(_) {}
       return rowId;
     }
   }
@@ -550,6 +572,8 @@ function getOrCreateShortUserId(rawLineUserId, displayName) {
   // Register new player with generated short ID
   const shortId = generatePassportStyleId(sheet);
   sheet.appendRow([shortId, displayName || 'ผู้เล่น LINE', 0, new Date(), '', '', '', searchId]);
+  _memUserCache[searchId] = shortId;
+  try { cache.put('SHORT_ID_' + searchId, shortId, 21600); } catch(_) {}
   return shortId;
 }
 
@@ -563,6 +587,19 @@ function getRawLineUserId(shortUserId) {
     return searchId;
   }
   
+  if (_memRawLineCache[searchId]) {
+    return _memRawLineCache[searchId];
+  }
+  
+  var cache = CacheService.getScriptCache();
+  try {
+    var cached = cache.get('RAW_LINE_ID_' + searchId);
+    if (cached) {
+      _memRawLineCache[searchId] = cached;
+      return cached;
+    }
+  } catch(_) {}
+  
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName('Players');
   const data = sheet.getDataRange().getValues();
@@ -571,7 +608,10 @@ function getRawLineUserId(shortUserId) {
     const rowId = data[i][0] ? data[i][0].toString().trim() : '';
     if (rowId === searchId) {
       const rawLineId = data[i][7] ? data[i][7].toString().trim() : '';
-      return rawLineId || searchId;
+      const finalId = rawLineId || searchId;
+      _memRawLineCache[searchId] = finalId;
+      try { cache.put('RAW_LINE_ID_' + searchId, finalId, 21600); } catch(_) {}
+      return finalId;
     }
   }
   return searchId;
@@ -1786,12 +1826,24 @@ function getPlayerBalance(userId, displayName) {
   const shortUserId = getOrCreateShortUserId(userId, displayName);
   var searchId = cleanUserId(shortUserId);
   if (!searchId) return 0;
+
+  var cache = CacheService.getScriptCache();
+  try {
+    var cachedBal = cache.get('PLAYER_BAL_' + searchId);
+    if (cachedBal !== null && cachedBal !== undefined && cachedBal !== '') {
+      var parsed = Number(cachedBal);
+      if (!isNaN(parsed)) return parsed;
+    }
+  } catch(_) {}
+
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Players');
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     const rowId = data[i][0] ? data[i][0].toString().trim() : '';
     if (rowId === searchId) {
-      return Number(data[i][2]) || 0;
+      var bal = Number(data[i][2]) || 0;
+      try { cache.put('PLAYER_BAL_' + searchId, String(bal), 60); } catch(_) {}
+      return bal;
     }
   }
   return 0;
@@ -1822,7 +1874,9 @@ function adjustPlayerBalance(userId, delta, displayName) {
           Logger.log('[CREDIT BLOCK] Refused deduction for ' + searchId + ': current balance ' + currentBalance + ', attempted ' + numericDelta);
           return false;
         }
-        cell.setValue(currentBalance + numericDelta);
+        const newBal = currentBalance + numericDelta;
+        cell.setValue(newBal);
+        try { CacheService.getScriptCache().put('PLAYER_BAL_' + searchId, String(newBal), 120); } catch(_) {}
         return true;
       }
     }
@@ -1853,15 +1907,11 @@ function saveOpenBet(orderNo, userId, displayName, side, amount, type, rMin, rMa
   
   const isAdminUser = searchId === 'admin' || searchId === 'user' || (typeof userId === 'string' && (userId.toLowerCase() === 'user' || userId.toLowerCase() === 'admin'));
 
-  // Anti-Overdraft Guard: verify regular creator has sufficient balance before locking credit
+  // Anti-Overdraft Guard: atomically deduct creator balance
   if (!isAdminUser && betAmount > 0) {
-    const currentBal = getPlayerBalance(searchId, displayName);
-    if (currentBal < betAmount) {
-      return { error: 'INSUFFICIENT_BALANCE', required: betAmount, current: currentBal };
-    }
-    // Lock creator's credit immediately
     const deducted = adjustPlayerBalance(searchId, -betAmount, displayName);
     if (!deducted) {
+      const currentBal = getPlayerBalance(searchId, displayName);
       return { error: 'INSUFFICIENT_BALANCE', required: betAmount, current: currentBal };
     }
   }
@@ -2521,7 +2571,8 @@ function getDashboardData(forceFresh) {
   const chatLogs = [];
   try {
     const cData = ss.getSheetByName('LineChatLogs').getDataRange().getValues();
-    for (let i = 1; i < cData.length; i++) {
+    const startLogIdx = Math.max(1, cData.length - 60);
+    for (let i = startLogIdx; i < cData.length; i++) {
       const row = cData[i];
       chatLogs.push({
         timestamp: safeFormatDate(row[0], 'HH:mm:ss'),
@@ -2576,17 +2627,20 @@ function adminApproveTransaction(txId) {
       let actualAmount = Number(tData[i][4]) || 0;
       if (actualAmount <= 0) {
         actualAmount = reqAmt;
-        tSheet.getRange(i + 1, 5).setValue(actualAmount);
       }
-      
-      tSheet.getRange(i + 1, 7).setValue('success');
-      tSheet.getRange(i + 1, 8).setValue('Manually approved by supervisor');
       
       const isWithdrawal = searchId.indexOf('WD') === 0 || (tData[i][5] && tData[i][5].toString().toUpperCase().indexOf('WD') !== -1) || (tData[i][7] && tData[i][7].toString().toLowerCase().indexOf('withdraw') !== -1);
 
+      // Single batched write to columns 5, 6, 7, 8
+      tSheet.getRange(i + 1, 5, 1, 4).setValues([[
+        actualAmount,
+        tData[i][5] || '',
+        'success',
+        'Manually approved by supervisor'
+      ]]);
+
       if (isWithdrawal) {
         // Withdrawal: the balance was already deducted, we just record the actual payout in sheet
-        tSheet.getRange(i + 1, 5).setValue(reqAmt);
         let details = "ถอนเงินคืนเข้าบัญชีของคุณ";
         const bank = getPlayerBank(userId);
         if (bank) {
@@ -2622,8 +2676,8 @@ function adminRejectTransaction(txId, reason) {
       const displayName = tData[i][2];
       const reqAmt = Number(tData[i][3]) || 0;
       
-      tSheet.getRange(i + 1, 7).setValue('rejected');
-      tSheet.getRange(i + 1, 8).setValue(reason || 'Rejected by supervisor');
+      // Single batched write to columns 7 and 8
+      tSheet.getRange(i + 1, 7, 1, 2).setValues([['rejected', reason || 'Rejected by supervisor']]);
       
       const isWithdrawal = searchId.indexOf('WD') === 0 || (tData[i][5] && tData[i][5].toString().toUpperCase().indexOf('WD') !== -1) || (tData[i][7] && tData[i][7].toString().toLowerCase().indexOf('withdraw') !== -1);
       
@@ -4779,17 +4833,34 @@ function logLineChatMessage(userId, displayName, sender, messageText, messageTyp
 
 function getPlayerNameFromDb(userId) {
   if (!userId) return null;
+  var cleanId = cleanUserId(userId);
+  if (_memUserCache['NAME_' + cleanId]) {
+    return _memUserCache['NAME_' + cleanId];
+  }
+  var cache = CacheService.getScriptCache();
+  try {
+    var cached = cache.get('PLAYER_NAME_' + cleanId);
+    if (cached) {
+      _memUserCache['NAME_' + cleanId] = cached;
+      return cached;
+    }
+  } catch(_) {}
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ss.getSheetByName('Players');
     if (!sheet) return null;
     const data = sheet.getDataRange().getValues();
-    const searchId = userId.toString().trim();
+    const searchId = cleanId;
     for (let i = 1; i < data.length; i++) {
       const rowId = data[i][0] ? data[i][0].toString().trim() : '';
       const rowLineId = data[i][7] ? data[i][7].toString().trim() : '';
       if (rowId === searchId || rowLineId === searchId) {
-        return data[i][1] ? data[i][1].toString() : '';
+        var name = data[i][1] ? data[i][1].toString() : '';
+        if (name) {
+          _memUserCache['NAME_' + cleanId] = name;
+          try { cache.put('PLAYER_NAME_' + cleanId, name, 21600); } catch(_) {}
+        }
+        return name;
       }
     }
   } catch (e) {

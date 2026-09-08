@@ -1501,7 +1501,7 @@ export default function App() {
   };
 
   // Admin Manual Slip Reviews
-  const handleAdminApproveReview = async (txId) => {
+  const handleAdminApproveReview = (txId) => {
     const targetTx = transactions.find(t => t.id === txId);
     if (!targetTx || targetTx.status !== 'escalated') {
       addToast('⚠️ รายการนี้ถูกดำเนินการไปแล้วหรือไม่อยู่ในสถานะรอตรวจสอบ', 'warning');
@@ -1509,54 +1509,69 @@ export default function App() {
     }
     const approvedAmount = (targetTx.actualAmount && targetTx.actualAmount > 0) ? targetTx.actualAmount : (targetTx.requestedAmount || 0);
 
+    // 🚀 OPTIMISTIC UPDATE: Update React State Instantly (0ms response time for admin!)
+    setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'success', actualAmount: approvedAmount, reviewReason: 'Manually approved by admin' } : t));
+    if (!txId.startsWith('WD')) {
+      setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) + approvedAmount } : p));
+    }
+    addToast(txId.startsWith('WD') ? `แอดมินอนุมัติคำขอถอนเงินยอด ${targetTx.requestedAmount} THB โอนเงินแล้วเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)` : `แอดมินอนุมัติเครดิตเติมเงินยอด ${approvedAmount} THB แมนนวลเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)`, 'success');
+
+    // Run backend in background
     if (isGAS) {
       window.google.script.run
-        .withSuccessHandler(() => {
-          setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'success', reviewReason: 'Manually approved by admin', actualAmount: approvedAmount } : t));
-          if (!txId.startsWith('WD')) {
-            setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) + approvedAmount } : p));
-          }
-          addToast(txId.startsWith('WD') ? 'อนุมัติการถอนเงินเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)' : `อนุมัติและอัพแต้ม +${approvedAmount} pt เรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)`, 'success');
+        .withFailureHandler((err) => {
+          console.error('[GAS Approve Error]:', err);
+          // Rollback on failure
+          setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
+          addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
         })
         .adminApproveTransaction(txId);
     } else {
-      await runBackendFunction('adminApproveTransaction', [txId]);
-      setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'success', actualAmount: approvedAmount, reviewReason: 'Approved manually by admin' } : t));
-      if (!txId.startsWith('WD')) {
-        setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) + approvedAmount } : p));
-      }
-      addToast(txId.startsWith('WD') ? `แอดมินอนุมัติคำขอถอนเงินยอด ${targetTx.requestedAmount} THB โอนเงินแล้วเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)` : `แอดมินอนุมัติเครดิตเติมเงินยอด ${approvedAmount} THB แมนนวลเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)`, 'success');
+      runBackendFunction('adminApproveTransaction', [txId]).catch(err => {
+        console.error('[Background Approve Error]:', err);
+        // Rollback on failure
+        setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
+        addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
+      });
     }
   };
 
-  const handleAdminRejectReview = async (txId, reason) => {
+  const handleAdminRejectReview = (txId, reason) => {
     const targetTx = transactions.find(t => t.id === txId);
     if (!targetTx || targetTx.status !== 'escalated') {
       addToast('⚠️ รายการนี้ถูกดำเนินการไปแล้วหรือไม่อยู่ในสถานะรอตรวจสอบ', 'warning');
       return;
     }
+
+    // 🚀 OPTIMISTIC UPDATE: Update React State Instantly (0ms response time for admin!)
+    setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'rejected', reviewReason: reason } : t));
+    if (txId.startsWith('WD')) {
+      setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) + targetTx.requestedAmount } : p));
+      addToast(`ปฏิเสธคำขอถอนเงินยอด ${targetTx.requestedAmount} THB และคืนเครดิตให้ผู้เล่นเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)`, 'info');
+    } else {
+      if (targetTx.playerId === 'user') {
+        setBillingResult({ status: 'rejected', reason });
+      }
+      addToast('ปฏิเสธการโอนสลิปเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)', 'info');
+    }
+
+    // Run backend in background
     if (isGAS) {
       window.google.script.run
-        .withSuccessHandler(() => {
-          setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'rejected', reviewReason: reason } : t));
-          if (txId.startsWith('WD')) {
-            setPlayers(prev => prev.map(p => p.isUser ? { ...p, balance: p.balance + targetTx.requestedAmount } : p));
-          }
-          addToast(txId.startsWith('WD') ? 'ปฏิเสธคำขอถอนเงินเรียบร้อย คืนเครดิตแล้ว (ส่งข้อความ LINE บอกผู้เล่นแล้ว)' : 'ปฏิเสธการโอนสลิปเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)', 'info');
+        .withFailureHandler((err) => {
+          console.error('[GAS Reject Error]:', err);
+          // Rollback on failure
+          setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
+          addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
         })
         .adminRejectTransaction(txId, reason);
     } else {
-      await runBackendFunction('adminRejectTransaction', [txId, reason]);
-      setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'rejected', reviewReason: reason } : t));
-      if (txId.startsWith('WD')) {
-        setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: p.balance + targetTx.requestedAmount } : p));
-        addToast(`ปฏิเสธคำขอถอนเงินยอด ${targetTx.requestedAmount} THB และคืนเครดิตให้ผู้เล่นเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)`, 'info');
-      } else {
-        if (targetTx.playerId === 'user') {
-          setBillingResult({ status: 'rejected', reason });
-        }
-        addToast('ปฏิเสธการโอนสลิปเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)', 'info');
-      }
+      runBackendFunction('adminRejectTransaction', [txId, reason]).catch(err => {
+        console.error('[Background Reject Error]:', err);
+        // Rollback on failure
+        setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
+        addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
+      });
     }
   };
 
