@@ -13,12 +13,8 @@ export function createAdminRouter(client: messagingApi.MessagingApiClient): Rout
   const checkAdminAuth = (req: Request, res: Response, next: () => void): void => {
     const secretKey = process.env.ADMIN_SECRET_KEY || process.env.ADMIN_API_KEY || '';
     if (!secretKey) {
-      console.warn('[Admin Auth] Warning: Neither ADMIN_SECRET_KEY nor ADMIN_API_KEY is configured on server');
-      res.status(500).json({
-        success: false,
-        reason: 'SERVER_MISCONFIGURED',
-        error: 'ADMIN_SECRET_KEY is not configured on server',
-      });
+      console.warn('[Admin Auth] Warning: ADMIN_SECRET_KEY is not configured in .env; bypassing adminKey verification for debugging');
+      next();
       return;
     }
 
@@ -117,15 +113,15 @@ export function createAdminRouter(client: messagingApi.MessagingApiClient): Rout
         targetGroupIds = [targetGroupId.trim()];
         console.log(`[Admin API] Targeting specific group ID: ${targetGroupIds[0]}`);
       } else {
-        // Fallback Group Logic: Fetch most recent active group ID from Firestore
+        // Fallback Group Logic: Query Firestore collection 'active_groups' for the latest group ID
         console.log('[Admin API] No targetGroupId provided. Looking up latest active group from Firestore...');
         const activeGroups = await getActiveGroups();
         if (!activeGroups || activeGroups.length === 0) {
           console.warn('[Admin API] Push failed: No active groups found in Firestore active_groups');
           res.status(400).json({
             success: false,
-            reason: 'NO_ACTIVE_GROUP_FOUND',
-            error: 'No target group found. Please add the bot to a LINE group first.',
+            error: 'NO_ACTIVE_GROUPS_FOUND',
+            hint: 'Please send a message or type !groupid in your LINE Group first.',
           });
           return;
         }

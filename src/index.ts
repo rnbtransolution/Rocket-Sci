@@ -14,7 +14,6 @@ const PORT = parseInt(process.env.PORT || '8080', 10);
 // Allows requests from Admin Web Portal (https://rnbtransolution.github.io) and local dev environments
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
-    // Reflect incoming origin or allow '*' so browser credentials and preflight work seamlessly
     callback(null, origin || true);
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -24,7 +23,28 @@ const corsOptions: cors.CorsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('{*path}', cors(corsOptions));
+
+// Explicitly handle preflight OPTIONS for all endpoints
+const handlePreflight = (req: Request, res: Response) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-key, X-Requested-With, x-admin-api-key');
+  res.sendStatus(200);
+};
+
+app.use((req: Request, res: Response, next: () => void) => {
+  if (req.method === 'OPTIONS') {
+    handlePreflight(req, res);
+    return;
+  }
+  next();
+});
+
+try {
+  app.options('*', handlePreflight);
+} catch {
+  app.options('{*path}', handlePreflight);
+}
 
 // 2. Request Logger Middleware
 app.use((req: Request, res: Response, next: () => void) => {
