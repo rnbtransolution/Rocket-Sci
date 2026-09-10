@@ -3,13 +3,18 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 
+const isGASHost = typeof window !== 'undefined' && (
+  window.location.hostname.includes('googleusercontent.com') ||
+  window.location.hostname.includes('script.google.com')
+);
+
 const API_BASE_URL =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ||
-  (typeof window !== 'undefined' && window.location.hostname.includes('github.io')
-    ? 'https://rocket-sci.onrender.com'
+  (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? (window.location.port === '3001' ? '' : 'http://localhost:3001')
     : '');
 const ADMIN_API_KEY =
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_API_KEY) || '';
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_API_KEY) || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
 
 // Helper to create a chainable Google Apps Script run Proxy
 function createAppsScriptRunner(successHandler = null, failureHandler = null) {
@@ -55,8 +60,8 @@ function createAppsScriptRunner(successHandler = null, failureHandler = null) {
   });
 }
 
-// Mock Google Apps Script API when running outside of Apps Script environment
-if (typeof window !== 'undefined' && (!window.google || !window.google.script)) {
+// Mock Google Apps Script API strictly when running outside of Apps Script environment
+if (typeof window !== 'undefined' && !isGASHost && (!window.google || !window.google.script)) {
   window.isNodeJS = true;
   window.google = {
     script: {

@@ -113,7 +113,15 @@ const SLIP_PRESETS = [
 const ADMIN_PASSCODE = import.meta.env.VITE_ADMIN_PASSCODE || 'rocket-admin';
 
 export default function App() {
-  const isGAS = typeof window !== 'undefined' && !!(window.google && window.google.script && window.google.script.run) && !window.isNodeJS;
+  const isGASHost = typeof window !== 'undefined' && (
+    window.location.hostname.includes('googleusercontent.com') ||
+    window.location.hostname.includes('script.google.com')
+  );
+  const isGAS = isGASHost || (
+    typeof window !== 'undefined' &&
+    !!(window.google && window.google.script && window.google.script.run) &&
+    !window.isNodeJS
+  );
   const isGitHubPages = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
   // Resilient API Base URL resolution:
   // 1. Inside GAS iframe: empty string (routes via google.script.run)
@@ -134,41 +142,62 @@ export default function App() {
     return import.meta.env.VITE_API_BASE_URL || '';
   };
   const API_BASE_URL = getApiBaseUrl();
-  const ADMIN_API_KEY = import.meta.env.VITE_ADMIN_API_KEY || '';
+  const ADMIN_API_KEY = import.meta.env.VITE_ADMIN_API_KEY || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
 
   const runBackendFunction = async (functionName, args = []) => {
     if (isGAS) {
-      return new Promise((resolve, reject) => {
-        try {
-          if (!window.google.script.run[functionName]) {
-            reject(new Error(`ฟังก์ชัน '${functionName}' ไม่พบใน Code.gs`));
-            return;
-          }
-          window.google.script.run
-            .withSuccessHandler((res) => resolve(res))
-            .withFailureHandler((err) => {
-              console.error(`[GAS RPC Error in ${functionName}]:`, err);
-              const errMsg = (err && (err.message || err.error)) || (typeof err === 'string' ? err : JSON.stringify(err)) || 'เกิดข้อผิดพลาดในการเรียก Apps Script';
-              reject(new Error(errMsg));
-            })[functionName](...args);
-        } catch (callErr) {
-          console.error(`[GAS Call Exception in ${functionName}]:`, callErr);
-          reject(new Error(callErr?.message || String(callErr)));
+      let gasRun = (typeof window !== 'undefined' && window.google?.script?.run) ? window.google.script.run : null;
+      if (!gasRun && isGASHost) {
+        for (let i = 0; i < 25 && !gasRun; i++) {
+          await new Promise(r => setTimeout(r, 100));
+          gasRun = (typeof window !== 'undefined' && window.google?.script?.run) ? window.google.script.run : null;
         }
-      });
+      }
+
+      if (gasRun) {
+        return new Promise((resolve, reject) => {
+          try {
+            const runner = gasRun
+              .withSuccessHandler((res) => resolve(res))
+              .withFailureHandler((err) => {
+                console.error(`[GAS RPC Error in ${functionName}]:`, err);
+                const errMsg = (err && (err.message || err.error)) || (typeof err === 'string' ? err : 'เกิดข้อผิดพลาดในการเชื่อมต่อ');
+                reject(new Error(errMsg));
+              });
+
+            if (typeof runner[functionName] === 'function') {
+              runner[functionName](...args);
+            } else if (typeof runner.executeAdminAction === 'function') {
+              runner.executeAdminAction(functionName, args);
+            } else {
+              reject(new Error(`ไม่พบฟังก์ชัน ${functionName}`));
+            }
+          } catch (callErr) {
+            console.error(`[GAS Call Exception in ${functionName}]:`, callErr);
+            reject(new Error(callErr?.message || 'ระบบขัดข้อง'));
+          }
+        });
+      }
     }
 
     const headers = { 'Content-Type': 'application/json' };
     if (ADMIN_API_KEY) headers['x-admin-api-key'] = ADMIN_API_KEY;
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/run`, {
+      const targetUrl = `${API_BASE_URL}/api/run`;
+      const res = await fetch(targetUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify({ functionName, args }),
       });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(res.status === 404 ? 'ไม่พบ API Endpoint' : 'ระบบขัดข้อง');
+      }
+
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Server error');
+      if (!res.ok) throw new Error(json.error || 'เกิดข้อผิดพลาด');
       return json.data;
     } catch (fetchErr) {
       console.error(`[API Call Error in ${functionName}]:`, fetchErr);
@@ -328,21 +357,15 @@ export default function App() {
       }
     };
 
-    // Use GAS-side wrapper to avoid sending large Flex objects through the bridge
     try {
       const res = await runBackendFunction('adminBroadcastQuote', [broadcastTargetGroup || 'ALL', name, min, max, isChotoy]);
-      const targetObj = lineGroups.find(g => g.id === broadcastTargetGroup);
-      const targetName = broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่ม' : (targetObj ? targetObj.name : `กลุ่ม (#${broadcastTargetGroup.slice(-4)})`);
-      
       if (res && res.success === false) {
-        addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'ไม่พบ Group ID หรือโควตาเต็ม'}`, 'warning');
+        addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
       } else {
-        addToast(`🚀 ประกาศราคาช่าง [${name}] (${min}-${max}s) → ${targetName} เรียบร้อย!`, 'success');
+        addToast(`🚀 ประกาศราคาสำเร็จ (${min}-${max}s)`, 'success');
       }
     } catch (e) {
-      console.error('Error broadcasting quote:', e);
-      const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Unknown Error';
-      addToast(`❌ Broadcast Error: ${errStr}`, 'danger');
+      addToast('❌ ส่งไม่สำเร็จ', 'danger');
     }
   };
   const [customRocketTime, setCustomRocketTime] = useState(''); // Manual entry by admin (blank default)
@@ -404,9 +427,13 @@ export default function App() {
     if (isGAS) {
       // GAS-hosted: use google.script.run RPC (SSE not available in GAS)
       const fetchGAS = () => {
-        window.google.script.run
-          .withSuccessHandler(applyData)
-          .getDashboardData();
+        const gas = window.google?.script?.run;
+        if (!gas) return;
+        if (typeof gas.getDashboardData === 'function') {
+          gas.withSuccessHandler(applyData).getDashboardData();
+        } else if (typeof gas.executeAdminAction === 'function') {
+          gas.withSuccessHandler(applyData).executeAdminAction('getDashboardData', []);
+        }
       };
       fetchGAS();
       const interval = setInterval(fetchGAS, 3000);
@@ -3021,11 +3048,10 @@ export default function App() {
                       onClick={async () => {
                         try {
                           const res = await runBackendFunction('adminBroadcastFinalCall', [broadcastTargetGroup || 'ALL']);
-                          if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
-                          else addToast('⛔ ประกาศปิดรับดวล (Final Call) เข้ากลุ่ม LINE เรียบร้อย!', 'warning');
+                          if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
+                          else addToast('⛔ ปิดรับดวลแล้ว', 'warning');
                         } catch(e) {
-                          const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
-                          addToast(`❌ Error: ${errStr}`, 'danger');
+                          addToast('❌ ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
                       className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
@@ -3047,14 +3073,13 @@ export default function App() {
                     </div>
                     <button
                       onClick={async () => {
-                        if (!window.confirm("⛔ คุณต้องการประกาศ 'ช่าง ⛔' (โมฆะรอบ) และยกเลิกคืนแต้มแผลดวลทั้งหมดใช่หรือไม่?")) return;
+                        if (!window.confirm("⛔ ยืนยันโมฆะรอบและยกเลิกคืนแต้มทั้งหมด?")) return;
                         try {
                           const res = await runBackendFunction('adminBroadcastVoidRound', [broadcastTargetGroup || 'ALL']);
-                          if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
-                          else addToast('⛔ ประกาศ "ช่าง ⛔" (โมฆะรอบ) และคืนแต้มผู้เล่นเรียบร้อย!', 'danger');
+                          if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
+                          else addToast('⛔ โมฆะรอบและคืนแต้มแล้ว', 'danger');
                         } catch(e) {
-                          const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
-                          addToast(`❌ Error: ${errStr}`, 'danger');
+                          addToast('❌ ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
                       className="w-full py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
@@ -3078,11 +3103,10 @@ export default function App() {
                       onClick={async () => {
                         try {
                           const res = await runBackendFunction('adminBroadcastRuleGuide', [broadcastTargetGroup || 'ALL']);
-                          if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
-                          else addToast('📖 ส่งคู่มือคีย์เวิร์ด & กติกาการเล่น เรียบร้อย!', 'info');
+                          if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
+                          else addToast('📖 ส่งกติกาแล้ว', 'info');
                         } catch(e) {
-                          const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
-                          addToast(`❌ Error: ${errStr}`, 'danger');
+                          addToast('❌ ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
                       className="w-full py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
@@ -3106,11 +3130,10 @@ export default function App() {
                       onClick={async () => {
                         try {
                           const res = await runBackendFunction('adminBroadcastScamWarning', [broadcastTargetGroup || 'ALL']);
-                          if (res && res.success === false) addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
-                          else addToast('🚨 บรอดแคสต์ประกาศเตือนมิจฉาชีพเรียบร้อย!', 'info');
+                          if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
+                          else addToast('🚨 ส่งเตือนความปลอดภัยแล้ว', 'info');
                         } catch(e) {
-                          const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
-                          addToast(`❌ Error: ${errStr}`, 'danger');
+                          addToast('❌ ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
                       className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
@@ -3195,14 +3218,13 @@ export default function App() {
                           try {
                             const res = await runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup || 'ALL', customBroadcastText.trim()]);
                             if (res && res.success === false) {
-                              addToast(`⚠️ ไม่สามารถส่งได้: ${res.error || res.body || 'โควตาเต็ม'}`, 'warning');
+                              addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
                             } else {
-                              addToast(`📢 ส่งประกาศเข้ากลุ่ม LINE เรียบร้อย!`, 'success');
+                              addToast('📢 ส่งประกาศเข้ากลุ่มแล้ว', 'success');
                               setCustomBroadcastText('');
                             }
                           } catch (err) {
-                            const errStr = err?.message || (typeof err === 'string' ? err : JSON.stringify(err)) || 'Error';
-                            addToast(`❌ Broadcast Error: ${errStr}`, 'danger');
+                            addToast('❌ ส่งไม่สำเร็จ', 'danger');
                           } finally {
                             setIsSendingBroadcast(false);
                           }
@@ -3264,17 +3286,16 @@ export default function App() {
                       )}
                       <button
                         onClick={async () => {
-                          addToast('⚡ กำลังทดสอบส่ง Push Message เข้ากลุ่ม...', 'info');
+                          addToast('⚡ กำลังทดสอบส่ง Push...', 'info');
                           try {
                             const testRes = await runBackendFunction('adminTestPushGroupMessage', [activeGroupId || 'ALL']);
                             if (testRes && testRes.success) {
-                              addToast(`✅ ทดสอบส่ง Push สำเร็จ! (HTTP 200) ข้อความเด้งเข้ากลุ่มแล้ว 🚀`, 'success');
+                              addToast('✅ ทดสอบส่ง Push สำเร็จ', 'success');
                             } else {
-                              addToast(`⚠️ LINE Push ไม่สำเร็จ: ${testRes?.error || testRes?.body || 'โควตาเต็ม'}`, 'warning');
+                              addToast(`⚠️ ส่งไม่สำเร็จ: ${testRes?.error || 'โควตาเต็ม'}`, 'warning');
                             }
                           } catch (err) {
-                            const errStr = err?.message || (typeof err === 'string' ? err : JSON.stringify(err)) || 'Error';
-                            addToast(`❌ Error: ${errStr}`, 'danger');
+                            addToast('❌ ส่งไม่สำเร็จ', 'danger');
                           }
                         }}
                         className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10.5px] font-bold transition-all active:scale-95 shadow-xs flex items-center gap-1"
@@ -3292,17 +3313,16 @@ export default function App() {
                           const res = await runBackendFunction('adminDiscoverGroupIds', []);
                           if (res && res.discovered && res.discovered.length > 0) {
                             const first = res.discovered[0];
-                            addToast(`🔍 พบ Group ID: ${first.id.slice(-8)} (${first.source}) — กำลังตั้งค่า...`, 'info');
+                            addToast(`🔍 พบ Group ID: ...${first.id.slice(-6)}`, 'info');
                             await runBackendFunction('adminSetActiveGroupId', [first.id]);
                             const dash = await runBackendFunction('getDashboardData', []);
                             if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
-                            addToast(`✅ ตั้งค่า Group ID สำเร็จ: ...${first.id.slice(-8)}`, 'success');
+                            addToast('✅ ตั้งค่า Group ID สำเร็จ', 'success');
                           } else {
-                            addToast('❌ ไม่พบ Group ID ในระบบ — กรุณา Paste Group ID ด้วยตนเองครับ', 'warning');
+                            addToast('⚠️ ไม่พบ Group ID ในระบบ', 'warning');
                           }
                         } catch(e) {
-                          const errStr = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || 'Error';
-                          addToast(`❌ Discover Error: ${errStr}`, 'danger');
+                          addToast('❌ ค้นหาไม่สำเร็จ', 'danger');
                         }
                       }}
                       className="py-2 px-3.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-all active:scale-95 whitespace-nowrap"
