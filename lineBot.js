@@ -569,6 +569,15 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   const normalized = text.trim().replace(/\s+/g, ' ').toLowerCase();
   const clean = text.replace(/\s+/g, '').toLowerCase();
 
+  if (normalized === '!groupid') {
+    if (groupId) {
+      await replyToLine(replyToken, `🆔 LINE Group ID: ${groupId}`, userId);
+    } else {
+      await replyToLine(replyToken, `⚠️ คำสั่งนี้ใช้งานได้เฉพาะในกลุ่ม LINE เท่านั้น`, userId);
+    }
+    return;
+  }
+
   // Admin Command 1: Open Rocket Flight Round ("เปิด [ชื่อบั้งไฟ]")
   const openRoundRegex = /^(เปิด|เปิดรอบ|รอบ)\s*(.+)$/;
   if (openRoundRegex.test(text.trim())) {

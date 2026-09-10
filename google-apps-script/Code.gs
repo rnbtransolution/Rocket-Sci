@@ -1192,6 +1192,16 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   const normalized = rawTrimmed.replace(/\s+/g, ' ').toLowerCase();
   const clean = rawTrimmed.replace(/\s+/g, '').toLowerCase();
 
+  // Utility Command: Group ID Inspection
+  if (normalized === '!groupid' || clean === '!groupid') {
+    if (groupId) {
+      replyToLine(replyToken, `🆔 LINE Group ID: ${groupId}`);
+    } else {
+      replyToLine(replyToken, `⚠️ คำสั่งนี้ใช้งานได้เฉพาะในกลุ่ม LINE เท่านั้น`);
+    }
+    return;
+  }
+
   // ─────────────────────────────────────────────────────────────
   // 1. CHECK BALANCE ("เช็คยอด", "คงเหลือ", "balance")
   // ─────────────────────────────────────────────────────────────

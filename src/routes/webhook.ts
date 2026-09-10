@@ -57,6 +57,30 @@ async function processSingleEvent(
     const text = event.message.text.trim();
     const replyToken = event.replyToken;
 
+    // Utility command: Check LINE Group ID
+    if (text.toLowerCase() === '!groupid' && replyToken) {
+      if (isGroup && groupId) {
+        await client.replyMessage({
+          replyToken,
+          messages: [{
+            type: 'text',
+            text: `🆔 LINE Group ID: ${groupId}`,
+          }],
+        });
+        console.log(`[Webhook] Answered !groupid in group: ${groupId}`);
+      } else {
+        await client.replyMessage({
+          replyToken,
+          messages: [{
+            type: 'text',
+            text: '⚠️ คำสั่งนี้ใช้งานได้เฉพาะในกลุ่ม LINE เท่านั้น',
+          }],
+        });
+        console.log(`[Webhook] Answered !groupid in 1-on-1 chat for user: ${userId}`);
+      }
+      return;
+    }
+
     // Fetch user display name
     let displayName = 'ผู้เล่น';
     if (userId) {
