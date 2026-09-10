@@ -320,7 +320,7 @@ export async function batchFetchSheets(options = {}) {
 
   const sheets = await getSheetsClient();
   if (!sheets || !spreadsheetId) {
-    return { players: [], transactions: [], bets: [], chatLogs: [] };
+    return { players: [], transactions: [], bets: [], chatLogs: [], lineGroups: [] };
   }
 
   try {
@@ -335,7 +335,20 @@ export async function batchFetchSheets(options = {}) {
       transactions: valueRanges[1]?.values || [],
       bets: valueRanges[2]?.values || [],
       chatLogs: valueRanges[3]?.values || [],
+      lineGroups: [],
     };
+
+    // Optional LineGroups tab (may not exist yet) — never fail the main batch for it
+    try {
+      const lgRes = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: 'LineGroups!A:E',
+      });
+      result.lineGroups = lgRes.data.values || [];
+      populateRowIndexCache('LineGroups', result.lineGroups);
+    } catch (_) {
+      result.lineGroups = [];
+    }
 
     // Cache the fresh dataset in memory
     sheetsCache.set(cacheKey, result);
@@ -351,7 +364,7 @@ export async function batchFetchSheets(options = {}) {
     // Return stale cache if available on error
     const stale = sheetsCache.get(cacheKey);
     if (stale) return stale;
-    return { players: [], transactions: [], bets: [], chatLogs: [] };
+    return { players: [], transactions: [], bets: [], chatLogs: [], lineGroups: [] };
   }
 }
 

@@ -272,12 +272,15 @@ export async function pushToLine(targetId, text) {
 
 /**
  * User-facing notices always land in private OA chat.
- * When the trigger came from a group, never reply into the group (keeps group clean/fast).
+ * When the trigger came from a group, push card to DM and notify cleanly in the group.
  */
 export async function deliverPrivateNotice(userId, replyToken, groupId, payload) {
   if (!userId) return;
   if (groupId) {
     await pushToLine(userId, payload);
+    if (replyToken && replyToken !== 'MOCK_REPLY_TOKEN') {
+      await replyToLine(replyToken, '💡 รายการส่วนตัว (เช็คยอด/ฝาก/ถอน/เมนู/กติกา) ส่งเข้าแชตส่วนตัวเรียบร้อยแล้วครับ 📩 (หากไม่เห็นข้อความ กรุณากดเพิ่มเพื่อน LINE OA ครับ)', userId);
+    }
     return;
   }
   if (replyToken && replyToken !== 'MOCK_REPLY_TOKEN') {
@@ -701,8 +704,10 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   }
 
   // J. FALLBACK — private only (never clutter group with unknown-command noise)
-  const fallbackNotice = `🤖 ไม่เข้าใจคำสั่งครับ ข้อมูลได้รับการบันทึกแล้ว แอดมินจะติดต่อกลับคุณในไม่ช้าครับ 💬\n(หรือพิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้งานได้ครับ 🚀)`;
-  await deliverPrivateNotice(userId, replyToken, groupId, fallbackNotice);
+  if (!groupId) {
+    const fallbackNotice = `🤖 ไม่เข้าใจคำสั่งครับ ข้อมูลได้รับการบันทึกแล้ว แอดมินจะติดต่อกลับคุณในไม่ช้าครับ 💬\n(หรือพิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้งานได้ครับ 🚀)`;
+    await deliverPrivateNotice(userId, replyToken, groupId, fallbackNotice);
+  }
 }
 
 export async function handleImageSlipMessage(messageId, userId, displayName, replyToken) {

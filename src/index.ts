@@ -1,0 +1,63 @@
+import express, { Request, Response } from 'express';
+import dotenv from 'dotenv';
+import { middleware, messagingApi } from '@line/bot-sdk';
+import { createWebhookRouter } from './routes/webhook.js';
+
+dotenv.config();
+
+const app = express();
+const PORT = parseInt(process.env.PORT || '8080', 10);
+
+const channelAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
+const channelSecret = process.env.LINE_CHANNEL_SECRET || '';
+
+if (!channelAccessToken) {
+  console.warn('[Server] Warning: LINE_CHANNEL_ACCESS_TOKEN is not set');
+}
+
+// 1. Initialize LINE Messaging API Client
+const messagingClient = new messagingApi.MessagingApiClient({
+  channelAccessToken,
+});
+
+// 2. LINE Middleware Configuration (Signature Validation)
+const lineConfig = {
+  channelAccessToken,
+  channelSecret,
+};
+
+// 3. Mount LINE Webhook with strict signature verification
+// Note: Must be mounted BEFORE express.json() to preserve raw body buffer for HMAC-SHA256 signature check
+if (channelSecret) {
+  app.use('/webhook', middleware(lineConfig), createWebhookRouter(messagingClient));
+} else {
+  console.warn('[Server] LINE_CHANNEL_SECRET not provided: bypassing signature validation for development');
+  app.use('/webhook', express.json(), createWebhookRouter(messagingClient));
+}
+
+// 4. Standard body parser for non-webhook REST endpoints
+app.use(express.json());
+
+// 5. Health Check endpoint
+app.get('/health', (_req: Request, res: Response) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'bangfai-node-service',
+    timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.floor(process.uptime()),
+  });
+});
+
+// 6. Root info endpoint
+app.get('/', (_req: Request, res: Response) => {
+  res.send('🚀 Bang Fai High-Concurrency Node.js Backend is running!');
+});
+
+// Start listening
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`====================================================`);
+  console.log(`🚀 Bang Fai Node.js Service listening on port ${PORT}`);
+  console.log(`🔗 Webhook endpoint: http://localhost:${PORT}/webhook`);
+  console.log(`🏥 Health check:     http://localhost:${PORT}/health`);
+  console.log(`====================================================`);
+});

@@ -9,8 +9,10 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-server
 dist-ssr
 *.local
+service-account.json
 
 # Editor directories and files
 .vscode/*

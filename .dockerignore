@@ -1,0 +1,13 @@
+node_modules
+.env
+.env.*
+!.env.example
+./legacy/
+dist/
+dist-server/
+.git
+.gitignore
+*.log
+npm-debug.log*
+service-account.json
+our-tracker-*.json

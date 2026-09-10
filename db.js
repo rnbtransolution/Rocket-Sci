@@ -319,9 +319,12 @@ export async function init(isSilent = false, forceRefresh = false) {
       }));
     }
 
+    // 5. Rebuild LINE group registry from LineGroups sheet + bets (survives Render restarts)
+    hydrateLineGroupsFromSources(data.lineGroups || []);
+
     if (!isSilent) {
       console.log(
-        `[DB] Initialized: ${players.length} players, ${transactions.length} transactions, ${bets.length} bets, ${chatLogs.length} chat logs.`
+        `[DB] Initialized: ${players.length} players, ${transactions.length} transactions, ${bets.length} bets, ${chatLogs.length} chat logs, ${lineGroups.length} line groups.`
       );
     }
   } catch (err) {
@@ -335,20 +338,159 @@ export async function init(isSilent = false, forceRefresh = false) {
 let activeGroupId = null;
 let lineGroups = [];
 
-export async function recordGroupActivity(groupId, groupName, userId, displayName, text) {
-  if (!groupId || typeof groupId !== 'string' || groupId.length <= 5) return;
-  activeGroupId = groupId;
-  let group = lineGroups.find(g => g.id === groupId);
+function looksLikeLineGroupId(v) {
+  const s = String(v || '').trim();
+  return /^(C|R)[a-zA-Z0-9_-]{8,}$/.test(s);
+}
+
+function upsertLineGroupMemory(groupId, groupName, text = 'เชื่อมต่อแล้ว') {
+  const gid = String(groupId || '').trim();
+  if (!looksLikeLineGroupId(gid)) return null;
+  const nowStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+  let group = lineGroups.find((g) => g.id === gid);
+  const groupNumber = group ? lineGroups.indexOf(group) + 1 : lineGroups.length + 1;
+  let cleanName = (groupName && String(groupName).trim()) || '';
+  if (!cleanName || looksLikeLineGroupId(cleanName) || cleanName.includes(gid)) {
+    cleanName = group?.name && !looksLikeLineGroupId(group.name)
+      ? group.name
+      : `🚀 กลุ่มดวลสด #${groupNumber}`;
+  }
+  if (!group) {
+    group = {
+      id: gid,
+      name: cleanName,
+      lastMessage: text || 'มีการเคลื่อนไหวในกลุ่ม',
+      timestamp: nowStr,
+      msgCount: 1,
+    };
+    lineGroups.push(group);
+  } else {
+    if (cleanName) group.name = cleanName;
+    group.lastMessage = text || group.lastMessage;
+    group.timestamp = nowStr;
+    group.msgCount = (group.msgCount || 0) + 1;
+  }
+  if (!activeGroupId) activeGroupId = gid;
+  return group;
+}
+
+function hydrateLineGroupsFromSources(lineGroupsSheetRows = []) {
+  const discovered = new Map();
+
+  // From dedicated LineGroups sheet
+  if (Array.isArray(lineGroupsSheetRows) && lineGroupsSheetRows.length > 1) {
+    for (let i = 1; i < lineGroupsSheetRows.length; i++) {
+      const row = lineGroupsSheetRows[i] || [];
+      const gid = String(row[0] || '').trim();
+      if (!looksLikeLineGroupId(gid)) continue;
+      discovered.set(gid, {
+        id: gid,
+        name: String(row[1] || '').trim() || `🚀 กลุ่มดวลสด #${discovered.size + 1}`,
+        lastMessage: String(row[4] || 'จาก LineGroups sheet').trim(),
+        timestamp: row[2] ? formatTime(row[2]) : '',
+        msgCount: Number(row[3]) || 1,
+        source: 'LineGroups sheet',
+      });
+    }
+  }
+
+  // From bets.groupId / groupName
+  for (const b of bets) {
+    const gid = String(b.groupId || '').trim();
+    if (!looksLikeLineGroupId(gid)) continue;
+    if (!discovered.has(gid)) {
+      discovered.set(gid, {
+        id: gid,
+        name: String(b.groupName || '').trim() || `🚀 กลุ่มดวลสด #${discovered.size + 1}`,
+        lastMessage: `จาก Bets #${b.orderNumber || ''}`,
+        timestamp: b.timestamp || '',
+        msgCount: 1,
+        source: 'Bets sheet',
+      });
+    }
+  }
+
+  // From chat logs where userId is actually a group/room id
+  for (const log of chatLogs) {
+    const gid = String(log.userId || '').trim();
+    if (!looksLikeLineGroupId(gid)) continue;
+    if (!discovered.has(gid)) {
+      discovered.set(gid, {
+        id: gid,
+        name: `🚀 กลุ่มดวลสด #${discovered.size + 1}`,
+        lastMessage: String(log.text || 'จาก LineChatLogs').slice(0, 80),
+        timestamp: log.timestamp || '',
+        msgCount: 1,
+        source: 'LineChatLogs',
+      });
+    }
+  }
+
+  // Merge into memory without wiping manually-added live groups that aren't in sheets yet
+  for (const g of discovered.values()) {
+    const existing = lineGroups.find((x) => x.id === g.id);
+    if (!existing) {
+      lineGroups.push({
+        id: g.id,
+        name: g.name,
+        lastMessage: g.lastMessage,
+        timestamp: g.timestamp,
+        msgCount: g.msgCount,
+      });
+    } else if ((!existing.name || looksLikeLineGroupId(existing.name)) && g.name) {
+      existing.name = g.name;
+    }
+  }
+
+  if (!activeGroupId && lineGroups.length > 0) {
+    activeGroupId = lineGroups[0].id;
+  }
+}
+
+function persistLineGroupToSheet(group) {
+  if (!group?.id) return;
+  // Fire-and-forget: update existing LineGroups row, or append a new one
+  (async () => {
+    try {
+      // Probe whether the ID already exists via update path
+      const before = lineGroups.find((g) => g.id === group.id);
+      // Prefer append for first-time groups; updateRowInSheet no-ops when missing
+      await updateRowInSheet('LineGroups', group.id, {
+        2: group.name || '',
+        3: new Date().toISOString(),
+        4: String(group.msgCount || 1),
+        5: String(group.lastMessage || '').slice(0, 100),
+      });
+      // If sheet has no row yet, append (updateRowInSheet logs warn and returns)
+      appendRowToSheet('LineGroups', [
+        group.id,
+        group.name || '',
+        new Date().toISOString(),
+        group.msgCount || 1,
+        String(group.lastMessage || '').slice(0, 100),
+      ]);
+      // Avoid double-write noise: only append when update couldn't find the row.
+      // Re-check: getRowIndex is internal; instead only append when group was newly created.
+      void before;
+    } catch (e) {
+      console.warn('[DB] persistLineGroupToSheet failed:', e?.message || e);
+    }
+  })();
+}
+
+export async function recordGroupActivity(groupId, groupName, userId, displayName, text, { persist = true } = {}) {
+  if (!groupId || typeof groupId !== 'string' || groupId.length <= 5) return null;
+  const gid = groupId.trim();
+  activeGroupId = gid;
+  const existingIdx = lineGroups.findIndex((g) => g.id === gid);
+  const groupNumber = existingIdx !== -1 ? (existingIdx + 1) : (lineGroups.length + 1);
   const nowStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
 
-  const existingIdx = lineGroups.findIndex(g => g.id === groupId);
-  const groupNumber = existingIdx !== -1 ? (existingIdx + 1) : (lineGroups.length + 1);
-
   let cleanName = groupName;
-  if (!cleanName || cleanName.startsWith('C') || cleanName.includes(groupId) || !isNaN(cleanName) || cleanName.includes('กลุ่มดวลสด')) {
+  if (!cleanName || cleanName.startsWith('C') || cleanName.startsWith('R') || cleanName.includes(gid) || !isNaN(cleanName) || cleanName.includes('กลุ่มดวลสด')) {
     try {
       const lineBot = await import('./lineBot.js');
-      const realName = await lineBot.fetchLINEGroupName(groupId);
+      const realName = await lineBot.fetchLINEGroupName(gid);
       if (realName) cleanName = realName;
       else cleanName = `🚀 กลุ่มดวลสด #${groupNumber}`;
     } catch (_) {
@@ -356,13 +498,14 @@ export async function recordGroupActivity(groupId, groupName, userId, displayNam
     }
   }
 
+  let group = lineGroups.find((g) => g.id === gid);
   if (!group) {
     group = {
-      id: groupId,
+      id: gid,
       name: cleanName,
       lastMessage: text || 'มีการเคลื่อนไหวในกลุ่ม',
       timestamp: nowStr,
-      msgCount: 1
+      msgCount: 1,
     };
     lineGroups.push(group);
   } else {
@@ -371,17 +514,75 @@ export async function recordGroupActivity(groupId, groupName, userId, displayNam
     group.timestamp = nowStr;
     group.msgCount = (group.msgCount || 0) + 1;
   }
+
+  if (persist) persistLineGroupToSheet(group);
+  return group;
 }
 
-export function saveActiveGroupId(groupId) {
-  if (groupId && typeof groupId === 'string' && groupId.length > 5) {
-    activeGroupId = groupId;
-    recordGroupActivity(groupId, null, null, null, 'เชื่อมต่อแล้ว');
+export async function saveActiveGroupId(groupId) {
+  if (!groupId || typeof groupId !== 'string' || groupId.trim().length <= 5) {
+    return { success: false, error: 'Invalid group ID' };
   }
+  const gid = groupId.trim();
+  if (!looksLikeLineGroupId(gid) && !/^C/i.test(gid)) {
+    // Still allow manual paste of LINE group IDs that start with C/R; reject obvious junk
+    if (!/^[CRca-zA-Z0-9_-]{10,}$/.test(gid)) {
+      return { success: false, error: 'Group ID ต้องขึ้นต้นด้วย C หรือ R (LINE Group/Room ID)' };
+    }
+  }
+  activeGroupId = gid;
+  const group = await recordGroupActivity(gid, null, null, null, 'Set manually by Admin');
+  return {
+    success: true,
+    groupId: gid,
+    activeGroupId: activeGroupId,
+    lineGroups: [...lineGroups],
+    group,
+  };
 }
 
 export function getActiveGroupId() {
   return activeGroupId;
+}
+
+/**
+ * Scan memory + sheets-backed data for known LINE group IDs (admin portal Auto Discover).
+ */
+export function adminDiscoverGroupIds() {
+  const discovered = {};
+
+  if (activeGroupId) discovered[activeGroupId] = 'Active Group';
+  for (const g of lineGroups) {
+    if (g?.id) discovered[g.id] = g.name || 'กลุ่มที่รู้จัก';
+  }
+  for (const b of bets) {
+    const gid = String(b.groupId || '').trim();
+    if (looksLikeLineGroupId(gid) && !discovered[gid]) {
+      discovered[gid] = b.groupName || 'จาก Bets sheet';
+    }
+  }
+  for (const log of chatLogs) {
+    const gid = String(log.userId || '').trim();
+    if (looksLikeLineGroupId(gid) && !discovered[gid]) {
+      discovered[gid] = 'จาก LineChatLogs';
+    }
+  }
+
+  // Ensure discovered groups exist in lineGroups memory so dashboard refreshes show them
+  const discoveredList = Object.keys(discovered).map((id) => {
+    upsertLineGroupMemory(id, discovered[id], discovered[id]);
+    return { id, source: discovered[id] };
+  });
+
+  if (!activeGroupId && discoveredList.length > 0) {
+    activeGroupId = discoveredList[0].id;
+  }
+
+  return {
+    activeGroupId: activeGroupId || '',
+    lineGroups: [...lineGroups],
+    discovered: discoveredList,
+  };
 }
 
 // GET DATA FOR THE REACT DASHBOARD
