@@ -117,6 +117,55 @@ app.use((req, res, next) => {
   next();
 });
 
+// Admin API - Get Active Groups
+app.get('/api/admin/groups', requireAdminApiKey, (req, res) => {
+  const dash = db.getDashboardData();
+  const groups = (dash?.lineGroups || []).map(g => ({
+    groupId: g.id,
+    groupName: g.name,
+    lastActiveAt: new Date().toISOString(),
+    isActive: true,
+  }));
+  res.json({ success: true, count: groups.length, groups });
+});
+
+// Admin API - Push Order
+app.post('/api/admin/push-order', requireAdminApiKey, async (req, res) => {
+  try {
+    const { targetGroupId, orderData } = req.body || {};
+    if (!orderData || typeof orderData !== 'object') {
+      return res.status(400).json({ success: false, reason: 'MISSING_ORDER_DATA', error: 'Missing required orderData object' });
+    }
+    const rocketName = (orderData.rocketName || 'ค่ายบั้งไฟพญานาค').trim();
+    const predictionType = (orderData.predictionType || 'สูง').trim();
+    const amount = parseInt(orderData.amount, 10) || 500;
+
+    const dash = db.getDashboardData();
+    const groups = dash?.lineGroups || [];
+    let targetId = targetGroupId;
+    if (!targetId || targetId.trim() === '') {
+      if (!groups.length) {
+        return res.status(400).json({
+          success: false,
+          reason: 'NO_ACTIVE_GROUP_FOUND',
+          error: 'No target group found. Please add the bot to a LINE group first.',
+        });
+      }
+      targetId = groups[0].id;
+    }
+
+    const pushRes = await lineBot.adminBroadcastQuote(targetId, rocketName, 120, 150, false);
+    res.json({
+      success: true,
+      message: `Order pushed to group ${targetId}`,
+      targetGroupId: targetId,
+      result: pushRes,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, reason: 'INTERNAL_SERVER_ERROR', error: err.message });
+  }
+});
+
 // RPC API Endpoint - maps React Dashboard remote calls (google.script.run emulation)
 app.post('/api/run', requireAdminApiKey, async (req, res) => {
   const { functionName, args = [] } = req.body;
