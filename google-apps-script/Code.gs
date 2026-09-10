@@ -1631,7 +1631,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   // ─────────────────────────────────────────────────────────────
   // 10. MAIN MENU & HELP
   // ─────────────────────────────────────────────────────────────
-  if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start' || clean === 'help' || clean === 'สวัสดี' || clean === 'ช่วยเหลือ') { {
+  if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start' || clean === 'help' || clean === 'สวัสดี' || clean === 'ช่วยเหลือ') {
     deliverPrivateNotice(userId, replyToken, groupId, constructMainMenuFlex());
     return;
   }
