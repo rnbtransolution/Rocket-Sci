@@ -388,7 +388,7 @@ export async function adminBroadcastVoidRound(targetId) {
 }
 
 export async function adminBroadcastRuleGuide(targetId) {
-  return await sendAdminMessageToLine(targetId || 'ALL', RULE_GUIDE_TEXT);
+  return await sendAdminMessageToLine(targetId || 'ALL', constructRuleGuideFlex());
 }
 
 export async function adminBroadcastScamWarning(targetId) {
@@ -688,9 +688,9 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
     return;
   }
 
-  // H. RULE / GUIDE — private preferred when typed in group (keeps group clean)
+  // H. RULE / GUIDE — Flex card (private when typed in group)
   if (clean === 'กติกา' || clean === 'rule' || clean === 'rules' || clean === 'วิธีเล่น' || clean === 'คู่มือ') {
-    await deliverPrivateNotice(userId, replyToken, groupId, RULE_GUIDE_TEXT);
+    await deliverPrivateNotice(userId, replyToken, groupId, constructRuleGuideFlex());
     return;
   }
 
@@ -2003,7 +2003,7 @@ export function constructEditAlertFlex(displayName, originalText, newText, order
 export function constructRuleGuideFlex() {
   return {
     "type": "bubble",
-    "size": "kilo",
+    "size": "mega",
     "header": {
       "type": "box",
       "layout": "vertical",
@@ -2025,15 +2025,16 @@ export function constructRuleGuideFlex() {
           "color": "#FFFFFF",
           "size": "sm",
           "align": "center",
-          "margin": "xs"
+          "margin": "xs",
+          "wrap": true
         }
       ]
     },
     "body": {
       "type": "box",
       "layout": "vertical",
-      "spacing": "xs",
-      "paddingAll": "sm",
+      "spacing": "sm",
+      "paddingAll": "md",
       "contents": [
         {
           "type": "box",
@@ -2047,12 +2048,51 @@ export function constructRuleGuideFlex() {
               "text": "📌 กฏที่ 1: เล่นราคาช่าง",
               "weight": "bold",
               "color": "#065F46",
-              "size": "xs",
+              "size": "sm",
               "wrap": true
             },
             {
               "type": "text",
-              "text": "🎉 ทายว่าชนะ (สูง):\n• ช่างไล่ / ชล / ไล่ / ลง\n• +5ชล / +5ล / +5ไล่\n• -5ชล / -5ล / -5ไล่\n💵 เช่น ชล100, ชล1000, +5ชล500\n\n👊 ทายว่าแพ้ (ต่ำ):\n• ช่างยั่ง / ช่างถอย / ชย\n• ชถ / ยั่ง / ย / ถอย / ถ\n• +5ชย / +5ชถ / +5ย / +5ถ\n• -5ชย / -5ชถ / -5ย / -5ถ\nเช่น ชถ100, ชถ1000, -5ชถ500",
+              "text": "🎉 ทายว่าชนะ (สูง):",
+              "weight": "bold",
+              "color": "#047857",
+              "size": "xs",
+              "margin": "sm",
+              "wrap": true
+            },
+            {
+              "type": "text",
+              "text": "• ช่างไล่ / ชล / ไล่ / ลง\n• +5ชล / +5ล / +5ไล่\n• -5ชล / -5ล / -5ไล่",
+              "color": "#047857",
+              "size": "xxs",
+              "wrap": true,
+              "margin": "xs"
+            },
+            {
+              "type": "text",
+              "text": "💵 พิมพ์คีย์เวิร์ดตามด้วยจำนวนเงิน (ตัวเลขเท่านั้น)\nเช่น ชล100 , ชล1000 , ชล10000",
+              "color": "#065F46",
+              "size": "xxs",
+              "wrap": true,
+              "margin": "xs"
+            },
+            {
+              "type": "separator",
+              "margin": "sm",
+              "color": "#A7F3D0"
+            },
+            {
+              "type": "text",
+              "text": "👊 ทายว่าแพ้ (ต่ำ):",
+              "weight": "bold",
+              "color": "#047857",
+              "size": "xs",
+              "margin": "sm",
+              "wrap": true
+            },
+            {
+              "type": "text",
+              "text": "• ช่างยั่ง / ช่างถอย / ชย\n• ชถ / ยั่ง / ย / ถอย / ถ\n• +5ชย / +5ชถ / +5ย / +5ถ\n• -5ชย / -5ชถ / -5ย / -5ถ\nเช่น ชถ100 , ชถ1000",
               "color": "#047857",
               "size": "xxs",
               "wrap": true,
@@ -2069,7 +2109,7 @@ export function constructRuleGuideFlex() {
           "contents": [
             {
               "type": "text",
-              "text": "📌 กฏที่ 2: การเปิดราคาเอง (ช่วงห่าง 50 วิพอดี)",
+              "text": "📌 กฏที่ 2: การเปิดราคาเอง (กรณีช่างไม่ต่อย / ต้องมีเครดิตพอ)",
               "weight": "bold",
               "color": "#0369A1",
               "size": "xs",
@@ -2077,7 +2117,38 @@ export function constructRuleGuideFlex() {
             },
             {
               "type": "text",
-              "text": "💰 เปิดราคาเอง (ช่วงห่าง 50 วิพอดี):\n• 300-350ล500 | 300-350ถ500\n• 350-400ล500 | 350-400ถ500\n\n⬆️ ช่างต่อยยกเลิก (ชตย):\nใส่ ชตย หลังจำนวนเงิน เช่น\n• 300-350ล500 ชตย | 350-400ถ500 ชตย",
+              "text": "💰 การเปิดราคาเอง (เปิดแผลสดใหม่):",
+              "weight": "bold",
+              "color": "#0284C7",
+              "size": "xs",
+              "margin": "sm",
+              "wrap": true
+            },
+            {
+              "type": "text",
+              "text": "⚠️ ช่วงราคาต้องห่างกัน 50 วิพอดี เช่น\n• 300-350ล500 | 300-350ถ500\n• 350-400ล500 | 350-400ถ500",
+              "color": "#0284C7",
+              "size": "xxs",
+              "wrap": true,
+              "margin": "xs"
+            },
+            {
+              "type": "separator",
+              "margin": "sm",
+              "color": "#BAE6FD"
+            },
+            {
+              "type": "text",
+              "text": "⬆️ ช่างต่อยยกเลิก (ชตย)",
+              "weight": "bold",
+              "color": "#0284C7",
+              "size": "xs",
+              "margin": "sm",
+              "wrap": true
+            },
+            {
+              "type": "text",
+              "text": "ใส่ ชตย หลังจำนวนเงิน เช่น\n• 300-350ล500 ชตย\n• 350-400ถ500 ชตย",
               "color": "#0284C7",
               "size": "xxs",
               "wrap": true,
