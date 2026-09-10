@@ -270,6 +270,32 @@ export async function pushToLine(targetId, text) {
   }
 }
 
+/**
+ * User-facing notices always land in private OA chat.
+ * When the trigger came from a group, never reply into the group (keeps group clean/fast).
+ */
+export async function deliverPrivateNotice(userId, replyToken, groupId, payload) {
+  if (!userId) return;
+  if (groupId) {
+    await pushToLine(userId, payload);
+    return;
+  }
+  if (replyToken && replyToken !== 'MOCK_REPLY_TOKEN') {
+    await replyToLine(replyToken, payload, userId);
+    return;
+  }
+  await pushToLine(userId, payload);
+}
+
+function getActiveRocketName() {
+  try {
+    const round = db.getActiveRocketRound?.();
+    return (round && round.name) ? String(round.name) : '';
+  } catch (_) {
+    return '';
+  }
+}
+
 export async function fetchLINEGroupName(groupId) {
   if (!groupId || typeof groupId !== 'string' || !groupId.startsWith('C')) return null;
   const cached = groupNameCache.get(groupId);
@@ -475,41 +501,26 @@ export async function broadcastToAllGroups(messageTextOrFlex) {
 
 export async function handleUnsendMessage(unsendMessageId, userId, displayName, groupId) {
   const info = await db.handleUnsendEvent(unsendMessageId, userId, displayName, groupId);
-  const target = groupId || info.targetGroupId || db.getActiveGroupId();
   const player = displayName || info.displayName || 'ผู้ใช้';
   const originalText = info.originalText || null;
   const orderNo = info.orderNo || null;
 
   const alertFlex = constructUnsendAlertFlex(player, originalText, orderNo);
-  if (target) {
-    await pushToLine(target, alertFlex);
-  } else if (userId) {
+  // Option A: private DM only — never post unsend alerts into the group
+  if (userId) {
     await pushToLine(userId, alertFlex);
   }
 }
 
 export async function handleMessageEdited(messageId, newText, userId, displayName, groupId, replyToken) {
   const info = await db.handleMessageEditedEvent(messageId, newText, userId, displayName, groupId);
-  const target = groupId || info.targetGroupId || db.getActiveGroupId();
   const player = displayName || info.displayName || 'ผู้ใช้';
   const originalText = info.originalText || null;
   const orderNo = info.orderNo || null;
 
   const alertFlex = constructEditAlertFlex(player, originalText, newText, orderNo);
-  if (replyToken && replyToken !== 'MOCK_REPLY_TOKEN') {
-    try {
-      await replyToLine(replyToken, alertFlex, userId);
-      return;
-    } catch (e) {
-      console.warn('[LINE] replyToken expired or failed for messageEdited, falling back to push:', e.message);
-    }
-  }
-
-  if (target) {
-    await pushToLine(target, alertFlex);
-  } else if (userId) {
-    await pushToLine(userId, alertFlex);
-  }
+  // Keep edit/cancel notices in private chat only
+  await deliverPrivateNotice(userId, replyToken, groupId, alertFlex);
 }
 
 // --- LINE BOT CONTROLLER / WEBHOOK HANDLERS ---
@@ -572,31 +583,28 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
     return;
   }
   
-  // A. CHECK BALANCE
+  // A. CHECK BALANCE — private only
   if (clean === 'เช็คยอด' || clean === 'คงเหลือ' || clean === 'balance') {
-    if (groupId) {
-      await replyToLine(replyToken, `💡 [แชตส่วนตัว] เช็คยอด/ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ 🚀`, userId);
-    } else {
-      const balance = await db.getPlayerBalance(userId, displayName);
-      const balanceFlex = constructBalanceFlex(displayName, balance);
-      await replyToLine(replyToken, balanceFlex, userId);
-    }
+    const balance = await db.getPlayerBalance(userId, displayName);
+    const balanceFlex = constructBalanceFlex(displayName, balance);
+    await deliverPrivateNotice(userId, replyToken, groupId, balanceFlex);
     return;
   }
   
-  // B. LIST ACTIVE DEALS
+  // B. LIST ACTIVE DEALS — private only (matching status)
   if (clean === 'รายการจับคู่' || clean === 'matched' || clean === 'รายการดวล') {
     const matchedBets = db.getPlayerActiveBets(userId);
+    const rocketLabel = getActiveRocketName();
     if (matchedBets.length === 0) {
-      await replyToLine(replyToken, `📝 [รายการดวล]: ไม่มีแผลดวลค้างครับ`, userId);
+      await deliverPrivateNotice(userId, replyToken, groupId, `📝 [รายการดวล]: ไม่มีแผลดวลค้างครับ${rocketLabel ? `\nบั้งไฟ: ${rocketLabel}` : ''}`);
     } else {
-      let replyMsg = `📝 [รายการดวลของคุณ (${matchedBets.length})]:\n`;
+      let replyMsg = `📝 [รายการดวลของคุณ (${matchedBets.length})]${rocketLabel ? `\nบั้งไฟ: ${rocketLabel}` : ''}:\n`;
       matchedBets.forEach(b => {
         const side = b.playerLowId === userId ? 'ต่ำ' : 'สูง';
         const oppName = b.playerLowId === userId ? b.playerHighName : b.playerLowName;
         replyMsg += `#${b.orderNumber} | ${side} | ${b.amount}pt vs ${oppName || 'รอคู่'}\n`;
       });
-      await replyToLine(replyToken, replyMsg, userId);
+      await deliverPrivateNotice(userId, replyToken, groupId, replyMsg);
     }
     return;
   }
@@ -605,79 +613,60 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   const isMatchCommand = await parseBetCommand(text, userId, displayName, replyToken, groupId, messageId);
   if (isMatchCommand) return;
 
-  // D. INITIATE DEPOSIT
+  // D. INITIATE DEPOSIT — private only (full flex in OA DM even if typed in group)
   if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit' || clean === 'เติมเครดิต') {
-    if (groupId) {
-      await replyToLine(replyToken, `💡 [แชตส่วนตัว] เช็คยอด/ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ 🚀`, userId);
-    } else {
-      const depositFlex = constructDepositFlex();
-      await replyToLine(replyToken, depositFlex, userId);
-    }
+    await deliverPrivateNotice(userId, replyToken, groupId, constructDepositFlex());
     return;
   }
 
-  // E. INITIATE WITHDRAWAL
+  // E. INITIATE WITHDRAWAL — private only
   if (clean === 'ถอนเงิน' || clean === 'ถอนยอด' || clean === 'withdraw') {
-    if (groupId) {
-      await replyToLine(replyToken, `💡 [แชตส่วนตัว] เช็คยอด/ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ 🚀`, userId);
-    } else {
-      const bank = db.getPlayerBank(userId);
-      if (!bank) {
-        if (db.hasSuccessfulDeposit(userId)) {
-          const regFlex = constructBankRegistrationFlex();
-          await replyToLine(replyToken, regFlex, userId);
-        } else {
-          await replyToLine(replyToken, `❌ ยังไม่มีข้อมูลบัญชี กรุณาทักแอดมินลงทะเบียนครับ`, userId);
-        }
+    const bank = db.getPlayerBank(userId);
+    if (!bank) {
+      if (db.hasSuccessfulDeposit(userId)) {
+        await deliverPrivateNotice(userId, replyToken, groupId, constructBankRegistrationFlex());
       } else {
-        const balance = await db.getPlayerBalance(userId, bank.accountName || displayName);
-        const withdrawFlex = constructWithdrawalFlex(bank.bankName, bank.accountNumber, bank.accountName, balance);
-        await replyToLine(replyToken, withdrawFlex ? withdrawFlex : `💸 บัญชี: ${bank.bankName} ${bank.accountNumber} (${balance}pt)\nพิมพ์ "ถอน [จำนวน]" เพื่อเริ่มทำรายการครับ`, userId);
+        await deliverPrivateNotice(userId, replyToken, groupId, `❌ ยังไม่มีข้อมูลบัญชี กรุณาทักแอดมินลงทะเบียนครับ`);
       }
+    } else {
+      const balance = await db.getPlayerBalance(userId, bank.accountName || displayName);
+      const withdrawFlex = constructWithdrawalFlex(bank.bankName, bank.accountNumber, bank.accountName, balance);
+      await deliverPrivateNotice(userId, replyToken, groupId, withdrawFlex ? withdrawFlex : `💸 บัญชี: ${bank.bankName} ${bank.accountNumber} (${balance}pt)\nพิมพ์ "ถอน [จำนวน]" เพื่อเริ่มทำรายการครับ`);
     }
     return;
   }
 
-  // F. PROCESS WITHDRAWAL REQUEST ("ถอน [amount]")
+  // F. PROCESS WITHDRAWAL REQUEST ("ถอน [amount]") — private only
   const withdrawTextRegex = /^(ถอน|ถอนเงิน|ถอนยอด)(\d+)$/;
   if (withdrawTextRegex.test(clean)) {
-    if (groupId) {
-      await replyToLine(replyToken, `💡 [แชตส่วนตัว] เช็คยอด/ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ 🚀`, userId);
-      return;
-    }
     const match = clean.match(withdrawTextRegex);
     const withdrawAmt = parseInt(match[2]);
     const bank = db.getPlayerBank(userId);
     
     if (!bank) {
-      await replyToLine(replyToken, `❌ ยังไม่ได้ลงทะเบียนบัญชีธนาคาร กรุณาแจ้งแอดมินครับ`, userId);
+      await deliverPrivateNotice(userId, replyToken, groupId, `❌ ยังไม่ได้ลงทะเบียนบัญชีธนาคาร กรุณาแจ้งแอดมินครับ`);
       return;
     }
     
     const balance = await db.getPlayerBalance(userId, bank.accountName || displayName);
     if (balance < withdrawAmt) {
-      await replyToLine(replyToken, `⚠️ เครดิตไม่พอ (มี ${balance}pt ต้องการถอน ${withdrawAmt}pt)`, userId);
+      await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ เครดิตไม่พอ (มี ${balance}pt ต้องการถอน ${withdrawAmt}pt)`);
       return;
     }
     
     if (withdrawAmt < 100) {
-      await replyToLine(replyToken, `⚠️ ถอนขั้นต่ำ 100pt ครับ`, userId);
+      await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ถอนขั้นต่ำ 100pt ครับ`);
       return;
     }
 
-    // Deduct player balance
     await db.adjustPlayerBalance(userId, -withdrawAmt, bank.accountName || displayName);
-    
-    // Log withdrawal transaction
     db.logTransaction(userId, bank.accountName || displayName, withdrawAmt, 0, 'PENDING_WITHDRAW', 'escalated', `Withdrawal request to ${bank.bankName} ${bank.accountNumber} ${bank.accountName}`);
-    
-    // Send banking notification flex (money going out)
     const bankFlex = constructBankingFlex("withdraw", withdrawAmt, `ถอนเงินโอนเข้าบัญชี ${bank.bankName} เลขบัญชี ${bank.accountNumber}`, null, userId);
-    await replyToLine(replyToken, bankFlex, userId);
+    await deliverPrivateNotice(userId, replyToken, groupId, bankFlex);
     return;
   }
 
-  // G. PROCESS DEPOSIT AMOUNT REQUEST
+  // G. PROCESS DEPOSIT AMOUNT REQUEST — private only
   const pureNumRegex = /^\d+$/;
   const depositTextRegex = /^(ฝาก|ฝากเงิน|เติม|เติมเงิน)(\d+)$/;
   let depositAmt = null;
@@ -689,43 +678,31 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   }
 
   if (depositAmt !== null) {
-    if (groupId) {
-      await replyToLine(replyToken, `💡 [แชตส่วนตัว] เช็คยอด/ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ 🚀`, userId);
-      return;
-    }
     if (depositAmt < 100 || depositAmt > 10000) {
-      await replyToLine(replyToken, `⚠️ ยอดฝากขั้นต่ำ 100 บาท สูงสุด 10,000 บาทครับ`, userId);
+      await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ยอดฝากขั้นต่ำ 100 บาท สูงสุด 10,000 บาทครับ`);
       return;
     }
 
     db.logTransaction(userId, displayName, depositAmt, 0, 'PENDING_SLIP', 'escalated', 'Waiting for user to upload pay slip');
-    const invoiceFlex = constructDepositInvoiceFlex(depositAmt);
-    await replyToLine(replyToken, invoiceFlex, userId);
+    await deliverPrivateNotice(userId, replyToken, groupId, constructDepositInvoiceFlex(depositAmt));
     return;
   }
 
-  // H. RULE / GUIDE COMMAND ("กติกา", "rule", "rules", "วิธีเล่น", "คู่มือ")
+  // H. RULE / GUIDE — private preferred when typed in group (keeps group clean)
   if (clean === 'กติกา' || clean === 'rule' || clean === 'rules' || clean === 'วิธีเล่น' || clean === 'คู่มือ') {
-    await replyToLine(replyToken, RULE_GUIDE_TEXT, userId);
+    await deliverPrivateNotice(userId, replyToken, groupId, RULE_GUIDE_TEXT);
     return;
   }
 
-  // I. HELP MENU
+  // I. HELP MENU — private only
   if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start' || clean === 'ช่วยเหลือ') {
-    if (groupId) {
-      await replyToLine(replyToken, `💡 [เมนูส่วนตัว] รายการเช็คยอด เติมเงิน ถอนเงิน เป็นข้อมูลส่วนบุคคลส่วนตัว กรุณาทักแชตตรงหา LINE OA แบบส่วนตัวครับ (ในกลุ่มใช้พิมพ์แทงดวลสด และพิมพ์ "กระดานดวล") 🚀`, userId);
-    } else {
-      const menuFlex = constructMainMenuFlex();
-      await replyToLine(replyToken, menuFlex, userId);
-    }
+    await deliverPrivateNotice(userId, replyToken, groupId, constructMainMenuFlex());
     return;
   }
 
-  // J. FALLBACK: Differentiate DM (rich helpful notice) vs Group (ultra-short 1-line notice)
-  const fallbackNotice = groupId
-    ? `🤖 ไม่เข้าใจคำสั่ง บันทึกแล้ว แอดมินจะติดต่อกลับครับ 💬`
-    : `🤖 ไม่เข้าใจคำสั่งครับ ข้อมูลได้รับการบันทึกแล้ว แอดมินจะติดต่อกลับคุณในไม่ช้าครับ 💬\n(หรือพิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้งานได้ครับ 🚀)`;
-  await replyToLine(replyToken, fallbackNotice, userId);
+  // J. FALLBACK — private only (never clutter group with unknown-command noise)
+  const fallbackNotice = `🤖 ไม่เข้าใจคำสั่งครับ ข้อมูลได้รับการบันทึกแล้ว แอดมินจะติดต่อกลับคุณในไม่ช้าครับ 💬\n(หรือพิมพ์ "เมนู" เพื่อดูคำสั่งที่ใช้งานได้ครับ 🚀)`;
+  await deliverPrivateNotice(userId, replyToken, groupId, fallbackNotice);
 }
 
 export async function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
@@ -941,35 +918,28 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
     const targetOrderNo = match[2] || null;
 
     const res = await db.cancelOpenBet(userId, targetOrderNo, false, displayName);
-    const tagPrefix = groupId ? `👤 [ถึงคุณ @${displayName}]: ` : '';
 
     if (res.success) {
       const miniFlex = constructCancelOrderMiniFlex(res.orderNumber);
+      // Cancel is order-board state: keep one group card so matchers stop ticking; confirm privately too
       await replyToLine(replyToken, miniFlex, userId);
-      // When cancelled from 1-on-1 private chat, also notify the LINE group where the open bet was posted!
       if (!groupId) {
         const targetGroup = res.groupId || db.getActiveGroupId();
-        if (targetGroup) {
-          await pushToLine(targetGroup, miniFlex);
-        }
-      } else if (userId && userId !== groupId) {
-        // When cancelled from group, notify creator private chat as well
+        if (targetGroup) await pushToLine(targetGroup, miniFlex);
+      } else if (userId) {
         await pushToLine(userId, miniFlex);
       }
     } else if (res.error === 'UNAUTHORIZED') {
-      const msg = `${tagPrefix}⚠️ เฉพาะเจ้าของแผล (@${res.creatorName}) หรือแอดมินเท่านั้นที่ยกเลิกได้ครับ`;
-      await replyToLine(replyToken, msg, userId);
+      await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ เฉพาะเจ้าของแผล (@${res.creatorName}) หรือแอดมินเท่านั้นที่ยกเลิกได้ครับ`);
     } else if (res.error === 'ALREADY_MATCHED') {
-      const msg = `${tagPrefix}⚠️ ไม่สามารถยกเลิกได้ครับ แผล Order #${res.orderNumber} มีคู่ดวลแมตช์แล้ว (กติกาไม่อนุญาตให้ยกเลิกแผลที่แมตช์แล้วทุกกรณีครับ 🚀)`;
-      await replyToLine(replyToken, msg, userId);
+      await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ไม่สามารถยกเลิกได้ครับ แผล Order #${res.orderNumber} มีคู่ดวลแมตช์แล้ว (กติกาไม่อนุญาตให้ยกเลิกแผลที่แมตช์แล้วทุกกรณีครับ 🚀)`);
     } else if (res.error === 'ALREADY_RESOLVED') {
-      const msg = `${tagPrefix}⚠️ แผล Order #${res.orderNumber} จบหรือถูกยกเลิกแล้วครับ`;
-      await replyToLine(replyToken, msg, userId);
+      await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ แผล Order #${res.orderNumber} จบหรือถูกยกเลิกแล้วครับ`);
     } else {
       const notFoundText = targetOrderNo
         ? `🚫 ไม่พบแผล Order #${targetOrderNo} ในระบบครับ`
         : `🚫 ไม่มีแผลที่เปิดรอคู่ในระบบครับ`;
-      await replyToLine(replyToken, `${tagPrefix}${notFoundText}`, userId);
+      await deliverPrivateNotice(userId, replyToken, groupId, notFoundText);
     }
     return true;
   }
@@ -1016,66 +986,66 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
 
   if (isAcceptMatch) {
     const sendNotice = async (msg) => {
-      await replyToLine(replyToken, msg, userId);
+      await deliverPrivateNotice(userId, replyToken, groupId, msg);
     };
 
     const matched = await db.matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmount);
-    const tagPrefix = groupId ? `👤 [ถึงคุณ @${displayName}]: ` : '';
 
     if (matched && matched.error === 'BELOW_MIN_PERCENT_LIMIT') {
-      await sendNotice(`${tagPrefix}⚠️ ยอดดวลขั้นต่ำคือ 20% (${matched.minAllowed} pt) ของ Order #${matched.orderNumber} ครับ (คุณระบุ ${matched.provided} pt)`);
+      await sendNotice(`⚠️ ยอดดวลขั้นต่ำคือ 20% (${matched.minAllowed} pt) ของ Order #${matched.orderNumber} ครับ (คุณระบุ ${matched.provided} pt)`);
       return true;
     }
     if (matched && matched.error === 'BELOW_MIN_LIMIT') {
-      await sendNotice(`${tagPrefix}⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${matched.provided} pt)`);
+      await sendNotice(`⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${matched.provided} pt)`);
       return true;
     }
     if (matched && matched.error === 'INSUFFICIENT_BALANCE') {
       const needed = matched.required - matched.current;
-      await sendNotice(`${tagPrefix}⚠️ แต้มไม่พอ (มี ${matched.current}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`);
+      await sendNotice(`⚠️ แต้มไม่พอ (มี ${matched.current}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`);
       return true;
     }
     if (matched && matched.error === 'OWN_BET') {
-      await sendNotice(`${tagPrefix}⚠️ คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ`);
+      await sendNotice(`⚠️ คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ`);
       return true;
     }
     if (matched && matched.error === 'CANCELLED') {
-      await sendNotice(`${tagPrefix}🚫 แผล Order #${matched.orderNumber} ถูกยกเลิกไปแล้วครับ`);
+      await sendNotice(`🚫 แผล Order #${matched.orderNumber} ถูกยกเลิกไปแล้วครับ`);
       return true;
     }
     if (matched && matched.error === 'ALREADY_MATCHED') {
-      await sendNotice(`${tagPrefix}⚠️ แผล Order #${matched.orderNumber} มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ`);
+      await sendNotice(`⚠️ แผล Order #${matched.orderNumber} มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ`);
       return true;
     }
     if (matched && matched.error === 'NOT_FOUND') {
-      await sendNotice(`${tagPrefix}🚫 ไม่พบแผล Order #${matched.targetOrderNo || targetOrderNo} ในระบบครับ`);
+      await sendNotice(`🚫 ไม่พบแผล Order #${matched.targetOrderNo || targetOrderNo} ในระบบครับ`);
       return true;
     }
     if (matched && matched.error === 'EXCEEDS_ORDER_AMOUNT') {
-      await sendNotice(`${tagPrefix}⚠️ ยอดรับดวล (${matched.provided} pt) เกินยอดของ Order #${matched.orderNumber} (รับได้สูงสุด ${matched.maxAllowed} pt ครับ)`);
+      await sendNotice(`⚠️ ยอดรับดวล (${matched.provided} pt) เกินยอดของ Order #${matched.orderNumber} (รับได้สูงสุด ${matched.maxAllowed} pt ครับ)`);
       return true;
     }
 
     if (matched && matched.orderNumber) {
-      // Reply directly to group/chat via replyToken
-      const flexMatch = constructMatchNotificationFlex(matched.orderNumber, matched.amount, matched.playerLowName, matched.playerHighName, matched.rangeInfo, matched.isChotoy, matched.rocketName);
-
+      const rocketLabel = matched.rocketName || getActiveRocketName();
+      // Group (or current chat): match card only
+      const flexMatch = constructMatchNotificationFlex(matched.orderNumber, matched.amount, matched.playerLowName, matched.playerHighName, matched.rangeInfo, matched.isChotoy, rocketLabel);
       const groupReply = replyToLine(replyToken, flexMatch, userId);
 
+      // Private confirmations for creator + matcher
+      const confirmText = `✅ ยืนยันแมตช์ Order #${matched.orderNumber}\nบั้งไฟ: ${rocketLabel || '-'}\nยอด: ${matched.amount}pt\nต่ำ: @${matched.playerLowName || '-'} | สูง: @${matched.playerHighName || '-'}`;
       const creatorPush = (async () => {
         try {
-          if (matched.creatorId) {
-            await pushToLine(matched.creatorId, flexMatch);
-          }
+          if (matched.creatorId) await pushToLine(matched.creatorId, confirmText);
         } catch (e) {
           console.error('[Match DM Creator Push Error]', e);
         }
       })();
-
       const matcherPush = (async () => {
         try {
-          if (groupId && matched.matcherId && matched.matcherId !== matched.creatorId) {
-            await pushToLine(matched.matcherId, flexMatch);
+          if (matched.matcherId && matched.matcherId !== matched.creatorId) {
+            // Always confirm matcher privately (group reply already used replyToken)
+            if (groupId) await pushToLine(matched.matcherId, confirmText);
+            else await pushToLine(matched.matcherId, confirmText);
           }
         } catch (e) {
           console.error('[Match DM Matcher Push Error]', e);
@@ -1088,8 +1058,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
       const notFoundText = targetOrderNo
         ? `🚫 ไม่พบแผล Order #${targetOrderNo} ที่เปิดรอคู่ครับ`
         : `🚫 ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ในขณะนี้ครับ`;
-      const tagPrefix = groupId ? `👤 [ถึงคุณ @${displayName}]: ` : '';
-      await sendNotice(`${tagPrefix}${notFoundText}`);
+      await sendNotice(notFoundText);
       return true;
     }
   }
@@ -1114,29 +1083,20 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
     if (side) {
       // 1. Check low-to-high order (minVal must be strictly less than maxVal)
       if (minVal >= maxVal) {
-        const orderErrMsg = groupId
-          ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-350${cmd} (คุณระบุ ${minVal}-${maxVal})`
-          : `⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-350${cmd} (คุณระบุ ${minVal}-${maxVal})`;
-        await replyToLine(replyToken, orderErrMsg, userId);
+        await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-350${cmd} (คุณระบุ ${minVal}-${maxVal})`);
         return true;
       }
 
       // 2. Check strict 50-second range window
       if (maxVal - minVal !== 50) {
         const diff = maxVal - minVal;
-        const windowErrMsg = groupId
-          ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ช่วงราคาต้องห่างกัน 50 วินาทีพอดีครับ เช่น 300-350${cmd} (คุณระบุ ${minVal}-${maxVal} ห่าง ${diff} วิ)`
-          : `⚠️ ช่วงราคาต้องห่างกัน 50 วินาทีพอดีครับ เช่น 300-350${cmd} (คุณระบุ ${minVal}-${maxVal} ห่าง ${diff} วิ)`;
-        await replyToLine(replyToken, windowErrMsg, userId);
+        await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ช่วงราคาต้องห่างกัน 50 วินาทีพอดีครับ เช่น 300-350${cmd} (คุณระบุ ${minVal}-${maxVal} ห่าง ${diff} วิ)`);
         return true;
       }
 
       // 3. Minimum amount check
       if (amount < 100) {
-        const minAmtMsg = groupId
-          ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`
-          : `⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`;
-        await replyToLine(replyToken, minAmtMsg, userId);
+        await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`);
         return true;
       }
 
@@ -1152,10 +1112,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
     const deltaMatch = strippedCmdText.match(/^([+\-]\d+)/);
     const deltaVal = parseInt(deltaMatch[1]);
     if (deltaVal !== 5 && deltaVal !== -5 && deltaVal !== 10 && deltaVal !== -10) {
-      const deltaErrMsg = groupId
-        ? `👤 [ถึงคุณ @${displayName}]: ⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)`
-        : `⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)`;
-      await replyToLine(replyToken, deltaErrMsg, userId);
+      await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)`);
       return true;
     }
     offsetDelta = deltaVal;
@@ -1174,10 +1131,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
     
     if (side) {
       if (amount < 100) {
-        const minAmtMsg = groupId
-          ? `👤 [ถึงคุณ @${displayName}]: ⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`
-          : `⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`;
-        await replyToLine(replyToken, minAmtMsg, userId);
+        await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`);
         return true;
       }
 
@@ -1205,27 +1159,20 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
 
 async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false, groupId = null, userTypedCmd = null, isPreQuote = false, offsetDelta = 0, messageId = null) {
   if (db.isRocketRoundClosed()) {
-    const msg = groupId
-      ? `👤 [ถึงคุณ @${displayName}]: ⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ`
-      : `⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ`;
-    await replyToLine(replyToken, msg, userId);
+    await deliverPrivateNotice(userId, replyToken, groupId, `⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ`);
     return;
   }
-  // Check if admin account (Admin quotes do NOT require credit deduction as they serve as guidelines)
-  const isAdminUser = userId === 'admin' || userId === 'user' || (typeof userId === 'string' && (userId.toLowerCase() === 'user' || userId.toLowerCase() === 'admin'));
 
-  // Generate unique 6-digit order number (avoid col-A collisions in Sheets)
   const orderNo = db.generateUniqueOrderNumber();
+  const rocketLabel = getActiveRocketName();
   
   // Save open bet with groupId for multi-group tracking (credit deduction happens inside db.saveOpenBet)
   const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal, groupId, userTypedCmd, isPreQuote, null, messageId);
   if (!saved || saved.error) {
     const bal = saved?.current || 0;
     const needed = amount - bal;
-    const msg = groupId
-      ? `⚠️ แต้มไม่พอ (มี ${bal}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`
-      : `⚠️ เครดิตไม่พอ กรุณาเติมเครดิตครับ`;
-    await replyToLine(replyToken, msg, userId);
+    const msg = `⚠️ แต้มไม่พอ (มี ${bal}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`;
+    await deliverPrivateNotice(userId, replyToken, groupId, msg);
     return;
   }
   
@@ -1238,8 +1185,15 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
     rangeInfo = '(ชตย)';
   }
   
-  const betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfo, isChotoy, userTypedCmd, isPreQuote);
+  // Group/chat: order card only (with บั้งไฟ name)
+  const betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfo, isChotoy, userTypedCmd, isPreQuote, rocketLabel);
   await replyToLine(replyToken, betCard, userId);
+
+  // Private order confirmation (especially when opened from a group)
+  if (groupId && userId) {
+    const sideLabel = side === 'low' ? 'ต่ำ' : 'สูง';
+    await pushToLine(userId, `✅ ยืนยันเปิดออเดอร์ #${orderNo}\nบั้งไฟ: ${rocketLabel || '-'}\nฝั่ง: ${sideLabel} | ${amount}pt${rangeInfo ? ` | ${rangeInfo}` : ''}`);
+  }
 }
 
 // --- LINE FLEX CONSTRUCTORS ---
@@ -2186,7 +2140,7 @@ export const RULE_GUIDE_TEXT = `📖 [คู่มือคีย์เวิร
 • 300-350ล500 ชตย
 • 350-400ถ500 ชตย`;
 
-export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy, userTypedCmd = null, isPreQuote = false) {
+export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isChotoy, userTypedCmd = null, isPreQuote = false, rocketName = null) {
   const sideShort = side === 'low' ? 'ล' : 'ถ';
   let cleanCmd = (userTypedCmd && typeof userTypedCmd === 'string') ? userTypedCmd.trim() : `${sideShort}${amount}`;
   cleanCmd = cleanCmd.replace(/^\d+[-/]\d+/, '').trim();
@@ -2259,6 +2213,7 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
     }
   ];
 
+  const rocketLabel = (rocketName && String(rocketName).trim()) ? String(rocketName).trim() : getActiveRocketName();
   const bodyContents = [
     {
       "type": "text",
@@ -2269,6 +2224,14 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
       "align": "center",
       "wrap": true
     },
+    ...(rocketLabel ? [{
+      "type": "text",
+      "text": `🚀 บั้งไฟ: ${rocketLabel}`,
+      "color": "#64748B",
+      "size": "xxs",
+      "align": "center",
+      "wrap": true
+    }] : []),
     {
       "type": "separator",
       "margin": "xs",
@@ -2400,6 +2363,16 @@ export function constructMatchNotificationFlex(orderNo, amount, playerLowName, p
           "size": "xxs",
           "align": "center",
           "margin": "sm",
+          "wrap": true
+        }] : []),
+        ...((rocketName && String(rocketName).trim()) ? [{
+          "type": "text",
+          "text": `🚀 บั้งไฟ: ${String(rocketName).trim()}`,
+          "color": "#334155",
+          "size": "xxs",
+          "weight": "bold",
+          "align": "center",
+          "margin": "xs",
           "wrap": true
         }] : [])
       ]
