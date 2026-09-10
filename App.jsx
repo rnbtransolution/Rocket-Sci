@@ -133,10 +133,15 @@ export default function App() {
   const getApiBaseUrl = () => {
     if (isGAS) return '';
     if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('rocket_api_base_url');
+      if (stored) return stored.replace(/\/+$/, '');
       const { hostname, port } = window.location;
       if (port === '3001') return '';
       if (hostname === 'localhost' || hostname === '127.0.0.1') {
         return 'http://localhost:3001';
+      }
+      if (hostname.includes('github.io')) {
+        return import.meta.env.VITE_API_BASE_URL || 'https://rocket-sci.onrender.com';
       }
     }
     return import.meta.env.VITE_API_BASE_URL || '';
@@ -181,14 +186,17 @@ export default function App() {
     }
 
     const headers = { 'Content-Type': 'application/json' };
-    if (ADMIN_API_KEY) headers['x-admin-api-key'] = ADMIN_API_KEY;
+    if (ADMIN_API_KEY) {
+      headers['x-admin-key'] = ADMIN_API_KEY;
+      headers['x-admin-api-key'] = ADMIN_API_KEY;
+    }
 
     try {
       const targetUrl = `${API_BASE_URL}/api/run`;
       const res = await fetch(targetUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ functionName, args }),
+        body: JSON.stringify({ functionName, args, adminKey: ADMIN_API_KEY, apiKey: ADMIN_API_KEY }),
       });
 
       const contentType = res.headers.get('content-type') || '';

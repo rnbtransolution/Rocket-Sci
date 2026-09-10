@@ -8,11 +8,23 @@ const isGASHost = typeof window !== 'undefined' && (
   window.location.hostname.includes('script.google.com')
 );
 
-const API_BASE_URL =
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ||
-  (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-    ? (window.location.port === '3001' ? '' : 'http://localhost:3001')
-    : '');
+const getApiBaseUrl = () => {
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem('rocket_api_base_url');
+    if (stored) return stored.replace(/\/+$/, '');
+    const { hostname, port } = window.location;
+    if (port === '3001') return '';
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://localhost:3001';
+    }
+    if (hostname.includes('github.io')) {
+      return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || 'https://rocket-sci.onrender.com';
+    }
+  }
+  return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || '';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 const ADMIN_API_KEY =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_API_KEY) || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
 
@@ -30,12 +42,15 @@ function createAppsScriptRunner(successHandler = null, failureHandler = null) {
       // Return a function representing the remote server-side function
       return function(...args) {
         const headers = { 'Content-Type': 'application/json' };
-        if (ADMIN_API_KEY) headers['x-admin-api-key'] = ADMIN_API_KEY;
+        if (ADMIN_API_KEY) {
+          headers['x-admin-key'] = ADMIN_API_KEY;
+          headers['x-admin-api-key'] = ADMIN_API_KEY;
+        }
 
         fetch(`${API_BASE_URL}/api/run`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ functionName: prop, args })
+          body: JSON.stringify({ functionName: prop, args, adminKey: ADMIN_API_KEY, apiKey: ADMIN_API_KEY })
         })
         .then(async res => {
           const contentType = res.headers.get('content-type');

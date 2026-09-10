@@ -69,9 +69,11 @@ if (process.env.APP_URL) {
 }
 
 app.use(cors({
-  origin: '*', // หรือใส่เฉพาะ 'https://rnbtransolution.github.io'
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key', 'x-admin-api-key']
+  origin: (origin, cb) => cb(null, origin || true),
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key', 'X-Requested-With', 'x-admin-api-key'],
+  credentials: true,
+  optionsSuccessStatus: 200,
 }));
 
 // Capture raw body for LINE signature verification
@@ -85,11 +87,20 @@ function requireAdminApiKey(req, res, next) {
   const functionName = req.body?.functionName;
   if (READ_ONLY_RPC.has(functionName)) return next();
   if (!ADMIN_API_KEY) {
-    return res.status(503).json({ error: 'Server ADMIN_API_KEY is not configured' });
+    return res.status(503).json({ success: false, reason: 'SERVER_MISCONFIGURED', error: 'Server ADMIN_API_KEY is not configured' });
   }
-  const provided = req.get('x-admin-key') || req.get('x-admin-api-key') || req.body?.apiKey || '';
+  const provided =
+    req.get('x-admin-key') ||
+    req.get('x-admin-api-key') ||
+    req.body?.adminKey ||
+    req.body?.apiKey ||
+    req.query?.adminKey ||
+    req.query?.apiKey ||
+    req.headers.authorization?.replace(/^Bearer\s+/i, '') ||
+    '';
   if (provided !== ADMIN_API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized' });
+    console.warn(`[Admin Auth] Rejected unauthorized call to ${req.originalUrl || req.path}`);
+    return res.status(401).json({ success: false, reason: 'INVALID_ADMIN_KEY', error: 'Unauthorized: Missing or invalid adminKey' });
   }
   return next();
 }
@@ -154,14 +165,24 @@ app.post('/api/admin/push-order', requireAdminApiKey, async (req, res) => {
       targetId = groups[0].id;
     }
 
-    const pushRes = await lineBot.adminBroadcastQuote(targetId, rocketName, 120, 150, false);
-    res.json({
-      success: true,
-      message: `Order pushed to group ${targetId}`,
-      targetGroupId: targetId,
-      result: pushRes,
-    });
+    try {
+      const pushRes = await lineBot.adminBroadcastQuote(targetId, rocketName, 120, 150, false);
+      res.json({
+        success: true,
+        message: `Order pushed to group ${targetId}`,
+        targetGroupId: targetId,
+        result: pushRes,
+      });
+    } catch (lineErr) {
+      console.error('[Admin API] LINE push error:', lineErr);
+      return res.status(502).json({
+        success: false,
+        reason: 'LINE_PUSH_FAILED',
+        error: lineErr?.message || 'Failed to push message to LINE group',
+      });
+    }
   } catch (err) {
+    console.error('[Admin API] Unexpected error:', err);
     res.status(500).json({ success: false, reason: 'INTERNAL_SERVER_ERROR', error: err.message });
   }
 });

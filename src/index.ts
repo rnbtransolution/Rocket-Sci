@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { middleware, messagingApi } from '@line/bot-sdk';
 import { createWebhookRouter } from './routes/webhook.js';
-import { createAdminRouter } from './routes/admin.js';
+import { createAdminRouter, handleAdminRpc } from './routes/admin.js';
 
 dotenv.config();
 
@@ -15,15 +15,16 @@ const PORT = parseInt(process.env.PORT || '8080', 10);
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
     // Reflect incoming origin or allow '*' so browser credentials and preflight work seamlessly
-    callback(null, origin || '*');
+    callback(null, origin || true);
   },
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key', 'x-admin-api-key'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key', 'X-Requested-With', 'x-admin-api-key'],
   credentials: true,
   optionsSuccessStatus: 200,
 };
 
 app.use(cors(corsOptions));
+app.options('{*path}', cors(corsOptions));
 
 // 2. Request Logger Middleware
 app.use((req: Request, res: Response, next: () => void) => {
@@ -68,6 +69,9 @@ app.use(express.json());
 
 // 7. Mount Admin API Router (Push order, active group discovery)
 app.use('/api/admin', createAdminRouter(messagingClient));
+
+// 8. Mount Universal RPC Endpoint (for React Dashboard compatibility with /api/run)
+app.post('/api/run', handleAdminRpc(messagingClient));
 
 // 8. Health Check endpoint
 app.get('/health', (_req: Request, res: Response) => {
