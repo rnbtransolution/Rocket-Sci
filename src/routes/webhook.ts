@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { webhook, messagingApi } from '@line/bot-sdk';
 import { handlePostbackEvent } from '../handlers/postbackHandler.js';
+import { recordActiveGroup } from '../handlers/groupHandler.js';
 import { createOrder, matchOrderTransaction } from '../services/firestoreService.js';
 import { generateOrderFlex, generateMatchSuccessFlex, generateMatchFailureFlex } from '../services/flexOrderService.js';
 
@@ -39,6 +40,13 @@ async function processSingleEvent(
   const userId = source?.userId;
   const groupId = (source as any)?.groupId || (source as any)?.roomId || null;
   const isGroup = source?.type === 'group' || source?.type === 'room' || !!groupId;
+
+  // Auto-capture Group ID whenever any event arrives from a group chat
+  if (isGroup && groupId) {
+    recordActiveGroup(groupId, client).catch((err) => {
+      console.warn(`[Webhook] Failed auto-capturing group ${groupId}:`, err?.message || err);
+    });
+  }
 
   if (event.type === 'postback') {
     await handlePostbackEvent(event, client);
