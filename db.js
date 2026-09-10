@@ -5,12 +5,32 @@ import {
   overwriteSheet,
   queueWrite,
   invalidateSheetsCache,
+  isWriteQueueBusy,
+  flushWriteQueue,
 } from './sheetsHelper.js';
 
 let players = [];
 let transactions = [];
 let bets = [];
 let chatLogs = [];
+
+/** Serialize credit/bet mutations across concurrent webhook handlers */
+let mutationLock = Promise.resolve();
+function withMutationLock(fn) {
+  const run = mutationLock.then(() => fn(), () => fn());
+  mutationLock = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+export function generateUniqueOrderNumber() {
+  let orderNo;
+  let tries = 0;
+  do {
+    orderNo = Math.floor(Math.random() * 900000 + 100000);
+    tries++;
+  } while (tries < 50 && bets.some((b) => String(b.orderNumber) === String(orderNo)));
+  return orderNo;
+}
 
 let activeTargetMin = null;
 let activeTargetMax = null;
@@ -183,6 +203,17 @@ export function cleanUserId(userId) {
 // Initialize and pull all data from Google Sheets into memory
 export async function init(isSilent = false, forceRefresh = false) {
   try {
+    // Do not clobber live memory while Sheet writes are still in flight
+    if (forceRefresh && isWriteQueueBusy()) {
+      if (!isSilent) {
+        console.warn('[DB] Skipping Sheets sync — write queue still busy');
+      }
+      return;
+    }
+    if (forceRefresh) {
+      await flushWriteQueue();
+    }
+
     const data = await batchFetchSheets({ force: forceRefresh });
 
     // 1. Players Sheet (Only update if valid data returned from Sheets)
@@ -230,23 +261,50 @@ export async function init(isSilent = false, forceRefresh = false) {
       }).reverse();
     }
 
-    // 3. Bets Sheet
+    // 3. Bets Sheet — columns aligned with GAS:
+    // A order, B-E players, F amount, G type, H-I range, J status, K winner,
+    // L timestamp, M groupId, N groupName, O messageId
     if (data.bets && data.bets.length > 1) {
-      bets = data.bets.slice(1).map((row) => ({
-        id: 'bet_' + row[0]?.toString(),
-        orderNumber: row[0]?.toString() || '',
-        playerLowId: row[1]?.toString() || '',
-        playerLowName: row[2]?.toString() || '',
-        playerHighId: row[3]?.toString() || '',
-        playerHighName: row[4]?.toString() || '',
-        amount: Number(row[5]) || 0,
-        type: row[6]?.toString() || '',
-        rangeMin: row[7] ? Number(row[7]) : null,
-        rangeMax: row[8] ? Number(row[8]) : null,
-        status: row[9]?.toString() || '',
-        winnerName: row[10]?.toString() || '',
-        timestamp: row[11] ? formatTime(row[11]) : '',
-      }));
+      bets = data.bets.slice(1).map((row) => {
+        const col11 = row[11]?.toString() || '';
+        const col12 = row[12]?.toString() || '';
+        const col13 = row[13]?.toString() || '';
+        const col14 = row[14]?.toString() || '';
+        // Backward compatible: older Node rows wrote groupId at L (no timestamp)
+        const looksLikeGroupId = (v) => /^C[a-zA-Z0-9_-]{8,}$/.test(String(v || ''));
+        let timestamp = '';
+        let groupId = '';
+        let groupName = '';
+        let messageId = '';
+        if (looksLikeGroupId(col11)) {
+          groupId = col11;
+          groupName = col12;
+          messageId = col13;
+        } else {
+          timestamp = col11 ? formatTime(row[11]) : '';
+          groupId = col12;
+          groupName = col13;
+          messageId = col14;
+        }
+        return {
+          id: 'bet_' + row[0]?.toString(),
+          orderNumber: row[0]?.toString() || '',
+          playerLowId: row[1]?.toString() || '',
+          playerLowName: row[2]?.toString() || '',
+          playerHighId: row[3]?.toString() || '',
+          playerHighName: row[4]?.toString() || '',
+          amount: Number(row[5]) || 0,
+          type: row[6]?.toString() || '',
+          rangeMin: row[7] ? Number(row[7]) : null,
+          rangeMax: row[8] ? Number(row[8]) : null,
+          status: row[9]?.toString() || '',
+          winnerName: row[10]?.toString() || '',
+          timestamp,
+          groupId,
+          groupName,
+          messageId,
+        };
+      });
     }
 
     // 4. LineChatLogs Sheet
@@ -584,8 +642,10 @@ export function saveOpenBet(orderNo, userId, displayName, side, betAmount, type 
     rMax ? rMax.toString() : '',
     'pending_match',
     '',
+    now.toISOString(),
     assignedGroupId,
-    assignedGroupName
+    assignedGroupName,
+    messageId || ''
   ]);
 
   if (pushTargets.length > 0) {
@@ -611,6 +671,10 @@ export function getBetByOrderNumber(orderNo) {
 
 // match against an existing open bet (supports optional specific target order number e.g. "12" or "123456")
 export async function matchExistingOpenBet(userId, displayName, targetOrderNo = null, customMatchAmount = null) {
+  return withMutationLock(() => matchExistingOpenBetUnlocked(userId, displayName, targetOrderNo, customMatchAmount));
+}
+
+async function matchExistingOpenBetUnlocked(userId, displayName, targetOrderNo = null, customMatchAmount = null) {
   const searchId = cleanUserId(userId);
   const matcherPlayer = players.find((p) => cleanUserId(p.id) === searchId);
   const matcherBal = matcherPlayer ? matcherPlayer.balance : 0;
@@ -693,15 +757,36 @@ export async function matchExistingOpenBet(userId, displayName, targetOrderNo = 
         9: 'matched',
       });
 
-      await adjustPlayerBalance(searchId, -matchAmt, displayName);
+      const deductedPartial = await adjustPlayerBalance(searchId, -matchAmt, displayName);
+      if (!deductedPartial) {
+        targetBet.status = 'pending_match';
+        targetBet.amount = matchAmt + remainingAmt;
+        if (targetBet.playerLowId === searchId) {
+          targetBet.playerLowId = '';
+          targetBet.playerLowName = '';
+        }
+        if (targetBet.playerHighId === searchId) {
+          targetBet.playerHighId = '';
+          targetBet.playerHighName = '';
+        }
+        updateRowInSheet('Bets', targetBet.orderNumber, {
+          1: targetBet.playerLowId,
+          2: targetBet.playerLowName,
+          3: targetBet.playerHighId,
+          4: targetBet.playerHighName,
+          5: targetBet.amount.toString(),
+          9: 'pending_match',
+        });
+        return { error: 'INSUFFICIENT_BALANCE', required: matchAmt, current: matcherBal, orderNumber: targetBet.orderNumber };
+      }
 
       if (remainingAmt >= 100) {
         const creatorSide = targetBet.playerLowId === searchId ? 'high' : 'low';
         const creatorName = targetBet.playerLowId === searchId ? targetBet.playerHighName : targetBet.playerLowName;
-        // Keep the original order number so the group and dashboard retain the consistent order ID
+        const remainingOrderNo = String(generateUniqueOrderNumber());
         const remainingBet = {
-          id: 'bet_' + targetBet.orderNumber + '_' + Date.now(),
-          orderNumber: targetBet.orderNumber,
+          id: 'bet_' + remainingOrderNo,
+          orderNumber: remainingOrderNo,
           playerLowId: creatorSide === 'low' ? creatorId : '',
           playerLowName: creatorSide === 'low' ? creatorName : '',
           playerHighId: creatorSide === 'high' ? creatorId : '',
@@ -730,8 +815,10 @@ export async function matchExistingOpenBet(userId, displayName, targetOrderNo = 
           remainingBet.rangeMax || '',
           'pending_match',
           '',
-          remainingBet.timestamp,
-          remainingBet.groupId || ''
+          new Date().toISOString(),
+          remainingBet.groupId || '',
+          remainingBet.groupName || '',
+          ''
         ]);
       } else {
         await adjustPlayerBalance(creatorId, remainingAmt, 'Partial match credit refund');
@@ -1131,7 +1218,7 @@ export async function adminApproveTransaction(txId) {
 
     let amountToAdd = (tx.actualAmount && tx.actualAmount > 0) ? tx.actualAmount : (tx.requestedAmount || 0);
     tx.actualAmount = amountToAdd;
-    updateRowInSheet('Transactions', txId, { 5: amountToAdd, 6: 'success', 7: tx.reviewReason });
+    updateRowInSheet('Transactions', txId, { 4: amountToAdd, 6: 'success', 7: tx.reviewReason });
 
     const isWithdrawal = tx.id.startsWith('WD') || (tx.slipRef && tx.slipRef.toString().toUpperCase().includes('WD')) || (tx.reviewReason && tx.reviewReason.toString().toLowerCase().includes('withdraw'));
     

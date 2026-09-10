@@ -110,13 +110,16 @@ const SLIP_PRESETS = [
   }
 ];
 
-const ADMIN_PASSCODE = '1234';
+const ADMIN_PASSCODE = import.meta.env.VITE_ADMIN_PASSCODE || 'rocket-admin';
 
 export default function App() {
   const isGAS = typeof window !== 'undefined' && !!(window.google && window.google.script && window.google.script.run) && !window.isNodeJS;
   const isGitHubPages = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
-  const GAS_ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbzzzrz0KDdYOwZ7nK7SxYbFMf7OT39mR8lAw4xeGUT_48Ju3tfafkiZzdrrqrRbvIzqyg/exec';
-  const API_BASE_URL = isGitHubPages ? '' : '';
+  // Single writer: GitHub Pages and local Node both talk to the Node backend (not GAS mutations)
+  const API_BASE_URL = isGAS
+    ? ''
+    : (import.meta.env.VITE_API_BASE_URL || (isGitHubPages ? 'https://rocket-sci.onrender.com' : ''));
+  const ADMIN_API_KEY = import.meta.env.VITE_ADMIN_API_KEY || '';
 
   const runBackendFunction = async (functionName, args = []) => {
     if (isGAS) {
@@ -140,26 +143,12 @@ export default function App() {
       });
     }
 
-    if (isGitHubPages) {
-      // Direct high-speed API to Google Apps Script from GitHub Pages
-      try {
-        const res = await fetch(GAS_ENDPOINT_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ functionName, args }),
-        });
-        const json = await res.json();
-        if (json.error) throw new Error(json.error);
-        return json.data;
-      } catch (err) {
-        console.error(`[GitHub Pages API Call to GAS Error]:`, err);
-        throw err;
-      }
-    }
+    const headers = { 'Content-Type': 'application/json' };
+    if (ADMIN_API_KEY) headers['x-admin-api-key'] = ADMIN_API_KEY;
 
     const res = await fetch(`${API_BASE_URL}/api/run`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ functionName, args }),
     });
     const json = await res.json();
@@ -403,28 +392,14 @@ export default function App() {
       const interval = setInterval(fetchGAS, 3000);
       return () => clearInterval(interval);
 
-    } else if (isGitHubPages) {
-      // GitHub Pages hosted: direct high-speed poll to Google Apps Script API
-      const fetchFromGASApi = async () => {
-        try {
-          const res = await fetch(`${GAS_ENDPOINT_URL}?action=getDashboardData`);
-          const json = await res.json();
-          if (json && json.data) applyData(json.data);
-        } catch(e) {
-          console.error('[GitHub Pages Polling Error]:', e);
-        }
-      };
-      fetchFromGASApi();
-      const interval = setInterval(fetchFromGASApi, 2500);
-      return () => clearInterval(interval);
-
-    } else if (isLiveBackend) {
-      // Node.js server (Render / Local / GitHub Pages): use SSE for zero-delay real-time push from server
+    } else if (isLiveBackend || isGitHubPages) {
+      // Node.js server (Render / Local / GitHub Pages): SSE from single writer backend
       let es;
       let reconnectTimer;
+      const sseQs = ADMIN_API_KEY ? `?apiKey=${encodeURIComponent(ADMIN_API_KEY)}` : '';
 
       const connect = () => {
-        es = new EventSource(`${API_BASE_URL}/api/events`);
+        es = new EventSource(`${API_BASE_URL}/api/events${sseQs}`);
 
         es.onmessage = (event) => {
           try {

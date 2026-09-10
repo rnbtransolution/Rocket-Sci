@@ -3,10 +3,27 @@
 // Project: Rocket Science Billing & Telemetry System
 // =========================================================================
 
-// CONFIGURATION CONSTANTS (Update these in your GAS environment)
-const LINE_CHANNEL_ACCESS_TOKEN = '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=';
-const SLIP_API_KEY = 'WNsIQaS1CqRpyHwPHb0SA5wcdh55sQYZT6cSNLSSssY='; // Slip2Go API Secret
-const SLIP_API_URL = 'https://connect.slip2go.com/api/verify-slip/qr-base64/info'; // Slip2Go base64 verification endpoint
+// Secrets live in Script Properties (Project Settings → Script properties).
+// Required keys: LINE_CHANNEL_ACCESS_TOKEN, SLIP_API_KEY, ADMIN_API_KEY
+// Optional: LINE_CHANNEL_SECRET, ALLOW_LINE_WEBHOOK (=true only if GAS is the LINE webhook)
+function getScriptSecret_(key) {
+  var props = PropertiesService.getScriptProperties();
+  return (props.getProperty(key) || '').toString();
+}
+
+function getLineToken_() {
+  return getScriptSecret_('LINE_CHANNEL_ACCESS_TOKEN');
+}
+
+function getSlipApiKey_() {
+  return getScriptSecret_('SLIP_API_KEY');
+}
+
+function getAdminApiKey_() {
+  return getScriptSecret_('ADMIN_API_KEY');
+}
+
+const SLIP_API_URL = 'https://connect.slip2go.com/api/verify-slip/qr-base64/info';
 let SHEET_ID = '1NaQbaUz8fcgd32sCAfxxKNBnpmFA5vu0_YVSehhdCEQ';
 try {
   var activeSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
@@ -15,6 +32,27 @@ try {
   }
 } catch (err) {
   console.warn("Using default SPREADSHEET_ID: " + SHEET_ID);
+}
+
+/** One-time helper: run from GAS editor after clasp push to load secrets into Script Properties */
+function bootstrapScriptSecrets(lineToken, slipKey, adminKey, lineSecret) {
+  var props = PropertiesService.getScriptProperties();
+  if (lineToken) props.setProperty('LINE_CHANNEL_ACCESS_TOKEN', String(lineToken));
+  if (slipKey) props.setProperty('SLIP_API_KEY', String(slipKey));
+  if (adminKey) props.setProperty('ADMIN_API_KEY', String(adminKey));
+  if (lineSecret) props.setProperty('LINE_CHANNEL_SECRET', String(lineSecret));
+  props.setProperty('ALLOW_LINE_WEBHOOK', 'false'); // Node is the single LINE writer
+  return { ok: true, keys: Object.keys(props.getProperties()) };
+}
+
+function assertAdminApiKey_(provided) {
+  var expected = getAdminApiKey_();
+  if (!expected) {
+    throw new Error('ADMIN_API_KEY Script Property is not configured');
+  }
+  if (String(provided || '') !== expected) {
+    throw new Error('Unauthorized');
+  }
 }
 
 var _memGroupNameCache = {};
@@ -122,7 +160,7 @@ function fetchLINEGroupName(groupId) {
       : ('https://api.line.me/v2/bot/group/' + gid + '/summary');
     var response = UrlFetchApp.fetch(endpoint, {
       headers: {
-        'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN
+        'Authorization': 'Bearer ' + getLineToken_()
       },
       muteHttpExceptions: true
     });
@@ -355,21 +393,18 @@ function adminOpenRound(name) {
  * HTTP GET: Serves the bundled React Admin & Simulator UI, or JSON API for external clients.
  */
 function doGet(e) {
-  // If requested via JSON API (e.g. from GitHub Pages)
+  // Read-only JSON API for external clients (mutations must use authenticated POST / google.script.run)
   if (e && e.parameter && (e.parameter.action === 'getDashboardData' || e.parameter.api === '1')) {
     var data = getDashboardData();
     return ContentService.createTextOutput(JSON.stringify({ success: true, data: data }))
       .setMimeType(ContentService.MimeType.JSON);
   }
   if (e && e.parameter && e.parameter.action) {
-    var action = e.parameter.action;
-    var args = [];
-    try {
-      args = e.parameter.args ? JSON.parse(e.parameter.args) : [];
-    } catch(_) {}
-    var res = executeAdminAction(action, args);
-    return ContentService.createTextOutput(JSON.stringify({ success: true, data: res }))
-      .setMimeType(ContentService.MimeType.JSON);
+    // Block unauthenticated mutating GET actions (legacy dual-writer path)
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: 'Mutating GET actions are disabled. Use the Node backend or authenticated google.script.run.'
+    })).setMimeType(ContentService.MimeType.JSON);
   }
 
   var html;
@@ -460,12 +495,26 @@ function doPost(e) {
   try {
     const postData = JSON.parse(e.postData.contents);
     
-    // Check if this is an API call from GitHub Pages or external client
+    // External / Pages API — require ADMIN_API_KEY (Node is preferred single writer)
     if (postData.functionName || postData.action) {
+      try {
+        assertAdminApiKey_(postData.apiKey || (e.parameter && e.parameter.apiKey));
+      } catch (authErr) {
+        return ContentService.createTextOutput(JSON.stringify({ success: false, error: authErr.message }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
       const fn = postData.functionName || postData.action;
       const args = postData.args || [];
       const res = executeAdminAction(fn, args);
       return ContentService.createTextOutput(JSON.stringify({ success: true, data: res }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // LINE webhook on GAS is disabled by default (Node owns LINE + sheet writes)
+    var allowLine = getScriptSecret_('ALLOW_LINE_WEBHOOK') === 'true';
+    if (!allowLine) {
+      console.warn('LINE webhook hit GAS but ALLOW_LINE_WEBHOOK!=true — ignored (use Node /webhook)');
+      return ContentService.createTextOutput(JSON.stringify({ status: 'ignored', reason: 'line_webhook_disabled_on_gas' }))
         .setMimeType(ContentService.MimeType.JSON);
     }
     
@@ -1488,7 +1537,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
       return;
     }
 
-    var orderNumber = (Math.floor(Math.random() * 9000) + 1000).toString();
+    var orderNumber = (Math.floor(Math.random() * 900000) + 100000).toString();
     var isPreQuoteBet = (betType === 'pre_quote');
     var userTypedCmdStr = cleanBetText || null;
     var saveResult = saveOpenBet(orderNumber, userId, displayName, side, amount, betType, rangeMin, rangeMax, groupId, userTypedCmdStr, isPreQuoteBet, messageId);
@@ -1643,7 +1692,7 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
   userId = getOrCreateShortUserId(userId, displayName);
   // 1. Call LINE Content API to pull image binary data
   const imageUrl = `https://api-data.line.me/v2/bot/message/${messageId}/content`;
-  const headers = { "Authorization": "Bearer " + LINE_CHANNEL_ACCESS_TOKEN };
+  const headers = { "Authorization": "Bearer " + getLineToken_() };
   const imageResponse = UrlFetchApp.fetch(imageUrl, { method: "get", headers: headers });
   const imageBlob = imageResponse.getBlob().setName("payslip.jpg");
   
@@ -1657,7 +1706,7 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
     options = {
       method: "post",
       headers: {
-        "Authorization": "Bearer " + SLIP_API_KEY,
+        "Authorization": "Bearer " + getSlipApiKey_(),
         "Content-Type": "application/json"
       },
       payload: JSON.stringify({
@@ -1670,7 +1719,7 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
   } else {
     options = {
       method: "post",
-      headers: { "Authorization": "Bearer " + SLIP_API_KEY },
+      headers: { "Authorization": "Bearer " + getSlipApiKey_() },
       payload: { 
         image: imageBlob,
         file: imageBlob
@@ -1971,6 +2020,7 @@ function saveOpenBet(orderNo, userId, displayName, side, amount, type, rMin, rMa
     '',
     new Date(),
     targetGroupId || '',
+    '',
     messageId || ''
   ]);
   if (messageId) {
@@ -2341,7 +2391,7 @@ function getLineUserProfile(userId) {
   const url = `https://api.line.me/v2/bot/profile/${userId}`;
   const options = {
     method: "get",
-    headers: { "Authorization": "Bearer " + LINE_CHANNEL_ACCESS_TOKEN },
+    headers: { "Authorization": "Bearer " + getLineToken_() },
     muteHttpExceptions: true
   };
   try {
@@ -2389,7 +2439,7 @@ function replyToLine(replyToken, text, userId) {
   const options = {
     method: 'post',
     contentType: 'application/json',
-    headers: { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN },
+    headers: { 'Authorization': 'Bearer ' + getLineToken_() },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   };
@@ -2675,6 +2725,12 @@ function adminApproveTransaction(txId) {
   for (let i = 1; i < tData.length; i++) {
     const rowTxId = tData[i][0] ? tData[i][0].toString().trim() : '';
     if (rowTxId === searchId) {
+      const currentStatus = (tData[i][6] || '').toString().toLowerCase();
+      if (currentStatus === 'success') {
+        // Idempotent: never credit twice
+        return getDashboardData();
+      }
+
       const userId = tData[i][1];
       const displayName = tData[i][2];
       const reqAmt = Number(tData[i][3]) || 0;
@@ -2685,7 +2741,7 @@ function adminApproveTransaction(txId) {
       
       const isWithdrawal = searchId.indexOf('WD') === 0 || (tData[i][5] && tData[i][5].toString().toUpperCase().indexOf('WD') !== -1) || (tData[i][7] && tData[i][7].toString().toLowerCase().indexOf('withdraw') !== -1);
 
-      // Single batched write to columns 5, 6, 7, 8
+      // Columns: E Actual, F Bank Ref, G Status, H Reason
       tSheet.getRange(i + 1, 5, 1, 4).setValues([[
         actualAmount,
         tData[i][5] || '',
@@ -2899,7 +2955,14 @@ function adminVoidRound() {
 
   for (let i = 1; i < bData.length; i++) {
     const status = bData[i][9];
-    if (status === 'pending_match' || status === 'matched' || status === 'pending_cancel') {
+    const betType = (bData[i][6] || '').toString();
+    const eligible =
+      status === 'pending_match' ||
+      status === 'matched' ||
+      status === 'pending_cancel' ||
+      status === 'pre_quote_matched' ||
+      (betType === 'pre_quote' && (status === 'pending_match' || status === 'pre_quote_matched'));
+    if (eligible) {
       const orderNo = bData[i][0];
       const lowId = bData[i][1];
       const lowName = bData[i][2];
@@ -3117,7 +3180,7 @@ function pushLineGroupMessage(groupId, text) {
   var options = {
     method: 'post',
     contentType: 'application/json',
-    headers: { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN },
+    headers: { 'Authorization': 'Bearer ' + getLineToken_() },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   };
@@ -3147,7 +3210,7 @@ function pushLineGroupMessage(groupId, text) {
       var fbRes = UrlFetchApp.fetch(url, {
         method: 'post',
         contentType: 'application/json',
-        headers: { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN },
+        headers: { 'Authorization': 'Bearer ' + getLineToken_() },
         payload: JSON.stringify({ to: groupId, messages: [{ type: 'text', text: fbText }] }),
         muteHttpExceptions: true
       });
@@ -3215,7 +3278,7 @@ function createLinePushRequest(userId, text) {
     url: 'https://api.line.me/v2/bot/message/push',
     method: 'post',
     contentType: 'application/json',
-    headers: { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN },
+    headers: { 'Authorization': 'Bearer ' + getLineToken_() },
     payload: JSON.stringify({
       to: rawLineUserId,
       messages: [messageObj]
@@ -3245,7 +3308,7 @@ function pushToLine(userId, text) {
       UrlFetchApp.fetch(req.url, {
         method: 'post',
         contentType: 'application/json',
-        headers: { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN },
+        headers: { 'Authorization': 'Bearer ' + getLineToken_() },
         payload: JSON.stringify({ to: rawTo, messages: [{ type: 'text', text: fbText }] }),
         muteHttpExceptions: true
       });
@@ -5284,7 +5347,7 @@ function sendAdminMessageToLine(targetId, messageText) {
         url: 'https://api.line.me/v2/bot/message/push',
         method: 'post',
         contentType: 'application/json',
-        headers: { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN },
+        headers: { 'Authorization': 'Bearer ' + getLineToken_() },
         payload: JSON.stringify({ to: keys[k], messages: [messageObj] }),
         muteHttpExceptions: true
       });
@@ -5784,7 +5847,7 @@ function setTargetMinMax(minVal, maxVal) {
  */
 function adminGetLineQuota() {
   try {
-    var headers = { 'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN };
+    var headers = { 'Authorization': 'Bearer ' + getLineToken_() };
     var qRes = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/quota', { headers: headers, muteHttpExceptions: true });
     var cRes = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/quota/consumption', { headers: headers, muteHttpExceptions: true });
     var quotaJson = JSON.parse(qRes.getContentText());

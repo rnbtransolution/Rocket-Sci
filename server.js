@@ -2,10 +2,11 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import * as db from './db.js';
 import * as lineBot from './lineBot.js';
-import { getCacheStats } from './sheetsHelper.js';
+import { getCacheStats, isWriteQueueBusy } from './sheetsHelper.js';
 
 dotenv.config();
 
@@ -14,6 +15,16 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
+const LINE_CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET || '';
+const READ_ONLY_RPC = new Set(['getDashboardData', 'verifyMockSlipFromClient']);
+
+if (!ADMIN_API_KEY) {
+  console.warn('[Auth] ADMIN_API_KEY is not set — mutating /api/run calls will be rejected.');
+}
+if (!LINE_CHANNEL_SECRET) {
+  console.warn('[Auth] LINE_CHANNEL_SECRET is not set — webhook signature checks are disabled (set it ASAP).');
+}
 
 // ─── SSE: Real-time push to connected dashboard clients ───────────────────────
 const sseClients = new Set();
@@ -44,22 +55,73 @@ function scheduleBroadcastUpdate(delay = 80) {
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
-// CORS setup (useful for local Vite development running on port 5173)
-app.use(cors());
+// CORS: allow dashboard hosts (local Vite + GitHub Pages + same-origin)
+const allowedOrigins = new Set([
+  'http://localhost:5173',
+  'http://localhost:3001',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:3001',
+  'https://rnbtransolution.github.io',
+  'https://rocket-sci.onrender.com',
+]);
+if (process.env.APP_URL) {
+  try { allowedOrigins.add(new URL(process.env.APP_URL).origin); } catch (_) {}
+}
 
-// Body parser
-app.use(express.json());
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin || allowedOrigins.has(origin) || /\.github\.io$/.test(new URL(origin).hostname)) {
+      return cb(null, true);
+    }
+    return cb(null, false);
+  },
+}));
+
+// Capture raw body for LINE signature verification
+app.use(express.json({
+  verify: (req, _res, buf) => {
+    req.rawBody = buf;
+  },
+}));
+
+function requireAdminApiKey(req, res, next) {
+  const functionName = req.body?.functionName;
+  if (READ_ONLY_RPC.has(functionName)) return next();
+  if (!ADMIN_API_KEY) {
+    return res.status(503).json({ error: 'Server ADMIN_API_KEY is not configured' });
+  }
+  const provided = req.get('x-admin-api-key') || req.body?.apiKey || '';
+  if (provided !== ADMIN_API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  return next();
+}
+
+function verifyLineSignature(req) {
+  if (!LINE_CHANNEL_SECRET) return true; // soft-open until secret is configured
+  const signature = req.get('x-line-signature');
+  if (!signature || !req.rawBody) return false;
+  const digest = crypto
+    .createHmac('SHA256', LINE_CHANNEL_SECRET)
+    .update(req.rawBody)
+    .digest('base64');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
+  } catch (_) {
+    return false;
+  }
+}
 
 // Logger middleware
 app.use((req, res, next) => {
   if (req.path !== '/api/run' || req.body?.functionName !== 'getDashboardData') {
-    console.log(`[HTTP] ${req.method} ${req.path}`, req.body || '');
+    console.log(`[HTTP] ${req.method} ${req.path}`, req.body?.functionName || '');
   }
   next();
 });
 
 // RPC API Endpoint - maps React Dashboard remote calls (google.script.run emulation)
-app.post('/api/run', async (req, res) => {
+app.post('/api/run', requireAdminApiKey, async (req, res) => {
   const { functionName, args = [] } = req.body;
   
   try {
@@ -185,8 +247,7 @@ app.post('/api/run', async (req, res) => {
     }
     
     // For mutating operations, push updated state to all SSE clients (debounced)
-    const readOnlyFunctions = new Set(['getDashboardData', 'verifyMockSlipFromClient']);
-    if (!readOnlyFunctions.has(functionName)) {
+    if (!READ_ONLY_RPC.has(functionName)) {
       scheduleBroadcastUpdate(30);
     }
 
@@ -199,6 +260,12 @@ app.post('/api/run', async (req, res) => {
 
 // SSE Endpoint - dashboard clients subscribe here for real-time push updates
 app.get('/api/events', (req, res) => {
+  const provided = req.get('x-admin-api-key') || req.query.apiKey || '';
+  if (ADMIN_API_KEY && provided !== ADMIN_API_KEY) {
+    // Allow unauthenticated SSE only for same-origin dashboard hosts; still require key when configured
+    // EventSource cannot set headers — accept ?apiKey= for browser clients
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -226,6 +293,11 @@ app.get('/api/events', (req, res) => {
 
 // LINE OA Webhook Endpoint
 app.post('/webhook', (req, res) => {
+  if (!verifyLineSignature(req)) {
+    console.warn('[Webhook] Rejected request with invalid or missing LINE signature');
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+
   // 1. Respond with HTTP 200 immediately to LINE to prevent timeouts and retry storms
   res.status(200).json({ status: 'ok' });
 
@@ -234,19 +306,16 @@ app.post('/webhook', (req, res) => {
     return;
   }
 
-  // 2. Offload event processing into non-blocking asynchronous execution
+  // 2. Process events sequentially to avoid same-bet / same-player race conditions
   setImmediate(async () => {
     try {
-      // Process events concurrently so a slow operation (e.g. OCR) doesn't block other messages
-      await Promise.allSettled(
-        events.map(async (event) => {
-          try {
-            await processSingleWebhookEvent(event);
-          } catch (eventErr) {
-            console.error('[Webhook] Error processing single event:', eventErr.message || eventErr);
-          }
-        })
-      );
+      for (const event of events) {
+        try {
+          await processSingleWebhookEvent(event);
+        } catch (eventErr) {
+          console.error('[Webhook] Error processing single event:', eventErr.message || eventErr);
+        }
+      }
 
       // 3. Consolidated SSE broadcast once after all events settle
       scheduleBroadcastUpdate();
@@ -340,6 +409,10 @@ async function startServer() {
     // (mutations in the app already write to in-memory state and Google Sheets directly)
     setInterval(async () => {
       try {
+        if (isWriteQueueBusy()) {
+          console.log('[Sync] Skipped — write queue busy');
+          return;
+        }
         await db.init(true, true); // Sync quietly in the background
         scheduleBroadcastUpdate(); // Push any external Sheets-side changes to connected SSE clients
       } catch (syncErr) {

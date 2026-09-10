@@ -5,8 +5,13 @@ import jpeg from 'jpeg-js';
 import { PNG } from 'pngjs';
 import NodeCache from 'node-cache';
 
-const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=';
-const SLIP_API_KEY = process.env.SLIP_API_KEY || 'WNsIQaS1CqRpyHwPHb0SA5wcdh55sQYZT6cSNLSSssY=';
+const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
+const LINE_CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET || '';
+const SLIP_API_KEY = process.env.SLIP_API_KEY || '';
+
+if (!LINE_CHANNEL_ACCESS_TOKEN) {
+  console.warn('[LINE] LINE_CHANNEL_ACCESS_TOKEN is not set — outbound LINE calls will fail.');
+}
 const SLIP_API_URL = process.env.SLIP_API_URL || 'https://connect.slip2go.com/api/verify-slip/qr-base64/info';
 const APP_URL = process.env.APP_URL || 'http://localhost:3001';
 
@@ -1209,8 +1214,8 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   // Check if admin account (Admin quotes do NOT require credit deduction as they serve as guidelines)
   const isAdminUser = userId === 'admin' || userId === 'user' || (typeof userId === 'string' && (userId.toLowerCase() === 'user' || userId.toLowerCase() === 'admin'));
 
-  // Generate 4-digit order number (1000 - 9999)
-  const orderNo = Math.floor(Math.random() * 9000 + 1000);
+  // Generate unique 6-digit order number (avoid col-A collisions in Sheets)
+  const orderNo = db.generateUniqueOrderNumber();
   
   // Save open bet with groupId for multi-group tracking (credit deduction happens inside db.saveOpenBet)
   const saved = db.saveOpenBet(orderNo, userId, displayName, side, amount, type, minVal, maxVal, groupId, userTypedCmd, isPreQuote, null, messageId);

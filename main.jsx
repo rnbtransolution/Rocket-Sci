@@ -3,6 +3,14 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 
+const API_BASE_URL =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ||
+  (typeof window !== 'undefined' && window.location.hostname.includes('github.io')
+    ? 'https://rocket-sci.onrender.com'
+    : '');
+const ADMIN_API_KEY =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_API_KEY) || '';
+
 // Helper to create a chainable Google Apps Script run Proxy
 function createAppsScriptRunner(successHandler = null, failureHandler = null) {
   return new Proxy({}, {
@@ -16,11 +24,12 @@ function createAppsScriptRunner(successHandler = null, failureHandler = null) {
       
       // Return a function representing the remote server-side function
       return function(...args) {
-        const isGH = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
-        const baseUrl = isGH ? 'https://rocket-sci.onrender.com' : '';
-        fetch(`${baseUrl}/api/run`, {
+        const headers = { 'Content-Type': 'application/json' };
+        if (ADMIN_API_KEY) headers['x-admin-api-key'] = ADMIN_API_KEY;
+
+        fetch(`${API_BASE_URL}/api/run`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({ functionName: prop, args })
         })
         .then(async res => {

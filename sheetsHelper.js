@@ -177,6 +177,31 @@ export function queueWrite(task) {
   processQueue();
 }
 
+/** True when Sheet writes are still pending (sync must not overwrite memory). */
+export function isWriteQueueBusy() {
+  return writeQueue.length > 0 || isQueueProcessing || pendingBatchUpdates.length > 0 || pendingChatLogs.length > 0;
+}
+
+/** Drain coalesced cell updates and the write queue before continuing. */
+export async function flushWriteQueue() {
+  if (batchUpdateTimer) {
+    clearTimeout(batchUpdateTimer);
+    batchUpdateTimer = null;
+    await flushBatchUpdates();
+  }
+  if (chatLogFlushTimer) {
+    clearTimeout(chatLogFlushTimer);
+    chatLogFlushTimer = null;
+    await flushChatLogs();
+  }
+  let spins = 0;
+  while (isWriteQueueBusy() && spins < 200) {
+    await processQueue();
+    await new Promise((r) => setTimeout(r, 25));
+    spins++;
+  }
+}
+
 // ─── BATCH UPDATE COALESCER (Consolidates multi-cell/multi-row updates into 1 API call) ───
 
 let pendingBatchUpdates = [];
@@ -301,7 +326,7 @@ export async function batchFetchSheets(options = {}) {
   try {
     const response = await sheets.spreadsheets.values.batchGet({
       spreadsheetId,
-      ranges: ['Players!A:H', 'Transactions!A:I', 'Bets!A:L', 'LineChatLogs!A:F'],
+      ranges: ['Players!A:H', 'Transactions!A:I', 'Bets!A:O', 'LineChatLogs!A:F'],
     });
 
     const valueRanges = response.data.valueRanges || [];
@@ -372,6 +397,7 @@ export function appendRowToSheet(sheetName, rowValues) {
             sheetMap.set(cleanId, newRowIndex);
           }
         }
+        invalidateSheetsCache();
         console.log(`[Google Sheets] Appended row to ${sheetName}`);
         break;
       } catch (err) {
@@ -393,7 +419,12 @@ export function appendRowToSheet(sheetName, rowValues) {
 export async function updateRowInSheet(sheetName, idValue, columnIndexMap) {
   if (!idValue) return;
 
-  const rowIndex = await getRowIndex(sheetName, idValue);
+  let rowIndex = await getRowIndex(sheetName, idValue);
+  // New rows may still be in the append queue — drain and retry once
+  if (rowIndex === -1 && isWriteQueueBusy()) {
+    await flushWriteQueue();
+    rowIndex = await getRowIndex(sheetName, idValue);
+  }
   if (rowIndex === -1) {
     console.warn(`[Google Sheets] Could not find row index for ID "${idValue}" in ${sheetName}`);
     return;
@@ -404,6 +435,8 @@ export async function updateRowInSheet(sheetName, idValue, columnIndexMap) {
     const colLetter = getColumnLetter(colIndex);
     scheduleBatchUpdate(`${sheetName}!${colLetter}${rowIndex}`, [[val]]);
   }
+  // Mutations must not be served from a stale read cache
+  invalidateSheetsCache();
 }
 
 /**
