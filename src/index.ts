@@ -11,32 +11,10 @@ const app = express();
 const PORT = parseInt(process.env.PORT || '8080', 10);
 
 // CORS configuration to enable Admin Dashboard access (https://rnbtransolution.github.io)
-const allowedOrigins = [
-  'https://rnbtransolution.github.io',
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'http://127.0.0.1:5173',
-  'http://127.0.0.1:3000',
-  'http://127.0.0.1:3001',
-];
-
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (
-      allowedOrigins.includes(origin) ||
-      origin.endsWith('.github.io') ||
-      origin.includes('localhost') ||
-      origin.includes('127.0.0.1')
-    ) {
-      return callback(null, true);
-    }
-    return callback(null, true);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-api-key'],
+  origin: '*', // หรือใส่เฉพาะ 'https://rnbtransolution.github.io'
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key', 'x-admin-api-key'],
 }));
 
 const channelAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';

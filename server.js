@@ -69,12 +69,9 @@ if (process.env.APP_URL) {
 }
 
 app.use(cors({
-  origin(origin, cb) {
-    if (!origin || allowedOrigins.has(origin) || /\.github\.io$/.test(new URL(origin).hostname)) {
-      return cb(null, true);
-    }
-    return cb(null, false);
-  },
+  origin: '*', // หรือใส่เฉพาะ 'https://rnbtransolution.github.io'
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key', 'x-admin-api-key']
 }));
 
 // Capture raw body for LINE signature verification
@@ -90,7 +87,7 @@ function requireAdminApiKey(req, res, next) {
   if (!ADMIN_API_KEY) {
     return res.status(503).json({ error: 'Server ADMIN_API_KEY is not configured' });
   }
-  const provided = req.get('x-admin-api-key') || req.body?.apiKey || '';
+  const provided = req.get('x-admin-key') || req.get('x-admin-api-key') || req.body?.apiKey || '';
   if (provided !== ADMIN_API_KEY) {
     return res.status(401).json({ error: 'Unauthorized' });
   }

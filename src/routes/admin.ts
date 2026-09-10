@@ -23,8 +23,9 @@ export function createAdminRouter(client: messagingApi.MessagingApiClient): Rout
 
     const providedKey =
       req.body?.adminKey ||
-      (req.query?.adminKey as string) ||
+      (req.headers['x-admin-key'] as string) ||
       (req.headers['x-admin-api-key'] as string) ||
+      (req.query?.adminKey as string) ||
       req.headers.authorization?.replace(/^Bearer\s+/i, '');
 
     if (!providedKey || providedKey !== secretKey) {
