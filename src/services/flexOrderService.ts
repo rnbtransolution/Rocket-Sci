@@ -1,4 +1,8 @@
+import NodeCache from 'node-cache';
 import { OrderData } from './firestoreService.js';
+
+// In-Memory Caching (Phase 4): Cache static Flex structures and templates
+export const flexCache = new NodeCache({ stdTTL: 3600, checkperiod: 120 });
 
 /**
  * Generate a dynamic LINE Flex Message bubble for open orders with a Postback match button.
@@ -308,7 +312,11 @@ export function generateMatchSuccessFlex(order: OrderData, matcherName: string):
  * Generate a concise error Flex Message when matching fails (e.g. already matched race condition).
  */
 export function generateMatchFailureFlex(orderNumber: string, reason: string): any {
-  return {
+  const cacheKey = `fail_${orderNumber}_${reason}`;
+  const cached = flexCache.get(cacheKey);
+  if (cached) return cached;
+
+  const flex = {
     type: 'flex',
     altText: `⚠️ ไม่สามารถจับคู่ Order #${orderNumber}`,
     contents: {
@@ -355,4 +363,6 @@ export function generateMatchFailureFlex(orderNumber: string, reason: string): a
       },
     },
   };
+  flexCache.set(cacheKey, flex);
+  return flex;
 }

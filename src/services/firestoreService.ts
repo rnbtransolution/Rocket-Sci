@@ -10,6 +10,13 @@ const credsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS ||
 
 export const firestore = new Firestore({
   keyFilename: credsPath,
+  // High-performance gRPC settings for HTTP/2 connection pooling & keep-alive
+  clientConfig: {
+    'grpc.keepalive_time_ms': 30000,
+    'grpc.keepalive_timeout_ms': 10000,
+    'grpc.keepalive_permit_without_calls': 1,
+    'grpc.http2.max_pings_without_data': 0,
+  },
 });
 
 export interface OrderData {
@@ -66,7 +73,19 @@ export async function matchOrderTransaction(
   userId: string,
   userName: string = 'ผู้เล่น'
 ): Promise<{ success: boolean; order: OrderData }> {
-  const orderRef = firestore.collection(ORDERS_COLLECTION).doc(orderId);
+  // Resolve docRef - support both Firestore doc ID and orderNumber field
+  let orderRef = firestore.collection(ORDERS_COLLECTION).doc(orderId);
+  const initialCheck = await orderRef.get();
+  if (!initialCheck.exists) {
+    const querySnapshot = await firestore
+      .collection(ORDERS_COLLECTION)
+      .where('orderNumber', '==', orderId)
+      .limit(1)
+      .get();
+    if (!querySnapshot.empty) {
+      orderRef = querySnapshot.docs[0].ref;
+    }
+  }
 
   return await firestore.runTransaction(async (transaction) => {
     const orderDoc = await transaction.get(orderRef);

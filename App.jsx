@@ -115,10 +115,25 @@ const ADMIN_PASSCODE = import.meta.env.VITE_ADMIN_PASSCODE || 'rocket-admin';
 export default function App() {
   const isGAS = typeof window !== 'undefined' && !!(window.google && window.google.script && window.google.script.run) && !window.isNodeJS;
   const isGitHubPages = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
-  // Single writer: GitHub Pages and local Node both talk to the Node backend (not GAS mutations)
-  const API_BASE_URL = isGAS
-    ? ''
-    : (import.meta.env.VITE_API_BASE_URL || (isGitHubPages ? 'https://rocket-sci.onrender.com' : ''));
+  // Resilient API Base URL resolution:
+  // 1. Inside GAS iframe: empty string (routes via google.script.run)
+  // 2. Running on local Node (localhost:3001) or local Vite dev (localhost:5173):
+  //    - If window.location.port is 3001, use '' (same-origin)
+  //    - If localhost / 127.0.0.1 on port 5173, target 'http://localhost:3001'
+  // 3. Explicit VITE_API_BASE_URL environment variable if configured
+  // 4. Default fallback: same-origin ''
+  const getApiBaseUrl = () => {
+    if (isGAS) return '';
+    if (typeof window !== 'undefined') {
+      const { hostname, port } = window.location;
+      if (port === '3001') return '';
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return 'http://localhost:3001';
+      }
+    }
+    return import.meta.env.VITE_API_BASE_URL || '';
+  };
+  const API_BASE_URL = getApiBaseUrl();
   const ADMIN_API_KEY = import.meta.env.VITE_ADMIN_API_KEY || '';
 
   const runBackendFunction = async (functionName, args = []) => {
@@ -146,14 +161,19 @@ export default function App() {
     const headers = { 'Content-Type': 'application/json' };
     if (ADMIN_API_KEY) headers['x-admin-api-key'] = ADMIN_API_KEY;
 
-    const res = await fetch(`${API_BASE_URL}/api/run`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ functionName, args }),
-    });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || 'Server error');
-    return json.data;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/run`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ functionName, args }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Server error');
+      return json.data;
+    } catch (fetchErr) {
+      console.error(`[API Call Error in ${functionName}]:`, fetchErr);
+      throw fetchErr;
+    }
   };
 
   // Security and Mode States

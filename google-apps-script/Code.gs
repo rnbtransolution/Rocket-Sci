@@ -50,6 +50,27 @@ function bootstrapScriptSecrets(lineToken, slipKey, adminKey, lineSecret) {
   return { ok: true, keys: Object.keys(props.getProperties()) };
 }
 
+function pruneDeadLineGroupsFromProperties() {
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('ACTIVE_GROUP_ID', 'Ccec6199403ca536e46079e37db1a1387');
+  var groupsJson = props.getProperty('LINE_GROUPS') || '[]';
+  var list = [];
+  try { list = JSON.parse(groupsJson); } catch(_) {}
+  var cleaned = list.filter(function(g) { return g && g.id && !DEAD_LINE_GROUP_IDS[g.id]; });
+  if (cleaned.length === 0) {
+    cleaned = [{
+      id: 'Ccec6199403ca536e46079e37db1a1387',
+      name: '.Test',
+      lastMessage: 'เชื่อมต่อแล้ว',
+      timestamp: 'Live',
+      msgCount: 171
+    }];
+  }
+  props.setProperty('LINE_GROUPS', JSON.stringify(cleaned));
+  _memLineGroups = cleaned;
+  return { success: true, activeGroupId: 'Ccec6199403ca536e46079e37db1a1387', lineGroups: cleaned };
+}
+
 function assertAdminApiKey_(provided) {
   var expected = getAdminApiKey_();
   if (!expected) {
@@ -63,13 +84,18 @@ function assertAdminApiKey_(provided) {
 var _memGroupNameCache = {};
 var _memChatLogSheet = null;
 
+var DEAD_LINE_GROUP_IDS = {
+  'Cecd8e08a64397683d85ca9dd72acf1a6': true,
+  'C12345678901234567890123456789012': true
+};
+
 /**
  * Group tracking & active group management backed by PropertiesService and Sheets fallback.
  */
 function getActiveGroupId() {
   var props = PropertiesService.getScriptProperties();
   var gid = props.getProperty('ACTIVE_GROUP_ID') || '';
-  if (gid && gid.length > 5) return gid;
+  if (gid && gid.length > 5 && !DEAD_LINE_GROUP_IDS[gid]) return gid;
 
   // Auto-Discovery Fallback: Scan Sheet tabs if properties are uninitialized
   try {
@@ -81,7 +107,7 @@ function getActiveGroupId() {
       var gData = gSheet.getDataRange().getValues();
       for (var gi = 1; gi < gData.length; gi++) {
         var sheetGid = (gData[gi][0] || '').toString().trim();
-        if (sheetGid && (sheetGid.startsWith('C') || sheetGid.startsWith('R')) && sheetGid.length > 5) {
+        if (sheetGid && (sheetGid.startsWith('C') || sheetGid.startsWith('R')) && sheetGid.length > 5 && !DEAD_LINE_GROUP_IDS[sheetGid]) {
           props.setProperty('ACTIVE_GROUP_ID', sheetGid);
           return sheetGid;
         }
@@ -95,7 +121,7 @@ function getActiveGroupId() {
       for (var bi = bData.length - 1; bi >= 1; bi--) {
         for (var col = 0; col < bData[bi].length; col++) {
           var val = (bData[bi][col] || '').toString().trim();
-          if ((val.startsWith('C') || val.startsWith('R')) && val.length >= 15) {
+          if ((val.startsWith('C') || val.startsWith('R')) && val.length >= 15 && !DEAD_LINE_GROUP_IDS[val]) {
             props.setProperty('ACTIVE_GROUP_ID', val);
             recordGroupActivity(val, null, null, null, 'Discovered from Bets');
             return val;
@@ -110,7 +136,7 @@ function getActiveGroupId() {
       var lData = lSheet.getDataRange().getValues();
       for (var li = lData.length - 1; li >= 1; li--) {
         var uVal = (lData[li][1] || '').toString().trim();
-        if ((uVal.startsWith('C') || uVal.startsWith('R')) && uVal.length >= 15) {
+        if ((uVal.startsWith('C') || uVal.startsWith('R')) && uVal.length >= 15 && !DEAD_LINE_GROUP_IDS[uVal]) {
           props.setProperty('ACTIVE_GROUP_ID', uVal);
           recordGroupActivity(uVal, null, null, null, 'Discovered from LineChatLogs');
           return uVal;
@@ -292,6 +318,19 @@ function getLineGroups() {
 
   var updatedNames = false;
 
+  // Prune any dead groups from list
+  if (Array.isArray(list) && list.length > 0) {
+    var filtered = [];
+    for (var f = 0; f < list.length; f++) {
+      if (list[f].id && !DEAD_LINE_GROUP_IDS[list[f].id]) {
+        filtered.push(list[f]);
+      } else {
+        updatedNames = true;
+      }
+    }
+    list = filtered;
+  }
+
   // Resolve real names for any placeholder group entries
   if (Array.isArray(list) && list.length > 0) {
     for (var i = 0; i < list.length; i++) {
@@ -308,6 +347,7 @@ function getLineGroups() {
         }
       }
     }
+    list.sort(function(a, b) { return (b.msgCount || 0) - (a.msgCount || 0); });
     if (updatedNames) {
       props.setProperty('LINE_GROUPS', JSON.stringify(list));
     }
@@ -324,7 +364,7 @@ function getLineGroups() {
       for (var r = 1; r < lgData.length; r++) {
         var gId = (lgData[r][0] || '').toString().trim();
         var gName = (lgData[r][1] || '').toString().trim();
-        if (gId && gId.length > 5) {
+        if (gId && gId.length > 5 && !DEAD_LINE_GROUP_IDS[gId]) {
           var resolvedName = gName;
           if (!resolvedName || resolvedName.indexOf('กลุ่มดวลสด') !== -1 || resolvedName.startsWith('C')) {
             var apiName = fetchLINEGroupName(gId);
@@ -345,6 +385,7 @@ function getLineGroups() {
         }
       }
       if (list.length > 0) {
+        list.sort(function(a, b) { return (b.msgCount || 0) - (a.msgCount || 0); });
         props.setProperty('LINE_GROUPS', JSON.stringify(list));
         return list;
       }
@@ -352,7 +393,7 @@ function getLineGroups() {
   } catch(e) {}
 
   var activeId = getActiveGroupId();
-  if (activeId) {
+  if (activeId && !DEAD_LINE_GROUP_IDS[activeId]) {
     var activeRealName = fetchLINEGroupName(activeId);
     var fallbackList = [{
       id: activeId,
@@ -489,6 +530,7 @@ function executeAdminAction(functionName, args) {
     case 'adminSetActiveGroupId': return adminSetActiveGroupId(args[0]);
     case 'adminDiscoverGroupIds': return adminDiscoverGroupIds();
     case 'adminTestPushGroupMessage': return adminTestPushGroupMessage(args[0]);
+    case 'pruneDeadLineGroupsFromProperties': return pruneDeadLineGroupsFromProperties();
     default: return { error: 'Unknown function: ' + functionName };
   }
 }
@@ -5381,9 +5423,9 @@ function sendAdminMessageToLine(targetId, messageText) {
     var activeId = getActiveGroupId();
     var targetIds = {};
     for (var gi = 0; gi < groups.length; gi++) {
-      if (groups[gi].id) targetIds[groups[gi].id] = true;
+      if (groups[gi].id && !DEAD_LINE_GROUP_IDS[groups[gi].id]) targetIds[groups[gi].id] = true;
     }
-    if (activeId) targetIds[activeId] = true;
+    if (activeId && !DEAD_LINE_GROUP_IDS[activeId]) targetIds[activeId] = true;
 
     // Fallback: scan Bets sheet for group IDs
     if (Object.keys(targetIds).length === 0) {
@@ -5394,7 +5436,7 @@ function sendAdminMessageToLine(targetId, messageText) {
           var bData = bSheet.getDataRange().getValues();
           for (var bi = 1; bi < bData.length; bi++) {
             var gVal = (bData[bi][12] && bData[bi][12].toString().trim()) || (bData[bi][7] && bData[bi][7].toString().trim());
-            if (gVal && (gVal.startsWith('C') || gVal.startsWith('R') || gVal.startsWith('c') || gVal.startsWith('r'))) {
+            if (gVal && (gVal.startsWith('C') || gVal.startsWith('R') || gVal.startsWith('c') || gVal.startsWith('r')) && !DEAD_LINE_GROUP_IDS[gVal]) {
               targetIds[gVal] = true;
             }
           }
@@ -5435,9 +5477,23 @@ function sendAdminMessageToLine(targetId, messageText) {
 
     var responses = UrlFetchApp.fetchAll(requests);
     var sendResults = [];
+    var hadDeadGroups = false;
     for (var k = 0; k < responses.length; k++) {
       var code = responses[k].getResponseCode();
+      var respBody = responses[k].getContentText();
+      if (code === 400 && respBody.indexOf('Failed to send messages') !== -1) {
+        DEAD_LINE_GROUP_IDS[keys[k]] = true;
+        hadDeadGroups = true;
+      }
       sendResults.push({ success: code === 200, code: code, groupId: keys[k] });
+    }
+    if (hadDeadGroups) {
+      try {
+        var curGroups = getLineGroups();
+        var cleaned = curGroups.filter(function(g) { return !DEAD_LINE_GROUP_IDS[g.id]; });
+        PropertiesService.getScriptProperties().setProperty('LINE_GROUPS', JSON.stringify(cleaned));
+        _memLineGroups = cleaned;
+      } catch(_) {}
     }
     return { success: true, count: keys.length, targets: keys, results: sendResults };
   }

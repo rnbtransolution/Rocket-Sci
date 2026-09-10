@@ -6,11 +6,11 @@ export async function handlePostbackEvent(
   event: webhook.PostbackEvent,
   client: messagingApi.MessagingApiClient
 ): Promise<void> {
-  const replyToken = event.replyToken;
   const userId = event.source?.userId;
+  const isGroup = event.source?.type === 'group' || event.source?.type === 'room';
 
-  if (!userId || !replyToken) {
-    console.warn('[PostbackHandler] Missing userId or replyToken in event');
+  if (!userId) {
+    console.warn('[PostbackHandler] Missing userId in postback event');
     return;
   }
 
@@ -40,16 +40,22 @@ export async function handlePostbackEvent(
     // 1. Execute Atomic Transaction Lock
     const result = await matchOrderTransaction(orderId, userId, displayName);
     
-    // 2. Reply match success card to group/chat
+    // 2. Direct Message Notification (1-on-1 DM):
+    // STRICT RULE: Never reply back to the Group Chat (groupId) for user actions.
+    // Do NOT use replyToken in group context for postback interactions.
+    // Send the result notification directly to the user's personal LINE chat (userId).
     const successFlex = generateMatchSuccessFlex(result.order, displayName);
-    await client.replyMessage({
-      replyToken,
-      messages: [successFlex],
-    });
-
-    console.log(`[PostbackHandler] Successfully matched Order #${result.order.orderNumber} for user ${displayName} (${userId})`);
+    try {
+      await client.pushMessage({
+        to: userId,
+        messages: [successFlex],
+      });
+      console.log(`[PostbackHandler] DM sent to ${displayName} (${userId}) for matched Order #${result.order.orderNumber}`);
+    } catch (pushErr: any) {
+      console.warn(`[PostbackHandler] Could not DM user ${userId} (user may not have added LINE OA as friend):`, pushErr?.message || pushErr);
+    }
   } catch (err: any) {
-    console.error(`[PostbackHandler] Order matching transaction failed for ${orderId}: ${err?.message || err}`);
+    console.warn(`[PostbackHandler] Order matching transaction failed for ${orderId}: ${err?.message || err}`);
 
     const existingOrder = await getOrder(orderId).catch(() => null);
     const orderNumber = existingOrder?.orderNumber || orderId;
@@ -64,13 +70,16 @@ export async function handlePostbackEvent(
     }
 
     const failureFlex = generateMatchFailureFlex(orderNumber, userReason);
+
+    // Push failure / too-late notification to user's personal 1-on-1 DM
     try {
-      await client.replyMessage({
-        replyToken,
+      await client.pushMessage({
+        to: userId,
         messages: [failureFlex],
       });
-    } catch (replyErr) {
-      console.error('[PostbackHandler] Failed to dispatch failure reply:', replyErr);
+      console.log(`[PostbackHandler] DM failure notice sent to ${displayName} (${userId}) for Order #${orderNumber}`);
+    } catch (pushErr: any) {
+      console.warn(`[PostbackHandler] Could not DM failure notice to user ${userId} (user may not have added LINE OA as friend):`, pushErr?.message || pushErr);
     }
   }
 }

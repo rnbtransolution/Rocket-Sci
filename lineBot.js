@@ -221,6 +221,11 @@ export async function pushToLine(targetId, text) {
       const resText = await response.text();
       console.log(`[LINE Push Flex Result to ${rawLineId}]: Status ${response.status} - ${resText}`);
       if (response.ok) return;
+      if (response.status === 400 && resText.includes('Failed to send messages')) {
+        console.warn(`[LINE Push] Target ${rawLineId} returned 400 Failed to send messages. Marking as dead.`);
+        db.markGroupDead(rawLineId);
+        return; // Do NOT try fallback text, target is invalid
+      }
     } catch (err) {
       console.error(`[LINE Push Flex Error to ${rawLineId}]:`, err);
     }
@@ -242,7 +247,11 @@ export async function pushToLine(targetId, text) {
         },
         body: JSON.stringify(textPayload)
       });
-      console.log(`[LINE Push Fallback Result to ${rawLineId}]: Status ${fbRes.status}`);
+      const fbText = await fbRes.text();
+      console.log(`[LINE Push Fallback Result to ${rawLineId}]: Status ${fbRes.status} - ${fbText}`);
+      if (fbRes.status === 400 && fbText.includes('Failed to send messages')) {
+        db.markGroupDead(rawLineId);
+      }
     } catch (e) {
       console.error(`[LINE Push Fallback Error to ${rawLineId}]:`, e);
     }
@@ -265,6 +274,10 @@ export async function pushToLine(targetId, text) {
     });
     const resText = await response.text();
     console.log(`[LINE Push Text Result to ${rawLineId}]: Status ${response.status} - ${resText}`);
+    if (response.status === 400 && resText.includes('Failed to send messages')) {
+      console.warn(`[LINE Push] Target ${rawLineId} returned 400 Failed to send messages. Marking as dead.`);
+      db.markGroupDead(rawLineId);
+    }
   } catch (err) {
     console.error(`[LINE Push Error to ${rawLineId}]:`, err);
   }
@@ -484,22 +497,26 @@ export async function broadcastToAllGroups(messageTextOrFlex) {
   const activeId = db.getActiveGroupId();
 
   const targetIds = new Set();
-  groups.forEach(g => { if (g.id) targetIds.add(g.id); });
-  if (activeId) targetIds.add(activeId);
+  groups.forEach(g => {
+    if (g.id && !db.DEAD_GROUP_IDS?.has(g.id)) targetIds.add(g.id);
+  });
+  if (activeId && !db.DEAD_GROUP_IDS?.has(activeId)) targetIds.add(activeId);
 
   // Fallback: If no group in properties, search open/historical bets for group IDs
   if (targetIds.size === 0) {
     const bets = dashData?.bets || [];
     bets.forEach(b => {
       if (b.groupId && (b.groupId.startsWith('C') || b.groupId.startsWith('R') || b.groupId.startsWith('c') || b.groupId.startsWith('r'))) {
-        targetIds.add(b.groupId);
+        if (!db.DEAD_GROUP_IDS?.has(b.groupId)) targetIds.add(b.groupId);
       }
     });
   }
 
-  const pushes = Array.from(targetIds).map(gId => pushToLine(gId, messageTextOrFlex));
+  const validTargets = Array.from(targetIds);
+  console.log(`[broadcastToAllGroups] Dispatching broadcast to ${validTargets.length} target(s):`, validTargets);
+  const pushes = validTargets.map(gId => pushToLine(gId, messageTextOrFlex));
   await Promise.allSettled(pushes);
-  return true;
+  return { success: true, count: validTargets.length, targets: validTargets };
 }
 
 export async function handleUnsendMessage(unsendMessageId, userId, displayName, groupId) {

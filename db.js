@@ -374,6 +374,26 @@ function upsertLineGroupMemory(groupId, groupName, text = 'เชื่อมต
   return group;
 }
 
+export const DEAD_GROUP_IDS = new Set([
+  'Cecd8e08a64397683d85ca9dd72acf1a6',
+  'C12345678901234567890123456789012',
+]);
+
+export function markGroupDead(groupId) {
+  if (!groupId) return;
+  DEAD_GROUP_IDS.add(groupId);
+  const idx = lineGroups.findIndex((g) => g.id === groupId);
+  if (idx !== -1) {
+    console.log(`[DB] Pruning dead group ${groupId} (${lineGroups[idx].name})`);
+    lineGroups.splice(idx, 1);
+  }
+  if (activeGroupId === groupId) {
+    const best = lineGroups.find((g) => !DEAD_GROUP_IDS.has(g.id) && (g.msgCount || 0) > 0) || lineGroups[0];
+    activeGroupId = best ? best.id : null;
+    console.log(`[DB] Active group reset from dead group ${groupId} to ${activeGroupId}`);
+  }
+}
+
 function hydrateLineGroupsFromSources(lineGroupsSheetRows = []) {
   const discovered = new Map();
 
@@ -382,7 +402,7 @@ function hydrateLineGroupsFromSources(lineGroupsSheetRows = []) {
     for (let i = 1; i < lineGroupsSheetRows.length; i++) {
       const row = lineGroupsSheetRows[i] || [];
       const gid = String(row[0] || '').trim();
-      if (!looksLikeLineGroupId(gid)) continue;
+      if (!looksLikeLineGroupId(gid) || DEAD_GROUP_IDS.has(gid)) continue;
       discovered.set(gid, {
         id: gid,
         name: String(row[1] || '').trim() || `🚀 กลุ่มดวลสด #${discovered.size + 1}`,
@@ -397,7 +417,7 @@ function hydrateLineGroupsFromSources(lineGroupsSheetRows = []) {
   // From bets.groupId / groupName
   for (const b of bets) {
     const gid = String(b.groupId || '').trim();
-    if (!looksLikeLineGroupId(gid)) continue;
+    if (!looksLikeLineGroupId(gid) || DEAD_GROUP_IDS.has(gid)) continue;
     if (!discovered.has(gid)) {
       discovered.set(gid, {
         id: gid,
@@ -413,7 +433,7 @@ function hydrateLineGroupsFromSources(lineGroupsSheetRows = []) {
   // From chat logs where userId is actually a group/room id
   for (const log of chatLogs) {
     const gid = String(log.userId || '').trim();
-    if (!looksLikeLineGroupId(gid)) continue;
+    if (!looksLikeLineGroupId(gid) || DEAD_GROUP_IDS.has(gid)) continue;
     if (!discovered.has(gid)) {
       discovered.set(gid, {
         id: gid,
@@ -428,6 +448,7 @@ function hydrateLineGroupsFromSources(lineGroupsSheetRows = []) {
 
   // Merge into memory without wiping manually-added live groups that aren't in sheets yet
   for (const g of discovered.values()) {
+    if (DEAD_GROUP_IDS.has(g.id)) continue;
     const existing = lineGroups.find((x) => x.id === g.id);
     if (!existing) {
       lineGroups.push({
@@ -442,8 +463,22 @@ function hydrateLineGroupsFromSources(lineGroupsSheetRows = []) {
     }
   }
 
-  if (!activeGroupId && lineGroups.length > 0) {
-    activeGroupId = lineGroups[0].id;
+  // Prune any dead groups that might have leaked into lineGroups
+  for (let i = lineGroups.length - 1; i >= 0; i--) {
+    if (DEAD_GROUP_IDS.has(lineGroups[i].id)) {
+      lineGroups.splice(i, 1);
+    }
+  }
+
+  // Sort lineGroups so the most active group (highest msgCount) is at the top
+  lineGroups.sort((a, b) => (b.msgCount || 0) - (a.msgCount || 0));
+
+  // If activeGroupId is missing, dead, or not in lineGroups, set to the most active valid group
+  if (!activeGroupId || DEAD_GROUP_IDS.has(activeGroupId) || !lineGroups.some((g) => g.id === activeGroupId)) {
+    const bestGroup = lineGroups.find((g) => !DEAD_GROUP_IDS.has(g.id) && (g.msgCount || 0) > 0) || lineGroups[0];
+    if (bestGroup) {
+      activeGroupId = bestGroup.id;
+    }
   }
 }
 

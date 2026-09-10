@@ -202,8 +202,7 @@ app.post('/api/run', requireAdminApiKey, async (req, res) => {
             db.setTargetMinMax(Number(rangeMatch[1]), Number(rangeMatch[2]));
           }
         }
-        await lineBot.sendAdminMessageToLine(args[0], args[1]);
-        result = db.getDashboardData();
+        result = await lineBot.sendAdminMessageToLine(args[0], args[1]);
         break;
         
       case 'adminOpenRound':
