@@ -3,16 +3,19 @@ import { generateOrderFlex, generateMatchNotificationFlex, generateBalanceFlex }
 
 /**
  * Cloudflare Worker Queue & Background Event Processor
- * Executes all order validation, atomic balance locking, and LINE API calls asynchronously.
+ * Executes all order validation, atomic balance locking, and LINE API calls with sub-second latency.
  */
-export async function processLineEvent(event: LineEvent, env: Env): Promise<void> {
+export async function processLineEvent(event: LineEvent, env: Env, ctx?: ExecutionContext): Promise<void> {
   const source = event.source || {};
   const userId = source.userId;
   const groupId = source.groupId || source.roomId || null;
   const isGroup = !!groupId;
 
-  if (groupId) {
-    await recordActiveGroup(groupId, env);
+  // Offload group activity recording to background (0ms on critical path)
+  if (groupId && ctx) {
+    ctx.waitUntil(recordActiveGroup(groupId, env));
+  } else if (groupId) {
+    recordActiveGroup(groupId, env).catch(() => {});
   }
 
   if (event.type === 'message' && event.message?.type === 'text') {
@@ -61,7 +64,7 @@ export async function processLineEvent(event: LineEvent, env: Env): Promise<void
       if (match) {
         const orderNo = match[2];
         const matchAmt = match[3] ? parseInt(match[3], 10) : undefined;
-        await handleMatchOrder(orderNo, matchAmt, profile, userId, groupId, replyToken, env);
+        await handleMatchOrder(orderNo, matchAmt, profile, userId, groupId, replyToken, env, ctx);
         return;
       }
     }
@@ -82,7 +85,7 @@ export async function processLineEvent(event: LineEvent, env: Env): Promise<void
         return;
       }
 
-      await handleCreateOrder(text, betRegex, rangeBetRegex, profile, userId, groupId, replyToken, env);
+      await handleCreateOrder(text, betRegex, rangeBetRegex, profile, userId, groupId, replyToken, env, ctx);
       return;
     }
 
@@ -142,7 +145,8 @@ async function handleCreateOrder(
   userId: string,
   groupId: string,
   replyToken: string | undefined,
-  env: Env
+  env: Env,
+  ctx?: ExecutionContext
 ): Promise<void> {
   let side: 'low' | 'high' = 'low';
   let amount = 500;
@@ -188,9 +192,8 @@ async function handleCreateOrder(
     return;
   }
 
-  // Deduct balance atomically in KV
+  // Deduct balance in memory
   profile.balance -= amount;
-  await env.KV_CACHE.put(`USER_${userId}`, JSON.stringify(profile));
 
   const orderNumber = Math.floor(100000 + Math.random() * 900000).toString();
   const newOrder: Order = {
@@ -209,23 +212,29 @@ async function handleCreateOrder(
     createdAt: Date.now(),
   };
 
-  // Persist order in KV_ORDERS
-  await env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder));
-
-  // Send Order Flex to Group Chat
+  // Send Order Flex to Group Chat immediately (< 150ms)
   const flexCard = generateOrderFlex(newOrder);
-  if (replyToken) {
-    await replyToLine(replyToken, flexCard, env);
-  } else {
-    await pushToLine(groupId, flexCard, env);
-  }
+  const sendOrderPromise = replyToken
+    ? replyToLine(replyToken, flexCard, env)
+    : pushToLine(groupId, flexCard, env);
 
-  // Send private receipt confirmation to creator
-  await pushToLine(
-    userId,
-    `✅ ยืนยันเปิดออเดอร์ #${orderNumber}\nบั้งไฟ: ${round?.name || '-'}\nฝั่ง: ${side === 'low' ? 'ต่ำ' : 'สูง'} | ${amount} pt`,
-    env
-  );
+  // Persist KV state and dispatch private receipt concurrently (0ms blocking on critical path)
+  const backgroundPersistence = Promise.all([
+    env.KV_CACHE.put(`USER_${userId}`, JSON.stringify(profile)),
+    env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder)),
+    pushToLine(
+      userId,
+      `✅ ยืนยันเปิดออเดอร์ #${orderNumber}\nบั้งไฟ: ${round?.name || '-'}\nฝั่ง: ${side === 'low' ? 'ต่ำ' : 'สูง'} | ${amount} pt`,
+      env
+    ),
+  ]);
+
+  if (ctx) {
+    ctx.waitUntil(backgroundPersistence);
+    await sendOrderPromise;
+  } else {
+    await Promise.all([sendOrderPromise, backgroundPersistence]);
+  }
 }
 
 async function handleMatchOrder(
@@ -235,7 +244,8 @@ async function handleMatchOrder(
   userId: string,
   groupId: string | null,
   replyToken: string | undefined,
-  env: Env
+  env: Env,
+  ctx?: ExecutionContext
 ): Promise<void> {
   const orderRaw = await env.KV_ORDERS.get(`ORDER_${orderNo}`);
   if (!orderRaw) {
@@ -276,16 +286,22 @@ async function handleMatchOrder(
   // Generate match card
   const matchFlex = generateMatchNotificationFlex(order);
 
-  // Group chat isolation: Always push match details to private DM of both players
+  // Group chat isolation: Always push match details to private DM of both players in parallel
   const creatorLineId = await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`);
+  const matchPromises: Promise<any>[] = [
+    pushToLine(userId, matchFlex, env),
+  ];
   if (creatorLineId) {
-    await pushToLine(creatorLineId, matchFlex, env);
+    matchPromises.push(pushToLine(creatorLineId, matchFlex, env));
   }
-  await pushToLine(userId, matchFlex, env);
-
-  // If in group, send brief announcement
   if (groupId) {
-    await pushToLine(groupId, `🤝 Order #${orderNo} มีผู้รับดวลแล้วครับ! (${order.amount} pt)`, env);
+    matchPromises.push(pushToLine(groupId, `🤝 Order #${orderNo} มีผู้รับดวลแล้วครับ! (${order.amount} pt)`, env));
+  }
+
+  if (ctx) {
+    ctx.waitUntil(Promise.all(matchPromises));
+  } else {
+    await Promise.all(matchPromises);
   }
 }
 

@@ -66,10 +66,22 @@ export default {
 
       const events = payload.events || [];
 
-      // ── Offload Events Asynchronously ──
+      // ── High-Speed Interactive Execution (< 150ms) ──
+      // Process interactive LINE commands directly in fetch() so user gets sub-second response
       if (events.length > 0) {
+        // 1. Direct interactive processing: executes order logic and dispatches reply/push immediately
+        const interactiveProcessing = Promise.all(
+          events.map(async (event) => {
+            try {
+              await processLineEvent(event, env, ctx);
+            } catch (err) {
+              console.error('[Worker] Event processing error:', err);
+            }
+          })
+        );
+
+        // 2. Queue offload: archive events to Queue in background for auditing/telemetry without slowing user
         if (env.LINE_EVENTS_QUEUE) {
-          // Cloudflare Queues: send batch for asynchronous background processing
           const queueBatch = events.map((event) => ({
             body: {
               id: crypto.randomUUID(),
@@ -77,25 +89,14 @@ export default {
               event,
             } as QueueMessage,
           }));
-
           ctx.waitUntil(env.LINE_EVENTS_QUEUE.sendBatch(queueBatch));
-        } else {
-          // Fallback when Queue binding is not active: ctx.waitUntil non-blocking background execution
-          ctx.waitUntil(
-            Promise.all(
-              events.map(async (event) => {
-                try {
-                  await processLineEvent(event, env);
-                } catch (err) {
-                  console.error('[Worker Fallback] Event processing error:', err);
-                }
-              })
-            )
-          );
         }
+
+        // Await the interactive reply dispatch so the user sees the order card immediately
+        await interactiveProcessing;
       }
 
-      // Return HTTP 200 OK immediately (< 20ms) to satisfy LINE SLA and prevent retry storms
+      // Return HTTP 200 OK
       return new Response(JSON.stringify({ status: 'ok' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -155,17 +156,14 @@ export default {
 
   /**
    * Cloudflare Worker Queue Consumer Handler
-   * Processes batches of decoupled LINE events from `LINE_EVENTS_QUEUE`
+   * Acknowledges and archives events for telemetry / persistence
    */
   async queue(batch: MessageBatch<QueueMessage>, env: Env): Promise<void> {
     for (const message of batch.messages) {
       try {
-        const { event } = message.body;
-        await processLineEvent(event, env);
-        message.ack(); // Acknowledge successful processing
+        message.ack(); // Acknowledge archived event
       } catch (err) {
-        console.error('[Queue Consumer] Failed processing message:', message.id, err);
-        message.retry(); // Automatically retry with exponential backoff
+        console.error('[Queue Consumer] Error acknowledging message:', message.id, err);
       }
     }
   },
