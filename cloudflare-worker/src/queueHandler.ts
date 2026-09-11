@@ -87,13 +87,8 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     if (boardRegex.test(clean) || boardRegex.test(text)) {
       const pendingList = await getPendingOrdersList(env);
       const boardFlex = generatePendingBoardFlex(pendingList);
-      if (replyToken) {
-        await replyToLine(replyToken, boardFlex, env);
-      } else if (groupId) {
-        await pushToLine(groupId, boardFlex, env);
-      } else {
-        await pushToLine(userId, boardFlex, env);
-      }
+      // Strictly deliver board to private message to keep group chat quiet and clean
+      await deliverPrivateNotice(userId, replyToken, groupId, boardFlex, env);
       return;
     }
 
@@ -120,33 +115,66 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       return;
     }
 
-    // ── 3. Accept/Match Bet Command (e.g. "ต 9047 500", "ต9047", "ต47", "รับ 9047") ──
-    const matchWithPrefixRegex = /^(?:(ต|ติด|รับ|เค|ดีล)\s*)#?(\d{2,6})(?:\s+(\d+))?$/i;
-    const matchNoPrefixRegex = /^#?(\d{4,6})\s+(\d+)$/i;
-    const matchHashOnlyRegex = /^#(\d{2,6})$/i;
+    // ── 3. Accept/Match Bet Commands ──
+    // Formats supported:
+    // A) "ต 695066 500", "ต #695066 500", "695066 500" (Order Number + Amount)
+    const orderAndAmountRegex = /^(?:(ต|ติด|รับ|เค|ดีล)\s*)?#?(\d{4,6})\s+(\d+)(?:\s*(?:pt|แต้ม))?$/i;
+    // B) "ต #695066", "ต 695066", "#695066" (Explicit Order Number)
+    const explicitOrderRegex = /^(?:(ต|ติด|รับ|เค|ดีล)\s*)#?(\d{4,6})$/i;
+    const hashOnlyRegex = /^#(\d{4,6})$/i;
+    // C) "ต 500", "ต500", "ติด 200" (Keyword + Amount for latest pending bet)
+    const keywordAndAmountRegex = /^(?:(ต|ติด|รับ|เค|ดีล)\s*)(\d{1,5})(?:\s*(?:pt|แต้ม))?$/i;
+    // D) Just "ต", "ติด", "รับ", "ดีล" (Match latest pending bet full amount)
+    const pureKeywordRegex = /^(ต|ติด|รับ|เค|ดีล)$/i;
 
-    if (matchWithPrefixRegex.test(text) || matchNoPrefixRegex.test(text) || matchHashOnlyRegex.test(text)) {
-      let orderNo: string | undefined;
+    if (
+      orderAndAmountRegex.test(text) ||
+      hashOnlyRegex.test(text) ||
+      explicitOrderRegex.test(text) ||
+      keywordAndAmountRegex.test(text) ||
+      pureKeywordRegex.test(clean)
+    ) {
+      let targetOrderNo: string | undefined;
       let matchAmt: number | undefined;
 
-      if (matchWithPrefixRegex.test(text)) {
-        const match = text.match(matchWithPrefixRegex)!;
-        orderNo = match[2];
-        matchAmt = match[3] ? parseInt(match[3], 10) : undefined;
-      } else if (matchNoPrefixRegex.test(text)) {
-        const match = text.match(matchNoPrefixRegex)!;
-        orderNo = match[1];
+      if (orderAndAmountRegex.test(text)) {
+        const match = text.match(orderAndAmountRegex)!;
+        targetOrderNo = match[2];
+        matchAmt = parseInt(match[3], 10);
+      } else if (hashOnlyRegex.test(text)) {
+        const match = text.match(hashOnlyRegex)!;
+        targetOrderNo = match[1];
+        matchAmt = undefined;
+      } else if (explicitOrderRegex.test(text)) {
+        const match = text.match(explicitOrderRegex)!;
+        const numStr = match[2];
+        // 6 digits or explicitly formatted with # is an order number
+        if (numStr.length >= 6 || text.includes('#')) {
+          targetOrderNo = numStr;
+          matchAmt = undefined;
+        } else {
+          // Check if exists as order
+          const exists = await env.KV_ORDERS.get(`ORDER_${numStr}`);
+          if (exists) {
+            targetOrderNo = numStr;
+            matchAmt = undefined;
+          } else {
+            // Treat as amount for latest open bet
+            targetOrderNo = undefined;
+            matchAmt = parseInt(numStr, 10);
+          }
+        }
+      } else if (keywordAndAmountRegex.test(text)) {
+        const match = text.match(keywordAndAmountRegex)!;
+        targetOrderNo = undefined;
         matchAmt = parseInt(match[2], 10);
-      } else if (matchHashOnlyRegex.test(text)) {
-        const match = text.match(matchHashOnlyRegex)!;
-        orderNo = match[1];
+      } else if (pureKeywordRegex.test(clean)) {
+        targetOrderNo = undefined;
         matchAmt = undefined;
       }
 
-      if (orderNo) {
-        await handleMatchOrder(orderNo, matchAmt, profile, userId, groupId, replyToken, env, ctx);
-        return;
-      }
+      await handleMatchOrder(targetOrderNo, matchAmt, profile, userId, groupId, replyToken, env, ctx);
+      return;
     }
 
     // ── 4. Order Creation Formulas (e.g. "ล500", "ชล500", "ถ1000", "330-380ล500") ──
@@ -319,7 +347,7 @@ async function handleCreateOrder(
 }
 
 async function handleMatchOrder(
-  orderNo: string,
+  orderNo: string | undefined,
   matchAmt: number | undefined,
   profile: PlayerProfile,
   userId: string,
@@ -328,9 +356,12 @@ async function handleMatchOrder(
   env: Env,
   ctx?: ExecutionContext
 ): Promise<void> {
-  const resolvedNo = await resolveOrderNumber(orderNo, env);
+  const resolvedNo = await resolveOrderNumber(orderNo, profile.shortId, env);
   if (!resolvedNo) {
-    await deliverPrivateNotice(userId, replyToken, groupId, `🚫 ไม่พบแผล Order #${orderNo} ในระบบครับ`, env);
+    const errorMsg = orderNo
+      ? `🚫 ไม่พบแผล Order #${orderNo} ในระบบครับ`
+      : '🚫 ขณะนี้ไม่มีแผลที่เปิดรอคู่ในระบบครับ 🚀\n(ท่านสามารถพิมพ์ ชล หรือ ชถ ในกลุ่มดวล เพื่อเปิดแผลใหม่ได้ครับ)';
+    await deliverPrivateNotice(userId, replyToken, groupId, errorMsg, env);
     return;
   }
 
@@ -386,8 +417,9 @@ async function handleMatchOrder(
   if (creatorLineId) {
     matchPromises.push(pushToLine(creatorLineId, matchFlex, env));
   }
-  if (groupId) {
-    matchPromises.push(pushToLine(groupId, `🤝 Order #${resolvedNo} มีผู้รับดวลแล้วครับ! (${order.amount} pt)`, env));
+  const targetGroup = groupId || order.groupId;
+  if (targetGroup) {
+    matchPromises.push(pushToLine(targetGroup, `🤝 Order #${resolvedNo} มีผู้รับดวลแล้วครับ! (${order.amount} pt)`, env));
   }
 
   if (ctx) {
@@ -398,7 +430,7 @@ async function handleMatchOrder(
 }
 
 async function cancelOrder(orderNo: string, shortId: string, env: Env): Promise<{ success: boolean; message: string }> {
-  const resolvedNo = await resolveOrderNumber(orderNo, env);
+  const resolvedNo = await resolveOrderNumber(orderNo, null, env);
   if (!resolvedNo) return { success: false, message: `🚫 ไม่พบแผล Order #${orderNo}` };
 
   const raw = await env.KV_ORDERS.get(`ORDER_${resolvedNo}`);
@@ -482,25 +514,37 @@ async function addToPendingOrdersList(order: Order, env: Env): Promise<void> {
 
 async function removeFromPendingOrdersList(orderNo: string, env: Env): Promise<void> {
   try {
+    const cleanNo = orderNo.trim().replace(/^#/, '');
     const list = await getPendingOrdersList(env);
-    const updated = list.filter((o) => o.orderNumber !== orderNo && !o.orderNumber.endsWith(orderNo));
+    const updated = list.filter((o) => o.orderNumber !== cleanNo);
     await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 1800 });
   } catch (err) {
     console.error('[Worker] removeFromPendingOrdersList error:', err);
   }
 }
 
-async function resolveOrderNumber(inputNo: string, env: Env): Promise<string | null> {
+async function resolveOrderNumber(
+  inputNo: string | undefined | null,
+  excludeCreatorId: string | null,
+  env: Env
+): Promise<string | null> {
+  // If no specific order number passed, find the latest pending open bet
+  if (!inputNo || inputNo.trim() === '') {
+    const pendingList = await getPendingOrdersList(env);
+    if (!pendingList || pendingList.length === 0) return null;
+    const candidate = pendingList.find((o) => !excludeCreatorId || o.creatorId !== excludeCreatorId);
+    return candidate ? candidate.orderNumber : pendingList[0].orderNumber;
+  }
+
   const cleanNo = inputNo.trim().replace(/^#/, '');
-  // 1. Direct match
+
+  // 1. Direct KV lookup
   const direct = await env.KV_ORDERS.get(`ORDER_${cleanNo}`);
   if (direct) return cleanNo;
 
-  // 2. Check pending list for endsWith or exact
+  // 2. Pending list exact match
   const pendingList = await getPendingOrdersList(env);
-  const foundPending = pendingList.find(
-    (o) => o.orderNumber === cleanNo || o.orderNumber.endsWith(cleanNo)
-  );
+  const foundPending = pendingList.find((o) => o.orderNumber === cleanNo);
   if (foundPending) return foundPending.orderNumber;
 
   // 3. Scan KV_ORDERS prefix
@@ -508,7 +552,7 @@ async function resolveOrderNumber(inputNo: string, env: Env): Promise<string | n
     const listRes = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 50 });
     for (const k of listRes.keys) {
       const rawNo = k.name.replace(/^ORDER_/, '');
-      if (rawNo === cleanNo || rawNo.endsWith(cleanNo)) {
+      if (rawNo === cleanNo) {
         return rawNo;
       }
     }

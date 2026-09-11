@@ -275,7 +275,7 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
       altText: '📊 กระดานดวลสด: ไม่มีแผลค้าง',
       contents: {
         type: 'bubble',
-        size: 'kilo',
+        size: 'mega',
         header: {
           type: 'box',
           layout: 'vertical',
@@ -291,7 +291,7 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
                   text: '📊 กระดานดวลสด',
                   weight: 'bold',
                   color: '#FFFFFF',
-                  size: 'sm',
+                  size: 'md',
                   flex: 1,
                 },
                 {
@@ -299,15 +299,22 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
                   layout: 'vertical',
                   backgroundColor: '#334155',
                   cornerRadius: 'sm',
-                  paddingStart: '6px',
-                  paddingEnd: '6px',
-                  paddingTop: '2px',
-                  paddingBottom: '2px',
+                  paddingStart: '8px',
+                  paddingEnd: '8px',
+                  paddingTop: '3px',
+                  paddingBottom: '3px',
                   contents: [
-                    { type: 'text', text: 'ว่าง 0 แผล', color: '#94A3B8', size: 'xxs', weight: 'bold' },
+                    { type: 'text', text: 'ว่าง 0 แผล', color: '#CBD5E1', size: 'xs', weight: 'bold' },
                   ],
                 },
               ],
+            },
+            {
+              type: 'text',
+              text: 'ยังไม่มีแผลเปิดรอคู่ในขณะนี้ 🚀',
+              color: '#CBD5E1',
+              size: 'xs',
+              margin: 'sm',
             },
           ],
         },
@@ -321,14 +328,14 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
               type: 'text',
               text: 'ไม่มีแผลดวลค้างในขณะนี้ 🚀',
               weight: 'bold',
-              color: '#334155',
-              size: 'sm',
+              color: '#0F172A',
+              size: 'md',
               align: 'center',
             },
             {
               type: 'text',
-              text: 'ท่านสามารถพิมพ์ ชล หรือ ชถ เพื่อเปิดแผลดวลใหม่ได้ทันทีครับ',
-              color: '#64748B',
+              text: 'ท่านสามารถพิมพ์ ชล หรือ ชถ ในกลุ่มดวล เพื่อเปิดแผลใหม่ได้ทันทีครับ',
+              color: '#475569',
               size: 'xs',
               align: 'center',
               wrap: true,
@@ -338,9 +345,20 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
         footer: {
           type: 'box',
           layout: 'horizontal',
-          spacing: 'xs',
-          paddingAll: 'sm',
+          spacing: 'sm',
+          paddingAll: 'md',
           contents: [
+            {
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              color: '#F1F5F9',
+              action: {
+                type: 'message',
+                label: '🔄 รีเฟรชกระดาน',
+                text: 'กระดานดวล',
+              },
+            },
             {
               type: 'button',
               style: 'secondary',
@@ -352,17 +370,6 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
                 text: 'กติกา',
               },
             },
-            {
-              type: 'button',
-              style: 'primary',
-              height: 'sm',
-              color: '#0D9488',
-              action: {
-                type: 'message',
-                label: '⚡ เปิดราคาช่าง',
-                text: 'ชล500',
-              },
-            },
           ],
         },
       },
@@ -372,97 +379,103 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
   const displayItems = pendingList.slice(0, 8);
   const itemBoxes = displayItems.map((b) => {
     const isLow = b.side === 'low';
-    const sideText = isLow ? '🔻 ต่ำ' : '🔺 สูง';
+    const sideText = isLow ? '🔻 ทายต่ำ' : '🔺 ทายสูง';
     const sideColor = isLow ? '#DC2626' : '#16A34A';
-    const sideBg = isLow ? '#FEF2F2' : '#F0FDF4';
-    const sideBorder = isLow ? '#FECACA' : '#BBF7D0';
-    const rangeText = (b.rangeMin && b.rangeMax) ? `${b.rangeMin}-${b.rangeMax}s` : 'ราคาช่าง';
-    const shortCode = String(b.orderNumber || '').slice(-2);
+    const rangeText = (b.rangeMin && b.rangeMax) ? `(${b.rangeMin}-${b.rangeMax}s)` : '(ราคาช่าง)';
     const amtStr = Number(b.amount || 0).toLocaleString('th-TH');
 
     return {
       type: 'box',
       layout: 'vertical',
-      backgroundColor: sideBg,
-      borderColor: sideBorder,
+      backgroundColor: '#FFFFFF',
+      borderColor: '#CBD5E1',
       borderWidth: '1px',
       cornerRadius: 'md',
-      paddingAll: 'sm',
+      paddingAll: 'md',
       spacing: 'xs',
       contents: [
+        // Row 1: Order ID (explicit, without redundant brackets) & Player Name
         {
           type: 'box',
           layout: 'horizontal',
           contents: [
             {
               type: 'text',
-              text: `#${b.orderNumber} (${shortCode})`,
+              text: `#${b.orderNumber}`,
               weight: 'bold',
               color: '#0F172A',
-              size: 'xs',
-              flex: 5,
+              size: 'sm',
+              flex: 6,
             },
             {
               type: 'text',
               text: `👤 @${b.creatorName || 'ผู้เล่น'}`,
               weight: 'bold',
-              color: '#475569',
-              size: 'xxs',
+              color: '#334155',
+              size: 'xs',
               align: 'end',
-              flex: 5,
+              flex: 6,
               wrap: true,
             },
           ],
         },
+        // Row 2: Prediction Side/Range & Amount
         {
           type: 'box',
           layout: 'horizontal',
           contents: [
             {
-              type: 'text',
-              text: `${sideText} ${rangeText}`,
-              weight: 'bold',
-              color: sideColor,
-              size: 'xs',
-              flex: 6,
+              type: 'box',
+              layout: 'horizontal',
+              flex: 7,
+              contents: [
+                {
+                  type: 'text',
+                  text: `${sideText} ${rangeText}`,
+                  weight: 'bold',
+                  color: sideColor,
+                  size: 'xs',
+                },
+              ],
             },
             {
               type: 'text',
               text: `${amtStr} pt`,
               weight: 'bold',
               color: '#0284C7',
-              size: 'xs',
+              size: 'sm',
               align: 'end',
-              flex: 4,
+              flex: 5,
             },
           ],
         },
+        // Row 3: Prominent High-Contrast Accept Deal Button
         {
           type: 'box',
           layout: 'horizontal',
           spacing: 'xs',
-          margin: 'xs',
+          margin: 'sm',
           contents: [
             {
               type: 'box',
               layout: 'vertical',
-              backgroundColor: isLow ? '#16A34A' : '#DC2626',
+              backgroundColor: '#0284C7',
               cornerRadius: 'sm',
-              paddingTop: '4px',
-              paddingBottom: '4px',
+              paddingTop: '6px',
+              paddingBottom: '6px',
               flex: 1,
               action: {
                 type: 'message',
-                label: `ต${shortCode}`,
-                text: `ต${shortCode}`,
+                label: `ต ${b.orderNumber}`,
+                text: `ต ${b.orderNumber}`,
               },
               contents: [
                 {
                   type: 'text',
-                  text: `⚡ รับดวล (ต${shortCode})`,
+                  text: `⚡ รับดวล Order #${b.orderNumber}`,
                   color: '#FFFFFF',
                   weight: 'bold',
-                  size: 'xxs',
+                  size: 'xs',
                   align: 'center',
                 },
               ],
@@ -476,11 +489,12 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
   const overflowNotice = pendingList.length > 8 ? [
     {
       type: 'text',
-      text: `... และอีก ${pendingList.length - 8} แผลดวล`,
-      size: 'xxs',
-      color: '#94A3B8',
+      text: `... และอีก ${pendingList.length - 8} แผลดวลที่เปิดรอคู่`,
+      size: 'xs',
+      color: '#475569',
+      weight: 'bold',
       align: 'center',
-      margin: 'xs',
+      margin: 'sm',
     },
   ] : [];
 
@@ -489,7 +503,7 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
     altText: `📊 กระดานดวลสด (${pendingList.length} แผลค้าง)`,
     contents: {
       type: 'bubble',
-      size: 'kilo',
+      size: 'mega',
       header: {
         type: 'box',
         layout: 'vertical',
@@ -505,7 +519,7 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
                 text: '📊 กระดานดวลสด',
                 weight: 'bold',
                 color: '#FFFFFF',
-                size: 'sm',
+                size: 'md',
                 flex: 1,
               },
               {
@@ -515,14 +529,14 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
                 cornerRadius: 'sm',
                 paddingStart: '8px',
                 paddingEnd: '8px',
-                paddingTop: '2px',
-                paddingBottom: '2px',
+                paddingTop: '3px',
+                paddingBottom: '3px',
                 contents: [
                   {
                     type: 'text',
                     text: `รอคู่ ${pendingList.length} แผล`,
                     color: '#FFFFFF',
-                    size: 'xxs',
+                    size: 'xs',
                     weight: 'bold',
                   },
                 ],
@@ -531,18 +545,18 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
           },
           {
             type: 'text',
-            text: 'แตะปุ่มเพื่อรับดวล หรือพิมพ์ ต[เลข] ได้ทันที 🚀',
-            color: '#94A3B8',
-            size: 'xxs',
-            margin: 'xs',
+            text: 'แตะปุ่มด้านล่าง หรือพิมพ์ ต [เลข Order] เพื่อรับดวล 🚀',
+            color: '#CBD5E1',
+            size: 'xs',
+            margin: 'sm',
           },
         ],
       },
       body: {
         type: 'box',
         layout: 'vertical',
-        spacing: 'xs',
-        paddingAll: 'sm',
+        spacing: 'sm',
+        paddingAll: 'md',
         contents: [
           ...itemBoxes,
           ...overflowNotice,
@@ -551,8 +565,8 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
       footer: {
         type: 'box',
         layout: 'horizontal',
-        spacing: 'xs',
-        paddingAll: 'sm',
+        spacing: 'sm',
+        paddingAll: 'md',
         contents: [
           {
             type: 'button',
@@ -561,7 +575,7 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
             color: '#F1F5F9',
             action: {
               type: 'message',
-              label: '🔄 รีเฟรช',
+              label: '🔄 รีเฟรชกระดาน',
               text: 'กระดานดวล',
             },
           },
@@ -572,19 +586,8 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
             color: '#F1F5F9',
             action: {
               type: 'message',
-              label: '📖 กติกา',
+              label: '📖 ดูกติกา',
               text: 'กติกา',
-            },
-          },
-          {
-            type: 'button',
-            style: 'primary',
-            height: 'sm',
-            color: '#0D9488',
-            action: {
-              type: 'message',
-              label: '⚡ เปิดราคาช่าง',
-              text: 'ชล500',
             },
           },
         ],
