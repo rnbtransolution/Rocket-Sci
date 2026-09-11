@@ -103,6 +103,19 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       return;
     }
 
+    // ── 1.3 Admin/System Command: Clear Board & Cache ("ล้างกระดาน", "เคลียร์แผล", "ล้างแคช", "clearboard") ──
+    const clearRegex = /^(?:🧹\s*)?(ล้างกระดาน|เคลียร์กระดาน|ล้างแผล|เคลียร์แผล|ล้างแคช|เคลียร์แคช|clearboard|resetboard|clearcache)$/i;
+    if (clearRegex.test(clean) || clearRegex.test(text)) {
+      const res = await clearAllPendingOrders(env);
+      const msg = `🧹 ล้างกระดานดวลสดและเคลียร์แคชเรียบร้อยแล้วครับ! (ลบทั้งหมด ${res.cleared} รายการ, กระดานว่าง 0 แผล)`;
+      if (replyToken) {
+        await replyToLine(replyToken, msg, env);
+      } else {
+        await pushToLine(userId, msg, env);
+      }
+      return;
+    }
+
     // ── 2. Cancel Order ("ยกเลิก [orderNo]") ──
     const cancelRegex = /^(ยกเลิก|cancel)\s*#?(\d{2,6})$/i;
     if (cancelRegex.test(clean) || cancelRegex.test(text)) {
@@ -216,15 +229,21 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       return;
     }
 
-    if (clean === 'ปิดรอบ' || clean === 'ปิดรับดวล' || clean === '3-2-go') {
+    if (clean === 'ปิดรอบ' || clean === 'ปิดรับดวล' || clean === 'ล็อครอบ' || clean === '3-2-go' || clean === '32go') {
       const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
+      let roundName = 'รอบดวลสด';
       if (roundStr) {
         const round = JSON.parse(roundStr) as RocketRound;
         round.status = 'CLOSED';
+        roundName = round.name;
         await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round));
-        if (replyToken) {
-          await replyToLine(replyToken, `⛔ ปิดรับดวลรอบ ${round.name} เรียบร้อยแล้วครับ!`, env);
-        }
+      }
+      // Also clear pending unmatched orders so board resets cleanly for next round
+      await clearAllPendingOrders(env);
+      if (replyToken) {
+        await replyToLine(replyToken, `⛔ ปิดรับดวลรอบ ${roundName} เรียบร้อยแล้วครับ! (ล้างกระดานรอคู่เรียบร้อย 0 แผล)`, env);
+      } else {
+        await pushToLine(userId, `⛔ ปิดรับดวลรอบ ${roundName} เรียบร้อยแล้วครับ! (ล้างกระดานรอคู่เรียบร้อย 0 แผล)`, env);
       }
       return;
     }
@@ -466,17 +485,47 @@ async function cancelOrder(orderNo: string, shortId: string, env: Env): Promise<
 
 // ── Pending Orders & Lookup Helpers ──
 
+/**
+ * Completely purges all pending orders from KV_CACHE and KV_ORDERS.
+ * Ensures the live board and database cache reset to 0 items immediately.
+ */
+export async function clearAllPendingOrders(env: Env): Promise<{ cleared: number }> {
+  let clearedCount = 0;
+  try {
+    // 1. Immediately overwrite PENDING_ORDERS_LIST with empty array in KV_CACHE
+    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 });
+
+    // 2. Scan and purge all ORDER_* keys in KV_ORDERS
+    let cursor: string | undefined = undefined;
+    do {
+      const listRes: any = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 100, cursor });
+      if (listRes.keys && listRes.keys.length > 0) {
+        clearedCount += listRes.keys.length;
+        await Promise.all(listRes.keys.map((k: any) => env.KV_ORDERS.delete(k.name)));
+      }
+      cursor = listRes.list_complete ? undefined : listRes.cursor;
+    } while (cursor);
+
+    console.log(`[Worker] clearAllPendingOrders: Purged ${clearedCount} order keys from KV.`);
+  } catch (err) {
+    console.error('[Worker] clearAllPendingOrders error:', err);
+  }
+  return { cleared: clearedCount };
+}
+
 export async function getPendingOrdersList(env: Env): Promise<Order[]> {
   try {
     const cached = await env.KV_CACHE.get('PENDING_ORDERS_LIST');
-    if (cached) {
+    const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+    if (cached !== null) {
       const list = JSON.parse(cached) as Order[];
-      return list.filter((o) => o && o.status === 'pending_match');
+      return list.filter((o) => o && o.status === 'pending_match' && (o.createdAt || 0) > twoHoursAgo);
     }
 
     // Fallback: Query KV_ORDERS
     const listRes = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 40 });
     if (!listRes.keys || listRes.keys.length === 0) {
+      await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 });
       return [];
     }
 
@@ -487,7 +536,7 @@ export async function getPendingOrdersList(env: Env): Promise<Order[]> {
       if (!raw) continue;
       try {
         const o = JSON.parse(raw) as Order;
-        if (o.status === 'pending_match') {
+        if (o.status === 'pending_match' && (o.createdAt || 0) > twoHoursAgo) {
           pending.push(o);
         }
       } catch (_) {}

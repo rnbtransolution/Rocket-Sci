@@ -1,6 +1,6 @@
 import { Env, LineWebhookPayload, QueueMessage } from './types.js';
 import { verifyLineSignature } from './signature.js';
-import { processLineEvent } from './queueHandler.js';
+import { processLineEvent, clearAllPendingOrders, getPendingOrdersList } from './queueHandler.js';
 
 export default {
   /**
@@ -121,9 +121,11 @@ export default {
         if (functionName === 'getDashboardData') {
           const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
           const activeGroupId = await env.KV_CACHE.get('ACTIVE_GROUP_ID');
+          const pendingBets = await getPendingOrdersList(env);
           result = {
             activeGroupId: activeGroupId || '',
             activeRocketRound: roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380, status: 'ACTIVE' },
+            pendingBets,
             serverTime: new Date().toISOString(),
           };
         } else if (functionName === 'adminOpenRound') {
@@ -137,6 +139,15 @@ export default {
             updatedAt: Date.now(),
           }));
           result = { success: true, round: roundName };
+        } else if (
+          functionName === 'clearPendingBets' ||
+          functionName === 'adminClearOrders' ||
+          functionName === 'resetOrders' ||
+          functionName === 'resetGoogleSheetsDatabase' ||
+          functionName === 'clearCache'
+        ) {
+          const res = await clearAllPendingOrders(env);
+          result = { success: true, message: 'Cleared pending orders and board cache', cleared: res.cleared };
         }
 
         return new Response(JSON.stringify({ success: true, data: result }), {
