@@ -93,6 +93,18 @@ async function processSingleEvent(
     // Pattern 1: Bet creation command (e.g. "ล500", "ถ500", "สูง 1000", "ต่ำ 500")
     // Allowed in Group Chat: New Order Creation Flex Message
     const betRegex = /^(?:([+-]?\d+)?\s*)?(ชล|ชถ|ชย|ชต|ย|ถ|ล|สูง|ต่ำ|ยั่ง|ถอย|ไล่)\s*(\d+)(?:\s*(?:pt|แต้ม))?$/i;
+    const rangeBetRegex = /^(\d+)[-/](\d+)(?:[a-zA-Z\u0e00-\u0e7f]+)?(?:\d+)?/i;
+    if ((betRegex.test(text) || rangeBetRegex.test(text)) && userId && replyToken && !isGroup) {
+      await client.replyMessage({
+        replyToken,
+        messages: [{
+          type: 'text',
+          text: '⚠️ การเปิดแผลดวลสามารถทำได้เฉพาะในกลุ่ม LINE เท่านั้นครับ 🚀\n(กรุณาส่งคำสั่งเปิดแผลในกลุ่มดวลครับ)'
+        }]
+      });
+      return;
+    }
+
     if (betRegex.test(text) && userId && replyToken) {
       const match = text.match(betRegex);
       if (match) {

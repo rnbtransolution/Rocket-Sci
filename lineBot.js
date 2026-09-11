@@ -1107,6 +1107,11 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
     else if (keywordsHigh.includes(cmd)) side = 'high';
     
     if (side) {
+      if (!groupId) {
+        await deliverPrivateNotice(userId, replyToken, groupId, '⚠️ การเปิดแผลดวลสามารถทำได้เฉพาะในกลุ่ม LINE เท่านั้นครับ 🚀\n(กรุณาส่งคำสั่งเปิดแผลในกลุ่มดวลครับ)');
+        return true;
+      }
+
       // 1. Check low-to-high order (minVal must be strictly less than maxVal)
       if (minVal >= maxVal) {
         await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-350${cmd} (คุณระบุ ${minVal}-${maxVal})`);
@@ -1156,6 +1161,11 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
     else if (keywordsHigh.includes(cmd)) side = 'high';
     
     if (side) {
+      if (!groupId) {
+        await deliverPrivateNotice(userId, replyToken, groupId, '⚠️ การเปิดแผลดวลสามารถทำได้เฉพาะในกลุ่ม LINE เท่านั้นครับ 🚀\n(กรุณาส่งคำสั่งเปิดแผลในกลุ่มดวลครับ)');
+        return true;
+      }
+
       if (amount < 100) {
         await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${amount} pt)`);
         return true;
@@ -1184,6 +1194,11 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
 }
 
 async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId, displayName, replyToken, isChotoy = false, groupId = null, userTypedCmd = null, isPreQuote = false, offsetDelta = 0, messageId = null) {
+  if (!groupId) {
+    await deliverPrivateNotice(userId, replyToken, groupId, '⚠️ การเปิดแผลดวลสามารถทำได้เฉพาะในกลุ่ม LINE เท่านั้นครับ 🚀\n(กรุณาส่งคำสั่งเปิดแผลในกลุ่มดวลครับ)');
+    return;
+  }
+
   if (db.isRocketRoundClosed()) {
     await deliverPrivateNotice(userId, replyToken, groupId, `⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ`);
     return;

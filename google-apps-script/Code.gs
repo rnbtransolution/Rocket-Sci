@@ -1491,6 +1491,11 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
     betType = 'custom_range';
 
     if (side) {
+      if (!groupId) {
+        deliverPrivateNotice(userId, replyToken, groupId, '⚠️ การเปิดแผลดวลสามารถทำได้เฉพาะในกลุ่ม LINE เท่านั้นครับ 🚀\n(กรุณาส่งคำสั่งเปิดแผลในกลุ่มดวลครับ)');
+        return;
+      }
+
       if (rangeMin >= rangeMax) {
         deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-350' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ')');
         return;
@@ -1514,9 +1519,16 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
     amount = sMatch[2] ? parseInt(sMatch[2]) : 500;
     betType = 'range';
 
-    if (side && amount < 100) {
-      deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)');
-      return;
+    if (side) {
+      if (!groupId) {
+        deliverPrivateNotice(userId, replyToken, groupId, '⚠️ การเปิดแผลดวลสามารถทำได้เฉพาะในกลุ่ม LINE เท่านั้นครับ 🚀\n(กรุณาส่งคำสั่งเปิดแผลในกลุ่มดวลครับ)');
+        return;
+      }
+
+      if (amount < 100) {
+        deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)');
+        return;
+      }
     }
 
     var activeRound = getActiveRocketRound();
@@ -1528,6 +1540,11 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
 
   // If a valid bet was parsed
   if (side && amount >= 100) {
+    if (!groupId) {
+      deliverPrivateNotice(userId, replyToken, groupId, '⚠️ การเปิดแผลดวลสามารถทำได้เฉพาะในกลุ่ม LINE เท่านั้นครับ 🚀\n(กรุณาส่งคำสั่งเปิดแผลในกลุ่มดวลครับ)');
+      return;
+    }
+
     if (isRocketRoundClosed()) {
       deliverPrivateNotice(userId, replyToken, groupId, '⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ');
       return;
