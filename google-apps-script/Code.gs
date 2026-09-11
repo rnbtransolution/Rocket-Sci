@@ -582,7 +582,7 @@ function doPost(e) {
           // High-Speed: Deferred logging executed AFTER reply was dispatched to ensure sub-second response in LINE
           logLineChatMessage(userId, displayName, 'player', message.text, 'text');
         } else if (message.type === 'image') {
-          handleImageSlipMessage(message.id, userId, displayName, replyToken);
+          handleImageSlipMessage(message.id, userId, displayName, replyToken, groupId);
         }
       } else if (event.type === 'unsend') {
         const unsendMessageId = event.unsend ? event.unsend.messageId : null;
@@ -1464,10 +1464,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
     var deltaMatch = strippedBetText.match(/^([+\-]\d+)/);
     var deltaVal = parseInt(deltaMatch[1]);
     if (deltaVal !== 5 && deltaVal !== -5 && deltaVal !== 10 && deltaVal !== -10) {
-      var deltaErrMsg = groupId
-        ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)'
-        : '⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)';
-      replyToLine(replyToken, deltaErrMsg, userId);
+      deliverPrivateNotice(userId, replyToken, groupId, '⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)');
       return;
     }
     offsetDelta = deltaVal;
@@ -1610,7 +1607,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
     }
     const balance = getPlayerBalance(userId, displayName);
     if (withdrawAmt < 100) {
-      replyToLine(replyToken, '❌ จำนวนเงินถอนขั้นต่ำคือ 100 แต้มครับ');
+      deliverPrivateNotice(userId, replyToken, groupId, '❌ จำนวนเงินถอนขั้นต่ำคือ 100 แต้มครับ');
       return;
     }
     if (balance < withdrawAmt) {
@@ -1675,8 +1672,12 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
 /**
  * Handle incoming LINE image transfers (Bank slip verification check)
  */
-function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
+function handleImageSlipMessage(messageId, userId, displayName, replyToken, groupId) {
   userId = getOrCreateShortUserId(userId, displayName);
+  function sendSlipNotice(payload) {
+    deliverPrivateNotice(userId, replyToken, groupId, payload);
+  }
+
   // 1. Call LINE Content API to pull image binary data
   const imageUrl = `https://api-data.line.me/v2/bot/message/${messageId}/content`;
   const headers = { "Authorization": "Bearer " + getLineToken_() };
@@ -1725,7 +1726,7 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
     slipData = JSON.parse(responseText);
   } catch (err) {
     logTransaction(userId, displayName, 0, 0, 'ERR_CONN', 'escalated', 'Slip Check API connectivity failure: ' + err.toString());
-    replyToLine(replyToken, `⚠️ ระบบเช็คสลิปขัดข้อง\nการเชื่อมต่อไปยัง API เช็คสลิปขัดข้อง รายการเติมเงินได้ส่งให้ แอดมิน ตรวจสอบแมนนวลในระบบหลังบ้านแล้วครับ`);
+    sendSlipNotice(`⚠️ ระบบเช็คสลิปขัดข้อง\nการเชื่อมต่อไปยัง API เช็คสลิปขัดข้อง รายการเติมเงินได้ส่งให้ แอดมิน ตรวจสอบแมนนวลในระบบหลังบ้านแล้วครับ`);
     return;
   }
   
@@ -1743,11 +1744,11 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
     
     // Check if it is a Bangkok Bank pending transaction to avoid showing scary server errors to the player
     if (errorDetail.indexOf("Bangkok Bank") !== -1 && errorDetail.indexOf("pending") !== -1) {
-      replyToLine(replyToken, `🏦 สลิปธนาคารกรุงเทพอยู่ระหว่างประมวลผล\nเนื่องจากระบบธนาคารกรุงเทพมีความล่าช้าชั่วคราวในการอัพเดทข้อมูลธุรกรรม ทำให้ระบบออโต้ยังไม่สามารถตรวจสอบได้ในขณะนี้\n\nบิลของคุณได้ส่งถึงแอดมินเรียบร้อยแล้ว กำลังดำเนินการตรวจสอบแมนนวลหลังบ้านและจะปรับเครดิตให้คุณโดยเร็วที่สุดครับ`);
+      sendSlipNotice(`🏦 สลิปธนาคารกรุงเทพอยู่ระหว่างประมวลผล\nเนื่องจากระบบธนาคารกรุงเทพมีความล่าช้าชั่วคราวในการอัพเดทข้อมูลธุรกรรม ทำให้ระบบออโต้ยังไม่สามารถตรวจสอบได้ในขณะนี้\n\nบิลของคุณได้ส่งถึงแอดมินเรียบร้อยแล้ว กำลังดำเนินการตรวจสอบแมนนวลหลังบ้านและจะปรับเครดิตให้คุณโดยเร็วที่สุดครับ`);
     } else if (responseCode === 403 || errorDetail.indexOf("expired") !== -1 || errorDetail.indexOf("SERVICE_EXPIRED") !== -1) {
-      replyToLine(replyToken, `📥 ได้รับสลิปเรียบร้อยแล้วครับ\nขณะนี้ระบบสแกนสลิปออโต้อยู่ระหว่างรอบบำรุงรักษาระบบ รายการเติมเงินของคุณได้ส่งต่อให้ แอดมิน ตรวจสอบและปรับเครดิตให้ในระบบหลังบ้านโดยเร็วที่สุดครับ 🙏`);
+      sendSlipNotice(`📥 ได้รับสลิปเรียบร้อยแล้วครับ\nขณะนี้ระบบสแกนสลิปออโต้อยู่ระหว่างรอบบำรุงรักษาระบบ รายการเติมเงินของคุณได้ส่งต่อให้ แอดมิน ตรวจสอบและปรับเครดิตให้ในระบบหลังบ้านโดยเร็วที่สุดครับ 🙏`);
     } else {
-      replyToLine(replyToken, `⚠️ ระบบเช็คสลิปขัดข้อง (HTTP ${responseCode})\nรายละเอียด: ${errorDetail}\n\nแอดมินได้รับบิลนี้เรียบร้อย กำลังตรวจสอบแมนนวลให้ในระบบหลังบ้านครับ`);
+      sendSlipNotice(`⚠️ ระบบเช็คสลิปขัดข้อง (HTTP ${responseCode})\nรายละเอียด: ${errorDetail}\n\nแอดมินได้รับบิลนี้เรียบร้อย กำลังตรวจสอบแมนนวลให้ในระบบหลังบ้านครับ`);
     }
     return;
   }
@@ -1763,7 +1764,7 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
       apiMessage = "ไม่พบข้อมูลสลิปในระบบธนาคาร หรือ QR Code ไม่ชัดเจน";
     }
     logTransaction(userId, displayName, 0, 0, 'ERR_INVALID_SLIP', 'escalated', 'API check failed: ' + apiMessage);
-    replyToLine(replyToken, `❌ สแกนสลิปไม่ผ่าน\nเหตุผล: ${apiMessage}\n\nระบบส่งต่อบิลนี้ให้แอดมินเช็คบัญชีแมนนวลแล้วครับ`);
+    sendSlipNotice(`❌ สแกนสลิปไม่ผ่าน\nเหตุผล: ${apiMessage}\n\nระบบส่งต่อบิลนี้ให้แอดมินเช็คบัญชีแมนนวลแล้วครับ`);
     return;
   }
   
@@ -1803,14 +1804,14 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
   // GUARD 1: Block slips with no readable reference code (corrupt/screenshot/re-cropped)
   if (!refCode || refCode.trim() === '') {
     logTransaction(userId, displayName, 0, actualAmount, 'NO_REF', 'escalated', 'Slip has no transaction reference code (possibly a screenshot or edited image)');
-    replyToLine(replyToken, `❌ สลิปไม่มีรหัสอ้างอิง!\nระบบตรวจพบว่าสลิปนี้ไม่มีเลขอ้างอิงธุรกรรม (transRef) อาจเป็นภาพ Screenshot หรือถูกตัดต่อ\n\nกรุณาส่งสลิปจากแอปธนาคารโดยตรงครับ`);
+    sendSlipNotice(`❌ สลิปไม่มีรหัสอ้างอิง!\nระบบตรวจพบว่าสลิปนี้ไม่มีเลขอ้างอิงธุรกรรม (transRef) อาจเป็นภาพ Screenshot หรือถูกตัดต่อ\n\nกรุณาส่งสลิปจากแอปธนาคารโดยตรงครับ`);
     return;
   }
   
   // GUARD 2: Block duplicate ref codes (checks ALL statuses, not just 'success')
   if (checkIfRefExists(refCode)) {
     logTransaction(userId, displayName, 0, actualAmount, refCode, 'escalated', 'Duplicate transaction ref code — already submitted before');
-    replyToLine(replyToken, `⚠️ ตรวจพบสลิปซ้ำในระบบ!\nเลขอ้างอิง: ${refCode}\nสลิปนี้เคยถูกนำมาใช้งานแล้ว ไม่ว่าจะผ่านหรือไม่ผ่านก็ตาม\n\nรายการส่งให้แอดมินตรวจสอบกรณีพิเศษครับ`);
+    sendSlipNotice(`⚠️ ตรวจพบสลิปซ้ำในระบบ!\nเลขอ้างอิง: ${refCode}\nสลิปนี้เคยถูกนำมาใช้งานแล้ว ไม่ว่าจะผ่านหรือไม่ผ่านก็ตาม\n\nรายการส่งให้แอดมินตรวจสอบกรณีพิเศษครับ`);
     return;
   }
  
@@ -1836,7 +1837,7 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
     const hoursDiff = (nowDate - slipDate) / (1000 * 60 * 60);
     if (!isNaN(hoursDiff) && hoursDiff > 24) {
       logTransaction(userId, displayName, 0, actualAmount, refCode, 'escalated', `Stale slip rejected — slip date: ${slipDateStr} is more than 24 hours old`);
-      replyToLine(replyToken, `⏰ สลิปหมดอายุ!\nสลิปนี้มีวันที่: ${slipDateStr}\nระบบยอมรับเฉพาะสลิปที่โอนภายใน 24 ชั่วโมงที่ผ่านมาเท่านั้น\n\nกรุณาโอนใหม่และส่งสลิปทันทีครับ`);
+      sendSlipNotice(`⏰ สลิปหมดอายุ!\nสลิปนี้มีวันที่: ${slipDateStr}\nระบบยอมรับเฉพาะสลิปที่โอนภายใน 24 ชั่วโมงที่ผ่านมาเท่านั้น\n\nกรุณาโอนใหม่และส่งสลิปทันทีครับ`);
       return;
     }
   }
@@ -1891,7 +1892,7 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
   // Deliver success Flex card to player
   var slipSuccessDetails = 'เติมเงินสำเร็จผ่านระบบสแกนสลิปอัตโนมัติ เลขอ้างอิง: ' + refCode;
   var slipFlex = constructBankingFlex('Income', actualAmount, slipSuccessDetails, null, userId);
-  replyToLine(replyToken, slipFlex);
+  sendSlipNotice(slipFlex);
 }
 
 // =========================================================================
