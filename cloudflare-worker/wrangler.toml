@@ -1,0 +1,33 @@
+name = "rocket-science-cf-worker"
+main = "src/index.ts"
+compatibility_date = "2024-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ── Cloudflare KV Namespace Bindings ──
+[[kv_namespaces]]
+binding = "KV_CACHE"
+id = "6f29b1fd16a142cfae401399fa7d08c3"
+preview_id = "72455bbc581942d4b029d1a0fc124cbb"
+
+[[kv_namespaces]]
+binding = "KV_ORDERS"
+id = "a9f088e6f5df4e00b90a9f135d938e96"
+preview_id = "1f5f455b0af349088bab9d9e9dca48ca"
+
+# ── Cloudflare Queues (High-Concurrency Async Decoupling) ──
+[[queues.producers]]
+binding = "LINE_EVENTS_QUEUE"
+queue = "rocket-science-line-events"
+
+[[queues.consumers]]
+queue = "rocket-science-line-events"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 3
+dead_letter_queue = "rocket-science-dlq"
+
+# ── Environment Variables ──
+[vars]
+ENVIRONMENT = "production"
+SPREADSHEET_ID = "1NaQbaUz8fcgd32sCAfxxKNBnpmFA5vu0_YVSehhdCEQ"
+GAS_FALLBACK_URL = "https://script.google.com/macros/s/AKfycbzzzrz0KDdYOwZ7nK7SxYbFMf7OT39mR8lAw4xeGUT_48Ju3tfafkiZzdrrqrRbvIzqyg/exec"
