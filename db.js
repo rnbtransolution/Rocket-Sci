@@ -216,7 +216,7 @@ export async function init(isSilent = false, forceRefresh = false) {
 
     const data = await batchFetchSheets({ force: forceRefresh });
 
-    // 1. Players Sheet (Only update if valid data returned from Sheets)
+    // 1. Players Sheet (Reset if empty/factory reset)
     if (data.players && data.players.length > 1) {
       players = data.players.slice(1).map((row, idx) => {
         const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
@@ -233,6 +233,8 @@ export async function init(isSilent = false, forceRefresh = false) {
           lineUserId: row[7]?.toString() || '',
         };
       });
+    } else if (data.players) {
+      players = [];
     }
 
     // 2. Transactions Sheet
@@ -259,6 +261,8 @@ export async function init(isSilent = false, forceRefresh = false) {
           logs: [`Verified in Sheets Database`, `Status: ${row[6]}`],
         };
       }).reverse();
+    } else if (data.transactions) {
+      transactions = [];
     }
 
     // 3. Bets Sheet — columns aligned with GAS:
@@ -305,6 +309,8 @@ export async function init(isSilent = false, forceRefresh = false) {
           messageId,
         };
       });
+    } else if (data.bets) {
+      bets = [];
     }
 
     // 4. LineChatLogs Sheet
@@ -317,6 +323,8 @@ export async function init(isSilent = false, forceRefresh = false) {
         text: row[4]?.toString() || '',
         type: row[5]?.toString() || 'text',
       }));
+    } else if (data.chatLogs) {
+      chatLogs = [];
     }
 
     // 5. Rebuild LINE group registry from LineGroups sheet + bets (survives Render restarts)

@@ -8,6 +8,9 @@ const isGASHost = typeof window !== 'undefined' && (
   window.location.hostname.includes('script.google.com')
 );
 
+const isGitHubPages = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
+const GAS_ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbzzzrz0KDdYOwZ7nK7SxYbFMf7OT39mR8lAw4xeGUT_48Ju3tfafkiZzdrrqrRbvIzqyg/exec';
+
 const getApiBaseUrl = () => {
   if (typeof window !== 'undefined') {
     const stored = localStorage.getItem('rocket_api_base_url');
@@ -16,9 +19,6 @@ const getApiBaseUrl = () => {
     if (port === '3001') return '';
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://localhost:3001';
-    }
-    if (hostname.includes('github.io')) {
-      return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || 'https://rocket-sci.onrender.com';
     }
   }
   return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || '';
@@ -41,6 +41,24 @@ function createAppsScriptRunner(successHandler = null, failureHandler = null) {
       
       // Return a function representing the remote server-side function
       return function(...args) {
+        if (isGitHubPages && !API_BASE_URL) {
+          fetch(GAS_ENDPOINT_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ functionName: prop, args, apiKey: ADMIN_API_KEY })
+          })
+          .then(res => res.json())
+          .then(json => {
+            if (json && json.error) throw new Error(json.error);
+            if (successHandler) successHandler(json ? json.data : null);
+          })
+          .catch(err => {
+            console.error(`[GAS Proxy Error] "${prop}":`, err);
+            if (failureHandler) failureHandler(err.message || err);
+          });
+          return;
+        }
+
         const headers = { 'Content-Type': 'application/json' };
         if (ADMIN_API_KEY) {
           headers['x-admin-key'] = ADMIN_API_KEY;
@@ -67,6 +85,24 @@ function createAppsScriptRunner(successHandler = null, failureHandler = null) {
           if (successHandler) successHandler(data);
         })
         .catch(err => {
+          if (isGitHubPages) {
+            console.warn(`[Node RPC failed, falling back to GAS for "${prop}"]`);
+            fetch(GAS_ENDPOINT_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify({ functionName: prop, args, apiKey: ADMIN_API_KEY })
+            })
+            .then(res => res.json())
+            .then(json => {
+              if (json && json.error) throw new Error(json.error);
+              if (successHandler) successHandler(json ? json.data : null);
+            })
+            .catch(gasErr => {
+              console.error(`[GAS Fallback Error] "${prop}":`, gasErr);
+              if (failureHandler) failureHandler(gasErr.message || gasErr);
+            });
+            return;
+          }
           console.error(`[API Proxy Error] "${prop}":`, err);
           if (failureHandler) failureHandler(err.message || err);
         });

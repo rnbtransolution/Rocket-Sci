@@ -123,6 +123,8 @@ export default function App() {
     !window.isNodeJS
   );
   const isGitHubPages = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
+  const GAS_ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbzzzrz0KDdYOwZ7nK7SxYbFMf7OT39mR8lAw4xeGUT_48Ju3tfafkiZzdrrqrRbvIzqyg/exec';
+
   // Resilient API Base URL resolution:
   // 1. Inside GAS iframe: empty string (routes via google.script.run)
   // 2. Running on local Node (localhost:3001) or local Vite dev (localhost:5173):
@@ -139,9 +141,6 @@ export default function App() {
       if (port === '3001') return '';
       if (hostname === 'localhost' || hostname === '127.0.0.1') {
         return 'http://localhost:3001';
-      }
-      if (hostname.includes('github.io')) {
-        return import.meta.env.VITE_API_BASE_URL || 'https://rocket-sci.onrender.com';
       }
     }
     return import.meta.env.VITE_API_BASE_URL || '';
@@ -185,6 +184,23 @@ export default function App() {
       }
     }
 
+    // Direct high-speed API to Google Apps Script when on GitHub Pages and no custom Node API is set
+    if (isGitHubPages && !API_BASE_URL) {
+      try {
+        const res = await fetch(GAS_ENDPOINT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ functionName, args, apiKey: ADMIN_API_KEY }),
+        });
+        const json = await res.json();
+        if (json && json.error) throw new Error(json.error);
+        return json ? json.data : null;
+      } catch (err) {
+        console.error(`[GitHub Pages GAS Call Error in ${functionName}]:`, err);
+        throw err;
+      }
+    }
+
     const headers = { 'Content-Type': 'application/json' };
     if (ADMIN_API_KEY) {
       headers['x-admin-key'] = ADMIN_API_KEY;
@@ -208,6 +224,22 @@ export default function App() {
       if (!res.ok) throw new Error(json.error || 'เกิดข้อผิดพลาด');
       return json.data;
     } catch (fetchErr) {
+      if (isGitHubPages) {
+        console.warn(`[API Call to ${API_BASE_URL} failed, falling back to GAS]:`, fetchErr?.message);
+        try {
+          const gasRes = await fetch(GAS_ENDPOINT_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ functionName, args, apiKey: ADMIN_API_KEY }),
+          });
+          const gasJson = await gasRes.json();
+          if (gasJson && gasJson.error) throw new Error(gasJson.error);
+          return gasJson ? gasJson.data : null;
+        } catch (gasErr) {
+          console.error(`[GAS Fallback Error in ${functionName}]:`, gasErr);
+          throw gasErr;
+        }
+      }
       console.error(`[API Call Error in ${functionName}]:`, fetchErr);
       throw fetchErr;
     }
@@ -405,19 +437,21 @@ export default function App() {
   // Detect live Node.js Express backend (localhost, Render, Vercel, Railway, or custom host)
   const isLiveBackend = typeof window !== 'undefined' && !isGAS;
 
-  // Unified live-data: GAS uses polling RPC; Node.js backend uses SSE for instant push
+  // Unified live-data: GAS uses polling RPC; GitHub Pages polls GAS directly; Node.js uses SSE
   useEffect(() => {
     const applyData = (data) => {
       if (!data) return;
-      if (data.players) setPlayers(data.players);
-      if (data.transactions) setTransactions(data.transactions);
-      if (data.bets) setBets(data.bets);
-      if (data.chatLogs) setChatLogs(data.chatLogs);
-      if (data.activeGroupId) setActiveGroupId(data.activeGroupId);
+      if (Array.isArray(data.players)) setPlayers(data.players);
+      if (Array.isArray(data.transactions)) setTransactions(data.transactions);
+      if (Array.isArray(data.bets)) setBets(data.bets);
+      if (Array.isArray(data.chatLogs)) setChatLogs(data.chatLogs);
+      if (data.activeGroupId !== undefined) setActiveGroupId(data.activeGroupId);
       if (data.lineGroups && data.lineGroups.length > 0) {
         setLineGroups(data.lineGroups);
       } else if (data.activeGroupId) {
         setLineGroups([{ id: data.activeGroupId, name: `🚀 กลุ่มดวลสด LINE (#${data.activeGroupId.slice(-4)})`, lastMessage: 'เชื่อมต่อสำเร็จ', timestamp: 'Live' }]);
+      } else if (Array.isArray(data.lineGroups)) {
+        setLineGroups([]);
       }
       if (data.activeRound) {
         if (data.activeRound.name) setRocketName(prev => (!prev || prev === 'ช่างบั้งไฟสด') ? data.activeRound.name : prev);
@@ -447,13 +481,56 @@ export default function App() {
       const interval = setInterval(fetchGAS, 3000);
       return () => clearInterval(interval);
 
-    } else if (isLiveBackend || isGitHubPages) {
-      // Node.js server (Render / Local / GitHub Pages): SSE from single writer backend
+    } else if (isGitHubPages) {
+      // GitHub Pages hosted: direct live sync with Google Apps Script API (bypasses browser cache)
+      const fetchFromGASApi = async () => {
+        try {
+          const res = await fetch(`${GAS_ENDPOINT_URL}?action=getDashboardData&_t=${Date.now()}`);
+          if (res.ok) {
+            const json = await res.json();
+            if (json && json.data) {
+              applyData(json.data);
+            }
+          }
+        } catch (e) {
+          console.warn('[GitHub Pages GAS Polling Note]:', e?.message || e);
+        }
+      };
+
+      fetchFromGASApi();
+      const interval = setInterval(fetchFromGASApi, 2500);
+
+      // If Node API_BASE_URL is also configured, attempt SSE in parallel
+      let es;
+      if (API_BASE_URL) {
+        try {
+          const sseQs = ADMIN_API_KEY ? `?apiKey=${encodeURIComponent(ADMIN_API_KEY)}` : '';
+          es = new EventSource(`${API_BASE_URL}/api/events${sseQs}`);
+          es.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              applyData(data);
+            } catch (_) {}
+          };
+          es.onerror = () => {
+            if (es) es.close();
+          };
+        } catch (_) {}
+      }
+
+      return () => {
+        clearInterval(interval);
+        if (es) es.close();
+      };
+
+    } else if (isLiveBackend) {
+      // Node.js server (Render / Local): SSE from single writer backend
       let es;
       let reconnectTimer;
       const sseQs = ADMIN_API_KEY ? `?apiKey=${encodeURIComponent(ADMIN_API_KEY)}` : '';
 
       const connect = () => {
+        if (!API_BASE_URL && window.location.port !== '3001') return;
         es = new EventSource(`${API_BASE_URL}/api/events${sseQs}`);
 
         es.onmessage = (event) => {
@@ -464,7 +541,6 @@ export default function App() {
         };
 
         es.onerror = () => {
-          // SSE connection dropped — close and reconnect after 3s
           es.close();
           reconnectTimer = setTimeout(connect, 3000);
         };
@@ -477,7 +553,7 @@ export default function App() {
         if (reconnectTimer) clearTimeout(reconnectTimer);
       };
     }
-  }, [isGAS, isLiveBackend]);
+  }, [isGAS, isLiveBackend, isGitHubPages]);
 
   // Auto scroll chats inside container without moving the browser viewport
   useEffect(() => {
@@ -561,12 +637,64 @@ export default function App() {
       addToast('เกิดข้อผิดพลาดในการล้างระเบียนระบบ: ' + (err.message || err), 'error');
     }
   };
+
+  const forceSyncFreshData = async () => {
+    addToast('⏳ กำลังดึงข้อมูลล่าสุดจาก Google Sheets...', 'info');
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('rocket_sci_dashboard_cache');
+      }
+      if (isGAS) {
+        const gas = window.google?.script?.run;
+        if (gas) {
+          const handler = (d) => {
+            if (d) {
+              setPlayers(Array.isArray(d.players) ? d.players : []);
+              setTransactions(Array.isArray(d.transactions) ? d.transactions : []);
+              setBets(Array.isArray(d.bets) ? d.bets : []);
+              setChatLogs(Array.isArray(d.chatLogs) ? d.chatLogs : []);
+              if (d.activeGroupId !== undefined) setActiveGroupId(d.activeGroupId);
+              if (d.lineGroups) setLineGroups(d.lineGroups);
+              addToast('✅ อัปเดตข้อมูลสดสำเร็จ', 'success');
+            }
+          };
+          if (typeof gas.getDashboardData === 'function') {
+            gas.withSuccessHandler(handler).getDashboardData();
+          } else if (typeof gas.executeAdminAction === 'function') {
+            gas.withSuccessHandler(handler).executeAdminAction('getDashboardData', []);
+          }
+        }
+      } else {
+        const res = await fetch(`${GAS_ENDPOINT_URL}?action=getDashboardData&_t=${Date.now()}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.data) {
+            const d = json.data;
+            setPlayers(Array.isArray(d.players) ? d.players : []);
+            setTransactions(Array.isArray(d.transactions) ? d.transactions : []);
+            setBets(Array.isArray(d.bets) ? d.bets : []);
+            setChatLogs(Array.isArray(d.chatLogs) ? d.chatLogs : []);
+            if (d.activeGroupId !== undefined) setActiveGroupId(d.activeGroupId);
+            if (d.lineGroups) setLineGroups(d.lineGroups);
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('rocket_sci_dashboard_cache', JSON.stringify(d));
+            }
+            addToast('✅ ดึงข้อมูลสดจาก Google Sheets สำเร็จ', 'success');
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[Force Sync Error]:', e);
+      addToast('❌ ไม่สามารถดึงข้อมูลสดได้', 'error');
+    }
+  };
   
-  // Attach resetConsoleState to window context for global call safety
+  // Attach resetConsoleState and forceSyncFreshData to window context for global call safety
   useEffect(() => {
     if (typeof window !== 'undefined') {
       window.resetConsoleState = resetConsoleState;
       window.handleClosePortal = handleClosePortal;
+      window.forceSyncFreshData = forceSyncFreshData;
     }
   }, []);
 
@@ -1873,6 +2001,14 @@ export default function App() {
           >
             <RotateCcw size={14} className="text-amber-700" />
             🔒 ปิดรอบพอร์ทัล (Close Portal Session)
+          </button>
+          <button 
+            onClick={forceSyncFreshData}
+            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-sky-50 hover:bg-sky-100 border border-sky-300 text-sky-800 flex items-center gap-1.5 transition-all shadow-xs active:scale-95"
+            title="ดึงข้อมูลล่าสุดจาก Google Sheets และล้างแคชในเบราว์เซอร์ทันที"
+          >
+            <RotateCcw size={14} className="text-sky-600" />
+            🔄 ดึงข้อมูลสด (Sync Sheets)
           </button>
           <button 
             onClick={resetConsoleState}
