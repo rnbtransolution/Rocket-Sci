@@ -1238,7 +1238,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   if (clean === 'กระดานดวล' || clean === 'แผลค้าง' || clean === 'เปิดรอคู่' || clean === 'รอคู่') {
     const pendingList = getPendingBetsList();
     var boardFlex = constructPendingBetsFlex(pendingList);
-    replyToLine(replyToken, boardFlex, userId);
+    deliverPrivateNotice(userId, replyToken, groupId, boardFlex);
     return;
   }
 
@@ -1250,20 +1250,17 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
     var cancelMatch = rawTrimmed.match(cancelRegex) || clean.match(cancelRegex);
     var cancelOrderNo = cancelMatch[2] || null;
     var cancelResult = handleCancelBetRequest(userId, cancelOrderNo, displayName);
-    var cancelTagPrefix = groupId ? ('👤 [ถึงคุณ @' + displayName + ']: ') : '';
     if (groupId) {
+      // Group chat stays clean: send cancellation updates to user's private DM only
       if (typeof cancelResult === 'object' && cancelResult.success) {
-        replyToLine(replyToken, cancelResult.flex, userId);
         if (userId && userId !== groupId) {
           pushToLine(userId, cancelResult.flex);
         }
       } else if (typeof cancelResult === 'object') {
-        replyToLine(replyToken, cancelResult, userId);
         if (userId && userId !== groupId) {
           pushToLine(userId, cancelResult);
         }
       } else {
-        replyToLine(replyToken, cancelTagPrefix + cancelResult, userId);
         if (userId && userId !== groupId) {
           pushToLine(userId, cancelResult);
         }
@@ -1272,10 +1269,6 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
       // 1:1 Private Chat cancellation
       if (typeof cancelResult === 'object' && cancelResult.success) {
         replyToLine(replyToken, cancelResult.flex, userId);
-        var groupToNotify = cancelResult.targetGroupId || getActiveGroupId();
-        if (groupToNotify) {
-          pushLineGroupMessage(groupToNotify, cancelResult.flex);
-        }
       } else {
         replyToLine(replyToken, cancelResult, userId);
       }
@@ -1408,7 +1401,13 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
     } else if (matchedBet && matchedBet.orderNumber) {
       var rocketLabel = matchedBet.rocketName || getActiveRocketName();
       var matchFlex = constructMatchNotificationFlex(matchedBet.orderNumber, matchedBet.amount, matchedBet.playerLowName, matchedBet.playerHighName, matchedBet.rangeInfo, false, rocketLabel);
-      replyToLine(replyToken, matchFlex, userId);
+      if (groupId) {
+        // Group chat stays clean: notify players directly via private DM
+        if (matchedBet.creatorId) pushToLine(matchedBet.creatorId, matchFlex);
+        if (matchedBet.matcherId && matchedBet.matcherId !== matchedBet.creatorId) pushToLine(matchedBet.matcherId, matchFlex);
+      } else {
+        replyToLine(replyToken, matchFlex, userId);
+      }
       var confirmText = '✅ ยืนยันแมตช์ Order #' + matchedBet.orderNumber + '\nบั้งไฟ: ' + (rocketLabel || '-') + '\nยอด: ' + matchedBet.amount + 'pt\nต่ำ: @' + (matchedBet.playerLowName || '-') + ' | สูง: @' + (matchedBet.playerHighName || '-');
       if (matchedBet.creatorId) pushToLine(matchedBet.creatorId, confirmText);
       if (matchedBet.matcherId && matchedBet.matcherId !== matchedBet.creatorId) pushToLine(matchedBet.matcherId, confirmText);
@@ -1496,27 +1495,18 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
 
     if (side) {
       if (rangeMin >= rangeMax) {
-        var orderErrMsg = groupId
-          ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-350' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ')'
-          : '⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-350' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ')';
-        replyToLine(replyToken, orderErrMsg, userId);
+        deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-350' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ')');
         return;
       }
 
       if (rangeMax - rangeMin !== 50) {
         var diff = rangeMax - rangeMin;
-        var windowErrMsg = groupId
-          ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ ช่วงราคาต้องห่างกัน 50 วินาทีพอดีครับ เช่น 300-350' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ' ห่าง ' + diff + ' วิ)'
-          : '⚠️ ช่วงราคาต้องห่างกัน 50 วินาทีพอดีครับ เช่น 300-350' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ' ห่าง ' + diff + ' วิ)';
-        replyToLine(replyToken, windowErrMsg, userId);
+        deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ช่วงราคาต้องห่างกัน 50 วินาทีพอดีครับ เช่น 300-350' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ' ห่าง ' + diff + ' วิ)');
         return;
       }
 
       if (amount < 100) {
-        var minAmtMsg = groupId
-          ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)'
-          : '⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)';
-        replyToLine(replyToken, minAmtMsg, userId);
+        deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)');
         return;
       }
     }
@@ -1528,10 +1518,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
     betType = 'range';
 
     if (side && amount < 100) {
-      var minAmtMsg2 = groupId
-        ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)'
-        : '⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)';
-      replyToLine(replyToken, minAmtMsg2, userId);
+      deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + amount + ' pt)');
       return;
     }
 
@@ -1545,20 +1532,14 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   // If a valid bet was parsed
   if (side && amount >= 100) {
     if (isRocketRoundClosed()) {
-      var closedMsg = groupId
-        ? '👤 [ถึงคุณ @' + displayName + ']: ⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ'
-        : '⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ';
-      replyToLine(replyToken, closedMsg, userId);
+      deliverPrivateNotice(userId, replyToken, groupId, '⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ');
       return;
     }
 
     const balance = getPlayerBalance(userId, displayName);
     if (balance < amount) {
       const needed = amount - balance;
-      const msg = groupId
-        ? '⚠️ แต้มไม่พอ (มี ' + balance + 'pt | ขาด ' + needed + 'pt) พิมพ์ "ฝากเงิน"'
-        : '⚠️ เครดิตไม่พอ (มี ' + balance + 'pt | ต้องการ ' + amount + 'pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ';
-      replyToLine(replyToken, msg, userId);
+      deliverPrivateNotice(userId, replyToken, groupId, '⚠️ แต้มไม่พอ (มี ' + balance + 'pt | ขาด ' + needed + 'pt) พิมพ์ "ฝากเงิน"');
       return;
     }
 
@@ -1569,10 +1550,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
     if (saveResult && saveResult.error) {
       var bal = saveResult.current || 0;
       var neededBal = amount - bal;
-      var insufficientMsg = groupId
-        ? '⚠️ แต้มไม่พอ (มี ' + bal + 'pt | ขาด ' + neededBal + 'pt) พิมพ์ "ฝากเงิน"'
-        : '⚠️ เครดิตไม่พอ (มี ' + bal + 'pt | ต้องการ ' + amount + 'pt)\n💵 พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ';
-      replyToLine(replyToken, insufficientMsg, userId);
+      deliverPrivateNotice(userId, replyToken, groupId, '⚠️ แต้มไม่พอ (มี ' + bal + 'pt | ขาด ' + neededBal + 'pt) พิมพ์ "ฝากเงิน"');
       return;
     }
 
@@ -2473,15 +2451,12 @@ function replyToLine(replyToken, text, userId) {
 
 /**
  * User-facing notices always land in private OA chat.
- * When the trigger came from a group, push card to DM and notify cleanly in the group.
+ * When the trigger came from a group, strictly push card/alert to DM without group replies.
  */
 function deliverPrivateNotice(userId, replyToken, groupId, payload) {
   if (!userId) return;
   if (groupId) {
     pushToLine(userId, payload);
-    if (replyToken && replyToken !== 'MOCK_REPLY_TOKEN') {
-      replyToLine(replyToken, '💡 รายการส่วนตัว (เช็คยอด/ฝาก/ถอน/เมนู/กติกา) ส่งเข้าแชตส่วนตัวเรียบร้อยแล้วครับ 📩 (หากไม่เห็นข้อความ กรุณากดเพิ่มเพื่อน LINE OA ครับ)', userId);
-    }
     return;
   }
   if (replyToken && replyToken !== 'MOCK_REPLY_TOKEN') {

@@ -102,7 +102,7 @@ export function applyQuoteToPreQuoteBets(minVal, maxVal) {
     }
   });
 
-  // Notify players about officially matched orders
+  // Notify players about officially matched orders (Direct Message to players only)
   if (updatedBets.length > 0) {
     import('./lineBot.js').then(lineBot => {
       updatedBets.forEach(b => {
@@ -111,7 +111,6 @@ export function applyQuoteToPreQuoteBets(minVal, maxVal) {
         const rangeStr = `${b.rangeMin}-${b.rangeMax}s`;
         const flex = lineBot.constructMatchNotificationFlex(b.orderNumber, b.amount, b.playerLowName, b.playerHighName, rangeStr, false, activeRocketRound?.name);
 
-        if (b.groupId) lineBot.pushToLine(b.groupId, `☄️ [แผล #${b.orderNumber} ได้รับราคาช่างและแมตช์สัญญาสมบูรณ์!] @${b.playerLowName} (ต่ำ) 🆚 @${b.playerHighName} (สูง) | ${b.amount}pt 🚀`);
         if (creatorId) lineBot.pushToLine(creatorId, flex);
         if (matcherId) lineBot.pushToLine(matcherId, flex);
       });
@@ -145,7 +144,11 @@ export function cancelUnquotedPreQuoteBets() {
   if (cancelledBets.length > 0) {
     import('./lineBot.js').then(lineBot => {
       cancelledBets.forEach(b => {
-        if (b.groupId) lineBot.pushToLine(b.groupId, `⚠️ แผล Order #${b.orderNumber} ถูกยกเลิกและคืนเครดิตเรียบร้อยแล้ว (เนื่องจากรอบนี้ไม่มีการเปิดราคาช่าง)`);
+        const creatorId = b.playerLowId || b.playerHighId;
+        const matcherId = b.playerLowId ? b.playerHighId : b.playerLowId;
+        const cancelNotice = `⚠️ แผล Order #${b.orderNumber} ถูกยกเลิกและคืนเครดิตเรียบร้อยแล้ว (เนื่องจากรอบนี้ไม่มีการเปิดราคาช่าง)`;
+        if (creatorId) lineBot.pushToLine(creatorId, cancelNotice);
+        if (matcherId) lineBot.pushToLine(matcherId, cancelNotice);
       });
     }).catch(err => console.error('Error pushing pre_quote cancellation:', err));
   }

@@ -222,8 +222,8 @@ export async function pushToLine(targetId, text) {
       console.log(`[LINE Push Flex Result to ${rawLineId}]: Status ${response.status} - ${resText}`);
       if (response.ok) return;
       if (response.status === 400 && resText.includes('Failed to send messages')) {
-        console.warn(`[LINE Push] Target ${rawLineId} returned 400 Failed to send messages. Marking as dead.`);
-        db.markGroupDead(rawLineId);
+        console.warn(`[LINE Push] Target ${rawLineId} returned 400 Failed to send messages.`);
+        if (isGroupId) db.markGroupDead(rawLineId);
         return; // Do NOT try fallback text, target is invalid
       }
     } catch (err) {
@@ -250,7 +250,7 @@ export async function pushToLine(targetId, text) {
       const fbText = await fbRes.text();
       console.log(`[LINE Push Fallback Result to ${rawLineId}]: Status ${fbRes.status} - ${fbText}`);
       if (fbRes.status === 400 && fbText.includes('Failed to send messages')) {
-        db.markGroupDead(rawLineId);
+        if (isGroupId) db.markGroupDead(rawLineId);
       }
     } catch (e) {
       console.error(`[LINE Push Fallback Error to ${rawLineId}]:`, e);
@@ -275,8 +275,8 @@ export async function pushToLine(targetId, text) {
     const resText = await response.text();
     console.log(`[LINE Push Text Result to ${rawLineId}]: Status ${response.status} - ${resText}`);
     if (response.status === 400 && resText.includes('Failed to send messages')) {
-      console.warn(`[LINE Push] Target ${rawLineId} returned 400 Failed to send messages. Marking as dead.`);
-      db.markGroupDead(rawLineId);
+      console.warn(`[LINE Push] Target ${rawLineId} returned 400 Failed to send messages.`);
+      if (isGroupId) db.markGroupDead(rawLineId);
     }
   } catch (err) {
     console.error(`[LINE Push Error to ${rawLineId}]:`, err);
@@ -285,15 +285,12 @@ export async function pushToLine(targetId, text) {
 
 /**
  * User-facing notices always land in private OA chat.
- * When the trigger came from a group, push card to DM and notify cleanly in the group.
+ * When the trigger came from a group, strictly push card/alert to DM without group replies.
  */
 export async function deliverPrivateNotice(userId, replyToken, groupId, payload) {
   if (!userId) return;
   if (groupId) {
     await pushToLine(userId, payload);
-    if (replyToken && replyToken !== 'MOCK_REPLY_TOKEN') {
-      await replyToLine(replyToken, '💡 รายการส่วนตัว (เช็คยอด/ฝาก/ถอน/เมนู/กติกา) ส่งเข้าแชตส่วนตัวเรียบร้อยแล้วครับ 📩 (หากไม่เห็นข้อความ กรุณากดเพิ่มเพื่อน LINE OA ครับ)', userId);
-    }
     return;
   }
   if (replyToken && replyToken !== 'MOCK_REPLY_TOKEN') {
@@ -736,9 +733,12 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
   }
 }
 
-export async function handleImageSlipMessage(messageId, userId, displayName, replyToken) {
+export async function handleImageSlipMessage(messageId, userId, displayName, replyToken, groupId = null) {
   userId = await db.getOrCreateShortUserId(userId, displayName);
   const pendingReqAmt = db.findPendingRequestedAmount(userId) || 0;
+  const sendSlipNotice = async (payload) => {
+    await deliverPrivateNotice(userId, replyToken, groupId, payload);
+  };
 
   // 1. Fetch image binary from LINE API
   const imageUrl = `https://api-data.line.me/v2/bot/message/${messageId}/content`;
@@ -751,7 +751,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
   } catch (err) {
     db.logTransaction(userId, displayName, pendingReqAmt, 0, 'ERR_LINE_IMG', 'escalated', 'LINE Image download failure: ' + err.toString());
-    await replyToLine(replyToken, `❌ ดาวน์โหลดภาพสลิปไม่สำเร็จ กรุณาลองส่งใหม่อีกครั้งครับ 🚀`);
+    await sendSlipNotice(`❌ ดาวน์โหลดภาพสลิปไม่สำเร็จ กรุณาลองส่งใหม่อีกครั้งครับ 🚀`);
     return;
   }
 
@@ -851,14 +851,14 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
   // RULE A: Check if QR / Slip could be read at all
   if (!refCode || refCode.trim() === '') {
     db.logTransaction(userId, displayName, pendingReqAmt, 0, 'ERR_UNREADABLE', 'escalated', 'No readable QR code or slip ref found');
-    await replyToLine(replyToken, `❌ สแกนสลิปไม่สำเร็จ (ไม่พบ QR Code ธนาคาร หรือภาพไม่ชัดเจน)\n📷 กรุณาส่งภาพสลิปจากแอปธนาคารโดยตรงที่มี QR Code ชัดเจนครับ 🚀`);
+    await sendSlipNotice(`❌ สแกนสลิปไม่สำเร็จ (ไม่พบ QR Code ธนาคาร หรือภาพไม่ชัดเจน)\n📷 กรุณาส่งภาพสลิปจากแอปธนาคารโดยตรงที่มี QR Code ชัดเจนครับ 🚀`);
     return;
   }
 
   // RULE B: Check Duplicate Reference Code
   if (db.checkIfRefExists(refCode)) {
     db.logTransaction(userId, displayName, pendingReqAmt, actualAmount, refCode, 'escalated', 'Duplicate transaction ref code');
-    await replyToLine(replyToken, `⚠️ สลิปนี้ถูกใช้งานไปแล้วในระบบ (Ref: ${refCode})\n📩 หากมีข้อสงสัย กรุณาติดต่อแอดมินตรวจสอบครับ`);
+    await sendSlipNotice(`⚠️ สลิปนี้ถูกใช้งานไปแล้วในระบบ (Ref: ${refCode})\n📩 หากมีข้อสงสัย กรุณาติดต่อแอดมินตรวจสอบครับ`);
     return;
   }
 
@@ -869,7 +869,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     const hoursDiff = (nowDate - slipDate) / (1000 * 60 * 60);
     if (!isNaN(hoursDiff) && hoursDiff > 24) {
       db.logTransaction(userId, displayName, pendingReqAmt, actualAmount, refCode, 'escalated', `Stale slip rejected - date: ${slipDateStr}`);
-      await replyToLine(replyToken, `⏰ สลิปหมดอายุ (โอนเมื่อ ${slipDateStr})\n⚠️ ระบบรับเฉพาะสลิปที่โอนภายใน 24 ชั่วโมงที่ผ่านมาเท่านั้นครับ`, userId);
+      await sendSlipNotice(`⏰ สลิปหมดอายุ (โอนเมื่อ ${slipDateStr})\n⚠️ ระบบรับเฉพาะสลิปที่โอนภายใน 24 ชั่วโมงที่ผ่านมาเท่านั้นครับ`);
       return;
     }
   }
@@ -879,7 +879,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     const isMatchReceiver = receiverName.indexOf("อิทธิรัตน์") !== -1 || receiverName.toUpperCase().indexOf("ITTHIRAT") !== -1;
     if (!isMatchReceiver) {
       db.logTransaction(userId, displayName, pendingReqAmt, actualAmount, refCode, 'escalated', `Receiver Name Mismatch (Receiver: ${receiverName})`);
-      await replyToLine(replyToken, `❌ บัญชีปลายทางไม่ถูกต้อง (ผู้รับคือ ${receiverName})\n⚠️ ระบบรับเฉพาะสลิปที่โอนเข้าบัญชี คุณอิทธิรัตน์ เท่านั้นครับ`, userId);
+      await sendSlipNotice(`❌ บัญชีปลายทางไม่ถูกต้อง (ผู้รับคือ ${receiverName})\n⚠️ ระบบรับเฉพาะสลิปที่โอนเข้าบัญชี คุณอิทธิรัตน์ เท่านั้นครับ`);
       return;
     }
   }
@@ -911,7 +911,7 @@ export async function handleImageSlipMessage(messageId, userId, displayName, rep
     : `เติมเงินสำเร็จผ่านระบบสแกนสลิปออโต้`;
 
   const bankFlex = constructBankingFlex("deposit", finalAmount, depositTextNote, null, userId);
-  await replyToLine(replyToken, bankFlex, userId);
+  await sendSlipNotice(bankFlex);
 }
 
 // --- ROCKET BET COMMAND PARSING LOGIC ---
@@ -938,7 +938,7 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
   if (clean === 'กระดานดวล' || clean === 'แผลค้าง' || clean === 'เปิดรอคู่' || clean === 'รอคู่') {
     const pendingList = db.getPendingBetsList();
     const boardFlex = constructPendingBetsFlex(pendingList);
-    await replyToLine(replyToken, boardFlex, userId);
+    await deliverPrivateNotice(userId, replyToken, groupId, boardFlex);
     return true;
   }
 
@@ -952,13 +952,11 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
 
     if (res.success) {
       const miniFlex = constructCancelOrderMiniFlex(res.orderNumber);
-      // Cancel is order-board state: keep one group card so matchers stop ticking; confirm privately too
-      await replyToLine(replyToken, miniFlex, userId);
-      if (!groupId) {
-        const targetGroup = res.groupId || db.getActiveGroupId();
-        if (targetGroup) await pushToLine(targetGroup, miniFlex);
-      } else if (userId) {
-        await pushToLine(userId, miniFlex);
+      if (groupId) {
+        // Group chat stays clean: confirm cancellation privately to user
+        if (userId) await pushToLine(userId, miniFlex);
+      } else {
+        await replyToLine(replyToken, miniFlex, userId);
       }
     } else if (res.error === 'UNAUTHORIZED') {
       await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ เฉพาะเจ้าของแผล (@${res.creatorName}) หรือแอดมินเท่านั้นที่ยกเลิกได้ครับ`);
@@ -1058,32 +1056,29 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
 
     if (matched && matched.orderNumber) {
       const rocketLabel = matched.rocketName || getActiveRocketName();
-      // Group (or current chat): match card only
       const flexMatch = constructMatchNotificationFlex(matched.orderNumber, matched.amount, matched.playerLowName, matched.playerHighName, matched.rangeInfo, matched.isChotoy, rocketLabel);
-      const groupReply = replyToLine(replyToken, flexMatch, userId);
-
-      // Private confirmations for creator + matcher
       const confirmText = `✅ ยืนยันแมตช์ Order #${matched.orderNumber}\nบั้งไฟ: ${rocketLabel || '-'}\nยอด: ${matched.amount}pt\nต่ำ: @${matched.playerLowName || '-'} | สูง: @${matched.playerHighName || '-'}`;
-      const creatorPush = (async () => {
-        try {
-          if (matched.creatorId) await pushToLine(matched.creatorId, confirmText);
-        } catch (e) {
-          console.error('[Match DM Creator Push Error]', e);
-        }
-      })();
-      const matcherPush = (async () => {
-        try {
-          if (matched.matcherId && matched.matcherId !== matched.creatorId) {
-            // Always confirm matcher privately (group reply already used replyToken)
-            if (groupId) await pushToLine(matched.matcherId, confirmText);
-            else await pushToLine(matched.matcherId, confirmText);
-          }
-        } catch (e) {
-          console.error('[Match DM Matcher Push Error]', e);
-        }
-      })();
 
-      await Promise.allSettled([groupReply, creatorPush, matcherPush]);
+      if (groupId) {
+        // Group chat stays clean: notify creator & matcher directly via private DM
+        const creatorPush = (async () => {
+          try {
+            if (matched.creatorId) await pushToLine(matched.creatorId, flexMatch);
+          } catch (e) {
+            console.error('[Match DM Creator Push Error]', e);
+          }
+        })();
+        const matcherPush = (async () => {
+          try {
+            if (matched.matcherId) await pushToLine(matched.matcherId, flexMatch);
+          } catch (e) {
+            console.error('[Match DM Matcher Push Error]', e);
+          }
+        })();
+        await Promise.allSettled([creatorPush, matcherPush]);
+      } else {
+        await replyToLine(replyToken, flexMatch, userId);
+      }
       return true;
     } else {
       const notFoundText = targetOrderNo

@@ -435,7 +435,7 @@ async function processSingleWebhookEvent(event) {
     if (message.type === 'text') {
       await lineBot.handleTextMessage(message.text, effectiveUserId, displayName, replyToken, groupId, message.id);
     } else if (message.type === 'image') {
-      await lineBot.handleImageSlipMessage(message.id, effectiveUserId, displayName, replyToken);
+      await lineBot.handleImageSlipMessage(message.id, effectiveUserId, displayName, replyToken, groupId);
     }
   } else if (event.type === 'unsend') {
     await lineBot.handleUnsendMessage(unsendMessageId, effectiveUserId, displayName, groupId);

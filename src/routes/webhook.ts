@@ -101,7 +101,17 @@ async function processSingleEvent(
         const isHigh = ['ชล', 'ล', 'สูง', 'ไล่'].includes(sideRaw);
         const side = isHigh ? 'high' : 'low';
 
-        if (amount >= 50 && amount <= 50000) {
+        if (amount < 50 || amount > 50000) {
+          const limitMsg = `⚠️ ยอดดวลต้องอยู่ระหว่าง 50 ถึง 50,000 pt ครับ (คุณระบุ ${amount} pt)`;
+          if (isGroup) {
+            try { await client.pushMessage({ to: userId, messages: [{ type: 'text', text: limitMsg }] }); } catch (_) {}
+          } else {
+            await client.replyMessage({ replyToken, messages: [{ type: 'text', text: limitMsg }] });
+          }
+          return;
+        }
+
+        try {
           const newOrder = await createOrder({
             creatorId: userId,
             creatorName: displayName,
@@ -110,12 +120,22 @@ async function processSingleEvent(
             groupId: groupId || undefined,
           });
 
+          // Order Creation Flex is allowed in group for other users to see & click
           const flexCard = generateOrderFlex(newOrder);
           await client.replyMessage({
             replyToken,
             messages: [flexCard],
           });
           console.log(`[Webhook] Created new Order #${newOrder.orderNumber} for ${displayName} in ${groupId ? 'Group' : 'DM'}`);
+          return;
+        } catch (orderErr: any) {
+          console.warn(`[Webhook] Failed creating order for ${displayName}:`, orderErr?.message || orderErr);
+          const errMsg = `⚠️ ไม่สามารถสร้างออเดอร์ได้: ${orderErr?.message || 'เครดิตไม่เพียงพอ หรือเกิดข้อผิดพลาด'}`;
+          if (isGroup) {
+            try { await client.pushMessage({ to: userId, messages: [{ type: 'text', text: errMsg }] }); } catch (_) {}
+          } else {
+            try { await client.replyMessage({ replyToken, messages: [{ type: 'text', text: errMsg }] }); } catch (_) {}
+          }
           return;
         }
       }
