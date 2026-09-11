@@ -266,3 +266,330 @@ export function generateBalanceFlex(displayName: string, balance: number): any {
     },
   };
 }
+
+// ── 4. Live Betting Board Card (กระดานดวลสด) ──
+export function generatePendingBoardFlex(pendingList: Order[]): any {
+  if (!pendingList || pendingList.length === 0) {
+    return {
+      type: 'flex',
+      altText: '📊 กระดานดวลสด: ไม่มีแผลค้าง',
+      contents: {
+        type: 'bubble',
+        size: 'kilo',
+        header: {
+          type: 'box',
+          layout: 'vertical',
+          backgroundColor: '#0F172A',
+          paddingAll: 'md',
+          contents: [
+            {
+              type: 'box',
+              layout: 'horizontal',
+              contents: [
+                {
+                  type: 'text',
+                  text: '📊 กระดานดวลสด',
+                  weight: 'bold',
+                  color: '#FFFFFF',
+                  size: 'sm',
+                  flex: 1,
+                },
+                {
+                  type: 'box',
+                  layout: 'vertical',
+                  backgroundColor: '#334155',
+                  cornerRadius: 'sm',
+                  paddingStart: '6px',
+                  paddingEnd: '6px',
+                  paddingTop: '2px',
+                  paddingBottom: '2px',
+                  contents: [
+                    { type: 'text', text: 'ว่าง 0 แผล', color: '#94A3B8', size: 'xxs', weight: 'bold' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          paddingAll: 'lg',
+          spacing: 'sm',
+          contents: [
+            {
+              type: 'text',
+              text: 'ไม่มีแผลดวลค้างในขณะนี้ 🚀',
+              weight: 'bold',
+              color: '#334155',
+              size: 'sm',
+              align: 'center',
+            },
+            {
+              type: 'text',
+              text: 'ท่านสามารถพิมพ์ ชล หรือ ชถ เพื่อเปิดแผลดวลใหม่ได้ทันทีครับ',
+              color: '#64748B',
+              size: 'xs',
+              align: 'center',
+              wrap: true,
+            },
+          ],
+        },
+        footer: {
+          type: 'box',
+          layout: 'horizontal',
+          spacing: 'xs',
+          paddingAll: 'sm',
+          contents: [
+            {
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              color: '#F1F5F9',
+              action: {
+                type: 'message',
+                label: '📖 ดูกติกา',
+                text: 'กติกา',
+              },
+            },
+            {
+              type: 'button',
+              style: 'primary',
+              height: 'sm',
+              color: '#0D9488',
+              action: {
+                type: 'message',
+                label: '⚡ เปิดราคาช่าง',
+                text: 'ชล500',
+              },
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  const displayItems = pendingList.slice(0, 8);
+  const itemBoxes = displayItems.map((b) => {
+    const isLow = b.side === 'low';
+    const sideText = isLow ? '🔻 ต่ำ' : '🔺 สูง';
+    const sideColor = isLow ? '#DC2626' : '#16A34A';
+    const sideBg = isLow ? '#FEF2F2' : '#F0FDF4';
+    const sideBorder = isLow ? '#FECACA' : '#BBF7D0';
+    const rangeText = (b.rangeMin && b.rangeMax) ? `${b.rangeMin}-${b.rangeMax}s` : 'ราคาช่าง';
+    const shortCode = String(b.orderNumber || '').slice(-2);
+    const amtStr = Number(b.amount || 0).toLocaleString('th-TH');
+
+    return {
+      type: 'box',
+      layout: 'vertical',
+      backgroundColor: sideBg,
+      borderColor: sideBorder,
+      borderWidth: '1px',
+      cornerRadius: 'md',
+      paddingAll: 'sm',
+      spacing: 'xs',
+      contents: [
+        {
+          type: 'box',
+          layout: 'horizontal',
+          contents: [
+            {
+              type: 'text',
+              text: `#${b.orderNumber} (${shortCode})`,
+              weight: 'bold',
+              color: '#0F172A',
+              size: 'xs',
+              flex: 5,
+            },
+            {
+              type: 'text',
+              text: `👤 @${b.creatorName || 'ผู้เล่น'}`,
+              weight: 'bold',
+              color: '#475569',
+              size: 'xxs',
+              align: 'end',
+              flex: 5,
+              wrap: true,
+            },
+          ],
+        },
+        {
+          type: 'box',
+          layout: 'horizontal',
+          contents: [
+            {
+              type: 'text',
+              text: `${sideText} ${rangeText}`,
+              weight: 'bold',
+              color: sideColor,
+              size: 'xs',
+              flex: 6,
+            },
+            {
+              type: 'text',
+              text: `${amtStr} pt`,
+              weight: 'bold',
+              color: '#0284C7',
+              size: 'xs',
+              align: 'end',
+              flex: 4,
+            },
+          ],
+        },
+        {
+          type: 'box',
+          layout: 'horizontal',
+          spacing: 'xs',
+          margin: 'xs',
+          contents: [
+            {
+              type: 'box',
+              layout: 'vertical',
+              backgroundColor: isLow ? '#16A34A' : '#DC2626',
+              cornerRadius: 'sm',
+              paddingTop: '4px',
+              paddingBottom: '4px',
+              flex: 1,
+              action: {
+                type: 'message',
+                label: `ต${shortCode}`,
+                text: `ต${shortCode}`,
+              },
+              contents: [
+                {
+                  type: 'text',
+                  text: `⚡ รับดวล (ต${shortCode})`,
+                  color: '#FFFFFF',
+                  weight: 'bold',
+                  size: 'xxs',
+                  align: 'center',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+  });
+
+  const overflowNotice = pendingList.length > 8 ? [
+    {
+      type: 'text',
+      text: `... และอีก ${pendingList.length - 8} แผลดวล`,
+      size: 'xxs',
+      color: '#94A3B8',
+      align: 'center',
+      margin: 'xs',
+    },
+  ] : [];
+
+  return {
+    type: 'flex',
+    altText: `📊 กระดานดวลสด (${pendingList.length} แผลค้าง)`,
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#0F172A',
+        paddingAll: 'md',
+        contents: [
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              {
+                type: 'text',
+                text: '📊 กระดานดวลสด',
+                weight: 'bold',
+                color: '#FFFFFF',
+                size: 'sm',
+                flex: 1,
+              },
+              {
+                type: 'box',
+                layout: 'vertical',
+                backgroundColor: '#059669',
+                cornerRadius: 'sm',
+                paddingStart: '8px',
+                paddingEnd: '8px',
+                paddingTop: '2px',
+                paddingBottom: '2px',
+                contents: [
+                  {
+                    type: 'text',
+                    text: `รอคู่ ${pendingList.length} แผล`,
+                    color: '#FFFFFF',
+                    size: 'xxs',
+                    weight: 'bold',
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            type: 'text',
+            text: 'แตะปุ่มเพื่อรับดวล หรือพิมพ์ ต[เลข] ได้ทันที 🚀',
+            color: '#94A3B8',
+            size: 'xxs',
+            margin: 'xs',
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'xs',
+        paddingAll: 'sm',
+        contents: [
+          ...itemBoxes,
+          ...overflowNotice,
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'horizontal',
+        spacing: 'xs',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'button',
+            style: 'secondary',
+            height: 'sm',
+            color: '#F1F5F9',
+            action: {
+              type: 'message',
+              label: '🔄 รีเฟรช',
+              text: 'กระดานดวล',
+            },
+          },
+          {
+            type: 'button',
+            style: 'secondary',
+            height: 'sm',
+            color: '#F1F5F9',
+            action: {
+              type: 'message',
+              label: '📖 กติกา',
+              text: 'กติกา',
+            },
+          },
+          {
+            type: 'button',
+            style: 'primary',
+            height: 'sm',
+            color: '#0D9488',
+            action: {
+              type: 'message',
+              label: '⚡ เปิดราคาช่าง',
+              text: 'ชล500',
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+

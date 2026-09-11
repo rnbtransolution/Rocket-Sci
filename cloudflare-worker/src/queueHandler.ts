@@ -1,5 +1,42 @@
 import { Env, LineEvent, Order, PlayerProfile, RocketRound } from './types.js';
-import { generateOrderFlex, generateMatchNotificationFlex, generateBalanceFlex } from './flexTemplates.js';
+import {
+  generateOrderFlex,
+  generateMatchNotificationFlex,
+  generateBalanceFlex,
+  generatePendingBoardFlex,
+} from './flexTemplates.js';
+
+export const RULE_GUIDE_TEXT = `📖 [คู่มือคีย์เวิร์ดกติกาการเล่น]
+
+📌 กฏที่ 1: เล่นราคาช่าง
+
+🎉 ทายว่าชนะ (สูง):
+• ช่างไล่ / ชล / ไล่ / ลง
+• +5ชล / +5ล / +5ไล่
+• -5ชล / -5ล / -5ไล่
+💵 พิมพ์คีย์เวิร์ดตามด้วยจำนวนเงิน (ตัวเลขเท่านั้น)
+เช่น ชล100 , ชล1000 , ชล10000
+
+👊 ทายว่าแพ้ (ต่ำ):
+• ช่างยั่ง / ช่างถอย / ชย
+• ชถ / ยั่ง / ย / ถอย / ถ
+• +5ชย / +5ชถ / +5ย / +5ถ
+• -5ชย / -5ชถ / -5ย / -5ถ
+เช่น ชถ100 , ชถ1000
+
+-----------------------------
+
+📌 กฏที่ 2: การเปิดราคาเอง (กรณีช่างไม่ต่อย / ต้องมีเครดิตพอ)
+
+💰 การเปิดราคาเอง (เปิดแผลสดใหม่):
+⚠️ ช่วงราคาต้องห่างกัน 50 วิพอดี เช่น
+• 300-350ล500 | 300-350ถ500
+• 350-400ล500 | 350-400ถ500
+
+⬆️ ช่างต่อยยกเลิก (ชตย) 
+ใส่ ชตย หลังจำนวนเงิน เช่น
+• 300-350ล500 ชตย
+• 350-400ถ500 ชตย`;
 
 /**
  * Cloudflare Worker Queue & Background Event Processor
@@ -45,6 +82,32 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       return;
     }
 
+    // ── 1.1 Live Betting Board ("กระดานดวล", "แผลค้าง", "เปิดรอคู่", "รอคู่", "กระดาน", "board") ──
+    const boardRegex = /^(?:📊\s*)?(กระดานดวล|แผลค้าง|เปิดรอคู่|รอคู่|กระดาน|board)$/i;
+    if (boardRegex.test(clean) || boardRegex.test(text)) {
+      const pendingList = await getPendingOrdersList(env);
+      const boardFlex = generatePendingBoardFlex(pendingList);
+      if (replyToken) {
+        await replyToLine(replyToken, boardFlex, env);
+      } else if (groupId) {
+        await pushToLine(groupId, boardFlex, env);
+      } else {
+        await pushToLine(userId, boardFlex, env);
+      }
+      return;
+    }
+
+    // ── 1.2 Rule Guide ("กติกา", "rule", "rules", "วิธีเล่น", "คู่มือ") ──
+    const ruleRegex = /^(?:📖\s*)?(กติกา|rule|rules|วิธีเล่น|คู่มือ)$/i;
+    if (ruleRegex.test(clean) || ruleRegex.test(text)) {
+      if (replyToken) {
+        await replyToLine(replyToken, RULE_GUIDE_TEXT, env);
+      } else {
+        await pushToLine(userId, RULE_GUIDE_TEXT, env);
+      }
+      return;
+    }
+
     // ── 2. Cancel Order ("ยกเลิก [orderNo]") ──
     const cancelRegex = /^(ยกเลิก|cancel)\s*#?(\d{2,6})$/i;
     if (cancelRegex.test(clean) || cancelRegex.test(text)) {
@@ -57,13 +120,30 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       return;
     }
 
-    // ── 3. Accept/Match Bet Command (e.g. "ต 9047 500", "ต9047", "รับ 9047") ──
-    const matchRegex = /^(?:(ต|ติด|รับ|เค|ดีล)\s*)?#?(\d{4,6})(?:\s+(\d+))?$/i;
-    if (matchRegex.test(text)) {
-      const match = text.match(matchRegex);
-      if (match) {
-        const orderNo = match[2];
-        const matchAmt = match[3] ? parseInt(match[3], 10) : undefined;
+    // ── 3. Accept/Match Bet Command (e.g. "ต 9047 500", "ต9047", "ต47", "รับ 9047") ──
+    const matchWithPrefixRegex = /^(?:(ต|ติด|รับ|เค|ดีล)\s*)#?(\d{2,6})(?:\s+(\d+))?$/i;
+    const matchNoPrefixRegex = /^#?(\d{4,6})\s+(\d+)$/i;
+    const matchHashOnlyRegex = /^#(\d{2,6})$/i;
+
+    if (matchWithPrefixRegex.test(text) || matchNoPrefixRegex.test(text) || matchHashOnlyRegex.test(text)) {
+      let orderNo: string | undefined;
+      let matchAmt: number | undefined;
+
+      if (matchWithPrefixRegex.test(text)) {
+        const match = text.match(matchWithPrefixRegex)!;
+        orderNo = match[2];
+        matchAmt = match[3] ? parseInt(match[3], 10) : undefined;
+      } else if (matchNoPrefixRegex.test(text)) {
+        const match = text.match(matchNoPrefixRegex)!;
+        orderNo = match[1];
+        matchAmt = parseInt(match[2], 10);
+      } else if (matchHashOnlyRegex.test(text)) {
+        const match = text.match(matchHashOnlyRegex)!;
+        orderNo = match[1];
+        matchAmt = undefined;
+      }
+
+      if (orderNo) {
         await handleMatchOrder(orderNo, matchAmt, profile, userId, groupId, replyToken, env, ctx);
         return;
       }
@@ -222,6 +302,7 @@ async function handleCreateOrder(
   const backgroundPersistence = Promise.all([
     env.KV_CACHE.put(`USER_${userId}`, JSON.stringify(profile)),
     env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder)),
+    addToPendingOrdersList(newOrder, env),
     pushToLine(
       userId,
       `✅ ยืนยันเปิดออเดอร์ #${orderNumber}\nบั้งไฟ: ${round?.name || '-'}\nฝั่ง: ${side === 'low' ? 'ต่ำ' : 'สูง'} | ${amount} pt`,
@@ -247,16 +328,22 @@ async function handleMatchOrder(
   env: Env,
   ctx?: ExecutionContext
 ): Promise<void> {
-  const orderRaw = await env.KV_ORDERS.get(`ORDER_${orderNo}`);
-  if (!orderRaw) {
+  const resolvedNo = await resolveOrderNumber(orderNo, env);
+  if (!resolvedNo) {
     await deliverPrivateNotice(userId, replyToken, groupId, `🚫 ไม่พบแผล Order #${orderNo} ในระบบครับ`, env);
+    return;
+  }
+
+  const orderRaw = await env.KV_ORDERS.get(`ORDER_${resolvedNo}`);
+  if (!orderRaw) {
+    await deliverPrivateNotice(userId, replyToken, groupId, `🚫 ไม่พบแผล Order #${resolvedNo} ในระบบครับ`, env);
     return;
   }
 
   const order = JSON.parse(orderRaw) as Order;
   if (order.status !== 'pending_match') {
     const reason = order.status === 'matched' ? 'มีคู่ดวลแล้วครับ' : 'ถูกยกเลิกไปแล้วครับ';
-    await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ แผล Order #${orderNo} ${reason}`, env);
+    await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ แผล Order #${resolvedNo} ${reason}`, env);
     return;
   }
 
@@ -277,11 +364,15 @@ async function handleMatchOrder(
   order.matcherId = profile.shortId;
   order.matcherName = profile.displayName;
   order.matchedAt = Date.now();
-  await env.KV_ORDERS.put(`ORDER_${orderNo}`, JSON.stringify(order));
+
+  const updatePersistence = Promise.all([
+    env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(order)),
+    removeFromPendingOrdersList(resolvedNo, env),
+    env.KV_CACHE.put(`USER_${userId}`, JSON.stringify(profile)),
+  ]);
 
   // Deduct matcher balance
   profile.balance -= effectiveAmt;
-  await env.KV_CACHE.put(`USER_${userId}`, JSON.stringify(profile));
 
   // Generate match card
   const matchFlex = generateMatchNotificationFlex(order);
@@ -290,12 +381,13 @@ async function handleMatchOrder(
   const creatorLineId = await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`);
   const matchPromises: Promise<any>[] = [
     pushToLine(userId, matchFlex, env),
+    updatePersistence,
   ];
   if (creatorLineId) {
     matchPromises.push(pushToLine(creatorLineId, matchFlex, env));
   }
   if (groupId) {
-    matchPromises.push(pushToLine(groupId, `🤝 Order #${orderNo} มีผู้รับดวลแล้วครับ! (${order.amount} pt)`, env));
+    matchPromises.push(pushToLine(groupId, `🤝 Order #${resolvedNo} มีผู้รับดวลแล้วครับ! (${order.amount} pt)`, env));
   }
 
   if (ctx) {
@@ -306,8 +398,11 @@ async function handleMatchOrder(
 }
 
 async function cancelOrder(orderNo: string, shortId: string, env: Env): Promise<{ success: boolean; message: string }> {
-  const raw = await env.KV_ORDERS.get(`ORDER_${orderNo}`);
-  if (!raw) return { success: false, message: `🚫 ไม่พบแผล Order #${orderNo}` };
+  const resolvedNo = await resolveOrderNumber(orderNo, env);
+  if (!resolvedNo) return { success: false, message: `🚫 ไม่พบแผล Order #${orderNo}` };
+
+  const raw = await env.KV_ORDERS.get(`ORDER_${resolvedNo}`);
+  if (!raw) return { success: false, message: `🚫 ไม่พบแผล Order #${resolvedNo}` };
 
   const order = JSON.parse(raw) as Order;
   if (order.creatorId !== shortId) {
@@ -318,7 +413,10 @@ async function cancelOrder(orderNo: string, shortId: string, env: Env): Promise<
   }
 
   order.status = 'cancelled';
-  await env.KV_ORDERS.put(`ORDER_${orderNo}`, JSON.stringify(order));
+  await Promise.all([
+    env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(order)),
+    removeFromPendingOrdersList(resolvedNo, env),
+  ]);
 
   // Refund creator balance
   const creatorLineId = await env.KV_CACHE.get(`RAW_LINE_${shortId}`);
@@ -331,7 +429,92 @@ async function cancelOrder(orderNo: string, shortId: string, env: Env): Promise<
     }
   }
 
-  return { success: true, message: `✅ ยกเลิก Order #${orderNo} และคืนแต้ม ${order.amount} pt เรียบร้อยแล้วครับ` };
+  return { success: true, message: `✅ ยกเลิก Order #${resolvedNo} และคืนแต้ม ${order.amount} pt เรียบร้อยแล้วครับ` };
+}
+
+// ── Pending Orders & Lookup Helpers ──
+
+export async function getPendingOrdersList(env: Env): Promise<Order[]> {
+  try {
+    const cached = await env.KV_CACHE.get('PENDING_ORDERS_LIST');
+    if (cached) {
+      const list = JSON.parse(cached) as Order[];
+      return list.filter((o) => o && o.status === 'pending_match');
+    }
+
+    // Fallback: Query KV_ORDERS
+    const listRes = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 40 });
+    if (!listRes.keys || listRes.keys.length === 0) {
+      return [];
+    }
+
+    const orderPromises = listRes.keys.map((k) => env.KV_ORDERS.get(k.name));
+    const rawOrders = await Promise.all(orderPromises);
+    const pending: Order[] = [];
+    for (const raw of rawOrders) {
+      if (!raw) continue;
+      try {
+        const o = JSON.parse(raw) as Order;
+        if (o.status === 'pending_match') {
+          pending.push(o);
+        }
+      } catch (_) {}
+    }
+
+    pending.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(pending), { expirationTtl: 1800 });
+    return pending;
+  } catch (err) {
+    console.error('[Worker] getPendingOrdersList error:', err);
+    return [];
+  }
+}
+
+async function addToPendingOrdersList(order: Order, env: Env): Promise<void> {
+  try {
+    const list = await getPendingOrdersList(env);
+    const updated = [order, ...list.filter((o) => o.orderNumber !== order.orderNumber)].slice(0, 30);
+    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 1800 });
+  } catch (err) {
+    console.error('[Worker] addToPendingOrdersList error:', err);
+  }
+}
+
+async function removeFromPendingOrdersList(orderNo: string, env: Env): Promise<void> {
+  try {
+    const list = await getPendingOrdersList(env);
+    const updated = list.filter((o) => o.orderNumber !== orderNo && !o.orderNumber.endsWith(orderNo));
+    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 1800 });
+  } catch (err) {
+    console.error('[Worker] removeFromPendingOrdersList error:', err);
+  }
+}
+
+async function resolveOrderNumber(inputNo: string, env: Env): Promise<string | null> {
+  const cleanNo = inputNo.trim().replace(/^#/, '');
+  // 1. Direct match
+  const direct = await env.KV_ORDERS.get(`ORDER_${cleanNo}`);
+  if (direct) return cleanNo;
+
+  // 2. Check pending list for endsWith or exact
+  const pendingList = await getPendingOrdersList(env);
+  const foundPending = pendingList.find(
+    (o) => o.orderNumber === cleanNo || o.orderNumber.endsWith(cleanNo)
+  );
+  if (foundPending) return foundPending.orderNumber;
+
+  // 3. Scan KV_ORDERS prefix
+  try {
+    const listRes = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 50 });
+    for (const k of listRes.keys) {
+      const rawNo = k.name.replace(/^ORDER_/, '');
+      if (rawNo === cleanNo || rawNo.endsWith(cleanNo)) {
+        return rawNo;
+      }
+    }
+  } catch (_) {}
+
+  return null;
 }
 
 // ── User Profile & Group Helpers ──
