@@ -503,7 +503,10 @@ async function handleCreateOrder(
 
   if (profile.balance < amount) {
     const needed = amount - profile.balance;
-    await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ แต้มไม่พอ (มี ${profile.balance} pt | ขาด ${needed} pt) พิมพ์ "ฝากเงิน"`, env);
+    const msg = groupId
+      ? `@${profile.displayName} ⚠️ แต้มไม่พอ (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt) พิมพ์ "ฝากเงิน" ในแชตส่วนตัวครับ 🚀`
+      : `⚠️ แต้มไม่พอ (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt) พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ 🚀`;
+    await deliverPrivateNotice(userId, replyToken, groupId, msg, env);
     return;
   }
 
@@ -529,11 +532,15 @@ async function handleCreateOrder(
 
   // Send Order Flex to Group Chat immediately (< 150ms)
   const flexCard = generateOrderFlex(newOrder);
-  const sendOrderPromise = replyToken
-    ? replyToLine(replyToken, flexCard, env)
-    : pushToLine(groupId, flexCard, env);
+  let cardDispatched = false;
+  if (replyToken) {
+    cardDispatched = await replyToLine(replyToken, flexCard, env);
+  }
+  if (!cardDispatched && groupId) {
+    await pushToLine(groupId, flexCard, env);
+  }
 
-  // Persist KV state concurrently (0ms blocking on critical path; private DM confirmation omitted to preserve quota)
+  // Persist KV state concurrently (0ms blocking on critical path)
   const backgroundPersistence = Promise.all([
     savePlayerProfile(profile, env, ctx),
     env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder)),
@@ -542,9 +549,8 @@ async function handleCreateOrder(
 
   if (ctx) {
     ctx.waitUntil(backgroundPersistence);
-    await sendOrderPromise;
   } else {
-    await Promise.all([sendOrderPromise, backgroundPersistence]);
+    await backgroundPersistence;
   }
 }
 
@@ -588,7 +594,10 @@ async function handleMatchOrder(
   const effectiveAmt = matchAmt || order.amount;
   if (profile.balance < effectiveAmt) {
     const needed = effectiveAmt - profile.balance;
-    await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ แต้มไม่พอ (มี ${profile.balance} pt | ขาด ${needed} pt) พิมพ์ "ฝากเงิน"`, env);
+    const msg = groupId
+      ? `@${profile.displayName} ⚠️ แต้มไม่พอรับแผล (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt) พิมพ์ "ฝากเงิน" ในแชตส่วนตัวครับ 🚀`
+      : `⚠️ แต้มไม่พอรับแผล (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt) พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ 🚀`;
+    await deliverPrivateNotice(userId, replyToken, groupId, msg, env);
     return;
   }
 
@@ -967,28 +976,50 @@ async function recordActiveGroup(groupId: string, env: Env): Promise<void> {
 
 // ── LINE HTTP Dispatchers ──
 
-async function replyToLine(replyToken: string, payload: any, env: Env): Promise<void> {
-  const messages = [typeof payload === 'string' ? { type: 'text', text: payload } : payload];
-  await fetch('https://api.line.me/v2/bot/message/reply', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`,
-    },
-    body: JSON.stringify({ replyToken, messages }),
-  });
+async function replyToLine(replyToken: string, payload: any, env: Env): Promise<boolean> {
+  try {
+    const messages = [typeof payload === 'string' ? { type: 'text', text: payload } : payload];
+    const res = await fetch('https://api.line.me/v2/bot/message/reply', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`,
+      },
+      body: JSON.stringify({ replyToken, messages }),
+    });
+    if (!res.ok) {
+      const errBody = await res.text();
+      console.error(`[LINE Reply Error] status=${res.status}: ${errBody}`);
+      return false;
+    }
+    return true;
+  } catch (err: any) {
+    console.error('[LINE Reply Exception]:', err?.message || err);
+    return false;
+  }
 }
 
-async function pushToLine(to: string, payload: any, env: Env): Promise<void> {
-  const messages = [typeof payload === 'string' ? { type: 'text', text: payload } : payload];
-  await fetch('https://api.line.me/v2/bot/message/push', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`,
-    },
-    body: JSON.stringify({ to, messages }),
-  });
+async function pushToLine(to: string, payload: any, env: Env): Promise<boolean> {
+  try {
+    const messages = [typeof payload === 'string' ? { type: 'text', text: payload } : payload];
+    const res = await fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`,
+      },
+      body: JSON.stringify({ to, messages }),
+    });
+    if (!res.ok) {
+      const errBody = await res.text();
+      console.error(`[LINE Push Error] to=${to} status=${res.status}: ${errBody}`);
+      return false;
+    }
+    return true;
+  } catch (err: any) {
+    console.error(`[LINE Push Exception] to=${to}:`, err?.message || err);
+    return false;
+  }
 }
 
 async function deliverPrivateNotice(
@@ -998,13 +1029,18 @@ async function deliverPrivateNotice(
   payload: any,
   env: Env
 ): Promise<void> {
-  if (groupId) {
-    await pushToLine(userId, payload, env);
-    return;
-  }
+  // 1. Prefer free, instant, zero-push-quota replyToken whenever available
   if (replyToken) {
-    await replyToLine(replyToken, payload, env);
-    return;
+    const sent = await replyToLine(replyToken, payload, env);
+    if (sent) return;
   }
-  await pushToLine(userId, payload, env);
+  // 2. Fallback to direct push if replyToken is expired or failed
+  if (groupId) {
+    const pushGroupOk = await pushToLine(groupId, payload, env);
+    if (!pushGroupOk) {
+      await pushToLine(userId, payload, env);
+    }
+  } else {
+    await pushToLine(userId, payload, env);
+  }
 }

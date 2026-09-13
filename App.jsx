@@ -150,7 +150,7 @@ export default function App() {
         return 'http://localhost:3001';
       }
     }
-    return import.meta.env.VITE_API_BASE_URL || '';
+    return import.meta.env.VITE_API_BASE_URL || 'https://rocket-science-cf-worker.rnbtransolution.workers.dev';
   };
   const API_BASE_URL = getApiBaseUrl();
   const ADMIN_API_KEY = import.meta.env.VITE_ADMIN_API_KEY || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
@@ -511,8 +511,56 @@ export default function App() {
       const interval = setInterval(fetchGAS, 3000);
       return () => clearInterval(interval);
 
+    } else if (API_BASE_URL) {
+      // Live Cloudflare Worker or Node.js Backend: direct high-speed sync
+      const fetchFromBackend = async () => {
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/run`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(ADMIN_API_KEY ? { 'x-admin-key': ADMIN_API_KEY, 'x-admin-api-key': ADMIN_API_KEY } : {}),
+            },
+            body: JSON.stringify({ functionName: 'getDashboardData', adminKey: ADMIN_API_KEY, apiKey: ADMIN_API_KEY }),
+          });
+          if (res.ok) {
+            const json = await res.json();
+            const payload = json?.data || json?.result || json;
+            if (payload && (payload.players || payload.activeRound)) {
+              applyData(payload);
+            }
+          }
+        } catch (e) {
+          console.warn('[Dashboard API Polling Note]:', e?.message || e);
+        }
+      };
+
+      fetchFromBackend();
+      const interval = setInterval(fetchFromBackend, 2000);
+
+      // Attempt SSE if stream endpoint is active
+      let es;
+      try {
+        const sseQs = ADMIN_API_KEY ? `?apiKey=${encodeURIComponent(ADMIN_API_KEY)}` : '';
+        es = new EventSource(`${API_BASE_URL}/api/events${sseQs}`);
+        es.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            applyData(data);
+          } catch (_) {}
+        };
+        es.onerror = () => {
+          if (es) es.close();
+        };
+      } catch (_) {}
+
+      return () => {
+        clearInterval(interval);
+        if (es) es.close();
+      };
+
     } else if (isGitHubPages) {
-      // GitHub Pages hosted: direct live sync with Google Apps Script API (bypasses browser cache)
+      // GitHub Pages hosted fallback: direct live sync with Google Apps Script API
       const fetchFromGASApi = async () => {
         try {
           const res = await fetch(`${GAS_ENDPOINT_URL}?action=getDashboardData&_t=${Date.now()}`);
@@ -530,27 +578,8 @@ export default function App() {
       fetchFromGASApi();
       const interval = setInterval(fetchFromGASApi, 2500);
 
-      // If Node API_BASE_URL is also configured, attempt SSE in parallel
-      let es;
-      if (API_BASE_URL) {
-        try {
-          const sseQs = ADMIN_API_KEY ? `?apiKey=${encodeURIComponent(ADMIN_API_KEY)}` : '';
-          es = new EventSource(`${API_BASE_URL}/api/events${sseQs}`);
-          es.onmessage = (event) => {
-            try {
-              const data = JSON.parse(event.data);
-              applyData(data);
-            } catch (_) {}
-          };
-          es.onerror = () => {
-            if (es) es.close();
-          };
-        } catch (_) {}
-      }
-
       return () => {
         clearInterval(interval);
-        if (es) es.close();
       };
 
     } else if (isLiveBackend) {
