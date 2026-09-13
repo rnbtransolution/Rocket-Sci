@@ -14,6 +14,8 @@ export interface Env {
   ENVIRONMENT?: string;
   SPREADSHEET_ID?: string;
   GAS_FALLBACK_URL?: string;
+  SLIP_API_KEY?: string;
+  SLIP_API_URL?: string;
 }
 
 // ── Queue Message Structure ──
@@ -90,6 +92,20 @@ export interface PlayerProfile {
   accountName?: string;
   registeredAt: number;
   updatedAt: number;
+}
+
+export interface Transaction {
+  id: string;
+  playerId: string;
+  playerName: string;
+  requestedAmount: number;
+  actualAmount: number;
+  slipRef?: string;
+  status: 'pending' | 'success' | 'escalated' | 'rejected';
+  reviewReason?: string;
+  timestamp: string;
+  type: 'deposit' | 'withdraw' | 'transfer';
+  createdAt: number;
 }
 
 export interface RocketRound {

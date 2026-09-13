@@ -780,3 +780,513 @@ export function generateRuleGuideFlex(): any {
   };
 }
 
+// ── 6. Main Menu Flex Card (เมนูหลักระบบดวล) ──
+export function generateMainMenuFlex(displayName: string, balance: number): any {
+  return {
+    type: 'flex',
+    altText: '🚀 เมนูหลักระบบดวลบั้งไฟ',
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#0A3D34',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: '🚀 เมนูหลัก (Rocket Science)',
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'xs',
+            align: 'center',
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'xs',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: '👤 ผู้เล่น', color: '#64748B', size: 'xs', flex: 4 },
+              { type: 'text', text: displayName || 'ผู้เล่น', weight: 'bold', color: '#1E293B', size: 'xs', flex: 6, align: 'end' },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            margin: 'xs',
+            contents: [
+              { type: 'text', text: '💰 แต้มคงเหลือ', color: '#64748B', size: 'xs', flex: 4 },
+              { type: 'text', text: `${balance.toLocaleString()} pt`, weight: 'bold', color: '#059669', size: 'xs', flex: 6, align: 'end' },
+            ],
+          },
+          {
+            type: 'separator',
+            margin: 'sm',
+            color: '#E2E8F0',
+          },
+          {
+            type: 'text',
+            text: 'เลือกรายการที่ต้องการทำได้เลยครับ',
+            size: 'xxs',
+            color: '#94A3B8',
+            align: 'center',
+            margin: 'xs',
+          },
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'xs',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'box',
+            layout: 'horizontal',
+            spacing: 'xs',
+            contents: [
+              {
+                type: 'button',
+                style: 'primary',
+                height: 'sm',
+                color: '#10B981',
+                action: {
+                  type: 'message',
+                  label: '💰 ฝากเงิน',
+                  text: 'ฝากเงิน',
+                },
+              },
+              {
+                type: 'button',
+                style: 'primary',
+                height: 'sm',
+                color: '#475569',
+                action: {
+                  type: 'message',
+                  label: '💸 ถอนเงิน',
+                  text: 'ถอนเงิน',
+                },
+              },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            spacing: 'xs',
+            margin: 'xs',
+            contents: [
+              {
+                type: 'button',
+                style: 'secondary',
+                height: 'sm',
+                action: {
+                  type: 'message',
+                  label: '📊 เช็คยอด',
+                  text: 'เช็คยอด',
+                },
+              },
+              {
+                type: 'button',
+                style: 'secondary',
+                height: 'sm',
+                action: {
+                  type: 'message',
+                  label: '📖 กติกา',
+                  text: 'กติกา',
+                },
+              },
+            ],
+          },
+          {
+            type: 'button',
+            style: 'secondary',
+            height: 'sm',
+            margin: 'xs',
+            action: {
+              type: 'message',
+              label: '📋 ดูกระดานดวลสด',
+              text: 'กระดานดวล',
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
+// ── 7. Deposit Options Card (เลือกยอดฝาก) ──
+export function generateDepositFlex(): any {
+  return {
+    type: 'flex',
+    altText: '💰 ฝากเครดิตเข้าระบบ',
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#10B981',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: '💰 ฝากเครดิต (Deposit)',
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'xs',
+            align: 'center',
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'xs',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: 'เลือกยอดเงินที่ต้องการฝาก หรือพิมพ์จำนวนเงิน เช่น "1000"',
+            size: 'xxs',
+            color: '#64748B',
+            align: 'center',
+            wrap: true,
+          },
+          {
+            type: 'separator',
+            margin: 'xs',
+            color: '#F1F5F9',
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            spacing: 'xs',
+            margin: 'xs',
+            contents: [
+              {
+                type: 'button',
+                style: 'primary',
+                height: 'sm',
+                color: '#10B981',
+                action: { type: 'message', label: '100 บาท', text: '100' },
+              },
+              {
+                type: 'button',
+                style: 'primary',
+                height: 'sm',
+                color: '#10B981',
+                action: { type: 'message', label: '300 บาท', text: '300' },
+              },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            spacing: 'xs',
+            margin: 'xs',
+            contents: [
+              {
+                type: 'button',
+                style: 'primary',
+                height: 'sm',
+                color: '#10B981',
+                action: { type: 'message', label: '500 บาท', text: '500' },
+              },
+              {
+                type: 'button',
+                style: 'primary',
+                height: 'sm',
+                color: '#10B981',
+                action: { type: 'message', label: '1,000 บาท', text: '1000' },
+              },
+            ],
+          },
+          {
+            type: 'text',
+            text: '💡 หรือพิมพ์จำนวนเงินที่ต้องการฝากเข้ามาได้ทันที',
+            size: 'xxs',
+            color: '#94A3B8',
+            align: 'center',
+            margin: 'xs',
+          },
+        ],
+      },
+    },
+  };
+}
+
+// ── 8. Deposit Invoice Card (ใบแจ้งโอนเงินฝาก) ──
+export function generateDepositInvoiceFlex(depositAmt: number): any {
+  const formattedAmt = Number(depositAmt || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return {
+    type: 'flex',
+    altText: `🧾 ใบแจ้งโอนเงินฝาก ${formattedAmt} THB`,
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#10B981',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: '🧾 ใบแจ้งโอนเงินฝาก',
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'xs',
+            align: 'center',
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'xs',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: `${formattedAmt} THB`,
+            weight: 'bold',
+            color: '#059669',
+            size: 'xl',
+            align: 'center',
+          },
+          {
+            type: 'text',
+            text: 'ยอดเงินที่ต้องโอน',
+            color: '#94A3B8',
+            size: 'xxs',
+            align: 'center',
+          },
+          {
+            type: 'separator',
+            margin: 'xs',
+            color: '#F1F5F9',
+          },
+          {
+            type: 'box',
+            layout: 'vertical',
+            margin: 'xs',
+            spacing: 'xxs',
+            contents: [
+              {
+                type: 'box',
+                layout: 'horizontal',
+                contents: [
+                  { type: 'text', text: '🏦 ธนาคาร', color: '#94A3B8', size: 'xxs', flex: 4 },
+                  { type: 'text', text: 'SCB (ไทยพาณิชย์)', weight: 'bold', color: '#334155', size: 'xxs', flex: 6, align: 'end' },
+                ],
+              },
+              {
+                type: 'box',
+                layout: 'horizontal',
+                contents: [
+                  { type: 'text', text: '🔢 เลขบัญชี', color: '#94A3B8', size: 'xxs', flex: 4 },
+                  { type: 'text', text: '064-2-35656-6', weight: 'bold', color: '#0369A1', size: 'xs', flex: 6, align: 'end' },
+                ],
+              },
+              {
+                type: 'box',
+                layout: 'horizontal',
+                contents: [
+                  { type: 'text', text: '👤 ชื่อบัญชี', color: '#94A3B8', size: 'xxs', flex: 4 },
+                  { type: 'text', text: 'อิทธิรัตน์ แนวหล่า', weight: 'bold', color: '#334155', size: 'xxs', flex: 6, align: 'end' },
+                ],
+              },
+            ],
+          },
+          {
+            type: 'separator',
+            margin: 'xs',
+            color: '#F1F5F9',
+          },
+          {
+            type: 'text',
+            text: '⚠️ โอนเสร็จแล้ว กรุณาส่ง "รูปสลิป" เข้ามาในแชทนี้ได้เลยครับ ระบบจะตรวจสอบและเติมเครดิตให้อัตโนมัติ 🙏',
+            size: 'xxs',
+            color: '#EA580C',
+            align: 'center',
+            wrap: true,
+            margin: 'xs',
+          },
+        ],
+      },
+    },
+  };
+}
+
+// ── 9. Withdrawal Card (ถอนเงินคืน) ──
+export function generateWithdrawalFlex(bankName: string, accountNumber: string, accountName: string, balance: number): any {
+  const formattedBal = Number(balance || 0).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return {
+    type: 'flex',
+    altText: '💸 แจ้งถอนเงินคืน',
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#475569',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: '💸 แจ้งถอนเงินคืน',
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'xs',
+            align: 'center',
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'xs',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: `${formattedBal} pt`,
+            weight: 'bold',
+            color: '#059669',
+            size: 'xl',
+            align: 'center',
+          },
+          {
+            type: 'text',
+            text: 'เครดิตคงเหลือ',
+            color: '#94A3B8',
+            size: 'xxs',
+            align: 'center',
+          },
+          {
+            type: 'separator',
+            margin: 'xs',
+            color: '#F1F5F9',
+          },
+          {
+            type: 'box',
+            layout: 'vertical',
+            margin: 'xs',
+            spacing: 'xxs',
+            contents: [
+              {
+                type: 'box',
+                layout: 'horizontal',
+                contents: [
+                  { type: 'text', text: '🏦 ธนาคาร', color: '#94A3B8', size: 'xxs', flex: 4 },
+                  { type: 'text', text: bankName || '-', weight: 'bold', color: '#334155', size: 'xxs', flex: 6, align: 'end' },
+                ],
+              },
+              {
+                type: 'box',
+                layout: 'horizontal',
+                contents: [
+                  { type: 'text', text: '🔢 เลขบัญชี', color: '#94A3B8', size: 'xxs', flex: 4 },
+                  { type: 'text', text: accountNumber || '-', weight: 'bold', color: '#334155', size: 'xxs', flex: 6, align: 'end' },
+                ],
+              },
+              {
+                type: 'box',
+                layout: 'horizontal',
+                contents: [
+                  { type: 'text', text: '👤 ชื่อบัญชี', color: '#94A3B8', size: 'xxs', flex: 4 },
+                  { type: 'text', text: accountName || '-', weight: 'bold', color: '#334155', size: 'xxs', flex: 6, align: 'end' },
+                ],
+              },
+            ],
+          },
+          {
+            type: 'separator',
+            margin: 'xs',
+            color: '#F1F5F9',
+          },
+          {
+            type: 'text',
+            text: '💡 พิมพ์ "ถอน [จำนวน]" เช่น "ถอน 500"\n(ถอนขั้นต่ำ 100 pt)',
+            size: 'xxs',
+            color: '#2563EB',
+            align: 'center',
+            wrap: true,
+            margin: 'xs',
+          },
+        ],
+      },
+    },
+  };
+}
+
+// ── 10. Bank Registration Card ──
+export function generateBankRegistrationFlex(): any {
+  return {
+    type: 'flex',
+    altText: '🏦 ลงทะเบียนบัญชีธนาคาร',
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#0284C7',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: '🏦 ลงทะเบียนบัญชีธนาคาร',
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'xs',
+            align: 'center',
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'xs',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: 'เพื่อความสะดวกรวดเร็วในการถอนเงิน กรุณาพิมพ์แจ้งข้อมูลบัญชีธนาคารของท่านในรูปแบบดังนี้ครับ:',
+            size: 'xxs',
+            color: '#475569',
+            wrap: true,
+          },
+          {
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: '#F8FAFC',
+            paddingAll: 'xs',
+            cornerRadius: 'sm',
+            margin: 'xs',
+            contents: [
+              {
+                type: 'text',
+                text: 'พิมพ์:\nบัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ-สกุล]\n\nตัวอย่าง:\nบัญชี กสิกร 0123456789 สมชาย ใจดี',
+                size: 'xxs',
+                color: '#0369A1',
+                weight: 'bold',
+                wrap: true,
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+}
+

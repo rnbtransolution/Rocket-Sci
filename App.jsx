@@ -695,11 +695,10 @@ export default function App() {
           }
         }
       } else {
-        const res = await fetch(`${GAS_ENDPOINT_URL}?action=getDashboardData&_t=${Date.now()}`);
-        if (res.ok) {
-          const json = await res.json();
-          if (json && json.data) {
-            const d = json.data;
+        let synced = false;
+        try {
+          const d = await runBackendFunction('syncWithSheets', []);
+          if (d && (d.players || d.bets || d.transactions)) {
             setPlayers(Array.isArray(d.players) ? d.players : []);
             setTransactions(Array.isArray(d.transactions) ? d.transactions : []);
             setBets(Array.isArray(d.bets) ? d.bets : []);
@@ -709,7 +708,30 @@ export default function App() {
             if (typeof window !== 'undefined') {
               localStorage.setItem('rocket_sci_dashboard_cache', JSON.stringify(d));
             }
-            addToast('✅ ดึงข้อมูลสดจาก Google Sheets สำเร็จ', 'success');
+            addToast('✅ ดึงข้อมูลสดจากฐานข้อมูลสำเร็จ', 'success');
+            synced = true;
+          }
+        } catch (backendErr) {
+          console.warn('[Sync Backend fallback to GAS]:', backendErr);
+        }
+
+        if (!synced) {
+          const res = await fetch(`${GAS_ENDPOINT_URL}?action=getDashboardData&_t=${Date.now()}`);
+          if (res.ok) {
+            const json = await res.json();
+            if (json && json.data) {
+              const d = json.data;
+              setPlayers(Array.isArray(d.players) ? d.players : []);
+              setTransactions(Array.isArray(d.transactions) ? d.transactions : []);
+              setBets(Array.isArray(d.bets) ? d.bets : []);
+              setChatLogs(Array.isArray(d.chatLogs) ? d.chatLogs : []);
+              if (d.activeGroupId !== undefined) setActiveGroupId(d.activeGroupId);
+              if (d.lineGroups) setLineGroups(d.lineGroups);
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('rocket_sci_dashboard_cache', JSON.stringify(d));
+              }
+              addToast('✅ ดึงข้อมูลสดจาก Google Sheets สำเร็จ', 'success');
+            }
           }
         }
       }
@@ -2024,112 +2046,119 @@ export default function App() {
               Rocket Science Command System
             </h1>
           </div>
-          <p className="text-[11px] text-slate-500 mt-1.5 font-sans">
-            ระบบจัดการธุรกรรมเครดิตและบันทึกเวลาขีปนาวุธภาคสนาม (Rocket Telemetry & Credit Settle System)
+          <p className="text-[11px] text-slate-500 mt-1 font-sans">
+            ระบบจัดการธุรกรรมเครดิตและการแข่งขันบั้งไฟสดภาคสนาม
           </p>
         </div>
         <div className="flex gap-2 justify-center flex-wrap">
           <button 
             onClick={handleClosePortal}
-            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 flex items-center gap-1.5 transition-all shadow-xs active:scale-95"
+            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 flex items-center gap-1.5 transition-all active:scale-95"
             title="รีเซ็ตและปิดรอบพอร์ทัลปัจจุบัน โดยไม่ลบข้อมูลผู้เล่นหรือประวัติธุรกรรม"
           >
-            <RotateCcw size={14} className="text-amber-700" />
-            🔒 ปิดรอบพอร์ทัล (Close Portal Session)
+            <RotateCcw size={13} className="text-amber-700" />
+            <span>ปิดรอบพอร์ทัล</span>
           </button>
           <button 
             onClick={forceSyncFreshData}
-            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-sky-50 hover:bg-sky-100 border border-sky-300 text-sky-800 flex items-center gap-1.5 transition-all shadow-xs active:scale-95"
-            title="ดึงข้อมูลล่าสุดจาก Google Sheets และล้างแคชในเบราว์เซอร์ทันที"
+            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-50 hover:bg-sky-100 border border-sky-300 text-sky-800 flex items-center gap-1.5 transition-all active:scale-95"
+            title="ดึงข้อมูลล่าสุดจากฐานข้อมูลและล้างแคชในเบราว์เซอร์ทันที"
           >
-            <RotateCcw size={14} className="text-sky-600" />
-            🔄 ดึงข้อมูลสด (Sync Sheets)
+            <RefreshCw size={13} className="text-sky-600" />
+            <span>ซิงค์ข้อมูลสด</span>
           </button>
           <button 
             onClick={resetConsoleState}
-            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 flex items-center gap-1.5 transition-all shadow-xs active:scale-95"
+            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 flex items-center gap-1.5 transition-all active:scale-95"
             title="ล้างข้อมูลระบบทั้งหมดกลับสู่ค่าเริ่มต้นโรงงาน"
           >
-            <RotateCcw size={14} className="text-rose-600" />
-            ⚠️ ล้างระเบียนโรงงาน (Factory Reset)
+            <RotateCcw size={13} className="text-rose-600" />
+            <span>รีเซ็ตระบบ</span>
           </button>
           <button 
             onClick={handleAdminLogout}
-            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-slate-100 hover:bg-rose-50 hover:border-rose-300 border border-slate-300 text-slate-700 hover:text-rose-700 flex items-center gap-1.5 transition-all shadow-xs active:scale-95"
+            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 hover:bg-rose-50 hover:border-rose-300 border border-slate-300 text-slate-700 hover:text-rose-700 flex items-center gap-1.5 transition-all active:scale-95"
             title="ออกจากระบบแอดมิน"
           >
-            <LogOut size={14} className="text-slate-500" />
-            🚪 ออกจากระบบ (Logout)
+            <LogOut size={13} className="text-slate-500" />
+            <span>ออกจากระบบ</span>
           </button>
         </div>
       </header>
 
       {/* Main Sandbox Grid (Standardized to corporate light 100% width column) */}
-      <main className="w-full max-w-6xl space-y-6">
+      <main className="w-full max-w-6xl space-y-5">
         
         {/* Top metrics bar stretching 100% width */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="glass-panel p-4 flex flex-col justify-between glass-panel-hover relative overflow-hidden group">
-            {/* Watermark Icon */}
-            <Wallet size={110} className="absolute -bottom-6 -right-6 text-slate-100/70 group-hover:text-emerald-100/40 group-hover:scale-110 transition-all duration-500 ease-out pointer-events-none z-0" />
-            
-            <div className="relative z-10 flex flex-col justify-between h-full">
-              <span className="text-xs uppercase font-bold tracking-wider text-slate-500 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+          <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                 ยอดฝากเครดิตรวม
               </span>
-              <span className="text-xl font-black mt-2 text-slate-800 font-mono tracking-tight">
-                {transactions.filter(t => t.status === 'success').reduce((acc, t) => acc + t.actualAmount, 0).toLocaleString()} <span className="text-sm text-slate-500">THB</span>
+              <span className="p-1.5 rounded-lg bg-emerald-50 text-emerald-700">
+                <Wallet size={15} />
               </span>
+            </div>
+            <div className="mt-2.5 flex items-baseline gap-1.5">
+              <span className="text-2xl font-black text-slate-800 font-mono tracking-tight">
+                {transactions.filter(t => t.status === 'success').reduce((acc, t) => acc + t.actualAmount, 0).toLocaleString()}
+              </span>
+              <span className="text-xs font-bold text-slate-400">THB</span>
             </div>
           </div>
 
-          <div className="glass-panel p-4 flex flex-col justify-between glass-panel-hover relative overflow-hidden group">
-            {/* Watermark Icon */}
-            <ShieldAlert size={110} className="absolute -bottom-6 -right-6 text-slate-100/70 group-hover:text-amber-100/40 group-hover:scale-110 transition-all duration-500 ease-out pointer-events-none z-0" />
-            
-            {transactions.filter(t => t.status === 'escalated').length > 0 && (
-              <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-rose-500 animate-ping z-20"></div>
-            )}
-            
-            <div className="relative z-10 flex flex-col justify-between h-full">
-              <span className="text-xs uppercase font-bold tracking-wider text-slate-500">
+          <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors relative">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                 รอตรวจหลักฐาน
               </span>
-              <div className="flex items-baseline gap-1 mt-2">
-                <span className="text-xl font-black text-amber-600 font-mono tracking-tight">
-                  {transactions.filter(t => t.status === 'escalated').length}
-                </span>
-                <span className="text-sm text-slate-500">บิลค้าง</span>
-              </div>
+              <span className="p-1.5 rounded-lg bg-amber-50 text-amber-700 relative">
+                <ShieldAlert size={15} />
+                {transactions.filter(t => t.status === 'escalated').length > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+                )}
+              </span>
+            </div>
+            <div className="mt-2.5 flex items-baseline gap-1.5">
+              <span className="text-2xl font-black text-amber-600 font-mono tracking-tight">
+                {transactions.filter(t => t.status === 'escalated').length}
+              </span>
+              <span className="text-xs font-bold text-slate-400">บิลค้าง</span>
             </div>
           </div>
 
-          <div className="glass-panel p-4 flex flex-col justify-between glass-panel-hover relative overflow-hidden group">
-            {/* Watermark Icon */}
-            <Rocket size={110} className="absolute -bottom-6 -right-6 text-slate-100/70 group-hover:text-sky-100/40 group-hover:scale-110 transition-all duration-500 ease-out pointer-events-none z-0" />
-            
-            <div className="relative z-10 flex flex-col justify-between h-full">
-              <span className="text-xs uppercase font-bold tracking-wider text-slate-500">
+          <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                 แผลจับคู่สด
               </span>
-              <span className="text-xl font-black mt-2 text-sky-600 font-mono tracking-tight">
-                {bets.filter(b => b.status === 'matched').length} <span className="text-sm text-slate-500 font-sans font-bold">ดีลคู่</span>
+              <span className="p-1.5 rounded-lg bg-sky-50 text-sky-700">
+                <Rocket size={15} />
               </span>
+            </div>
+            <div className="mt-2.5 flex items-baseline gap-1.5">
+              <span className="text-2xl font-black text-sky-600 font-mono tracking-tight">
+                {bets.filter(b => b.status === 'matched').length}
+              </span>
+              <span className="text-xs font-bold text-slate-400">ดีลคู่</span>
             </div>
           </div>
 
-          <div className="glass-panel p-4 flex flex-col justify-between glass-panel-hover relative overflow-hidden group">
-            {/* Watermark Icon */}
-            <Users size={110} className="absolute -bottom-6 -right-6 text-slate-100/70 group-hover:text-indigo-100/40 group-hover:scale-110 transition-all duration-500 ease-out pointer-events-none z-0" />
-            
-            <div className="relative z-10 flex flex-col justify-between h-full">
-              <span className="text-xs uppercase font-bold tracking-wider text-slate-500">
+          <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                 บัญชีผู้เล่น
               </span>
-              <span className="text-xl font-black mt-2 text-indigo-600 font-mono tracking-tight">
-                {players.length} <span className="text-sm text-slate-500 font-sans font-bold">บัญชี</span>
+              <span className="p-1.5 rounded-lg bg-indigo-50 text-indigo-700">
+                <Users size={15} />
               </span>
+            </div>
+            <div className="mt-2.5 flex items-baseline gap-1.5">
+              <span className="text-2xl font-black text-indigo-700 font-mono tracking-tight">
+                {players.length}
+              </span>
+              <span className="text-xs font-bold text-slate-400">บัญชี</span>
             </div>
           </div>
         </div>
@@ -2219,66 +2248,48 @@ export default function App() {
 
           {/* TAB 1: ONSITE TELEMETRY RECEIVER & MECHANIC QUOTE SETUP */}
           {(adminTab === 'quote' || adminTab === 'rocket') && (
-            <div className="glass-panel p-5 space-y-5 relative overflow-hidden group">
-              {/* Watermark Icon */}
-              <Rocket size={140} className="absolute -bottom-10 -right-10 text-slate-100/30 group-hover:text-emerald-100/40 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
-              
-              <div className="relative z-10">
-                <div className="card-header-ref card-header-dot-emerald">
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center justify-center gap-2 font-heading">
-                    <Rocket size={14} className="text-emerald-600 animate-pulse" />
-                    ศูนย์ออกราคาช่างเปิดรับดวล (Original Mechanic Quote Setup & Broadcast)
+            <div className="glass-panel p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                <div>
+                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
+                    <Rocket size={18} className="text-emerald-600" />
+                    ออกราคาช่างเปิดรับดวล
                   </h3>
+                  <p className="text-xs text-slate-500 font-sans mt-0.5">
+                    ตั้งค่าชื่อค่ายช่าง บั้งไฟ และช่วงราคาเปิด (Min - Max) เพื่อบรอดแคสต์ลงกลุ่มดวลสด
+                  </p>
                 </div>
-                <p className="text-[11px] text-slate-500 text-center font-sans mt-2">
-                  ตั้งค่าชื่อค่ายช่าง บั้งไฟ ช่วงราคาช่างเปิด และบรอดแคสต์ส่งการ์ดราคาดวลสดลงกลุ่ม LINE OA ทันที
-                </p>
+                <span className="self-start sm:self-auto text-[10px] text-emerald-700 font-extrabold bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                  LINE Broadcast Ready
+                </span>
               </div>
 
               {/* Connected Channel Header */}
-              <div className="w-full rounded-xl border border-slate-200 bg-white p-3 flex justify-between items-center shadow-xs">
+              <div className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 flex justify-between items-center text-xs">
                 <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span className="text-xs font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-1.5 font-heading">
-                    📡 ONSITE TELEMETRY RECEIVER (ACTIVE)
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="text-[11px] font-bold text-slate-700 font-heading">
+                    กลุ่มเป้าหมายปัจจุบัน:
                   </span>
                   {activeGroupId ? (
-                    <span className="px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md text-[10px] font-mono font-bold flex items-center gap-1">
-                      💬 Connected Group: {(() => {
+                    <span className="px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded text-[11px] font-mono font-bold flex items-center gap-1">
+                      {(() => {
                         const activeObj = lineGroups.find(g => g.id === activeGroupId);
                         const isRaw = !activeObj || !activeObj.name || activeObj.name.startsWith('C') || activeObj.name.includes(activeGroupId) || !isNaN(activeObj.name);
                         return !isRaw ? activeObj.name : `🚀 กลุ่มดวลสด (#${activeGroupId.slice(-4)})`;
                       })()}
                     </span>
                   ) : (
-                    <span className="px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-md text-[10px] font-mono font-semibold">
-                      ⏳ Waiting for LINE Group chat message...
+                    <span className="px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 rounded text-[10.5px] font-semibold">
+                      ยังไม่มีกลุ่มที่เชื่อมต่อ
                     </span>
                   )}
                 </div>
-                <span className="text-[10px] text-slate-400 uppercase font-mono">Channel: Onsite-Radio-V2</span>
+                <span className="text-[10px] text-slate-400 font-mono">Channel: Onsite-Radio-V2</span>
               </div>
 
-              {/* CARD 1: Original Mechanic Quote Setup & Broadcast Card */}
-              <div className="p-5 bg-gradient-to-br from-emerald-50/80 via-white to-teal-50/50 rounded-2xl border border-emerald-200 shadow-sm space-y-4">
-                <div className="flex items-center justify-between border-b border-emerald-100 pb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="p-1.5 bg-emerald-600 text-white rounded-lg shadow-sm">
-                      <Rocket size={16} />
-                    </span>
-                    <div>
-                      <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider font-heading">
-                        CARD 1: 🚀 ราคาช่างเปิดรับดวล (Original Mechanic Quote Setup)
-                      </h3>
-                      <p className="text-[11px] text-slate-500 font-sans">
-                        ตั้งค่าชื่อค่ายช่าง บั้งไฟ และช่วงราคาช่างเปิด (Min - Max) เพื่อกระจายราคาท้าดวลลงกลุ่มดวลสด
-                      </p>
-                    </div>
-                  </div>
-                  <span className="text-[10px] text-emerald-700 font-extrabold bg-emerald-100 px-2.5 py-1 rounded-full border border-emerald-200">
-                    LINE Broadcast Ready
-                  </span>
-                </div>
+              {/* Form Card */}
+              <div className="p-4 bg-slate-50/50 rounded-xl border border-slate-200 space-y-3.5">
 
                 {/* Form Fields: Rocket Name & Range Min/Max */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -2394,9 +2405,10 @@ export default function App() {
                 {/* Broadcast Quote Primary Button */}
                 <button
                   onClick={() => handleBroadcastFastQuote()}
-                  className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 font-heading tracking-wide"
+                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs transition-all active:scale-95 flex items-center justify-center gap-2 font-heading tracking-wide"
                 >
-                  🚀 ประกาศออกราคาช่าง {targetMin && targetMax ? `${targetMin}-${targetMax}` : '(ระบุช่วงราคา)'} วินาที ลง{broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่มดวลสด' : 'กลุ่มที่เลือก'} (Broadcast Quote)
+                  <Rocket size={15} />
+                  <span>ประกาศราคาช่าง {targetMin && targetMax ? `${targetMin}-${targetMax}s` : ''} ลง{broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่มดวลสด' : 'กลุ่มที่เลือก'}</span>
                 </button>
 
                 {/* Tab 1 Footer Note & Shortcut to Broadcast Tab */}
@@ -2406,8 +2418,8 @@ export default function App() {
                     onClick={() => setAdminTab('broadcast')}
                     className="text-purple-700 hover:text-purple-900 font-bold underline flex items-center gap-1 transition-all active:scale-95"
                   >
-                    <Radio size={13} className="text-purple-600 animate-pulse" />
-                    ไปยังศูนย์บรอดแคสต์ & คีย์ลัดแอดมิน (Final Call / โมฆะรอบ) ➜
+                    <Radio size={13} className="text-purple-600" />
+                    <span>ไปยังศูนย์บรอดแคสต์ & คีย์ลัดแอดมิน ➜</span>
                   </button>
                 </div>
               </div>
@@ -2416,42 +2428,24 @@ export default function App() {
 
           {/* TAB 2: FINAL RESULT TELEMETRY & ROUND SETTLEMENT */}
           {adminTab === 'settle' && (
-            <div className="glass-panel p-5 space-y-5 relative overflow-hidden group">
-              {/* Watermark Icon */}
-              <Zap size={140} className="absolute -bottom-10 -right-10 text-slate-100/30 group-hover:text-sky-100/40 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
-              
-              <div className="relative z-10">
-                <div className="card-header-ref card-header-dot-sky">
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center justify-center gap-2 font-heading">
-                    <Zap size={14} className="text-sky-600 animate-pulse" />
-                    ป้อนผลเวลาบินจริง & ชำระแต้มดวล (Final Flight Time & Round Settlement)
+            <div className="glass-panel p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                <div>
+                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
+                    <Zap size={18} className="text-sky-600" />
+                    ป้อนผลเวลาบินจริง & สรุปผลรอบ
                   </h3>
+                  <p className="text-xs text-slate-500 font-sans mt-0.5">
+                    ป้อนเวลาวินาทีที่จรวดบินสำเร็จจริง เพื่อคำนวณผู้ชนะและโอนจ่ายแต้มผลการดวลทั้งหมดในรอบนี้
+                  </p>
                 </div>
-                <p className="text-[11px] text-slate-500 text-center font-sans mt-2">
-                  ป้อนผลเวลาวินาทีที่จรวดบินสำเร็จจริง เพื่อให้ระบบคำนวณผู้ชนะและโอนจ่ายแต้มผลการท้าดวลทั้งหมดในรอบนี้
-                </p>
+                <span className="self-start sm:self-auto text-[10px] text-sky-700 font-extrabold bg-sky-50 px-2.5 py-1 rounded-full border border-sky-200">
+                  Telemetry Engine
+                </span>
               </div>
 
-              {/* CARD 2: Final Result Telemetry & Round Settlement Card */}
-              <div className="p-5 bg-gradient-to-br from-sky-50/80 via-white to-indigo-50/50 rounded-2xl border border-sky-200 shadow-sm space-y-4">
-                <div className="flex items-center justify-between border-b border-sky-100 pb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="p-1.5 bg-sky-600 text-white rounded-lg shadow-sm">
-                      <Zap size={16} />
-                    </span>
-                    <div>
-                      <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider font-heading">
-                        🎯 ป้อนผลเวลาบินจริง & ชำระแต้มดวล (Final Flight Time & Round Settlement)
-                      </h3>
-                      <p className="text-[11px] text-slate-500 font-sans">
-                        ป้อนผลเวลาวินาทีที่จรวดบินสำเร็จจริง เพื่อให้ระบบคำนวณผู้ชนะและโอนจ่ายแต้มผลการท้าดวลทั้งหมดในรอบนี้
-                      </p>
-                    </div>
-                  </div>
-                  <span className="text-[10px] text-sky-700 font-extrabold bg-sky-100 px-2.5 py-1 rounded-full border border-sky-200">
-                    Telemetry Settlement Engine
-                  </span>
-                </div>
+              {/* Settlement Form Card */}
+              <div className="p-4 bg-slate-50/50 rounded-xl border border-slate-200 space-y-3.5">
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
                   {/* Actual Air Time Input */}
@@ -2594,20 +2588,18 @@ export default function App() {
             const totalBetVolume = bets.reduce((sum, b) => sum + (b.amount || 0), 0);
 
             return (
-              <div className="glass-panel p-5 space-y-5 relative overflow-hidden group">
-                {/* Watermark Icon */}
-                <Trophy size={140} className="absolute -bottom-10 -right-10 text-slate-100/30 group-hover:text-indigo-100/40 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
-
-                <div className="relative z-10 space-y-3">
-                  <div className="card-header-ref card-header-dot-indigo">
-                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center justify-center gap-2 font-heading">
-                      <Trophy size={14} className="text-indigo-600 animate-pulse" />
-                      กระดานดวลสด & สัญญาแข่งขัน (Live Game Contracts & Bets Board)
+              <div className="glass-panel p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                  <div>
+                    <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
+                      <Trophy size={18} className="text-indigo-600" />
+                      กระดานดวลสด & สัญญาแข่งขัน
                     </h3>
+                    <p className="text-xs text-slate-500 font-sans mt-0.5">
+                      ตรวจสอบคู่ดวลที่จับคู่แล้ว บิลที่รอคู่ดวล หรือถอนแผลคืนแต้มให้ผู้เล่น
+                    </p>
                   </div>
-                  <p className="text-[11px] text-slate-500 text-center font-sans">
-                    ตรวจสอบคู่ดวลที่จับคู่แล้ว บิลที่รอคู่ดวล หรือจัดการถอนแผลคืนเครดิตให้ผู้เล่นได้แบบเรียลไทม์
-                  </p>
+                </div>
 
                   {/* Summary Metric Cards */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-sans">
@@ -2791,7 +2783,6 @@ export default function App() {
                       </tbody>
                     </table>
                   </div>
-                </div>
               </div>
             );
           })()}
@@ -2831,21 +2822,20 @@ export default function App() {
             const rejectedCount = transactions.filter(t => t.status === 'rejected').length;
 
             return (
-              <div className="glass-panel p-5 space-y-4 relative overflow-hidden group">
-                <FileText size={140} className="absolute -bottom-10 -right-10 text-slate-100/30 group-hover:text-amber-100/40 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
-                
-                <div className="relative z-10 space-y-3">
-                  <div className="card-header-ref card-header-dot-amber">
-                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center justify-center gap-2 font-heading">
-                      <FileText size={14} className="text-amber-600 animate-pulse" />
-                      {isReviewOnly ? 'ศูนย์จัดการธุรกรรมรออนุมัติ (Escalation & Withdrawal Overseer)' : 'ประวัติทำรายการฝาก-ถอนของเงินเครดิตระบบ (Credit Transactions Archive)'}
+              <div className="glass-panel p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                  <div>
+                    <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
+                      <FileText size={18} className={isReviewOnly ? 'text-amber-600' : 'text-slate-600'} />
+                      {isReviewOnly ? 'ธุรกรรมรอตรวจสอบสลิป & คำขอถอน' : 'ประวัติการทำรายการฝาก-ถอนทั้งหมด'}
                     </h3>
+                    <p className="text-xs text-slate-500 font-sans mt-0.5">
+                      {isReviewOnly 
+                        ? 'สลิปโอนที่ยอดไม่ตรง หรือคำขอถอนเงินที่รอแอดมินตรวจสอบและยืนยัน'
+                        : 'บันทึกประวัติการเติมเงิน สแกนสลิป และถอนเครดิตทั้งหมดในระบบ'}
+                    </p>
                   </div>
-                  <p className="text-[11px] text-slate-500 text-center font-sans">
-                    {isReviewOnly 
-                      ? 'รายการสลิปโอนที่มีการเอสคาเลท หรือคำขอถอนเงินที่รอแอดมินยืนยัน สามารถค้นหา กรอง และอนุมัติได้ทันที'
-                      : 'ตารางบันทึกประวัติการทำรายการเติมเงิน สแกนสลิป และถอนเครดิตทั้งหมดในระบบ'}
-                  </p>
+                </div>
 
                   {/* Filter & Search Bar */}
                   <div className="flex items-center justify-between gap-3 flex-wrap bg-slate-50 p-3 rounded-xl border border-slate-200">
@@ -2918,7 +2908,6 @@ export default function App() {
                       )}
                     </div>
                   </div>
-                </div>
 
                 {/* High-Density Compact Transaction Table */}
                 <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
@@ -3027,28 +3016,18 @@ export default function App() {
             );
           })()}
 
-          {/* TAB 3: PLAYERS CREDIT */}
+          {/* TAB 5: PLAYERS CREDIT */}
           {adminTab === 'players' && (
-            <div className="glass-panel p-5 space-y-6 relative overflow-hidden group">
-              {/* Watermark Icon */}
-              <Users size={140} className="absolute -bottom-10 -right-10 text-slate-100/30 group-hover:text-indigo-100/40 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
-              
-              <div className="relative z-10">
-                <div className="card-header-ref card-header-dot-indigo">
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center justify-center gap-2 font-heading">
-                    <Users size={14} className="text-indigo-600" />
-                    จัดการบัญชีผู้เล่น (Player Account Management)
-                  </h3>
-                </div>
-                <p className="text-[11px] text-slate-500 text-center font-sans mt-2 mb-4">
-                  แก้ไขชื่อ เครดิต บัญชีธนาคาร หรือลบผู้เล่นได้จากหน้านี้โดยตรง
-                </p>
-              </div>
-
-              {/* Header actions */}
-              <div className="flex items-center justify-between flex-wrap gap-2 relative z-10">
+            <div className="glass-panel p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
                 <div>
-                  <span className="text-xs font-bold text-slate-700">รายชื่อสมาชิกทั้งหมด</span>
+                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
+                    <Users size={18} className="text-teal-600" />
+                    จัดการบัญชีผู้เล่น
+                  </h3>
+                  <p className="text-xs text-slate-500 font-sans mt-0.5">
+                    ตรวจสอบรายชื่อ แก้ไขเครดิต บัญชีธนาคาร หรือเพิ่มสมาชิกใหม่
+                  </p>
                 </div>
                 <button
                   onClick={() => { 
@@ -3059,9 +3038,9 @@ export default function App() {
                     setCreatePlayerModal(true); 
                     setCreatePlayerForm({ lineId: randomId, name: '', balance: 0 }); 
                   }}
-                  className="flex items-center gap-1.5 px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl shadow transition-all active:scale-95"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-lg transition-all active:scale-95"
                 >
-                  <span className="text-base leading-none">＋</span> เพิ่มผู้เล่น
+                  <span>＋ เพิ่มผู้เล่น</span>
                 </button>
               </div>
 
@@ -3163,30 +3142,27 @@ export default function App() {
 
           {/* TAB 7: BROADCAST HUB & FIELD ADMIN HOTKEYS */}
           {adminTab === 'broadcast' && (
-            <div className="glass-panel p-5 space-y-6 relative overflow-hidden group">
-              {/* Watermark Icon */}
-              <Radio size={140} className="absolute -bottom-10 -right-10 text-slate-100/30 group-hover:text-purple-100/40 group-hover:scale-105 transition-all duration-500 ease-out pointer-events-none z-0" />
-
-              <div className="relative z-10 space-y-2">
-                <div className="card-header-ref card-header-dot-purple">
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center justify-center gap-2 font-heading">
-                    <Radio size={15} className="text-purple-600 animate-pulse" />
-                    ศูนย์บรอดแคสต์ & คีย์ลัดสั่งการสนาม (Broadcast Hub & Field Controls)
+            <div className="glass-panel p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                <div>
+                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
+                    <Radio size={18} className="text-purple-600" />
+                    ศูนย์บรอดแคสต์ & คีย์ลัดสั่งการสนาม
                   </h3>
+                  <p className="text-xs text-slate-500 font-sans mt-0.5">
+                    ควบคุมรอบฉุกเฉิน ปิดรับดวล ส่งคู่มือกติกา ประกาศข้อความสนามเข้ากลุ่ม LINE
+                  </p>
                 </div>
-                <p className="text-[11px] text-slate-500 text-center font-sans">
-                  ควบคุมรอบฉุกเฉิน ปิดรับดวล ส่งคู่มือกติกา ประกาศข้อความสนามเข้ากลุ่ม LINE และจัดการการเชื่อมต่อห้องแชต
-                </p>
               </div>
 
               {/* Target Group Selector (Applies to all actions in this tab) */}
-              <div className="bg-purple-50/60 border border-purple-200 rounded-xl p-3 flex items-center justify-between flex-wrap gap-3 relative z-10">
+              <div className="bg-purple-50/60 border border-purple-200 rounded-xl p-3 flex items-center justify-between flex-wrap gap-3">
                 <div className="flex items-center gap-2">
-                  <span className="p-1.5 bg-purple-600 text-white rounded-lg shadow-xs">
+                  <span className="p-1.5 bg-purple-600 text-white rounded-lg">
                     <Users size={14} />
                   </span>
                   <div>
-                    <span className="text-xs font-black text-purple-950 font-heading block">กลุ่มเป้าหมายการส่งข้อความ (Target Broadcast Audience):</span>
+                    <span className="text-xs font-black text-purple-950 font-heading block">กลุ่มเป้าหมายการส่งข้อความ:</span>
                     <span className="text-[10px] text-purple-700 font-sans">คำสั่งและประกาศทั้งหมดในหน้านี้จะส่งไปยังกลุ่มที่เลือก</span>
                   </div>
                 </div>
@@ -3196,7 +3172,7 @@ export default function App() {
                     onChange={(e) => setBroadcastTargetGroup(e.target.value)}
                     className="w-full bg-white border border-purple-200 text-purple-950 font-bold px-3 py-1.5 rounded-lg text-xs focus:ring-2 focus:ring-purple-500 focus:outline-none"
                   >
-                    <option value="ALL">🌐 กระจายทุกกลุ่มดวลสด (Broadcast All Groups)</option>
+                    <option value="ALL">🌐 กระจายทุกกลุ่มดวลสด (All Groups)</option>
                     {lineGroups.map((g, idx) => {
                       const isRawId = !g.name || g.name.startsWith('C') || g.name.includes(g.id) || !isNaN(g.name);
                       const displayName = !isRawId ? g.name : `🚀 กลุ่มดวลสด #${idx + 1} (${g.id.slice(-4)})`;
@@ -3211,10 +3187,10 @@ export default function App() {
               </div>
 
               {/* SECTION 1: FIELD OPERATION & EMERGENCY HOTKEYS */}
-              <div className="space-y-3 relative z-10">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                   <span className="text-xs font-black text-slate-800 uppercase tracking-wider font-heading flex items-center gap-1.5">
-                    <span>⚡ 1. ปุ่มคีย์ลัดสั่งการสนาม & กฎกติกา (Field Operation Hotkeys)</span>
+                    <span>⚡ 1. ปุ่มคีย์ลัดสั่งการสนาม & กฎกติกา</span>
                   </span>
                   <span className="text-[10px] text-slate-400 font-sans">ส่งการ์ด Flex แจ้งเตือนด่วนเข้ากลุ่ม LINE ทันที</span>
                 </div>
@@ -3332,10 +3308,10 @@ export default function App() {
               </div>
 
               {/* SECTION 2: CUSTOM FIELD ANNOUNCEMENT */}
-              <div className="space-y-3 relative z-10">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                   <span className="text-xs font-black text-slate-800 uppercase tracking-wider font-heading flex items-center gap-1.5">
-                    <span>📢 2. ส่งประกาศอิสระเข้ากลุ่ม LINE (Custom Field Announcement)</span>
+                    <span>📢 2. ส่งประกาศอิสระเข้ากลุ่ม LINE</span>
                   </span>
                   <span className="text-[10px] text-slate-400 font-sans">พิมพ์ข้อความแจ้งเตือนหรือข้อมูลสนามส่งตรงเข้ากลุ่ม</span>
                 </div>
@@ -3427,10 +3403,10 @@ export default function App() {
               </div>
 
               {/* SECTION 3: LINE GROUP CONNECTION & DIAGNOSTICS */}
-              <div className="space-y-3 relative z-10">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                   <span className="text-xs font-black text-slate-800 uppercase tracking-wider font-heading flex items-center gap-1.5">
-                    <span>📡 3. จัดการการเชื่อมต่อกลุ่ม LINE (LINE Group Connection & Diagnostics)</span>
+                    <span>📡 3. จัดการการเชื่อมต่อกลุ่ม LINE</span>
                   </span>
                   <span className="text-[10px] text-slate-400 font-sans">ตรวจสอบสถานะ Webhook และทดสอบการส่งข้อความ</span>
                 </div>

@@ -26,11 +26,13 @@
   --font-heading: 'Google Sans', 'Anuphan', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-/* Base resets & typography */
+/* Base resets & typography (Zero Box-Shadow Standard) */
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  box-shadow: none !important;
+  text-shadow: none !important;
 }
 
 /* Contrast Rule 1: Solid Dark / Deep Red / Deep Blue / Deep Slate -> White text */
@@ -95,21 +97,17 @@ body {
   background: var(--line-header);
 }
 
-/* Glassmorphism panels (Sleek light-mode card system) */
+/* Clean Corporate Cards */
 .glass-panel {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border-radius: 18px;
-  box-shadow: 0 4px 20px -2px var(--glass-shadow);
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  transition: all 0.2s ease-in-out;
 }
 
 .glass-panel-hover:hover {
-  border-color: rgba(2, 132, 199, 0.2);
-  box-shadow: 0 10px 30px -5px rgba(2, 132, 199, 0.08);
-  transform: translateY(-1px);
+  border-color: #cbd5e1;
+  background-color: #ffffff;
 }
 
 /* Text styles */
@@ -194,114 +192,10 @@ body {
   color: #c2410c;
 }
 
-/* --- Professional PowerPoint Reference Dashboard Styling --- */
-
-/* Centered card header with thin line and colored circular dot below it */
+/* Clean Corporate Section Headers */
 .card-header-ref {
   text-align: center;
-  position: relative;
-  padding-bottom: 12px;
-  margin-bottom: 16px;
-}
-
-.card-header-ref::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 20%;
-  right: 20%;
-  height: 1px;
-  background: linear-gradient(to right, transparent, #cbd5e1 20%, #cbd5e1 80%, transparent);
-}
-
-.card-header-dot-sky::before {
-  content: '';
-  position: absolute;
-  bottom: -4px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background-color: #0ea5e9; /* Sky blue dot */
-  border: 2px solid white;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-  z-index: 10;
-}
-
-.card-header-dot-rose::before {
-  content: '';
-  position: absolute;
-  bottom: -4px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background-color: #e11d48; /* Rose dot */
-  border: 2px solid white;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-  z-index: 10;
-}
-
-.card-header-dot-emerald::before {
-  content: '';
-  position: absolute;
-  bottom: -4px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background-color: #10b981; /* Emerald dot */
-  border: 2px solid white;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-  z-index: 10;
-}
-
-.card-header-dot-indigo::before {
-  content: '';
-  position: absolute;
-  bottom: -4px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background-color: #6366f1; /* Indigo dot */
-  border: 2px solid white;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-  z-index: 10;
-}
-
-.card-header-dot-amber::before {
-  content: '';
-  position: absolute;
-  bottom: -4px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background-color: #f59e0b; /* Amber dot */
-  border: 2px solid white;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-  z-index: 10;
-}
-
-.card-header-dot-teal::before {
-  content: '';
-  position: absolute;
-  bottom: -4px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background-color: #0d9488; /* Teal dot */
-  border: 2px solid white;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-  z-index: 10;
+  margin-bottom: 12px;
 }
 
 /* Watermark backdrop image/icon containers */

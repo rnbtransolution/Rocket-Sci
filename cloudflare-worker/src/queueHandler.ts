@@ -1,10 +1,15 @@
-import { Env, LineEvent, Order, PlayerProfile, RocketRound } from './types.js';
+import { Env, LineEvent, Order, PlayerProfile, RocketRound, Transaction } from './types.js';
 import {
   generateOrderFlex,
   generateMatchNotificationFlex,
   generateBalanceFlex,
   generatePendingBoardFlex,
   generateRuleGuideFlex,
+  generateMainMenuFlex,
+  generateDepositFlex,
+  generateDepositInvoiceFlex,
+  generateWithdrawalFlex,
+  generateBankRegistrationFlex,
 } from './flexTemplates.js';
 
 export const RULE_GUIDE_TEXT = `📖 [คู่มือคีย์เวิร์ดกติกาการเล่น]
@@ -73,13 +78,166 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     if (!userId) return;
 
     // Resolve Player Profile with KV caching
-    const profile = await getOrCreatePlayerProfile(userId, env);
+    const profile = await getOrCreatePlayerProfile(userId, env, ctx);
 
-    // ── 1. Balance Inspection ("เช็คยอด", "คงเหลือ", "balance") ──
+    // ── 1. Balance Inspection ("เช็คยอด", "คงเหลือ", "balance", "สอบถามยอด", "ยอด", "ยอดเงิน", "ดูยอด", "กระเป๋า") ──
     const clean = text.replace(/\s+/g, '').toLowerCase();
-    if (clean === 'เช็คยอด' || clean === 'คงเหลือ' || clean === 'balance') {
+    const balanceKeywords = ['เช็คยอด', 'คงเหลือ', 'balance', 'สอบถามยอด', 'ยอด', 'ยอดเงิน', 'ดูยอด', 'กระเป๋า', 'กระเป๋าเงิน'];
+    if (balanceKeywords.includes(clean)) {
       const balanceFlex = generateBalanceFlex(profile.displayName, profile.balance);
       await deliverPrivateNotice(userId, replyToken, groupId, balanceFlex, env);
+      return;
+    }
+
+    // ── 1.1 Main Menu ("เมนู", "เมนูหลัก", "menu", "เริ่ม", "start", "ช่วยเหลือ", "help") ──
+    const menuKeywords = ['เมนู', 'เมนูหลัก', 'menu', 'เริ่ม', 'start', 'ช่วยเหลือ', 'help'];
+    if (menuKeywords.includes(clean)) {
+      if (isGroup) {
+        await deliverPrivateNotice(
+          userId,
+          replyToken,
+          groupId,
+          '💡 [เมนูระบบดวลส่วนตัว]\nเมนูเช็คยอด เติมเงิน ถอนเงิน สามารถกดทักแชตตรงหา LINE OA เพื่อใช้งานได้ทันทีครับ 🚀\nสำหรับในกลุ่มนี้ พิมพ์ "กระดานดวล" เพื่อดูแผลค้างครับ',
+          env
+        );
+      } else {
+        const menuFlex = generateMainMenuFlex(profile.displayName, profile.balance);
+        await deliverPrivateNotice(userId, replyToken, groupId, menuFlex, env);
+      }
+      return;
+    }
+
+    // ── 1.2 Deposit Intent ("ฝากเงิน", "เติมเงิน", "deposit", "เติมเครดิต", "ฝาก") ──
+    const depositKeywords = ['ฝากเงิน', 'เติมเงิน', 'deposit', 'เติมเครดิต', 'ฝาก'];
+    if (depositKeywords.includes(clean)) {
+      const depositFlex = generateDepositFlex();
+      await deliverPrivateNotice(userId, replyToken, groupId, depositFlex, env);
+      return;
+    }
+
+    // ── 1.3 Deposit Amount Request (in 1-on-1 private chat: e.g. "1000", "ฝาก 1000", "ฝาก1000") ──
+    const pureNumRegex = /^\d+$/;
+    const depositTextRegex = /^(?:ฝาก|ฝากเงิน|เติม|เติมเงิน)\s*(\d+)$/;
+    let depositAmt: number | null = null;
+    if (!isGroup && pureNumRegex.test(clean)) {
+      depositAmt = parseInt(clean, 10);
+    } else if (depositTextRegex.test(clean)) {
+      depositAmt = parseInt(clean.match(depositTextRegex)![1], 10);
+    }
+
+    if (depositAmt !== null) {
+      if (depositAmt < 100 || depositAmt > 50000) {
+        await deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ยอดฝากขั้นต่ำ 100 บาท สูงสุด 50,000 บาทครับ', env);
+        return;
+      }
+      const txId = `TX${Math.floor(100000 + Math.random() * 900000)}`;
+      const nowStr = new Date().toLocaleTimeString('th-TH', { hour12: false });
+      const newTx: Transaction = {
+        id: txId,
+        playerId: profile.shortId,
+        playerName: profile.displayName,
+        requestedAmount: depositAmt,
+        actualAmount: 0,
+        slipRef: '',
+        status: 'escalated',
+        reviewReason: 'รอผู้ใช้แนบสลิปโอนเงิน',
+        timestamp: nowStr,
+        type: 'deposit',
+        createdAt: Date.now(),
+      };
+      await addTransaction(newTx, env, ctx);
+      const invoiceFlex = generateDepositInvoiceFlex(depositAmt);
+      await deliverPrivateNotice(userId, replyToken, groupId, invoiceFlex, env);
+      return;
+    }
+
+    // ── 1.4 Bank Account Registration ("บัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ-สกุล]") ──
+    const bankRegRegex = /^(?:บัญชี|ลงทะเบียนบัญชี|bank)\s+(\S+)\s+(\d{8,15})\s+(.+)$/i;
+    if (bankRegRegex.test(text)) {
+      const match = text.match(bankRegRegex)!;
+      profile.bankName = match[1];
+      profile.accountNumber = match[2];
+      profile.accountName = match[3].trim();
+      await savePlayerProfile(profile, env, ctx);
+      await deliverPrivateNotice(
+        userId,
+        replyToken,
+        groupId,
+        `✅ บันทึกข้อมูลบัญชีธนาคารเรียบร้อยแล้วครับ!\n🏦 ธนาคาร: ${profile.bankName}\n🔢 เลขบัญชี: ${profile.accountNumber}\n👤 ชื่อ: ${profile.accountName}\n\nท่านสามารถพิมพ์ "ถอน [จำนวน]" เพื่อแจ้งถอนได้ทันทีครับ 💸`,
+        env
+      );
+      return;
+    }
+
+    // ── 1.5 Withdrawal Intent ("ถอน", "ถอนเงิน", "ถอนยอด", "withdraw") ──
+    const withdrawKeywords = ['ถอน', 'ถอนเงิน', 'ถอนยอด', 'withdraw'];
+    if (withdrawKeywords.includes(clean)) {
+      if (profile.bankName && profile.accountNumber) {
+        const withdrawFlex = generateWithdrawalFlex(
+          profile.bankName,
+          profile.accountNumber,
+          profile.accountName || profile.displayName,
+          profile.balance
+        );
+        await deliverPrivateNotice(userId, replyToken, groupId, withdrawFlex, env);
+      } else {
+        const bankRegFlex = generateBankRegistrationFlex();
+        await deliverPrivateNotice(userId, replyToken, groupId, bankRegFlex, env);
+      }
+      return;
+    }
+
+    // ── 1.6 Withdrawal Execution ("ถอน 500", "ถอน500") ──
+    const withdrawAmtRegex = /^(?:ถอน|ถอนเงิน|ถอนยอด)\s*(\d+)$/;
+    if (withdrawAmtRegex.test(clean)) {
+      const match = clean.match(withdrawAmtRegex)!;
+      const withdrawAmt = parseInt(match[1], 10);
+      if (withdrawAmt < 100) {
+        await deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ยอดถอนขั้นต่ำ 100 pt ครับ', env);
+        return;
+      }
+      if (profile.balance < withdrawAmt) {
+        await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ แต้มคงเหลือไม่พอครับ (มี ${profile.balance} pt ต้องการถอน ${withdrawAmt} pt)`, env);
+        return;
+      }
+      if (!profile.bankName || !profile.accountNumber) {
+        await deliverPrivateNotice(
+          userId,
+          replyToken,
+          groupId,
+          '❌ ท่านยังไม่ได้ลงทะเบียนบัญชีรับเงิน กรุณาพิมพ์:\nบัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ-สกุล]\nเช่น บัญชี กสิกร 0123456789 สมชาย ใจดี',
+          env
+        );
+        return;
+      }
+
+      profile.balance -= withdrawAmt;
+      await savePlayerProfile(profile, env, ctx);
+
+      const txId = `WD${Math.floor(100000 + Math.random() * 900000)}`;
+      const nowStr = new Date().toLocaleTimeString('th-TH', { hour12: false });
+      const newTx: Transaction = {
+        id: txId,
+        playerId: profile.shortId,
+        playerName: profile.displayName,
+        requestedAmount: withdrawAmt,
+        actualAmount: withdrawAmt,
+        slipRef: '',
+        status: 'escalated',
+        reviewReason: `แจ้งถอนเข้า ${profile.bankName} ${profile.accountNumber} (${profile.accountName || profile.displayName})`,
+        timestamp: nowStr,
+        type: 'withdraw',
+        createdAt: Date.now(),
+      };
+      await addTransaction(newTx, env, ctx);
+
+      await deliverPrivateNotice(
+        userId,
+        replyToken,
+        groupId,
+        `💸 ส่งคำขอถอนเงิน ${withdrawAmt.toLocaleString()} pt เรียบร้อยแล้วครับ!\nเข้าบัญชี: ${profile.bankName} ${profile.accountNumber} (${profile.accountName || profile.displayName})\nแต้มคงเหลือ: ${profile.balance.toLocaleString()} pt\nแอดมินกำลังดำเนินการโอนเงินให้ครับ 🙏`,
+        env
+      );
       return;
     }
 
@@ -245,6 +403,38 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       }
       return;
     }
+
+    // ── Fallback for Unrecognized Private Messages ──
+    if (!isGroup) {
+      const fallbackMsg = `🤖 ได้รับข้อความแล้วครับ 💬\nท่านสามารถพิมพ์ "เมนู" เพื่อเปิดเมนูทำรายการ หรือพิมพ์ "ฝากเงิน", "เช็คยอด", "ถอนเงิน", "กติกา" ได้ทันทีครับ 🚀`;
+      await deliverPrivateNotice(userId, replyToken, null, fallbackMsg, env);
+      return;
+    }
+  }
+
+  // ── Image Message Handler (Slip Upload) ──
+  if (event.type === 'message' && event.message?.type === 'image' && userId) {
+    const profile = await getOrCreatePlayerProfile(userId, env, ctx);
+    const replyToken = event.replyToken;
+    const txId = `TX${Math.floor(100000 + Math.random() * 900000)}`;
+    const nowStr = new Date().toLocaleTimeString('th-TH', { hour12: false });
+    const newTx: Transaction = {
+      id: txId,
+      playerId: profile.shortId,
+      playerName: profile.displayName,
+      requestedAmount: 1000,
+      actualAmount: 0,
+      slipRef: event.message.id,
+      status: 'escalated',
+      reviewReason: 'แนบรูปสลิปโอนเงิน - รอแอดมินตรวจสอบยอด',
+      timestamp: nowStr,
+      type: 'deposit',
+      createdAt: Date.now(),
+    };
+    await addTransaction(newTx, env, ctx);
+    const msg = `✅ ได้รับรูปสลิปโอนเงินเรียบร้อยแล้วครับ! (รหัสรายการ: #${txId})\nระบบได้ส่งให้แอดมินตรวจสอบยอดเงินเข้าบัญชีเรียบร้อย เมื่อตรวจสอบสำเร็จแต้มจะเข้าทันทีครับ 🙏`;
+    await deliverPrivateNotice(userId, replyToken, groupId, msg, env);
+    return;
   }
 
   // ── Postback Event (from Button Click in LINE) ──
@@ -254,8 +444,8 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     if (action === 'match_order') {
       const orderNo = params.get('order_id') || '';
       const amount = parseInt(params.get('amount') || '0', 10);
-      const profile = await getOrCreatePlayerProfile(userId, env);
-      await handleMatchOrder(orderNo, amount || undefined, profile, userId, groupId, event.replyToken, env);
+      const profile = await getOrCreatePlayerProfile(userId, env, ctx);
+      await handleMatchOrder(orderNo, amount || undefined, profile, userId, groupId, event.replyToken, env, ctx);
     }
   }
 }
@@ -345,7 +535,7 @@ async function handleCreateOrder(
 
   // Persist KV state concurrently (0ms blocking on critical path; private DM confirmation omitted to preserve quota)
   const backgroundPersistence = Promise.all([
-    env.KV_CACHE.put(`USER_${userId}`, JSON.stringify(profile)),
+    savePlayerProfile(profile, env, ctx),
     env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder)),
     addToPendingOrdersList(newOrder, env),
   ]);
@@ -402,6 +592,9 @@ async function handleMatchOrder(
     return;
   }
 
+  // Deduct matcher balance BEFORE saving
+  profile.balance -= effectiveAmt;
+
   // Update order status in KV
   order.status = 'matched';
   order.matcherId = profile.shortId;
@@ -411,11 +604,8 @@ async function handleMatchOrder(
   const updatePersistence = Promise.all([
     env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(order)),
     removeFromPendingOrdersList(resolvedNo, env),
-    env.KV_CACHE.put(`USER_${userId}`, JSON.stringify(profile)),
+    savePlayerProfile(profile, env, ctx),
   ]);
-
-  // Deduct matcher balance
-  profile.balance -= effectiveAmt;
 
   // Generate match card
   const matchFlex = generateMatchNotificationFlex(order);
@@ -469,7 +659,7 @@ async function cancelOrder(orderNo: string, shortId: string, env: Env): Promise<
     if (profileRaw) {
       const p = JSON.parse(profileRaw) as PlayerProfile;
       p.balance += order.amount;
-      await env.KV_CACHE.put(`USER_${creatorLineId}`, JSON.stringify(p));
+      await savePlayerProfile(p, env);
     }
   }
 
@@ -603,13 +793,138 @@ async function resolveOrderNumber(
   return null;
 }
 
-// ── User Profile & Group Helpers ──
+// ── User Profile, Transactions & Group Helpers ──
 
-async function getOrCreatePlayerProfile(userId: string, env: Env): Promise<PlayerProfile> {
+export async function getPlayersList(env: Env): Promise<any[]> {
+  try {
+    const cached = await env.KV_CACHE.get('PLAYERS_LIST');
+    let list: PlayerProfile[] = [];
+    if (cached) {
+      try { list = JSON.parse(cached); } catch (_) {}
+    }
+
+    if (!list || list.length === 0) {
+      const scanRes = await env.KV_CACHE.list({ prefix: 'USER_' });
+      if (scanRes.keys && scanRes.keys.length > 0) {
+        const promises = scanRes.keys.map(k => env.KV_CACHE.get(k.name));
+        const raws = await Promise.all(promises);
+        list = raws.filter(Boolean).map(r => JSON.parse(r!) as PlayerProfile);
+        if (list.length > 0) {
+          await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(list));
+        }
+      }
+    }
+
+    const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
+    return list.map((p, idx) => ({
+      id: p.shortId || p.lineUserId,
+      name: p.displayName || 'ผู้เล่น',
+      balance: Number(p.balance) || 0,
+      joinDate: p.registeredAt ? new Date(p.registeredAt).toLocaleDateString('th-TH') : '-',
+      bankName: p.bankName || '',
+      bankAccount: p.accountNumber || '',
+      accountName: p.accountName || p.displayName || '',
+      isUser: false,
+      avatar: avatars[idx % avatars.length],
+      lineUserId: p.lineUserId || '',
+    }));
+  } catch (err) {
+    console.error('[Worker] getPlayersList error:', err);
+    return [];
+  }
+}
+
+export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: ExecutionContext): Promise<void> {
+  try {
+    profile.updatedAt = Date.now();
+    const cacheKey = `USER_${profile.lineUserId}`;
+    await env.KV_CACHE.put(cacheKey, JSON.stringify(profile));
+    if (profile.shortId) {
+      await env.KV_CACHE.put(`RAW_LINE_${profile.shortId}`, profile.lineUserId);
+    }
+
+    let list: PlayerProfile[] = [];
+    const cached = await env.KV_CACHE.get('PLAYERS_LIST');
+    if (cached) {
+      try { list = JSON.parse(cached); } catch (_) {}
+    }
+    const idx = list.findIndex(p => p.lineUserId === profile.lineUserId || (profile.shortId && p.shortId === profile.shortId));
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...profile };
+    } else {
+      list.push(profile);
+    }
+    await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(list));
+
+    // Offload sync to Google Sheets in background
+    if (env.GAS_FALLBACK_URL) {
+      const syncPromise = fetch(env.GAS_FALLBACK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          functionName: 'adminSetPlayerBalance',
+          args: [profile.lineUserId, profile.balance],
+          apiKey: env.ADMIN_API_KEY,
+        }),
+      }).catch((e) => console.warn('[Worker] Sheets player balance sync error:', e));
+      if (ctx) ctx.waitUntil(syncPromise);
+    }
+  } catch (err) {
+    console.error('[Worker] savePlayerProfile error:', err);
+  }
+}
+
+export async function getTransactionsList(env: Env): Promise<Transaction[]> {
+  try {
+    const cached = await env.KV_CACHE.get('TRANSACTIONS_LIST');
+    if (cached) {
+      return JSON.parse(cached);
+    }
+    return [];
+  } catch (err) {
+    console.error('[Worker] getTransactionsList error:', err);
+    return [];
+  }
+}
+
+export async function addTransaction(tx: Transaction, env: Env, ctx?: ExecutionContext): Promise<void> {
+  try {
+    const list = await getTransactionsList(env);
+    const updated = [tx, ...list.filter(t => t.id !== tx.id)].slice(0, 100);
+    await env.KV_CACHE.put('TRANSACTIONS_LIST', JSON.stringify(updated));
+
+    if (env.GAS_FALLBACK_URL) {
+      const syncPromise = fetch(env.GAS_FALLBACK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          functionName: 'logTransaction',
+          args: [
+            tx.playerId,
+            tx.playerName,
+            tx.requestedAmount,
+            tx.actualAmount,
+            tx.id,
+            tx.status,
+            tx.reviewReason,
+          ],
+          apiKey: env.ADMIN_API_KEY,
+        }),
+      }).catch((e) => console.warn('[Worker] Sheets tx sync error:', e));
+      if (ctx) ctx.waitUntil(syncPromise);
+    }
+  } catch (err) {
+    console.error('[Worker] addTransaction error:', err);
+  }
+}
+
+export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: ExecutionContext): Promise<PlayerProfile> {
   const cacheKey = `USER_${userId}`;
   const cached = await env.KV_CACHE.get(cacheKey);
   if (cached) {
-    return JSON.parse(cached);
+    const profile = JSON.parse(cached) as PlayerProfile;
+    await savePlayerProfile(profile, env, ctx);
+    return profile;
   }
 
   // Fetch LINE user display name via Messaging API
@@ -634,8 +949,7 @@ async function getOrCreatePlayerProfile(userId: string, env: Env): Promise<Playe
     updatedAt: Date.now(),
   };
 
-  await env.KV_CACHE.put(cacheKey, JSON.stringify(newProfile));
-  await env.KV_CACHE.put(`RAW_LINE_${shortId}`, userId);
+  await savePlayerProfile(newProfile, env, ctx);
   return newProfile;
 }
 

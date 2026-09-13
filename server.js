@@ -17,7 +17,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
 const LINE_CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET || '';
-const READ_ONLY_RPC = new Set(['getDashboardData', 'verifyMockSlipFromClient', 'adminLogin']);
+const READ_ONLY_RPC = new Set(['getDashboardData', 'verifyMockSlipFromClient', 'adminLogin', 'syncWithSheets']);
 
 if (!ADMIN_API_KEY) {
   console.warn('[Auth] ADMIN_API_KEY is not set — mutating /api/run calls will be rejected.');
@@ -322,6 +322,11 @@ app.post('/api/run', requireAdminApiKey, async (req, res) => {
 
       case 'adminTestPushGroupMessage':
         result = await lineBot.adminTestPushGroupMessage(args[0]);
+        break;
+
+      case 'syncWithSheets':
+        await db.init(false, true);
+        result = db.getDashboardData();
         break;
 
       default:
