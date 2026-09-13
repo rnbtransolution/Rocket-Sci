@@ -1078,7 +1078,7 @@ export function generateDepositInvoiceFlex(depositAmt: number): any {
             type: 'box',
             layout: 'vertical',
             margin: 'xs',
-            spacing: 'xxs',
+            spacing: 'xs',
             contents: [
               {
                 type: 'box',
@@ -1181,7 +1181,7 @@ export function generateWithdrawalFlex(bankName: string, accountNumber: string, 
             type: 'box',
             layout: 'vertical',
             margin: 'xs',
-            spacing: 'xxs',
+            spacing: 'xs',
             contents: [
               {
                 type: 'box',

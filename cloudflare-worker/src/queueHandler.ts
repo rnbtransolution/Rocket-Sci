@@ -931,9 +931,7 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
   const cacheKey = `USER_${userId}`;
   const cached = await env.KV_CACHE.get(cacheKey);
   if (cached) {
-    const profile = JSON.parse(cached) as PlayerProfile;
-    await savePlayerProfile(profile, env, ctx);
-    return profile;
+    return JSON.parse(cached) as PlayerProfile;
   }
 
   // Fetch LINE user display name via Messaging API
