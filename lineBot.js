@@ -479,6 +479,8 @@ export async function sendAdminMessageToLine(targetId, messageText) {
     } else {
       payload = constructMainMenuFlex();
     }
+  } else if (clean === 'กติกา' || clean === 'rule' || clean === 'rules' || clean === 'วิธีเล่น' || clean === 'คู่มือ') {
+    payload = constructRuleGuideFlex();
   }
   
   await pushToLine(destinationId, payload);
@@ -1229,12 +1231,6 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
   // Group/chat: order card only (with บั้งไฟ name)
   const betCard = constructBetOpenFlex(orderNo, amount, side, displayName, rangeInfo, isChotoy, userTypedCmd, isPreQuote, rocketLabel);
   await replyToLine(replyToken, betCard, userId);
-
-  // Private order confirmation (especially when opened from a group)
-  if (groupId && userId) {
-    const sideLabel = side === 'low' ? 'ต่ำ' : 'สูง';
-    await pushToLine(userId, `✅ ยืนยันเปิดออเดอร์ #${orderNo}\nบั้งไฟ: ${rocketLabel || '-'}\nฝั่ง: ${sideLabel} | ${amount}pt${rangeInfo ? ` | ${rangeInfo}` : ''}`);
-  }
 }
 
 // --- LINE FLEX CONSTRUCTORS ---
@@ -2133,7 +2129,7 @@ export function constructRuleGuideFlex() {
             },
             {
               "type": "text",
-              "text": "• ช่างยั่ง / ช่างถอย / ชย\n• ชถ / ยั่ง / ย / ถอย / ถ\n• +5ชย / +5ชถ / +5ย / +5ถ\n• -5ชย / -5ชถ / -5ย / -5ถ\nเช่น ชถ100 , ชถ1000",
+              "text": "• ช่างยัง / ช่างถอย / ชย\n• ชถ / ยัง / ย / ถอย / ถ\n• +5ชย / +5ชถ / +5ย / +5ถ\n• -5ชย / -5ชถ / -5ย / -5ถ\nเช่น ชถ100 , ชถ1000",
               "color": "#047857",
               "size": "xxs",
               "wrap": true,
@@ -2569,7 +2565,7 @@ export function constructPendingBetsFlex(pendingList) {
             "color": "#F1F5F9",
             "action": {
               "type": "message",
-              "label": "📖 ดูกติกา",
+              "label": "📖 กติกา",
               "text": "กติกา"
             }
           },
@@ -2580,7 +2576,7 @@ export function constructPendingBetsFlex(pendingList) {
             "color": "#0D9488",
             "action": {
               "type": "message",
-              "label": "⚡ เปิดราคาช่าง",
+              "label": "⚡ เปิดราคา",
               "text": "ชล500"
             }
           }

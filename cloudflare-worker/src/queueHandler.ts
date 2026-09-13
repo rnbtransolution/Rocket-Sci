@@ -4,6 +4,7 @@ import {
   generateMatchNotificationFlex,
   generateBalanceFlex,
   generatePendingBoardFlex,
+  generateRuleGuideFlex,
 } from './flexTemplates.js';
 
 export const RULE_GUIDE_TEXT = `📖 [คู่มือคีย์เวิร์ดกติกาการเล่น]
@@ -95,11 +96,8 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     // ── 1.2 Rule Guide ("กติกา", "rule", "rules", "วิธีเล่น", "คู่มือ") ──
     const ruleRegex = /^(?:📖\s*)?(กติกา|rule|rules|วิธีเล่น|คู่มือ)$/i;
     if (ruleRegex.test(clean) || ruleRegex.test(text)) {
-      if (replyToken) {
-        await replyToLine(replyToken, RULE_GUIDE_TEXT, env);
-      } else {
-        await pushToLine(userId, RULE_GUIDE_TEXT, env);
-      }
+      const ruleFlex = generateRuleGuideFlex();
+      await deliverPrivateNotice(userId, replyToken, groupId, ruleFlex, env);
       return;
     }
 
@@ -345,16 +343,11 @@ async function handleCreateOrder(
     ? replyToLine(replyToken, flexCard, env)
     : pushToLine(groupId, flexCard, env);
 
-  // Persist KV state and dispatch private receipt concurrently (0ms blocking on critical path)
+  // Persist KV state concurrently (0ms blocking on critical path; private DM confirmation omitted to preserve quota)
   const backgroundPersistence = Promise.all([
     env.KV_CACHE.put(`USER_${userId}`, JSON.stringify(profile)),
     env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder)),
     addToPendingOrdersList(newOrder, env),
-    pushToLine(
-      userId,
-      `✅ ยืนยันเปิดออเดอร์ #${orderNumber}\nบั้งไฟ: ${round?.name || '-'}\nฝั่ง: ${side === 'low' ? 'ต่ำ' : 'สูง'} | ${amount} pt`,
-      env
-    ),
   ]);
 
   if (ctx) {

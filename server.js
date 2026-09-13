@@ -17,7 +17,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
 const LINE_CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET || '';
-const READ_ONLY_RPC = new Set(['getDashboardData', 'verifyMockSlipFromClient']);
+const READ_ONLY_RPC = new Set(['getDashboardData', 'verifyMockSlipFromClient', 'adminLogin']);
 
 if (!ADMIN_API_KEY) {
   console.warn('[Auth] ADMIN_API_KEY is not set — mutating /api/run calls will be rejected.');
@@ -196,6 +196,21 @@ app.post('/api/run', requireAdminApiKey, async (req, res) => {
     let result;
     
     switch (functionName) {
+      case 'adminLogin': {
+        const username = args[0] || '';
+        const password = args[1] || '';
+        const expectedUser = process.env.ADMIN_USERNAME || 'admin';
+        const expectedPass = process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSCODE || 'rocket-admin';
+        const isUserMatch = username.trim().toLowerCase() === expectedUser.toLowerCase();
+        const isPassMatch = password === expectedPass || password === (process.env.ADMIN_PASSCODE || 'rocket-admin');
+        if (isUserMatch && isPassMatch) {
+          result = { success: true, adminKey: ADMIN_API_KEY, username: expectedUser };
+        } else {
+          result = { success: false, error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
+        }
+        break;
+      }
+
       case 'getDashboardData':
         result = db.getDashboardData();
         break;

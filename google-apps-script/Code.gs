@@ -1572,10 +1572,6 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
     var rocketLabel = getActiveRocketName();
     var betOpenFlex = constructBetOpenFlex(orderNumber, amount, side, displayName, rangeInfo, isChotoy, userTypedCmdStr, isPreQuoteBet, rocketLabel);
     replyToLine(replyToken, betOpenFlex, userId);
-    if (groupId && userId) {
-      var sideLabel = side === 'low' ? 'ต่ำ' : 'สูง';
-      pushToLine(userId, '✅ ยืนยันเปิดออเดอร์ #' + orderNumber + '\nบั้งไฟ: ' + (rocketLabel || '-') + '\nฝั่ง: ' + sideLabel + ' | ' + amount + 'pt' + (rangeInfo ? (' | ' + rangeInfo) : ''));
-    }
     return;
   }
 
@@ -4690,7 +4686,7 @@ function constructPendingBetsFlex(pendingList) {
             "color": "#F1F5F9",
             "action": {
               "type": "message",
-              "label": "📖 ดูกติกา",
+              "label": "📖 กติกา",
               "text": "กติกา"
             }
           },
@@ -4701,7 +4697,7 @@ function constructPendingBetsFlex(pendingList) {
             "color": "#0D9488",
             "action": {
               "type": "message",
-              "label": "⚡ เปิดราคาช่าง",
+              "label": "⚡ เปิดราคา",
               "text": "ชล500"
             }
           }
@@ -5455,6 +5451,11 @@ function sendAdminMessageToLine(targetId, messageText) {
       return { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ — กรุณาใส่ Group ID ก่อนส่งครับ', targets: [] };
     }
 
+    if (!isObj && (clean === 'กติกา' || clean === 'rule' || clean === 'rules' || clean === 'วิธีเล่น' || clean === 'คู่มือ')) {
+      messageText = constructRuleGuideFlex();
+      isObj = true;
+    }
+
     var messageObj;
     if (isObj) {
       var alt = (messageText.header && messageText.header.contents && messageText.header.contents[0] && messageText.header.contents[0].text)
@@ -5520,6 +5521,8 @@ function sendAdminMessageToLine(targetId, messageText) {
       }
     } else if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start') {
       payload = constructMainMenuFlex();
+    } else if (clean === 'กติกา' || clean === 'rule' || clean === 'rules' || clean === 'วิธีเล่น' || clean === 'คู่มือ') {
+      payload = constructRuleGuideFlex();
     }
   }
 

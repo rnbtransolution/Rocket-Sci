@@ -1528,10 +1528,6 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
     var rocketLabel = getActiveRocketName();
     var betOpenFlex = constructBetOpenFlex(orderNumber, amount, side, displayName, rangeInfo, isChotoy, userTypedCmdStr, isPreQuoteBet, rocketLabel);
     replyToLine(replyToken, betOpenFlex, userId);
-    if (groupId && userId) {
-      var sideLabel = side === 'low' ? 'ต่ำ' : 'สูง';
-      pushToLine(userId, '✅ ยืนยันเปิดออเดอร์ #' + orderNumber + '\nบั้งไฟ: ' + (rocketLabel || '-') + '\nฝั่ง: ' + sideLabel + ' | ' + amount + 'pt' + (rangeInfo ? (' | ' + rangeInfo) : ''));
-    }
     return;
   }
 

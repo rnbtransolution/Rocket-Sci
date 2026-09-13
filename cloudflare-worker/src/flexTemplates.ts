@@ -345,8 +345,8 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
         footer: {
           type: 'box',
           layout: 'horizontal',
-          spacing: 'sm',
-          paddingAll: 'md',
+          spacing: 'xs',
+          paddingAll: 'sm',
           contents: [
             {
               type: 'button',
@@ -355,7 +355,7 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
               color: '#F1F5F9',
               action: {
                 type: 'message',
-                label: '🔄 รีเฟรชกระดาน',
+                label: '🔄 รีเฟรช',
                 text: 'กระดานดวล',
               },
             },
@@ -366,7 +366,7 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
               color: '#F1F5F9',
               action: {
                 type: 'message',
-                label: '📖 ดูกติกา',
+                label: '📖 กติกา',
                 text: 'กติกา',
               },
             },
@@ -565,8 +565,8 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
       footer: {
         type: 'box',
         layout: 'horizontal',
-        spacing: 'sm',
-        paddingAll: 'md',
+        spacing: 'xs',
+        paddingAll: 'sm',
         contents: [
           {
             type: 'button',
@@ -575,7 +575,7 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
             color: '#F1F5F9',
             action: {
               type: 'message',
-              label: '🔄 รีเฟรชกระดาน',
+              label: '🔄 รีเฟรช',
               text: 'กระดานดวล',
             },
           },
@@ -586,9 +586,193 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
             color: '#F1F5F9',
             action: {
               type: 'message',
-              label: '📖 ดูกติกา',
+              label: '📖 กติกา',
               text: 'กติกา',
             },
+          },
+        ],
+      },
+    },
+  };
+}
+
+// ── 5. Rule Guide Card (คู่มือคีย์เวิร์ดกติกาการเล่น) ──
+export function generateRuleGuideFlex(): any {
+  return {
+    type: 'flex',
+    altText: '📖 คู่มือคีย์เวิร์ดกติกาการเล่น 🚀',
+    contents: {
+      type: 'bubble',
+      size: 'mega',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#0A3D34',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: '🚀 ROCKET SCIENCE',
+            weight: 'bold',
+            color: '#FDE047',
+            size: 'xxs',
+            align: 'center',
+          },
+          {
+            type: 'text',
+            text: '📖 คู่มือคีย์เวิร์ดกติกาการเล่น',
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'sm',
+            align: 'center',
+            margin: 'xs',
+            wrap: true,
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        paddingAll: 'md',
+        contents: [
+          {
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: '#ECFDF5',
+            cornerRadius: 'md',
+            paddingAll: 'sm',
+            contents: [
+              {
+                type: 'text',
+                text: '📌 กฏที่ 1: เล่นราคาช่าง',
+                weight: 'bold',
+                color: '#065F46',
+                size: 'sm',
+                wrap: true,
+              },
+              {
+                type: 'text',
+                text: '🎉 ทายว่าชนะ (สูง):',
+                weight: 'bold',
+                color: '#047857',
+                size: 'xs',
+                margin: 'sm',
+                wrap: true,
+              },
+              {
+                type: 'text',
+                text: '• ช่างไล่ / ชล / ไล่ / ลง\n• +5ชล / +5ล / +5ไล่\n• -5ชล / -5ล / -5ไล่',
+                color: '#047857',
+                size: 'xxs',
+                wrap: true,
+                margin: 'xs',
+              },
+              {
+                type: 'text',
+                text: '💵 พิมพ์คีย์เวิร์ดตามด้วยจำนวนเงิน (ตัวเลขเท่านั้น)\nเช่น ชล100 , ชล1000 , ชล10000',
+                color: '#065F46',
+                size: 'xxs',
+                wrap: true,
+                margin: 'xs',
+              },
+              {
+                type: 'separator',
+                margin: 'sm',
+                color: '#A7F3D0',
+              },
+              {
+                type: 'text',
+                text: '👊 ทายว่าแพ้ (ต่ำ):',
+                weight: 'bold',
+                color: '#047857',
+                size: 'xs',
+                margin: 'sm',
+                wrap: true,
+              },
+              {
+                type: 'text',
+                text: '• ช่างยัง / ช่างถอย / ชย\n• ชถ / ยัง / ย / ถอย / ถ\n• +5ชย / +5ชถ / +5ย / +5ถ\n• -5ชย / -5ชถ / -5ย / -5ถ\nเช่น ชถ100 , ชถ1000',
+                color: '#047857',
+                size: 'xxs',
+                wrap: true,
+                margin: 'xs',
+              },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: '#F0F9FF',
+            cornerRadius: 'md',
+            paddingAll: 'sm',
+            contents: [
+              {
+                type: 'text',
+                text: '📌 กฏที่ 2: การเปิดราคาเอง (กรณีช่างไม่ต่อย / ต้องมีเครดิตพอ)',
+                weight: 'bold',
+                color: '#0369A1',
+                size: 'xs',
+                wrap: true,
+              },
+              {
+                type: 'text',
+                text: '💰 การเปิดราคาเอง (เปิดแผลสดใหม่):',
+                weight: 'bold',
+                color: '#0284C7',
+                size: 'xs',
+                margin: 'sm',
+                wrap: true,
+              },
+              {
+                type: 'text',
+                text: '⚠️ ช่วงราคาต้องห่างกัน 50 วิพอดี เช่น\n• 300-350ล500 | 300-350ถ500\n• 350-400ล500 | 350-400ถ500',
+                color: '#0284C7',
+                size: 'xxs',
+                wrap: true,
+                margin: 'xs',
+              },
+              {
+                type: 'separator',
+                margin: 'sm',
+                color: '#BAE6FD',
+              },
+              {
+                type: 'text',
+                text: '⬆️ ช่างต่อยกเลิก (ชตย)',
+                weight: 'bold',
+                color: '#0284C7',
+                size: 'xs',
+                margin: 'sm',
+                wrap: true,
+              },
+              {
+                type: 'text',
+                text: 'ใส่ ชตย หลังจำนวนเงิน เช่น\n• 300-350ล500 ชตย\n• 350-400ถ500 ชตย',
+                color: '#0284C7',
+                size: 'xxs',
+                wrap: true,
+                margin: 'xs',
+              },
+            ],
+          },
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'horizontal',
+        paddingAll: 'xs',
+        contents: [
+          {
+            type: 'button',
+            action: {
+              type: 'message',
+              label: '📋 ดูกระดานดวลสด',
+              text: 'กระดานดวล',
+            },
+            style: 'primary',
+            color: '#0A3D34',
+            height: 'sm',
           },
         ],
       },
