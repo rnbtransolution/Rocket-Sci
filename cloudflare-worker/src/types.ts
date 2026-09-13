@@ -67,6 +67,7 @@ export interface Order {
   orderNumber: string;
   creatorId: string;
   creatorName: string;
+  creatorLineUserId?: string;
   matcherId?: string | null;
   matcherName?: string | null;
   side: 'low' | 'high'; // 'low' = ล/ถ/ต่ำ, 'high' = ชล/สูง

@@ -272,15 +272,32 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       return;
     }
 
-    // ── 2. Cancel Order ("ยกเลิก [orderNo]") ──
-    const cancelRegex = /^(ยกเลิก|cancel)\s*#?(\d{2,6})$/i;
+    // ── 2. Cancel Order ("ยกเลิก [orderNo]" or "ยกเลิก") ──
+    const cancelRegex = /^(ยกเลิก|cancel)(?:\s*#?(\d{2,6}))?$/i;
     if (cancelRegex.test(clean) || cancelRegex.test(text)) {
       const match = text.match(cancelRegex) || clean.match(cancelRegex);
-      const targetNo = match ? match[2] : null;
-      if (targetNo) {
-        const cancelRes = await cancelOrder(targetNo, profile.shortId, env);
-        await deliverPrivateNotice(userId, replyToken, groupId, cancelRes.message, env);
+      let targetNo = match ? match[2] : null;
+
+      if (!targetNo) {
+        // Auto-find caller's latest pending open bet
+        const pendingList = await getPendingOrdersList(env);
+        const myPending = pendingList.find((o) => o.creatorId === profile.shortId);
+        if (myPending) {
+          targetNo = myPending.orderNumber;
+        } else {
+          await deliverPrivateNotice(
+            userId,
+            replyToken,
+            groupId,
+            '⚠️ ไม่พบแผลดวลค้างของคุณที่สามารถยกเลิกได้ครับ\n(หรือพิมพ์ "ยกเลิก [เลข Order]" เช่น "ยกเลิก 518947")',
+            env
+          );
+          return;
+        }
       }
+
+      const cancelRes = await cancelOrder(targetNo, profile, env, ctx);
+      await deliverPrivateNotice(userId, replyToken, groupId, cancelRes.message, env);
       return;
     }
 
@@ -503,9 +520,7 @@ async function handleCreateOrder(
 
   if (profile.balance < amount) {
     const needed = amount - profile.balance;
-    const msg = groupId
-      ? `@${profile.displayName} ⚠️ แต้มไม่พอ (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt) พิมพ์ "ฝากเงิน" ในแชตส่วนตัวครับ 🚀`
-      : `⚠️ แต้มไม่พอ (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt) พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ 🚀`;
+    const msg = `⚠️ แต้มไม่พอครับ (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt)\n💡 พิมพ์ "ฝากเงิน" ในแชตนี้เพื่อเติมเครดิตได้เลยครับ 🚀`;
     await deliverPrivateNotice(userId, replyToken, groupId, msg, env);
     return;
   }
@@ -518,6 +533,7 @@ async function handleCreateOrder(
     orderNumber,
     creatorId: profile.shortId,
     creatorName: profile.displayName,
+    creatorLineUserId: profile.lineUserId,
     side,
     amount,
     betType: isCustom ? 'custom_range' : 'range',
@@ -540,18 +556,12 @@ async function handleCreateOrder(
     await pushToLine(groupId, flexCard, env);
   }
 
-  // Persist KV state concurrently (0ms blocking on critical path)
-  const backgroundPersistence = Promise.all([
+  // Persist KV state immediately to guarantee atomic consistency
+  await Promise.all([
     savePlayerProfile(profile, env, ctx),
     env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder)),
     addToPendingOrdersList(newOrder, env),
   ]);
-
-  if (ctx) {
-    ctx.waitUntil(backgroundPersistence);
-  } else {
-    await backgroundPersistence;
-  }
 }
 
 async function handleMatchOrder(
@@ -594,9 +604,7 @@ async function handleMatchOrder(
   const effectiveAmt = matchAmt || order.amount;
   if (profile.balance < effectiveAmt) {
     const needed = effectiveAmt - profile.balance;
-    const msg = groupId
-      ? `@${profile.displayName} ⚠️ แต้มไม่พอรับแผล (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt) พิมพ์ "ฝากเงิน" ในแชตส่วนตัวครับ 🚀`
-      : `⚠️ แต้มไม่พอรับแผล (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt) พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ 🚀`;
+    const msg = `⚠️ แต้มไม่พอรับแผลครับ (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt)\n💡 พิมพ์ "ฝากเงิน" ในแชตนี้เพื่อเติมเครดิตได้เลยครับ 🚀`;
     await deliverPrivateNotice(userId, replyToken, groupId, msg, env);
     return;
   }
@@ -640,7 +648,12 @@ async function handleMatchOrder(
   }
 }
 
-async function cancelOrder(orderNo: string, shortId: string, env: Env): Promise<{ success: boolean; message: string }> {
+async function cancelOrder(
+  orderNo: string,
+  profile: PlayerProfile,
+  env: Env,
+  ctx?: ExecutionContext
+): Promise<{ success: boolean; message: string }> {
   const resolvedNo = await resolveOrderNumber(orderNo, null, env);
   if (!resolvedNo) return { success: false, message: `🚫 ไม่พบแผล Order #${orderNo}` };
 
@@ -648,31 +661,28 @@ async function cancelOrder(orderNo: string, shortId: string, env: Env): Promise<
   if (!raw) return { success: false, message: `🚫 ไม่พบแผล Order #${resolvedNo}` };
 
   const order = JSON.parse(raw) as Order;
-  if (order.creatorId !== shortId) {
+  if (order.creatorId !== profile.shortId) {
     return { success: false, message: '⚠️ คุณไม่ใช่เจ้าของแผลนี้ครับ' };
   }
   if (order.status !== 'pending_match') {
-    return { success: false, message: `⚠️ แผลนี้อยู่ในสถานะ ${order.status} ไม่สามารถยกเลิกได้ครับ` };
+    return { success: false, message: `⚠️ แผล Order #${resolvedNo} อยู่ในสถานะ ${order.status} ไม่สามารถยกเลิกได้ครับ` };
   }
 
+  // 1. Mark order cancelled in KV_ORDERS & remove from pending list
   order.status = 'cancelled';
   await Promise.all([
     env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(order)),
     removeFromPendingOrdersList(resolvedNo, env),
   ]);
 
-  // Refund creator balance
-  const creatorLineId = await env.KV_CACHE.get(`RAW_LINE_${shortId}`);
-  if (creatorLineId) {
-    const profileRaw = await env.KV_CACHE.get(`USER_${creatorLineId}`);
-    if (profileRaw) {
-      const p = JSON.parse(profileRaw) as PlayerProfile;
-      p.balance += order.amount;
-      await savePlayerProfile(p, env);
-    }
-  }
+  // 2. Refund balance directly to the creator's profile
+  profile.balance += order.amount;
+  await savePlayerProfile(profile, env, ctx);
 
-  return { success: true, message: `✅ ยกเลิก Order #${resolvedNo} และคืนแต้ม ${order.amount} pt เรียบร้อยแล้วครับ` };
+  return {
+    success: true,
+    message: `✅ ยกเลิก Order #${resolvedNo} เรียบร้อยแล้วครับ!\n💰 คืนแต้ม: +${order.amount.toLocaleString()} pt\n💎 แต้มคงเหลือปัจจุบัน: ${profile.balance.toLocaleString()} pt 🚀`,
+  };
 }
 
 // ── Pending Orders & Lookup Helpers ──
@@ -1027,18 +1037,18 @@ async function deliverPrivateNotice(
   payload: any,
   env: Env
 ): Promise<void> {
-  // 1. Prefer free, instant, zero-push-quota replyToken whenever available
-  if (replyToken) {
-    const sent = await replyToLine(replyToken, payload, env);
-    if (sent) return;
-  }
-  // 2. Fallback to direct push if replyToken is expired or failed
-  if (groupId) {
-    const pushGroupOk = await pushToLine(groupId, payload, env);
-    if (!pushGroupOk) {
-      await pushToLine(userId, payload, env);
+  // 1. If in 1-on-1 private chat with LINE OA:
+  if (!groupId) {
+    if (replyToken) {
+      const sent = await replyToLine(replyToken, payload, env);
+      if (sent) return;
     }
-  } else {
     await pushToLine(userId, payload, env);
+    return;
   }
+
+  // 2. If interaction originated in a LINE Group:
+  // Strictly isolate private notices (balance errors, cancellation receipts, deposit info)
+  // to the user's private LINE chat so the group chat remains 100% clean and quiet.
+  await pushToLine(userId, payload, env);
 }
