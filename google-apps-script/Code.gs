@@ -445,6 +445,11 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify({ success: true, data: data }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+  if (e && e.parameter && e.parameter.action === 'getLineQuota') {
+    var quota = adminGetLineQuota();
+    return ContentService.createTextOutput(JSON.stringify({ success: true, data: quota }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
   if (e && e.parameter && e.parameter.action) {
     // Block unauthenticated mutating GET actions (legacy dual-writer path)
     return ContentService.createTextOutput(JSON.stringify({
@@ -530,6 +535,11 @@ function executeAdminAction(functionName, args) {
     case 'adminSetActiveGroupId': return adminSetActiveGroupId(args[0]);
     case 'adminDiscoverGroupIds': return adminDiscoverGroupIds();
     case 'adminTestPushGroupMessage': return adminTestPushGroupMessage(args[0]);
+    case 'syncWithSheets': 
+      invalidateDashboardCache();
+      return getDashboardData(true);
+    case 'adminGetLineQuota':
+      return adminGetLineQuota();
     case 'pruneDeadLineGroupsFromProperties': return pruneDeadLineGroupsFromProperties();
     default: return { error: 'Unknown function: ' + functionName };
   }
@@ -2723,7 +2733,8 @@ function getDashboardData(forceFresh) {
     activeGroupId: getActiveGroupId(),
     lineGroups: getLineGroups(),
     activeRound: getActiveRocketRound(),
-    roundStatus: PropertiesService.getScriptProperties().getProperty('ROUND_STATUS') || 'ACTIVE'
+    roundStatus: PropertiesService.getScriptProperties().getProperty('ROUND_STATUS') || 'ACTIVE',
+    lineQuota: adminGetLineQuota()
   };
 
   try {
@@ -3219,8 +3230,9 @@ function pushLineGroupMessage(groupId, text) {
     }
 
     var errorMsg = 'LINE API Error (HTTP ' + code + ')';
-    if (body && (body.indexOf('monthly limit') !== -1 || body.indexOf('reached your monthly') !== -1)) {
-      errorMsg = 'โควตา Push Message ของ LINE OA เดือนนี้เต็มแล้ว (300/300 ข้อความ) — กรุณาอัปเกรดแพ็กเกจเป็น Basic/Pro ที่ manager.line.biz เพื่อส่งข้อความได้ไม่จำกัดครับ';
+    if (code === 429 || (body && (body.indexOf('monthly limit') !== -1 || body.indexOf('reached your monthly') !== -1))) {
+      errorMsg = 'โควต้าส่งข้อความของบัญชี LINE OA ประจำเดือนนี้เต็มแล้ว (300/300 ข้อความ) กรุณาอัปเกรดแพ็กเกจเป็น Basic/Pro ที่ manager.line.biz เพื่อส่งข้อความต่อครับ';
+      return { success: false, code: 429, error: errorMsg, isQuotaExhausted: true, groupId: groupId };
     } else if (body && body.indexOf('Invalid reply token') !== -1) {
       errorMsg = 'โทเค็นตอบกลับหมดอายุ';
     } else if (body && body.indexOf('Authentication failed') !== -1) {
@@ -5479,14 +5491,27 @@ function sendAdminMessageToLine(targetId, messageText) {
     var responses = UrlFetchApp.fetchAll(requests);
     var sendResults = [];
     var hadDeadGroups = false;
+    var successCount = 0;
+    var isQuotaError = false;
+    var errorMessage = '';
     for (var k = 0; k < responses.length; k++) {
       var code = responses[k].getResponseCode();
       var respBody = responses[k].getContentText();
+      if (code === 200) {
+        successCount++;
+      } else {
+        if (code === 429 || respBody.indexOf('monthly limit') !== -1) {
+          isQuotaError = true;
+          errorMessage = 'โควต้าส่งข้อความของบัญชี LINE OA ประจำเดือนนี้เต็มแล้ว (300/300 ข้อความ) กรุณาอัปเกรดแพ็กเกจเป็น Basic/Pro ที่ manager.line.biz เพื่อส่งข้อความต่อครับ';
+        } else if (!errorMessage) {
+          errorMessage = 'ส่งเข้ากลุ่มไม่สำเร็จ (HTTP ' + code + ')';
+        }
+      }
       if (code === 400 && respBody.indexOf('Failed to send messages') !== -1) {
         DEAD_LINE_GROUP_IDS[keys[k]] = true;
         hadDeadGroups = true;
       }
-      sendResults.push({ success: code === 200, code: code, groupId: keys[k] });
+      sendResults.push({ success: code === 200, code: code, groupId: keys[k], error: respBody });
     }
     if (hadDeadGroups) {
       try {
@@ -5496,7 +5521,24 @@ function sendAdminMessageToLine(targetId, messageText) {
         _memLineGroups = cleaned;
       } catch(_) {}
     }
-    return { success: true, count: keys.length, targets: keys, results: sendResults };
+    if (successCount === 0 && keys.length > 0) {
+      return {
+        success: false,
+        error: isQuotaError ? errorMessage : (errorMessage || 'ส่งเข้ากลุ่มไม่สำเร็จ'),
+        code: isQuotaError ? 429 : 400,
+        isQuotaExhausted: isQuotaError,
+        count: keys.length,
+        targets: keys,
+        results: sendResults
+      };
+    }
+    return {
+      success: true,
+      count: successCount,
+      targets: keys,
+      results: sendResults,
+      partialWarning: successCount < keys.length ? 'ส่งสำเร็จบางกลุ่ม' : undefined
+    };
   }
 
   // ─── Single target: resolve payload if keyword ───
@@ -5530,11 +5572,19 @@ function sendAdminMessageToLine(targetId, messageText) {
   if (isGroupTarget) {
     singleRes = pushLineGroupMessage(targetId, payload);
   } else {
-    pushToLine(targetId, payload);
-    singleRes = { success: true, targetId: targetId };
+    var pRes = pushToLine(targetId, payload);
+    singleRes = pRes !== false ? { success: true, targetId: targetId } : { success: false, error: 'ส่งข้อความหาผู้ใช้ไม่สำเร็จ', targetId: targetId };
   }
 
   logLineChatMessage(targetId, isGroupTarget ? 'กลุ่ม' : 'ผู้เล่น', 'admin', logMsg, (typeof payload === 'object') ? 'flex' : 'text');
+  if (singleRes && singleRes.success === false) {
+    return {
+      success: false,
+      error: singleRes.error || 'ส่งข้อความไม่สำเร็จ',
+      code: singleRes.code,
+      isQuotaExhausted: singleRes.code === 429
+    };
+  }
   return { success: true, count: 1, targets: [targetId], result: singleRes };
 }
 

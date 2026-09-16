@@ -198,6 +198,30 @@ export default {
           const chatLogsRaw = await env.KV_CACHE.get('CHAT_LOGS');
           const chatLogs = chatLogsRaw ? JSON.parse(chatLogsRaw) : [];
 
+          let lineQuota: any = null;
+          try {
+            const token = env.LINE_CHANNEL_ACCESS_TOKEN;
+            if (token) {
+              const [qRes, cRes] = await Promise.all([
+                fetch('https://api.line.me/v2/bot/message/quota', { headers: { Authorization: `Bearer ${token}` } }),
+                fetch('https://api.line.me/v2/bot/message/quota/consumption', { headers: { Authorization: `Bearer ${token}` } }),
+              ]);
+              if (qRes.ok && cRes.ok) {
+                const qJson: any = await qRes.json();
+                const cJson: any = await cRes.json();
+                const totalLimit = qJson.value || 0;
+                const used = cJson.totalUsage || 0;
+                lineQuota = {
+                  type: qJson.type || 'limited',
+                  limit: totalLimit,
+                  totalUsage: used,
+                  remaining: Math.max(0, totalLimit - used),
+                  isExhausted: totalLimit > 0 && used >= totalLimit,
+                };
+              }
+            }
+          } catch (_) {}
+
           result = {
             players,
             transactions,
@@ -208,7 +232,30 @@ export default {
             activeRound: roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380, status: 'ACTIVE' },
             roundStatus: roundStr ? (JSON.parse(roundStr).status || 'ACTIVE') : 'ACTIVE',
             serverTime: new Date().toISOString(),
+            lineQuota,
           };
+        } else if (functionName === 'adminGetLineQuota') {
+          try {
+            const token = env.LINE_CHANNEL_ACCESS_TOKEN;
+            const headers = { Authorization: `Bearer ${token}` };
+            const [qRes, cRes] = await Promise.all([
+              fetch('https://api.line.me/v2/bot/message/quota', { headers }),
+              fetch('https://api.line.me/v2/bot/message/quota/consumption', { headers }),
+            ]);
+            const qJson: any = await qRes.json();
+            const cJson: any = await cRes.json();
+            const totalLimit = qJson.value || 0;
+            const used = cJson.totalUsage || 0;
+            result = {
+              type: qJson.type || 'limited',
+              limit: totalLimit,
+              totalUsage: used,
+              remaining: Math.max(0, totalLimit - used),
+              isExhausted: totalLimit > 0 && used >= totalLimit,
+            };
+          } catch (e: any) {
+            result = { error: e?.message || 'Failed to fetch quota' };
+          }
         } else if (functionName === 'adminLogin') {
           const username = args[0] || '';
           const password = args[1] || '';
@@ -377,11 +424,78 @@ export default {
           functionName === 'clearPendingBets' ||
           functionName === 'adminClearOrders' ||
           functionName === 'resetOrders' ||
-          functionName === 'resetGoogleSheetsDatabase' ||
           functionName === 'clearCache'
         ) {
           const res = await clearAllPendingOrders(env);
           result = { success: true, message: 'Cleared pending orders and board cache', cleared: res.cleared };
+        } else if (functionName === 'resetGoogleSheetsDatabase') {
+          // 1. Clear atomic order state in KV
+          await clearAllPendingOrders(env);
+          // 2. Clear players, transactions, and logs in KV
+          await env.KV_CACHE.delete('PLAYERS_LIST');
+          await env.KV_CACHE.delete('TRANSACTIONS_LIST');
+          await env.KV_CACHE.delete('CHAT_LOGS');
+          // 3. Clear all cached player profiles and raw LINE mappings
+          try {
+            const userScan = await env.KV_CACHE.list({ prefix: 'USER_' });
+            if (userScan.keys && userScan.keys.length > 0) {
+              await Promise.all(userScan.keys.map((k) => env.KV_CACHE.delete(k.name)));
+            }
+            const rawScan = await env.KV_CACHE.list({ prefix: 'RAW_LINE_' });
+            if (rawScan.keys && rawScan.keys.length > 0) {
+              await Promise.all(rawScan.keys.map((k) => env.KV_CACHE.delete(k.name)));
+            }
+          } catch (_) {}
+
+          // 4. Forward database reset to Google Apps Script / Google Sheets
+          let sheetsResetResult: any = null;
+          if (env.GAS_FALLBACK_URL) {
+            try {
+              const res = await fetch(env.GAS_FALLBACK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({
+                  functionName: 'resetGoogleSheetsDatabase',
+                  args: [],
+                  apiKey: env.ADMIN_API_KEY,
+                }),
+              });
+              const json: any = await res.json();
+              sheetsResetResult = json?.data || json;
+            } catch (err) {
+              console.warn('[Worker] GAS reset database error:', err);
+            }
+          }
+
+          result = sheetsResetResult || {
+            players: [],
+            transactions: [],
+            bets: [],
+            chatLogs: [],
+            activeGroupId: (await env.KV_CACHE.get('ACTIVE_GROUP_ID')) || '',
+            roundStatus: 'ACTIVE',
+          };
+        } else if (functionName === 'syncWithSheets') {
+          let sheetsData: any = null;
+          if (env.GAS_FALLBACK_URL) {
+            try {
+              const res = await fetch(`${env.GAS_FALLBACK_URL}?action=getDashboardData&_t=${Date.now()}`);
+              const json: any = await res.json();
+              sheetsData = json?.data || json;
+            } catch (e) {
+              console.warn('[Worker] syncWithSheets fetch error:', e);
+            }
+          }
+          if (sheetsData) {
+            result = sheetsData;
+          } else {
+            result = {
+              players: await getPlayersList(env),
+              transactions: await getTransactionsList(env),
+              bets: await getPendingOrdersList(env),
+              activeGroupId: (await env.KV_CACHE.get('ACTIVE_GROUP_ID')) || '',
+            };
+          }
         } else if (functionName === 'sendAdminMessageToLine') {
           const target = args[0];
           const messageText = args[1];
@@ -434,7 +548,8 @@ export default {
             }
 
             const sendResults = await Promise.all(targets.map((to) => pushToLine(to, payload, env)));
-            const allSuccess = sendResults.every(Boolean);
+            const allSuccess = sendResults.every((r) => r.success);
+            const quotaError = sendResults.find((r) => r.code === 429);
 
             await appendChatLog(env, {
               timestamp: formatTime(),
@@ -449,7 +564,12 @@ export default {
               success: allSuccess,
               count: targets.length,
               targets,
-              error: allSuccess ? undefined : 'ส่งเข้าบางกลุ่มไม่สำเร็จ (กรุณาเช็คสิทธิ์ LINE OA ในกลุ่ม)',
+              error: allSuccess
+                ? undefined
+                : (quotaError?.error || 'ส่งเข้าบางกลุ่มไม่สำเร็จ (กรุณาเช็คสิทธิ์ LINE OA ในกลุ่ม)'),
+              code: quotaError ? 429 : (allSuccess ? 200 : 400),
+              isQuotaExhausted: !!quotaError,
+              results: sendResults,
             };
           }
         } else if (functionName === 'adminBroadcastQuote') {
@@ -502,7 +622,8 @@ export default {
             result = { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ (กรุณาตรวจสอบ Active Group ID)' };
           } else {
             const sendResults = await Promise.all(targets.map((to) => pushToLine(to, quoteFlex, env)));
-            const allSuccess = sendResults.every(Boolean);
+            const allSuccess = sendResults.every((r) => r.success);
+            const quotaError = sendResults.find((r) => r.code === 429);
 
             await appendChatLog(env, {
               timestamp: formatTime(),
@@ -513,7 +634,15 @@ export default {
               type: 'flex',
             });
 
-            result = { success: allSuccess, targets, round: roundData };
+            result = {
+              success: allSuccess,
+              targets,
+              round: roundData,
+              error: allSuccess ? undefined : (quotaError?.error || 'ส่งข้อความเข้าบางกลุ่มไม่สำเร็จ'),
+              code: quotaError ? 429 : (allSuccess ? 200 : 400),
+              isQuotaExhausted: !!quotaError,
+              results: sendResults,
+            };
           }
         } else if (functionName === 'adminBroadcastFinalCall') {
           const target = args[0];
@@ -557,7 +686,10 @@ export default {
           if (targets.length === 0) {
             result = { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ' };
           } else {
-            await Promise.all(targets.map((to) => pushToLine(to, finalFlex, env)));
+            const sendResults = await Promise.all(targets.map((to) => pushToLine(to, finalFlex, env)));
+            const allSuccess = sendResults.every((r) => r.success);
+            const quotaError = sendResults.find((r) => r.code === 429);
+
             await appendChatLog(env, {
               timestamp: formatTime(),
               userId: targets[0],
@@ -566,7 +698,15 @@ export default {
               text: '[⛔ ปิดรับดวลรอบนี้แล้ว]',
               type: 'flex',
             });
-            result = { success: true, targets };
+
+            result = {
+              success: allSuccess,
+              targets,
+              error: allSuccess ? undefined : (quotaError?.error || 'ส่งเข้าบางกลุ่มไม่สำเร็จ'),
+              code: quotaError ? 429 : (allSuccess ? 200 : 400),
+              isQuotaExhausted: !!quotaError,
+              results: sendResults,
+            };
           }
         } else if (functionName === 'adminBroadcastVoidRound') {
           const target = args[0];
@@ -609,7 +749,10 @@ export default {
           if (targets.length === 0) {
             result = { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ' };
           } else {
-            await Promise.all(targets.map((to) => pushToLine(to, voidFlex, env)));
+            const sendResults = await Promise.all(targets.map((to) => pushToLine(to, voidFlex, env)));
+            const allSuccess = sendResults.every((r) => r.success);
+            const quotaError = sendResults.find((r) => r.code === 429);
+
             await appendChatLog(env, {
               timestamp: formatTime(),
               userId: targets[0],
@@ -618,7 +761,15 @@ export default {
               text: '[⛔ โมฆะรอบการแข่งขัน]',
               type: 'flex',
             });
-            result = { success: true, targets };
+
+            result = {
+              success: allSuccess,
+              targets,
+              error: allSuccess ? undefined : (quotaError?.error || 'ส่งเข้าบางกลุ่มไม่สำเร็จ'),
+              code: quotaError ? 429 : (allSuccess ? 200 : 400),
+              isQuotaExhausted: !!quotaError,
+              results: sendResults,
+            };
           }
         } else if (functionName === 'adminBroadcastRuleGuide') {
           const target = args[0];
@@ -627,7 +778,10 @@ export default {
           if (targets.length === 0) {
             result = { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ' };
           } else {
-            await Promise.all(targets.map((to) => pushToLine(to, ruleFlex, env)));
+            const sendResults = await Promise.all(targets.map((to) => pushToLine(to, ruleFlex, env)));
+            const allSuccess = sendResults.every((r) => r.success);
+            const quotaError = sendResults.find((r) => r.code === 429);
+
             await appendChatLog(env, {
               timestamp: formatTime(),
               userId: targets[0],
@@ -636,7 +790,15 @@ export default {
               text: '[📖 คู่มือกติกา]',
               type: 'flex',
             });
-            result = { success: true, targets };
+
+            result = {
+              success: allSuccess,
+              targets,
+              error: allSuccess ? undefined : (quotaError?.error || 'ส่งเข้าบางกลุ่มไม่สำเร็จ'),
+              code: quotaError ? 429 : (allSuccess ? 200 : 400),
+              isQuotaExhausted: !!quotaError,
+              results: sendResults,
+            };
           }
         } else if (functionName === 'adminBroadcastScamWarning') {
           const target = args[0];
@@ -671,7 +833,10 @@ export default {
           if (targets.length === 0) {
             result = { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ' };
           } else {
-            await Promise.all(targets.map((to) => pushToLine(to, warnFlex, env)));
+            const sendResults = await Promise.all(targets.map((to) => pushToLine(to, warnFlex, env)));
+            const allSuccess = sendResults.every((r) => r.success);
+            const quotaError = sendResults.find((r) => r.code === 429);
+
             await appendChatLog(env, {
               timestamp: formatTime(),
               userId: targets[0],
@@ -680,7 +845,15 @@ export default {
               text: '[🚨 เตือนความปลอดภัย]',
               type: 'flex',
             });
-            result = { success: true, targets };
+
+            result = {
+              success: allSuccess,
+              targets,
+              error: allSuccess ? undefined : (quotaError?.error || 'ส่งเข้าบางกลุ่มไม่สำเร็จ'),
+              code: quotaError ? 429 : (allSuccess ? 200 : 400),
+              isQuotaExhausted: !!quotaError,
+              results: sendResults,
+            };
           }
         } else if (functionName === 'adminTestPushGroupMessage') {
           const target = args[0];
@@ -691,7 +864,8 @@ export default {
             const timeStr = formatTime();
             const msg = `🔔 ทดสอบการส่งข้อความแจ้งเตือนจากระบบ Admin Web Portal (เวลา: ${timeStr}) 🚀\nสถานะการเชื่อมต่อ: สมบูรณ์ 100% 🟢`;
             const sendResults = await Promise.all(targets.map((to) => pushToLine(to, msg, env)));
-            const allSuccess = sendResults.every(Boolean);
+            const allSuccess = sendResults.every((r) => r.success);
+            const quotaError = sendResults.find((r) => r.code === 429);
 
             await appendChatLog(env, {
               timestamp: timeStr,
@@ -701,7 +875,15 @@ export default {
               text: msg,
               type: 'text',
             });
-            result = { success: allSuccess, targets, error: allSuccess ? undefined : 'ส่งเข้าบางกลุ่มไม่สำเร็จ' };
+
+            result = {
+              success: allSuccess,
+              targets,
+              error: allSuccess ? undefined : (quotaError?.error || 'ส่งเข้าบางกลุ่มไม่สำเร็จ'),
+              code: quotaError ? 429 : (allSuccess ? 200 : 400),
+              isQuotaExhausted: !!quotaError,
+              results: sendResults,
+            };
           }
         } else if (functionName === 'adminDiscoverGroupIds') {
           const activeGroupId = await env.KV_CACHE.get('ACTIVE_GROUP_ID');

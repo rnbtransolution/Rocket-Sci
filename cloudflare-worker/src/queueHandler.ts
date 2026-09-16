@@ -1115,7 +1115,7 @@ async function replyToLine(replyToken: string, payload: any, env: Env): Promise<
   }
 }
 
-export async function pushToLine(to: string, payload: any, env: Env): Promise<boolean> {
+export async function pushToLine(to: string, payload: any, env: Env): Promise<{ success: boolean; code?: number; error?: string }> {
   try {
     let messageObj: any;
     if (typeof payload === 'string') {
@@ -1143,12 +1143,23 @@ export async function pushToLine(to: string, payload: any, env: Env): Promise<bo
     if (!res.ok) {
       const errBody = await res.text();
       console.error(`[LINE Push Error] to=${to} status=${res.status}: ${errBody}`);
-      return false;
+      if (res.status === 429 || errBody.includes('monthly limit')) {
+        return {
+          success: false,
+          code: 429,
+          error: 'โควต้าส่งข้อความของบัญชี LINE OA ประจำเดือนนี้เต็มแล้ว (300/300 ข้อความ) กรุณาอัปเกรดแพ็กเกจเป็น Basic/Pro ที่ manager.line.biz ครับ',
+        };
+      }
+      return {
+        success: false,
+        code: res.status,
+        error: `LINE API Error (HTTP ${res.status}): ${errBody}`,
+      };
     }
-    return true;
+    return { success: true, code: 200 };
   } catch (err: any) {
     console.error(`[LINE Push Exception] to=${to}:`, err?.message || err);
-    return false;
+    return { success: false, error: err?.message || 'Network exception' };
   }
 }
 
