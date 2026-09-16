@@ -1150,6 +1150,13 @@ export async function pushToLine(to: string, payload: any, env: Env): Promise<{ 
           error: 'โควต้าส่งข้อความของบัญชี LINE OA ประจำเดือนนี้เต็มแล้ว (300/300 ข้อความ) กรุณาอัปเกรดแพ็กเกจเป็น Basic/Pro ที่ manager.line.biz ครับ',
         };
       }
+      if (res.status === 400 && (errBody.includes('Failed to send messages') || errBody.includes('Bad Request'))) {
+        return {
+          success: false,
+          code: 400,
+          error: `บอท LINE OA ไม่ได้อยู่ในกลุ่มเป้าหมาย (${to.slice(-6)}) หรือยังไม่ได้เชิญบอทเข้ากลุ่มนี้`,
+        };
+      }
       return {
         success: false,
         code: res.status,

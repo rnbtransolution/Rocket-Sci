@@ -56,23 +56,23 @@ function bootstrapScriptSecrets(lineToken, slipKey, adminKey, lineSecret) {
 
 function pruneDeadLineGroupsFromProperties() {
   var props = PropertiesService.getScriptProperties();
-  props.setProperty('ACTIVE_GROUP_ID', 'Ccec6199403ca536e46079e37db1a1387');
+  props.setProperty('ACTIVE_GROUP_ID', 'C61efb2aa1ad6fc26fefdc41fb710b431');
   var groupsJson = props.getProperty('LINE_GROUPS') || '[]';
   var list = [];
   try { list = JSON.parse(groupsJson); } catch(_) {}
   var cleaned = list.filter(function(g) { return g && g.id && !DEAD_LINE_GROUP_IDS[g.id]; });
   if (cleaned.length === 0) {
     cleaned = [{
-      id: 'Ccec6199403ca536e46079e37db1a1387',
+      id: 'C61efb2aa1ad6fc26fefdc41fb710b431',
       name: '.Test',
       lastMessage: 'เชื่อมต่อแล้ว',
       timestamp: 'Live',
-      msgCount: 171
+      msgCount: 1
     }];
   }
   props.setProperty('LINE_GROUPS', JSON.stringify(cleaned));
   _memLineGroups = cleaned;
-  return { success: true, activeGroupId: 'Ccec6199403ca536e46079e37db1a1387', lineGroups: cleaned };
+  return { success: true, activeGroupId: 'C61efb2aa1ad6fc26fefdc41fb710b431', lineGroups: cleaned };
 }
 
 function assertAdminApiKey_(provided) {
@@ -89,6 +89,7 @@ var _memGroupNameCache = {};
 var _memChatLogSheet = null;
 
 var DEAD_LINE_GROUP_IDS = {
+  'Ccec6199403ca536e46079e37db1a1387': true,
   'Cecd8e08a64397683d85ca9dd72acf1a6': true,
   'C12345678901234567890123456789012': true
 };
@@ -152,7 +153,7 @@ function getActiveGroupId() {
   }
 
   // 4. Fallback default active test group
-  var hardcodedActive = 'Ccec6199403ca536e46079e37db1a1387';
+  var hardcodedActive = 'C61efb2aa1ad6fc26fefdc41fb710b431';
   props.setProperty('ACTIVE_GROUP_ID', hardcodedActive);
   return hardcodedActive;
 }
@@ -3243,6 +3244,8 @@ function pushLineGroupMessage(groupId, text) {
     if (code === 429 || (body && (body.indexOf('monthly limit') !== -1 || body.indexOf('reached your monthly') !== -1))) {
       errorMsg = 'โควต้าส่งข้อความของบัญชี LINE OA ประจำเดือนนี้เต็มแล้ว (300/300 ข้อความ) กรุณาอัปเกรดแพ็กเกจเป็น Basic/Pro ที่ manager.line.biz เพื่อส่งข้อความต่อครับ';
       return { success: false, code: 429, error: errorMsg, isQuotaExhausted: true, groupId: groupId };
+    } else if (code === 400 && body && (body.indexOf('Failed to send messages') !== -1 || body.indexOf('Bad Request') !== -1)) {
+      errorMsg = 'บอท LINE OA ไม่ได้อยู่ในกลุ่มเป้าหมาย (' + (groupId ? groupId.slice(-6) : '') + ') หรือยังไม่ได้เชิญบอทเข้ากลุ่มนี้';
     } else if (body && body.indexOf('Invalid reply token') !== -1) {
       errorMsg = 'โทเค็นตอบกลับหมดอายุ';
     } else if (body && body.indexOf('Authentication failed') !== -1) {
