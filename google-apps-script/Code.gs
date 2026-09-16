@@ -9,8 +9,12 @@
 function getScriptSecret_(key) {
   var props = PropertiesService.getScriptProperties();
   var val = (props.getProperty(key) || '').toString();
-  if (val) return val;
-  if (key === 'LINE_CHANNEL_ACCESS_TOKEN') return '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=';
+  if (val && val !== '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=') return val;
+  if (key === 'LINE_CHANNEL_ACCESS_TOKEN') {
+    var newToken = 'PpuZyApV5ZnAbv30gq3h5F7+gwidiQyhUWiyyZWIFLVMXbWg7gAylFzy+2WYPsYWsx9IAhC2YCf3Y+0QLpr50IVoLEyTO8iljM6OmidmF1A/3p3BaXk2A6rphlobN7ipKJdZMBQrGEvwvjHTgmhE8wdB04t89/1O/w1cDnyilFU=';
+    try { props.setProperty('LINE_CHANNEL_ACCESS_TOKEN', newToken); } catch (_) {}
+    return newToken;
+  }
   if (key === 'SLIP_API_KEY') return 'WNsIQaS1CqRpyHwPHb0SA5wcdh55sQYZT6cSNLSSssY=';
   if (key === 'ADMIN_API_KEY') return 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
   return '';
@@ -540,6 +544,12 @@ function executeAdminAction(functionName, args) {
       return getDashboardData(true);
     case 'adminGetLineQuota':
       return adminGetLineQuota();
+    case 'adminSetLineToken':
+      if (args[0]) {
+        PropertiesService.getScriptProperties().setProperty('LINE_CHANNEL_ACCESS_TOKEN', String(args[0]).trim());
+        return { success: true, message: 'LINE token updated' };
+      }
+      return { success: false, error: 'No token provided' };
     case 'pruneDeadLineGroupsFromProperties': return pruneDeadLineGroupsFromProperties();
     default: return { error: 'Unknown function: ' + functionName };
   }

@@ -10,7 +10,7 @@ function getScriptSecret_(key) {
   var props = PropertiesService.getScriptProperties();
   var val = (props.getProperty(key) || '').toString();
   if (val) return val;
-  if (key === 'LINE_CHANNEL_ACCESS_TOKEN') return '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=';
+  if (key === 'LINE_CHANNEL_ACCESS_TOKEN') return 'PpuZyApV5ZnAbv30gq3h5F7+gwidiQyhUWiyyZWIFLVMXbWg7gAylFzy+2WYPsYWsx9IAhC2YCf3Y+0QLpr50IVoLEyTO8iljM6OmidmF1A/3p3BaXk2A6rphlobN7ipKJdZMBQrGEvwvjHTgmhE8wdB04t89/1O/w1cDnyilFU=';
   if (key === 'SLIP_API_KEY') return 'WNsIQaS1CqRpyHwPHb0SA5wcdh55sQYZT6cSNLSSssY=';
   if (key === 'ADMIN_API_KEY') return 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
   return '';
