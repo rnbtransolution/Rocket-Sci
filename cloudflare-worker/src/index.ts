@@ -3,6 +3,7 @@ import { verifyLineSignature } from './signature.js';
 import {
   processLineEvent,
   clearAllPendingOrders,
+  voidAllRoundOrders,
   getPendingOrdersList,
   getPlayersList,
   savePlayerProfile,
@@ -225,40 +226,35 @@ export default {
             targetTx.actualAmount = targetTx.requestedAmount;
             await env.KV_CACHE.put('TRANSACTIONS_LIST', JSON.stringify(txs));
 
-            // Credit player balance
+            const isWithdrawal = String(txId).startsWith('WD') || targetTx.type === 'withdraw';
             const players = await getPlayersList(env);
             const player = players.find(p => p.id === targetTx.playerId || p.lineUserId === targetTx.playerId);
             if (player) {
-              player.balance = (Number(player.balance) || 0) + targetTx.requestedAmount;
               const rawLine = player.lineUserId || await env.KV_CACHE.get(`RAW_LINE_${player.id}`) || player.id;
-              await savePlayerProfile({
-                shortId: player.id,
-                lineUserId: rawLine,
-                displayName: player.name,
-                balance: player.balance,
-                bankName: player.bankName,
-                accountNumber: player.bankAccount,
-                accountName: player.accountName,
-                registeredAt: Date.now(),
-                updatedAt: Date.now(),
-              }, env, ctx);
+              if (isWithdrawal) {
+                // Withdrawal: balance was already deducted upon request. Notify player of success.
+                if (rawLine) {
+                  await pushToLine(rawLine, `💸 [ถอนเงินสำเร็จ]: ยอด ${targetTx.requestedAmount.toLocaleString()} บาท แอดมินได้โอนเข้าบัญชีของคุณเรียบร้อยแล้วครับ 🚀`, env);
+                }
+              } else {
+                // Deposit: credit player balance
+                player.balance = (Number(player.balance) || 0) + targetTx.requestedAmount;
+                await savePlayerProfile({
+                  shortId: player.id,
+                  lineUserId: rawLine,
+                  displayName: player.name,
+                  balance: player.balance,
+                  bankName: player.bankName,
+                  accountNumber: player.bankAccount,
+                  accountName: player.accountName,
+                  registeredAt: Date.now(),
+                  updatedAt: Date.now(),
+                }, env, ctx);
 
-              // Push notice to player
-              if (rawLine) {
-                await fetch('https://api.line.me/v2/bot/message/push', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`,
-                  },
-                  body: JSON.stringify({
-                    to: rawLine,
-                    messages: [{
-                      type: 'text',
-                      text: `✅ อนุมัติยอดเงินฝาก ${targetTx.requestedAmount.toLocaleString()} บาท เรียบร้อยแล้วครับ!\nแต้มคงเหลือปัจจุบัน: ${player.balance.toLocaleString()} pt 🚀`,
-                    }],
-                  }),
-                }).catch(() => {});
+                // Push notice to player
+                if (rawLine) {
+                  await pushToLine(rawLine, `✅ อนุมัติยอดเงินฝาก ${targetTx.requestedAmount.toLocaleString()} บาท เรียบร้อยแล้วครับ!\nแต้มคงเหลือปัจจุบัน: ${player.balance.toLocaleString()} pt 🚀`, env);
+                }
               }
             }
           }
@@ -272,6 +268,36 @@ export default {
             targetTx.status = 'rejected';
             targetTx.reviewReason = reason;
             await env.KV_CACHE.put('TRANSACTIONS_LIST', JSON.stringify(txs));
+
+            const isWithdrawal = String(txId).startsWith('WD') || targetTx.type === 'withdraw';
+            const players = await getPlayersList(env);
+            const player = players.find(p => p.id === targetTx.playerId || p.lineUserId === targetTx.playerId);
+            if (player) {
+              const rawLine = player.lineUserId || await env.KV_CACHE.get(`RAW_LINE_${player.id}`) || player.id;
+              if (isWithdrawal) {
+                // Refund locked withdrawal points back to player profile
+                player.balance = (Number(player.balance) || 0) + targetTx.requestedAmount;
+                await savePlayerProfile({
+                  shortId: player.id,
+                  lineUserId: rawLine,
+                  displayName: player.name,
+                  balance: player.balance,
+                  bankName: player.bankName,
+                  accountNumber: player.bankAccount,
+                  accountName: player.accountName,
+                  registeredAt: Date.now(),
+                  updatedAt: Date.now(),
+                }, env, ctx);
+
+                if (rawLine) {
+                  await pushToLine(rawLine, `❌ [ปฏิเสธการถอนเงิน]: ยอด ${targetTx.requestedAmount.toLocaleString()} pt (สาเหตุ: ${reason})\nระบบได้คืนแต้มเข้ากระเป๋าเรียบร้อย แต้มคงเหลือ: ${player.balance.toLocaleString()} pt 🚀`, env);
+                }
+              } else {
+                if (rawLine) {
+                  await pushToLine(rawLine, `❌ [ปฏิเสธการฝากเงิน]: ยอด ${targetTx.requestedAmount.toLocaleString()} บาท (สาเหตุ: ${reason})`, env);
+                }
+              }
+            }
           }
           result = { success: true, txId };
         } else if (functionName === 'adminSetPlayerBalance') {
@@ -577,7 +603,7 @@ export default {
             },
           };
 
-          await clearAllPendingOrders(env);
+          await voidAllRoundOrders(env, ctx);
 
           const targets = await resolveTargetGroupIds(target, env);
           if (targets.length === 0) {
@@ -754,7 +780,8 @@ export default {
                 resolvedOrders.push(order);
 
                 if (winnerLineId && winnerSide !== 'draw') {
-                  const winProfRaw = await env.KV_CACHE.get(`USER_${winnerLineId}`);
+                  const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${winnerLineId}`)) || (winnerLineId === order.creatorId ? order.creatorLineUserId : null) || winnerLineId;
+                  const winProfRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
                   if (winProfRaw) {
                     const wp = JSON.parse(winProfRaw);
                     wp.balance = (Number(wp.balance) || 0) + (amt * 2);
@@ -762,7 +789,8 @@ export default {
                   }
                 } else if (winnerSide === 'draw') {
                   if (order.creatorId) {
-                    const cpRaw = await env.KV_CACHE.get(`USER_${order.creatorId}`);
+                    const cRawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
+                    const cpRaw = await env.KV_CACHE.get(`USER_${cRawLine}`);
                     if (cpRaw) {
                       const cp = JSON.parse(cpRaw);
                       cp.balance = (Number(cp.balance) || 0) + amt;
@@ -770,7 +798,8 @@ export default {
                     }
                   }
                   if (order.matcherId) {
-                    const mpRaw = await env.KV_CACHE.get(`USER_${order.matcherId}`);
+                    const mRawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.matcherId}`)) || order.matcherId;
+                    const mpRaw = await env.KV_CACHE.get(`USER_${mRawLine}`);
                     if (mpRaw) {
                       const mp = JSON.parse(mpRaw);
                       mp.balance = (Number(mp.balance) || 0) + amt;

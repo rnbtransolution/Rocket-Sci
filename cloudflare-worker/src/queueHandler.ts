@@ -628,6 +628,7 @@ async function handleMatchOrder(
   const matchFlex = generateMatchNotificationFlex(order);
 
   // Group chat isolation: Always push match details to private DM of both players in parallel
+  // Do NOT send any match alerts to the LINE group (keeps group clean and quiet)
   const creatorLineId = await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`);
   const matchPromises: Promise<any>[] = [
     pushToLine(userId, matchFlex, env),
@@ -635,10 +636,6 @@ async function handleMatchOrder(
   ];
   if (creatorLineId) {
     matchPromises.push(pushToLine(creatorLineId, matchFlex, env));
-  }
-  const targetGroup = groupId || order.groupId;
-  if (targetGroup) {
-    matchPromises.push(pushToLine(targetGroup, `🤝 Order #${resolvedNo} มีผู้รับดวลแล้วครับ! (${order.amount} pt)`, env));
   }
 
   if (ctx) {
@@ -688,31 +685,112 @@ async function cancelOrder(
 // ── Pending Orders & Lookup Helpers ──
 
 /**
- * Completely purges all pending orders from KV_CACHE and KV_ORDERS.
- * Ensures the live board and database cache reset to 0 items immediately.
+ * Cancels all unmatched pending orders from KV_CACHE and KV_ORDERS and refunds creators.
+ * Preserves matched orders waiting for flight time settlement.
  */
-export async function clearAllPendingOrders(env: Env): Promise<{ cleared: number }> {
+export async function clearAllPendingOrders(env: Env, ctx?: ExecutionContext): Promise<{ cleared: number }> {
   let clearedCount = 0;
   try {
-    // 1. Immediately overwrite PENDING_ORDERS_LIST with empty array in KV_CACHE
+    // 1. Immediately reset PENDING_ORDERS_LIST with empty array in KV_CACHE
     await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 });
 
-    // 2. Scan and purge all ORDER_* keys in KV_ORDERS
+    // 2. Scan and cancel ONLY pending_match orders, refunding creators
     let cursor: string | undefined = undefined;
     do {
       const listRes: any = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 100, cursor });
       if (listRes.keys && listRes.keys.length > 0) {
-        clearedCount += listRes.keys.length;
-        await Promise.all(listRes.keys.map((k: any) => env.KV_ORDERS.delete(k.name)));
+        for (const k of listRes.keys) {
+          const raw = await env.KV_ORDERS.get(k.name);
+          if (!raw) continue;
+          try {
+            const order = JSON.parse(raw) as Order;
+            if (order.status === 'pending_match') {
+              order.status = 'cancelled';
+              await env.KV_ORDERS.put(k.name, JSON.stringify(order));
+              clearedCount++;
+
+              // Refund creator
+              if (order.creatorId && Number(order.amount) > 0) {
+                const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
+                const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+                if (profileRaw) {
+                  const p = JSON.parse(profileRaw) as PlayerProfile;
+                  p.balance = (Number(p.balance) || 0) + Number(order.amount);
+                  await savePlayerProfile(p, env, ctx);
+                }
+              }
+            }
+          } catch (_) {}
+        }
       }
       cursor = listRes.list_complete ? undefined : listRes.cursor;
     } while (cursor);
 
-    console.log(`[Worker] clearAllPendingOrders: Purged ${clearedCount} order keys from KV.`);
+    console.log(`[Worker] clearAllPendingOrders: Cancelled and refunded ${clearedCount} pending unmatched orders.`);
   } catch (err) {
     console.error('[Worker] clearAllPendingOrders error:', err);
   }
   return { cleared: clearedCount };
+}
+
+/**
+ * Voids the entire round: cancels BOTH pending_match and matched orders,
+ * refunding 100% of points to both creator and matcher.
+ */
+export async function voidAllRoundOrders(env: Env, ctx?: ExecutionContext): Promise<{ voided: number }> {
+  let voidedCount = 0;
+  try {
+    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 });
+
+    let cursor: string | undefined = undefined;
+    do {
+      const listRes: any = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 100, cursor });
+      if (listRes.keys && listRes.keys.length > 0) {
+        for (const k of listRes.keys) {
+          const raw = await env.KV_ORDERS.get(k.name);
+          if (!raw) continue;
+          try {
+            const order = JSON.parse(raw) as Order;
+            if (order.status === 'pending_match' || order.status === 'matched') {
+              const wasMatched = order.status === 'matched';
+              order.status = 'cancelled';
+              await env.KV_ORDERS.put(k.name, JSON.stringify(order));
+              voidedCount++;
+              const amt = Number(order.amount) || 0;
+
+              // Refund creator
+              if (order.creatorId && amt > 0) {
+                const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
+                const cpRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+                if (cpRaw) {
+                  const cp = JSON.parse(cpRaw) as PlayerProfile;
+                  cp.balance = (Number(cp.balance) || 0) + amt;
+                  await savePlayerProfile(cp, env, ctx);
+                }
+              }
+
+              // Refund matcher if matched
+              if (wasMatched && order.matcherId && amt > 0) {
+                const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.matcherId}`)) || order.matcherId;
+                const mpRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+                if (mpRaw) {
+                  const mp = JSON.parse(mpRaw) as PlayerProfile;
+                  mp.balance = (Number(mp.balance) || 0) + amt;
+                  await savePlayerProfile(mp, env, ctx);
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+      cursor = listRes.list_complete ? undefined : listRes.cursor;
+    } while (cursor);
+
+    console.log(`[Worker] voidAllRoundOrders: Voided and refunded ${voidedCount} orders 100%.`);
+  } catch (err) {
+    console.error('[Worker] voidAllRoundOrders error:', err);
+  }
+  return { voided: voidedCount };
 }
 
 export async function getPendingOrdersList(env: Env): Promise<Order[]> {

@@ -1059,7 +1059,6 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
     if (matched && matched.orderNumber) {
       const rocketLabel = matched.rocketName || getActiveRocketName();
       const flexMatch = constructMatchNotificationFlex(matched.orderNumber, matched.amount, matched.playerLowName, matched.playerHighName, matched.rangeInfo, matched.isChotoy, rocketLabel);
-      const confirmText = `✅ ยืนยันแมตช์ Order #${matched.orderNumber}\nบั้งไฟ: ${rocketLabel || '-'}\nยอด: ${matched.amount}pt\nต่ำ: @${matched.playerLowName || '-'} | สูง: @${matched.playerHighName || '-'}`;
 
       if (groupId) {
         // Group chat stays clean: notify creator & matcher directly via private DM

@@ -1408,9 +1408,6 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
       } else {
         replyToLine(replyToken, matchFlex, userId);
       }
-      var confirmText = '✅ ยืนยันแมตช์ Order #' + matchedBet.orderNumber + '\nบั้งไฟ: ' + (rocketLabel || '-') + '\nยอด: ' + matchedBet.amount + 'pt\nต่ำ: @' + (matchedBet.playerLowName || '-') + ' | สูง: @' + (matchedBet.playerHighName || '-');
-      if (matchedBet.creatorId) pushToLine(matchedBet.creatorId, confirmText);
-      if (matchedBet.matcherId && matchedBet.matcherId !== matchedBet.creatorId) pushToLine(matchedBet.matcherId, confirmText);
       if (matchedBet.isSplit && matchedBet.splitOrderNumber && matchedBet.remainingAmount >= 100) {
         var groupTarget = groupId || getActiveGroupId();
         if (groupTarget) {
