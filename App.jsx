@@ -1509,10 +1509,17 @@ export default function App() {
     setChatLogs(prev => [...prev, newLog]);
     addToast(isGroupMode ? `ส่งข้อความเข้า [${targetName}] สำเร็จแล้ว 🚀` : `ส่งข้อความไปยัง [${targetName}] สำเร็จแล้ว 💬`, 'success');
 
-    // High-Speed Optimistic Dispatch: Fire to GAS/LINE in background with zero UI delay
-    runBackendFunction('sendAdminMessageToLine', [targetChatId, text]).catch(e => {
-      console.error('Error sending admin message to LINE:', e);
-    });
+    // High-Speed Optimistic Dispatch: Fire to backend/LINE in background with zero UI delay
+    runBackendFunction('sendAdminMessageToLine', [targetChatId, text])
+      .then(res => {
+        if (res && res.success === false) {
+          addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'ตรวจสอบกลุ่ม LINE'}`, 'warning');
+        }
+      })
+      .catch(e => {
+        console.error('Error sending admin message to LINE:', e);
+        addToast(`❌ ส่งไม่สำเร็จ: ${e?.message || 'การเชื่อมต่อขัดข้อง'}`, 'danger');
+      });
   };
 
   // Parse bet command from Group chat message (Sandbox fallback)

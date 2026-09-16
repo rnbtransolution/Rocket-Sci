@@ -980,13 +980,43 @@ async function recordActiveGroup(groupId: string, env: Env): Promise<void> {
       lastActive: Date.now(),
     }));
   }
+
+  // Ensure group is listed in LINE_GROUPS for discovery and multi-group broadcast
+  try {
+    const lineGroupsRaw = await env.KV_CACHE.get('LINE_GROUPS');
+    let lineGroups = lineGroupsRaw ? JSON.parse(lineGroupsRaw) : [];
+    if (!Array.isArray(lineGroups)) lineGroups = [];
+    if (!lineGroups.some((g: any) => g.id === groupId)) {
+      lineGroups.push({
+        id: groupId,
+        name: `🚀 กลุ่มดวลสด (#${groupId.slice(-4)})`,
+        lastMessage: '',
+        timestamp: 'Live',
+      });
+      await env.KV_CACHE.put('LINE_GROUPS', JSON.stringify(lineGroups));
+    }
+  } catch (_) {}
 }
 
 // ── LINE HTTP Dispatchers ──
 
 async function replyToLine(replyToken: string, payload: any, env: Env): Promise<boolean> {
   try {
-    const messages = [typeof payload === 'string' ? { type: 'text', text: payload } : payload];
+    let messageObj: any;
+    if (typeof payload === 'string') {
+      messageObj = { type: 'text', text: payload };
+    } else if (payload && payload.type === 'flex') {
+      messageObj = payload;
+    } else if (payload && (payload.type === 'bubble' || payload.type === 'carousel')) {
+      const altText = payload.header?.contents?.[0]?.text || payload.altText || '🚀 Rocket Science';
+      messageObj = { type: 'flex', altText, contents: payload };
+    } else if (payload && payload.type === 'text') {
+      messageObj = payload;
+    } else {
+      messageObj = { type: 'text', text: String(payload) };
+    }
+
+    const messages = [messageObj];
     const res = await fetch('https://api.line.me/v2/bot/message/reply', {
       method: 'POST',
       headers: {
@@ -1007,9 +1037,23 @@ async function replyToLine(replyToken: string, payload: any, env: Env): Promise<
   }
 }
 
-async function pushToLine(to: string, payload: any, env: Env): Promise<boolean> {
+export async function pushToLine(to: string, payload: any, env: Env): Promise<boolean> {
   try {
-    const messages = [typeof payload === 'string' ? { type: 'text', text: payload } : payload];
+    let messageObj: any;
+    if (typeof payload === 'string') {
+      messageObj = { type: 'text', text: payload };
+    } else if (payload && payload.type === 'flex') {
+      messageObj = payload;
+    } else if (payload && (payload.type === 'bubble' || payload.type === 'carousel')) {
+      const altText = payload.header?.contents?.[0]?.text || payload.altText || '🚀 Rocket Science';
+      messageObj = { type: 'flex', altText, contents: payload };
+    } else if (payload && payload.type === 'text') {
+      messageObj = payload;
+    } else {
+      messageObj = { type: 'text', text: String(payload) };
+    }
+
+    const messages = [messageObj];
     const res = await fetch('https://api.line.me/v2/bot/message/push', {
       method: 'POST',
       headers: {
