@@ -416,16 +416,14 @@ export default function App() {
   const [activeGroupId, setActiveGroupId] = useState(null); // Active connected LINE Group ID
   const [lineGroups, setLineGroups] = useState([]); // List of active connected LINE Groups
   const [chatTypeMode, setChatTypeMode] = useState('group'); // 'group' or 'private'
-  const [selectedGroupFilter, setSelectedGroupFilter] = useState('ALL'); // Multi-group filter
   const [broadcastTargetGroup, setBroadcastTargetGroup] = useState('ALL'); // Multi-group broadcast target
-  const [lineQuota, setLineQuota] = useState({ totalUsage: 300, limit: 300, isExhausted: true, remaining: 0 }); // Live LINE quota monitor
-  
+
   const privateChatEndRef = useRef(null);
   const groupChatEndRef = useRef(null);
   const privateChatContainerRef = useRef(null);
   const groupChatContainerRef = useRef(null);
 
-  // Parse URL query parameter userId on mount & fetch real-time LINE quota
+  // Parse URL query parameter userId on mount
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const uid = urlParams.get('userId');
@@ -434,24 +432,7 @@ export default function App() {
       const normalizedUid = uid.trim().toLowerCase() === 'user' ? 'user' : uid.trim();
       setPlayerUserId(normalizedUid);
     }
-    fetchLineQuota();
   }, []);
-
-  const fetchLineQuota = async () => {
-    try {
-      if (isGAS) {
-        const gas = window.google?.script?.run;
-        if (gas && typeof gas.adminGetLineQuota === 'function') {
-          gas.withSuccessHandler((q) => { if (q && !q.error) setLineQuota(q); }).adminGetLineQuota();
-        } else if (gas && typeof gas.executeAdminAction === 'function') {
-          gas.withSuccessHandler((q) => { if (q && !q.error) setLineQuota(q); }).executeAdminAction('adminGetLineQuota', []);
-        }
-      } else {
-        const q = await runBackendFunction('adminGetLineQuota', []);
-        if (q && !q.error) setLineQuota(q);
-      }
-    } catch (_) {}
-  };
 
   // Detect live Node.js Express backend (localhost, Render, Vercel, Railway, or custom host)
   const isLiveBackend = typeof window !== 'undefined' && !isGAS;
@@ -464,7 +445,6 @@ export default function App() {
       if (Array.isArray(data.transactions)) setTransactions(data.transactions);
       if (Array.isArray(data.bets)) setBets(data.bets);
       if (Array.isArray(data.chatLogs)) setChatLogs(data.chatLogs);
-      if (data.lineQuota) setLineQuota(data.lineQuota);
       if (data.activeGroupId !== undefined) setActiveGroupId(data.activeGroupId);
       if (data.lineGroups && data.lineGroups.length > 0) {
         setLineGroups(data.lineGroups);
@@ -2056,7 +2036,7 @@ export default function App() {
               {(window.isNodeJS || isGAS) ? '🟢 Connected' : '🧪 Demo Mode'}
             </span>
             <h1 className="text-xl md:text-2xl font-black tracking-tight text-slate-800 uppercase font-heading">
-              Rocket Science Command System
+              Rocket Commander
             </h1>
           </div>
           <p className="text-[11px] text-slate-500 mt-1 font-sans">
@@ -2415,19 +2395,6 @@ export default function App() {
                   </select>
                 </div>
 
-                {/* Quota Exhaustion Warning */}
-                {lineQuota?.isExhausted && (
-                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-2.5 flex items-start gap-2 text-rose-800 text-xs">
-                    <AlertTriangle size={15} className="text-rose-600 shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-black">โควต้า LINE Push เต็ม ({lineQuota.usage}/{lineQuota.limit || 300}): </span>
-                      LINE จะบล็อกการส่งข้อความเข้ากลุ่ม กรุณาอัปเกรดแพ็กเกจที่{' '}
-                      <a href="https://manager.line.biz" target="_blank" rel="noreferrer" className="underline font-bold text-rose-900">
-                        manager.line.biz
-                      </a>
-                    </div>
-                  </div>
-                )}
 
                 {/* Broadcast Quote Primary Button */}
                 <button
@@ -3182,58 +3149,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* LINE Messaging Quota Status Card */}
-              {lineQuota && (
-                <div className={`border rounded-xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
-                  lineQuota.isExhausted 
-                    ? 'bg-rose-50 border-rose-300 text-rose-950' 
-                    : (lineQuota.remaining < 50 ? 'bg-amber-50 border-amber-300 text-amber-950' : 'bg-slate-50 border-slate-200 text-slate-900')
-                }`}>
-                  <div className="flex items-start gap-2.5">
-                    <span className={`p-2 rounded-lg mt-0.5 sm:mt-0 ${
-                      lineQuota.isExhausted ? 'bg-rose-600 text-white' : (lineQuota.remaining < 50 ? 'bg-amber-600 text-white' : 'bg-emerald-600 text-white')
-                    }`}>
-                      <Radio size={16} />
-                    </span>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-black font-heading">
-                          {lineQuota.isExhausted ? '⚠️ โควต้าส่งข้อความ LINE OA ประจำเดือนเต็มแล้ว' : '💬 สถานะโควต้าส่งข้อความ LINE OA'}
-                        </span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                          lineQuota.isExhausted 
-                            ? 'bg-rose-200 text-rose-900' 
-                            : (lineQuota.remaining < 50 ? 'bg-amber-200 text-amber-900' : 'bg-emerald-100 text-emerald-800')
-                        }`}>
-                          ใช้ไป {lineQuota.totalUsage} / {lineQuota.limit} ({lineQuota.isExhausted ? 'หมดโควต้า' : `คงเหลือ ${lineQuota.remaining}`})
-                        </span>
-                      </div>
-                      <p className="text-[11px] font-sans mt-1 leading-relaxed">
-                        {lineQuota.isExhausted ? (
-                          <span>
-                            LINE ไม่อนุญาตให้ Push ข้อความเข้ากลุ่ม (HTTP 429: monthly limit) เนื่องจากครบโควต้าฟรีประจำเดือน หากต้องการส่งข้อความต่อ กรุณาอัปเกรดแพ็กเกจเป็น Basic/Pro ที่{' '}
-                            <a href="https://manager.line.biz" target="_blank" rel="noreferrer" className="underline font-bold text-rose-800 hover:text-rose-950">LINE Official Account Manager</a>
-                          </span>
-                        ) : (
-                          <span className="text-slate-500">
-                            ข้อความ Push เข้ากลุ่มหรือแจ้งเตือนบิลจะถูกหักจากโควต้านี้ (แพ็กเกจฟรี 300 ข้อความ/เดือน)
-                          </span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      addToast('⏳ กำลังตรวจสอบโควต้าล่าสุด...', 'info');
-                      fetchLineQuota().then(() => addToast('✅ ตรวจสอบโควต้าสำเร็จ', 'success'));
-                    }}
-                    className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 active:scale-95 shadow-xs"
-                  >
-                    <RefreshCw size={12} />
-                    <span>รีเฟรชโควต้า</span>
-                  </button>
-                </div>
-              )}
 
               {/* Target Group Selector (Applies to all actions in this tab) */}
               <div className="bg-purple-50/60 border border-purple-200 rounded-xl p-3 flex items-center justify-between flex-wrap gap-3">
