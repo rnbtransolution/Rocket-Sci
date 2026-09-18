@@ -130,7 +130,7 @@ export default function App() {
     !window.isNodeJS
   );
   const isGitHubPages = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
-  const GAS_ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbzzzrz0KDdYOwZ7nK7SxYbFMf7OT39mR8lAw4xeGUT_48Ju3tfafkiZzdrrqrRbvIzqyg/exec';
+  const CF_WORKER_BASE_URL = 'https://rocket-science-cf-worker.rnbtransolution.workers.dev';
 
   // Resilient API Base URL resolution:
   // 1. Inside GAS iframe: empty string (routes via google.script.run)
@@ -150,10 +150,10 @@ export default function App() {
         return 'http://localhost:3001';
       }
     }
-    // On GitHub Pages, return empty string so it queries GAS_ENDPOINT_URL directly,
-    // ensuring 100% real-time synchronization with Google Sheets without stale KV cache desync.
+    // On GitHub Pages, route directly to the Cloudflare Worker — the LINE webhook
+    // authority holding the live KV ledger (players, chats, groups, orders).
     if (isGitHubPages) {
-      return '';
+      return CF_WORKER_BASE_URL;
     }
     return import.meta.env.VITE_API_BASE_URL || '';
   };
@@ -196,23 +196,6 @@ export default function App() {
       }
     }
 
-    // Direct high-speed API to Google Apps Script when on GitHub Pages and no custom Node API is set
-    if (isGitHubPages && !API_BASE_URL) {
-      try {
-        const res = await fetch(GAS_ENDPOINT_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ functionName, args, apiKey: ADMIN_API_KEY }),
-        });
-        const json = await res.json();
-        if (json && json.error) throw new Error(json.error);
-        return json ? json.data : null;
-      } catch (err) {
-        console.error(`[GitHub Pages GAS Call Error in ${functionName}]:`, err);
-        throw err;
-      }
-    }
-
     const headers = { 'Content-Type': 'application/json' };
     if (ADMIN_API_KEY) {
       headers['x-admin-key'] = ADMIN_API_KEY;
@@ -236,22 +219,6 @@ export default function App() {
       if (!res.ok) throw new Error(json.error || 'เกิดข้อผิดพลาด');
       return json.data;
     } catch (fetchErr) {
-      if (isGitHubPages) {
-        console.warn(`[API Call to ${API_BASE_URL} failed, falling back to GAS]:`, fetchErr?.message);
-        try {
-          const gasRes = await fetch(GAS_ENDPOINT_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ functionName, args, apiKey: ADMIN_API_KEY }),
-          });
-          const gasJson = await gasRes.json();
-          if (gasJson && gasJson.error) throw new Error(gasJson.error);
-          return gasJson ? gasJson.data : null;
-        } catch (gasErr) {
-          console.error(`[GAS Fallback Error in ${functionName}]:`, gasErr);
-          throw gasErr;
-        }
-      }
       console.error(`[API Call Error in ${functionName}]:`, fetchErr);
       throw fetchErr;
     }
@@ -479,12 +446,6 @@ export default function App() {
         } else if (gas && typeof gas.executeAdminAction === 'function') {
           gas.withSuccessHandler((q) => { if (q && !q.error) setLineQuota(q); }).executeAdminAction('adminGetLineQuota', []);
         }
-      } else if (isGitHubPages && !API_BASE_URL) {
-        const res = await fetch(`${GAS_ENDPOINT_URL}?action=getLineQuota&_t=${Date.now()}`);
-        if (res.ok) {
-          const json = await res.json();
-          if (json && json.data) setLineQuota(json.data);
-        }
       } else {
         const q = await runBackendFunction('adminGetLineQuota', []);
         if (q && !q.error) setLineQuota(q);
@@ -589,23 +550,20 @@ export default function App() {
       };
 
     } else if (isGitHubPages) {
-      // GitHub Pages hosted fallback: direct live sync with Google Apps Script API
-      const fetchFromGASApi = async () => {
+      // GitHub Pages hosted: poll the Cloudflare Worker (LINE webhook authority) via RPC
+      const fetchFromWorkerApi = async () => {
         try {
-          const res = await fetch(`${GAS_ENDPOINT_URL}?action=getDashboardData&_t=${Date.now()}`);
-          if (res.ok) {
-            const json = await res.json();
-            if (json && json.data) {
-              applyData(json.data);
-            }
+          const data = await runBackendFunction('getDashboardData', []);
+          if (data) {
+            applyData(data);
           }
         } catch (e) {
-          console.warn('[GitHub Pages GAS Polling Note]:', e?.message || e);
+          console.warn('[GitHub Pages Worker Polling Note]:', e?.message || e);
         }
       };
 
-      fetchFromGASApi();
-      const interval = setInterval(fetchFromGASApi, 2500);
+      fetchFromWorkerApi();
+      const interval = setInterval(fetchFromWorkerApi, 2500);
 
       return () => {
         clearInterval(interval);
@@ -770,27 +728,11 @@ export default function App() {
             synced = true;
           }
         } catch (backendErr) {
-          console.warn('[Sync Backend fallback to GAS]:', backendErr);
+          console.warn('[Sync Backend Error]:', backendErr);
         }
 
         if (!synced) {
-          const res = await fetch(`${GAS_ENDPOINT_URL}?action=getDashboardData&_t=${Date.now()}`);
-          if (res.ok) {
-            const json = await res.json();
-            if (json && json.data) {
-              const d = json.data;
-              setPlayers(Array.isArray(d.players) ? d.players : []);
-              setTransactions(Array.isArray(d.transactions) ? d.transactions : []);
-              setBets(Array.isArray(d.bets) ? d.bets : []);
-              setChatLogs(Array.isArray(d.chatLogs) ? d.chatLogs : []);
-              if (d.activeGroupId !== undefined) setActiveGroupId(d.activeGroupId);
-              if (d.lineGroups) setLineGroups(d.lineGroups);
-              if (typeof window !== 'undefined') {
-                localStorage.setItem('rocket_sci_dashboard_cache', JSON.stringify(d));
-              }
-              addToast('✅ ดึงข้อมูลสดจากฐานข้อมูลสำเร็จ', 'success');
-            }
-          }
+          addToast('⚠️ ไม่สามารถดึงข้อมูลสดจากเวอร์กเกอร์ได้', 'error');
         }
       }
     } catch (e) {
