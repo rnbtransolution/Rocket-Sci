@@ -7,11 +7,7 @@
     "dev": "vite",
     "build": "vite build && python3 bundle_gas.py",
     "lint": "eslint .",
-    "preview": "vite preview",
-    "server": "node server.js",
-    "start:node": "tsx src/index.ts",
-    "build:node": "tsc",
-    "start": "npm run build && node server.js"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@google-cloud/firestore": "^9.1.0",

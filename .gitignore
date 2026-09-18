@@ -47,3 +47,5 @@ S__*
 *.txt
 !public/*.png
 !public/*.jpg
+.wrangler/
+.wrangler

@@ -128,23 +128,8 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     const clean = text.replace(/\s+/g, '').toLowerCase();
     const balanceKeywords = ['เช็คยอด', 'คงเหลือ', 'balance', 'สอบถามยอด', 'ยอด', 'ยอดเงิน', 'ดูยอด', 'กระเป๋า', 'กระเป๋าเงิน'];
     if (balanceKeywords.includes(clean)) {
-      // ── Instant-Reply Balance Architecture ──
-      // Reply IMMEDIATELY from the KV-cached balance (never block the reply token on
-      // a remote Google Sheets call — GAS latency measured 1.3s–6.4s caused LINE to
-      // disconnect at ~3s before the reply dispatched, producing silent dead taps).
-      // The authoritative Sheets sync then runs in the background; if the authority
-      // differs, a corrected balance card is pushed afterwards.
       const balanceFlex = generateBalanceFlex(profile.displayName, profile.balance);
-      const bgSync = syncProfileBalanceFromDb(profile, env, ctx)
-        .then((synced) => {
-          if (synced && synced.balance !== profile.balance) {
-            console.log(`[Balance] Background sync corrected balance ${profile.balance} -> ${synced.balance}; pushing correction`);
-            return pushToLine(userId, generateBalanceFlex(synced.displayName, synced.balance), env);
-          }
-        })
-        .catch((err) => console.warn('[Balance] Background sync error (non-fatal):', err?.message || err));
-      if (ctx) ctx.waitUntil(bgSync);
-      await deliverPrivateNotice(userId, replyToken, groupId, balanceFlex, env);
+      await deliverPrivateNotice(userId, replyToken, groupId, balanceFlex, env, profile.displayName);
       return;
     }
 
@@ -714,14 +699,17 @@ async function handleMatchOrder(
   // Generate match card
   const matchFlex = generateMatchNotificationFlex(order);
 
-  // Group chat isolation: Always push match details to private DM of both players in parallel
-  // Do NOT send any match alerts to the LINE group (keeps group clean and quiet)
-  const creatorLineId = await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`);
-  const matchPromises: Promise<any>[] = [
-    pushToLine(userId, matchFlex, env),
-    updatePersistence,
-  ];
-  if (creatorLineId) {
+  // Match notification: reply to group if requested via group, and push to DM of both players
+  const creatorLineId = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId;
+  const matchPromises: Promise<any>[] = [updatePersistence];
+  
+  if (replyToken) {
+    matchPromises.push(replyToLine(replyToken, matchFlex, env));
+  } else {
+    matchPromises.push(pushToLine(userId, matchFlex, env));
+  }
+
+  if (creatorLineId && creatorLineId !== userId) {
     matchPromises.push(pushToLine(creatorLineId, matchFlex, env));
   }
 
@@ -748,7 +736,7 @@ async function cancelOrder(
   if (order.creatorId !== profile.shortId) {
     return { success: false, message: '⚠️ คุณไม่ใช่เจ้าของแผลนี้ครับ' };
   }
-  if (order.status !== 'pending_match') {
+  if (order.status !== 'pending_match' && order.status !== 'pending_hold') {
     return { success: false, message: `⚠️ แผล Order #${resolvedNo} อยู่ในสถานะ ${order.status} ไม่สามารถยกเลิกได้ครับ` };
   }
 
@@ -841,15 +829,16 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
               await env.KV_ORDERS.put(k.name, JSON.stringify(order));
               cancelledCount++;
               const amt = Number(order.amount) || 0;
+              const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
               const notifyPromise = deliverPrivateNotice(
-                order.creatorId,
+                rawLine,
                 undefined,
                 order.groupId || null,
                 `🚫 Order #${order.orderNumber} ถูกยกเลิกอัตโนมัติ เนื่องจากจบรอบดวลโดยไม่มีการประกาศราคาช่างอย่างเป็นทางการ ✅ (คืนแต้ม ${amt.toLocaleString()} pt)`,
-                env
+                env,
+                order.creatorName
               );
-              if (order.creatorId && amt > 0) {
-                const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
+              if (rawLine && amt > 0) {
                 const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
                 if (profileRaw) {
                   const p = JSON.parse(profileRaw) as PlayerProfile;
@@ -920,15 +909,17 @@ export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, 
   // Notify each converted player that their pre-quote order is now active
   const notifyPromises = held
     .filter((o) => o.status === 'pending_match')
-    .map((o) =>
-      deliverPrivateNotice(
-        o.creatorId,
+    .map(async (o) => {
+      const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${o.creatorId}`)) || o.creatorLineUserId || o.creatorId;
+      return deliverPrivateNotice(
+        rawLine,
         undefined,
         o.groupId || null,
         `✅ ราคาช่างอย่างเป็นทางการแล้ว: ${bandMin}-${bandMax} วิ\n🧾 Order #${o.orderNumber} (${o.amount.toLocaleString()} pt ${o.side === 'low' ? 'ชถ/ต่ำ' : 'ชล/สูง'}) เปิดรอคู่แล้ว พร้อมจับคู่ครับ 🚀`,
-        env
-      )
-    );
+        env,
+        o.creatorName
+      );
+    });
   await Promise.all(notifyPromises);
 
   console.log(`[Worker] releaseHeldPreQuoteOrders: released ${converted} held pre-quote orders, auto-matched ${matched} pairs.`);
@@ -1228,7 +1219,7 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({
           functionName: 'adminSetPlayerBalance',
-          args: [profile.lineUserId, profile.balance],
+          args: [profile.lineUserId, profile.balance, profile.displayName, true],
           apiKey: env.ADMIN_API_KEY,
         }),
       }).catch((e) => console.warn('[Worker] Sheets player balance sync error:', e));
@@ -1345,128 +1336,15 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
     shortId,
     lineUserId: userId,
     displayName,
-    balance: 0, // Real balance is synced from the authoritative Sheets DB below, never a fabricated demo value
+    balance: 0,
     registeredAt: Date.now(),
     updatedAt: Date.now(),
   };
-
-  // The Google Sheets database is the single source of truth for credit balances.
-  // Before caching a fresh profile, pull the player's real balance from the DB so a
-  // zero-credit player is never reported / synchronized as 1,000 pts.
-  // Bounded by a 3s timeout so a slow/cold GAS call can never block the LINE reply.
-  if (env.GAS_FALLBACK_URL) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
-    try {
-      const syncRes = await fetch(`${env.GAS_FALLBACK_URL}?action=getDashboardData&_t=${Date.now()}`, {
-        signal: controller.signal,
-      });
-      if (syncRes.ok) {
-        const syncJson: any = await syncRes.json();
-        if (syncJson && syncJson.success !== false && Array.isArray(syncJson?.data?.players ?? syncJson?.players)) {
-          const dash = syncJson?.data || syncJson;
-          const players: any[] = dash.players;
-          const match = players.find(
-            (p: any) => p && (p.lineUserId === userId || p.id === newProfile.shortId)
-          );
-          if (match) {
-            newProfile.balance = Number(match.balance) || 0;
-            if (match.name) newProfile.displayName = match.name;
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[Worker] getOrCreatePlayerProfile balance sync error:', err);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
 
   await savePlayerProfile(newProfile, env, ctx);
   return newProfile;
 }
 
-/**
- * Re-sync a player's credit balance with the authoritative Google Sheets database.
- * The DB is the single source of truth; a stale KV cache must never overshadow an
- * admin-set balance (e.g. a player zeroed out in the DB but still cached at 1,000).
- * Returns the (possibly in-place updated) profile with the authoritative balance.
- *
- * NOTE: guarded by a 3s hard timeout so a cold/slow GAS call can never block the
- * LINE reply — if the DB can't be reached, the cached balance is returned as-is.
- */
-export async function syncProfileBalanceFromDb(
-  profile: PlayerProfile,
-  env: Env,
-  ctx?: ExecutionContext
-): Promise<PlayerProfile> {
-  if (!env.GAS_FALLBACK_URL) return profile;
-  // Throttle: max 1 Sheets read per user per 60s. The instant reply already went
-  // out from KV cache; this background correction does not need to be real-time.
-  if (await isGasSyncThrottled('BAL', profile.lineUserId, env)) return profile;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 3000);
-  const _t0 = Date.now();
-  try {
-    const syncRes = await fetch(`${env.GAS_FALLBACK_URL}?action=getDashboardData&_t=${Date.now()}`, {
-      signal: controller.signal,
-    });
-    if (!syncRes.ok) {
-      console.warn(`[Balance] Sync HTTP ${syncRes.status} after ${Date.now() - _t0}ms — keeping cached balance ${profile.balance}`);
-      return profile;
-    }
-    const syncJson: any = await syncRes.json();
-    if (!syncJson || syncJson.success === false) return profile; // Failed read — keep cached value
-    const dash = syncJson?.data || syncJson;
-    if (!Array.isArray(dash?.players)) return profile; // Corrupt / partial payload — never zero a player on bad data
-    const players: any[] = dash.players;
-    // ── Empty-Ledger Guard ──
-    // The authority ledger must never be trusted when it contains ZERO players.
-    // An empty sheet means the DB was never populated (or was wiped) — treating it
-    // as truth would zero out every player's KV-cached balance (observed live:
-    // getDashboardData returned players:[] and silently zeroed a 1,000 pt account).
-    // In that state the KV cache is the freshest surviving copy of the ledger and
-    // is authoritative until the DB is repopulated.
-    if (players.length === 0) {
-      console.warn(`[Balance] Authority ledger EMPTY (${Date.now() - _t0}ms) — keeping cached balance ${profile.balance}`);
-      return profile;
-    }
-    const match = players.find(
-      (p: any) => p && (p.lineUserId === profile.lineUserId || p.id === profile.shortId)
-    );
-    // DB is the single source of truth. A successful, non-cached DB read that does
-    // NOT contain this player means the account has no credited balance (0) — never
-    // report a stale KV demo value (e.g. the old hardcoded 1,000) for a solo account.
-    // ── Merge-Safe Guard (replaces old !match → balance=0 zeroing) ──
-    // The sheet can legitimately lag KV (throttled writes, sync latency, operator
-    // edits in-flight). Zeroing here wiped the 1,000 pt balance AND any newly
-    // created user record seconds after creation. The Ledger Authority Ladder:
-    //   1. adminSetPlayerBalance (explicit operator action) — always wins
-    //   2. KV ledger (live gameplay writes)               — wins over a missing row
-    //   3. Sheet row (reporting mirror, may lag)          — wins only when present
-    // Sheets CATCHES UP via savePlayerProfile's throttled adminSetPlayerBalance write.
-    if (!match) {
-      console.warn(
-        `[Balance] Player ${profile.shortId || profile.lineUserId} absent from sheet — keeping KV balance ${profile.balance} (sheet lags; a queued save will restore the row)`
-      );
-      return profile;
-    }
-
-    const dbBalance = Number(match.balance) || 0;
-    const dbName = match.name || profile.displayName;
-    if (dbBalance !== profile.balance || dbName !== profile.displayName) {
-      profile.balance = dbBalance;
-      profile.displayName = dbName;
-      profile.updatedAt = Date.now();
-      await savePlayerProfile(profile, env, ctx);
-    }
-  } catch (err) {
-    console.warn('[Worker] syncProfileBalanceFromDb error:', err);
-  } finally {
-    clearTimeout(timer);
-  }
-  return profile;
-}
 
 async function recordActiveGroup(groupId: string, env: Env): Promise<void> {
   await env.KV_CACHE.put('ACTIVE_GROUP_ID', groupId);
@@ -1595,26 +1473,44 @@ async function deliverPrivateNotice(
   replyToken: string | undefined,
   groupId: string | null,
   payload: any,
-  env: Env
+  env: Env,
+  displayName?: string
 ): Promise<void> {
-  const _t0 = Date.now();
+  // Resolve raw LINE userId if PL-shortId was passed
+  let targetLineId = userId;
+  if (userId && userId.startsWith('PL')) {
+    const raw = await env.KV_CACHE.get(`RAW_LINE_${userId}`);
+    if (raw) targetLineId = raw;
+  }
+
   // 1. If in 1-on-1 private chat with LINE OA:
   if (!groupId) {
-    // Keep the floating main-menu Quick Reply visible after every private reply,
-    // not only after the "เมนู" command.
     const enriched = attachMainMenuQuickReply(payload);
     if (replyToken) {
       const sent = await replyToLine(replyToken, enriched, env);
       if (sent) return;
     }
-    await pushToLine(userId, enriched, env);
+    if (targetLineId && targetLineId.startsWith('U')) {
+      await pushToLine(targetLineId, enriched, env);
+    }
     return;
   }
 
   // 2. If interaction originated in a LINE Group:
-  // Strictly isolate private notices (balance errors, cancellation receipts, deposit info)
-  // to the user's private LINE chat so the group chat remains 100% clean and quiet.
-  // The private DM message also carries the floating main-menu Quick Reply so the
-  // user can keep acting without re-invoking "เมนู".
-  await pushToLine(userId, attachMainMenuQuickReply(payload), env);
+  // Attempt private delivery via DM for players who have friended the bot
+  let pushSuccess = false;
+  if (targetLineId && targetLineId.startsWith('U')) {
+    const res = await pushToLine(targetLineId, attachMainMenuQuickReply(payload), env);
+    pushSuccess = !!(res && res.success);
+  }
+
+  // If DM push failed (e.g. user hasn't added the bot as friend) OR if replyToken is available:
+  // Provide an instant inline response in the group so the bot is never silent
+  if (!pushSuccess && replyToken) {
+    let summaryText = typeof payload === 'string' ? payload : (payload.altText || payload.text || '⚠️ ไม่สามารถทำรายการได้ครับ');
+    if (displayName) {
+      summaryText = `📢 @${displayName}\n${summaryText}`;
+    }
+    await replyToLine(replyToken, summaryText, env);
+  }
 }

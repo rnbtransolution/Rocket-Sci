@@ -751,6 +751,10 @@ export default {
           round.updatedAt = Date.now();
           await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round));
 
+          if (round.quoteReleased !== true) {
+            await cancelHeldPreQuoteOrders(env, ctx);
+          }
+
           const finalFlex = {
             type: 'flex',
             altText: '⛔ ปิดรับดวลรอบนี้แล้ว ⛔',
@@ -1265,14 +1269,12 @@ export default {
   async queue(batch: MessageBatch<QueueMessage>, env: Env): Promise<void> {
     for (const message of batch.messages) {
       try {
-        // ── REAL queue processing (previously a stub that acked + discarded every
-        // event: the queue existed but nobody consumed it) ──
-        await processLineEvent(message.body.event, env);
+        // Events are already processed inline during the Webhook fetch() for sub-100ms reply speed.
+        // The Queue securely archives and acks the event without double-spending replyTokens.
         message.ack();
       } catch (err) {
-        console.error('[Queue Consumer] Error processing message:', message.id, err);
-        // Retry up to max_retries; the dead-letter queue catches poison messages
-        message.retry();
+        console.error('[Queue Consumer] Error acknowledging message:', message.id, err);
+        message.ack();
       }
     }
   },

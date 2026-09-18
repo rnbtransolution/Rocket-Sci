@@ -437,6 +437,7 @@ function adminOpenRound(name) {
     }
   }
   setRocketRoundStatus('ACTIVE');
+  setQuoteReleased(false);
   return getDashboardData();
 }
 
@@ -515,7 +516,7 @@ function executeAdminAction(functionName, args) {
       return adminUpdatePlayerName(args[0], args[1]);
     case 'adminSetPlayerBalance': 
       invalidateDashboardCache();
-      return adminSetPlayerBalance(args[0], args[1]);
+      return adminSetPlayerBalance(args[0], args[1], args[2], args[3]);
     case 'adminDeletePlayer': 
       invalidateDashboardCache();
       return adminDeletePlayer(args[0]);
@@ -950,7 +951,7 @@ function handleCancelBetRequest(userId, orderNo, displayName) {
           return "⚠️ แผลดวล Order #" + curOrderNo + " จบหรือถูกยกเลิกแล้วครับ";
         }
         
-        if (status === 'pending_match') {
+        if (status === 'pending_match' || status === 'pending_hold') {
           // Direct cancel
           sheet.getRange(i + 1, 10).setValue('cancelled');
           // Refund credit to the creator
@@ -988,7 +989,7 @@ function handleCancelBetRequest(userId, orderNo, displayName) {
                        (displayName && (playerLowName === displayName || playerHighName === displayName)));
     if (!isCreator && searchId !== 'admin') continue;
 
-    if (status === 'pending_match') {
+    if (status === 'pending_match' || status === 'pending_hold') {
       sheet.getRange(i + 1, 10).setValue('cancelled');
       adjustPlayerBalance(creatorId || searchId, amount, creatorName);
       var targetGroupId = (row[12] && row[12].toString().trim()) || (row[7] && row[7].toString().trim()) || getActiveGroupId();
@@ -1304,6 +1305,10 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   var closeRoundRegex = /^(ปิดรอบ|ปิดรับดวล|ล็อครอบ|3-2-go|32go)$/i;
   if (closeRoundRegex.test(clean)) {
     var currentRound = getActiveRocketRound();
+    // If the ราคาช่าง was never officially released, cancel + refund held pre-quote bets.
+    if (!getQuoteReleased()) {
+      try { cancelHeldPreQuoteBets(); } catch (cancelErr) { Logger.log('[close] cancelHeldPreQuoteBets error: ' + cancelErr.toString()); }
+    }
     setRocketRoundStatus('CLOSED');
     replyToLine(replyToken, '❌ ปิดรับดวลรอบ ' + (currentRound ? currentRound.name : '') + ' เรียบร้อยแล้วครับ', userId);
     return;
@@ -1313,6 +1318,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   var openRoundRegex = /^(เปิดรอบ|เปิดรับดวล)$/i;
   if (openRoundRegex.test(clean)) {
     setRocketRoundStatus('ACTIVE');
+    setQuoteReleased(false);
     var activeRound = getActiveRocketRound();
     replyToLine(replyToken, '🚀 เปิดรับดวลแล้วครับ | บั้งไฟ: ' + activeRound.name + ' | ราคาช่าง: ' + activeRound.targetMin + '-' + activeRound.targetMax + ' วิ', userId);
     return;
@@ -1330,6 +1336,8 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
     }
     var curRound = getActiveRocketRound();
     setActiveRocketRound(curRound.name, qMin, qMax, curRound.isChotoy);
+    setQuoteReleased(true);
+    try { releasePreQuoteBets(qMin, qMax); } catch (relErr) { Logger.log('[ราคา] releasePreQuoteBets error: ' + relErr.toString()); }
     var quoteNotice = '📍 [ราคาช่างประกาศ]: ' + qMin + ' – ' + qMax + ' วิ\n\nตัวเลือกปรับราคา (กติกา 50 วิ):\n• -10: ' + (qMin - 10) + '-' + (qMax - 10) + 'วิ (ชล / ชถ)\n• -5:  ' + (qMin - 5) + '-' + (qMax - 5) + 'วิ (ชล / ชถ)\n• ปกติ: ' + qMin + '-' + qMax + 'วิ (ชล / ชถ)\n• +5:  ' + (qMin + 5) + '-' + (qMax + 5) + 'วิ (ชล / ชถ)\n• +10: ' + (qMin + 10) + '-' + (qMax + 10) + 'วิ (ชล / ชถ)';
     var groupTargetQ = groupId || getActiveGroupId();
     if (groupTargetQ) pushLineGroupMessage(groupTargetQ, quoteNotice);
@@ -1550,10 +1558,19 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
     }
 
     var activeRound = getActiveRocketRound();
-    rangeMin = Number(activeRound.targetMin) || 330;
-    rangeMax = Number(activeRound.targetMax) || 380;
-    rangeMin += offsetDelta;
-    rangeMax += offsetDelta;
+    // Official ราคาช่าง not released yet → hold simple bets as pre-quote with their offset marker.
+    // rangeMin stores the offset delta (e.g. 5, -5, 10) so it can be resolved against the official
+    // band when the admin broadcasts the quote.
+    if (!getQuoteReleased()) {
+      betType = 'pre_quote';
+      rangeMin = offsetDelta;
+      rangeMax = offsetDelta;
+    } else {
+      rangeMin = Number(activeRound.targetMin) || 330;
+      rangeMax = Number(activeRound.targetMax) || 380;
+      rangeMin += offsetDelta;
+      rangeMax += offsetDelta;
+    }
   }
 
   // If a valid bet was parsed
@@ -2026,6 +2043,7 @@ function saveOpenBet(orderNo, userId, displayName, side, amount, type, rMin, rMa
   }
   
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Bets');
+  const holdStatus = (isPreQuote === true || isPreQuote === 'true' || type === 'pre_quote') ? 'pending_hold' : 'pending_match';
   sheet.appendRow([
     orderNo,
     side === 'low' ? searchId : '',
@@ -2036,7 +2054,7 @@ function saveOpenBet(orderNo, userId, displayName, side, amount, type, rMin, rMa
     type,
     rMin || '',
     rMax || '',
-    'pending_match',
+    holdStatus,
     '',
     new Date(),
     targetGroupId || '',
@@ -2588,28 +2606,43 @@ function adminUpdatePlayerName(userId, newName) {
 /**
  * Admin: Set a player's credit balance directly (absolute value, not delta).
  */
-function adminSetPlayerBalance(userId, newBalance) {
+function adminSetPlayerBalance(userId, newBalance, displayName, suppressPush) {
   var searchId = cleanUserId(userId);
   if (!searchId) return { ok: false, error: 'Missing userId' };
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Players');
   const data = sheet.getDataRange().getValues();
   const bal = Number(newBalance) || 0;
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0] && data[i][0].toString().trim() === searchId) {
+    const col0 = (data[i][0] || '').toString().trim();
+    const col7 = (data[i][7] || '').toString().trim();
+    if (col0 === searchId || col7 === searchId) {
       const oldBalance = Number(data[i][2]) || 0;
       sheet.getRange(i + 1, 3).setValue(bal);
-      // Log as admin adjustment
-      const tSheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Transactions');
-      const txId = 'ADJ' + new Date().getTime();
-      tSheet.appendRow([txId, searchId, data[i][1], bal - oldBalance, bal, 'ADMIN_ADJUST', 'success', `Admin set balance: ${oldBalance} → ${bal}`, new Date()]);
-      // Notify player
-      const delta = bal - oldBalance;
-      const sign = delta >= 0 ? '+' : '';
-      pushToLine(searchId, `💰 แอดมินปรับยอดเครดิตของคุณ\n\nยอดเก่า: ${oldBalance} แต้ม\nปรับ: ${sign}${delta} แต้ม\nยอดใหม่: ${bal} แต้ม`);
+      if (displayName && !data[i][1]) {
+        sheet.getRange(i + 1, 2).setValue(displayName);
+      }
+      // Log as admin adjustment if balance changed
+      if (bal !== oldBalance) {
+        const tSheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Transactions');
+        const txId = 'ADJ' + new Date().getTime();
+        tSheet.appendRow([txId, col0 || searchId, data[i][1] || 'ผู้เล่น', bal - oldBalance, bal, 'ADMIN_ADJUST', 'success', `Admin set balance: ${oldBalance} → ${bal}`, new Date()]);
+        if (!suppressPush && searchId.startsWith('U')) {
+          const delta = bal - oldBalance;
+          const sign = delta >= 0 ? '+' : '';
+          try {
+            pushToLine(searchId, `💰 ปรับยอดเครดิตของคุณ\n\nยอดเก่า: ${oldBalance} แต้ม\nปรับ: ${sign}${delta} แต้ม\nยอดใหม่: ${bal} แต้ม`);
+          } catch (_) {}
+        }
+      }
       return getDashboardData();
     }
   }
-  return { ok: false, error: 'Player not found' };
+
+  // Player not found in sheet: Auto-insert new player record
+  const shortId = searchId.startsWith('PL') ? searchId : ('PL' + searchId.slice(-6).toUpperCase());
+  const pName = displayName || ('ผู้เล่น ' + shortId.slice(-4));
+  sheet.appendRow([shortId, pName, bal, new Date(), '', '', '', searchId.startsWith('U') ? searchId : '']);
+  return getDashboardData();
 }
 
 /**
@@ -2732,6 +2765,25 @@ function getDashboardData(forceFresh) {
     });
   }
 
+  // 3b. P2P result analytics — derived from settled/resolved bets
+  const p2pResults = [];
+  for (let i = Math.max(1, bData.length - 300); i < bData.length; i++) {
+    const row = bData[i];
+    const s = row[9] ? row[9].toString() : '';
+    if (s !== 'resolved') continue;
+    const winnerName = row[10] ? row[10].toString() : '';
+    const pLowName = row[2] ? row[2].toString() : '';
+    const pHighName = row[4] ? row[4].toString() : '';
+    if (!winnerName) continue;
+    p2pResults.push({
+      orderNumber: row[0].toString(),
+      amount: Number(row[5]) || 0,
+      winnerName: winnerName,
+      loserName: (winnerName === pLowName) ? pHighName : pLowName,
+      timestamp: safeFormatDate(row[11], 'HH:mm:ss')
+    });
+  }
+
   // 4. LineChatLogs sheet (inline — reuses same ss, no extra openById call)
   const chatLogs = [];
   try {
@@ -2756,6 +2808,7 @@ function getDashboardData(forceFresh) {
     players: players,
     transactions: transactions,
     bets: bets,
+    p2pResults: p2pResults,
     chatLogs: chatLogs,
     activeGroupId: getActiveGroupId(),
     lineGroups: getLineGroups(),
@@ -2880,7 +2933,12 @@ function adminResolveBets(finalTime, targetMin, targetMax) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const bSheet = ss.getSheetByName('Bets');
   if (!bSheet) return getDashboardData();
-  
+
+  // If the ราคาช่าง was never officially released, cancel + refund held pre-quote bets.
+  if (!getQuoteReleased()) {
+    try { cancelHeldPreQuoteBets(); } catch (cancelErr) { Logger.log('[adminResolveBets] cancelHeldPreQuoteBets error: ' + cancelErr.toString()); }
+  }
+
   // 1. Perform automatic matching of any unmatched pending bets
   autoMatchPendingBets(ss, bSheet);
   
@@ -3006,6 +3064,59 @@ function adminResolveBets(finalTime, targetMin, targetMax) {
     Logger.log("Error pushing round summary flex: " + e.toString());
   }
 
+  // 4. Broadcast P2P winner/loser breakdown to all active groups (Task 3)
+  try {
+    const p2pBodies = [];
+    const allData = bSheet.getDataRange().getValues();
+    for (let i = 1; i < allData.length; i++) {
+      const rw = allData[i];
+      if (rw[9] === 'resolved' && rw[10]) {
+        const winnerLabel = String(rw[10]);
+        const lowN = rw[2] ? String(rw[2]) : '';
+        const highN = rw[4] ? String(rw[4]) : '';
+        const loserLabel = (winnerLabel === lowN) ? highN : lowN;
+        p2pBodies.push({
+          "type": "box",
+          "layout": "horizontal",
+          "spacing": "sm",
+          "contents": [
+            { "type": "text", "text": "#" + rw[0], "size": "xs", "color": "#64748B", "flex": 2, "wrap": true },
+            { "type": "text", "text": "💰 " + (Number(rw[5]) || 0).toLocaleString(), "size": "xs", "color": "#0F172A", "weight": "bold", "flex": 2, "align": "end" },
+            { "type": "text", "text": "👑 " + String(winnerLabel).slice(0, 14), "size": "xs", "color": "#059669", "weight": "bold", "flex": 4, "wrap": true },
+            { "type": "text", "text": "💥 " + String(loserLabel).slice(0, 14), "size": "xs", "color": "#DC2626", "flex": 4, "wrap": true }
+          ]
+        });
+        if (p2pBodies.length >= 20) break;
+      }
+    }
+    if (p2pBodies.length > 0) {
+      const p2pFlex = {
+        "type": "bubble",
+        "size": "giga",
+        "header": {
+          "type": "box",
+          "layout": "vertical",
+          "backgroundColor": "#064E3B",
+          "paddingAll": "md",
+          "contents": [
+            { "type": "text", "text": "🤝 ผลดวลตัวต่อตัว (P2P)", "weight": "bold", "color": "#FDE047", "size": "sm", "align": "center" },
+            { "type": "text", "text": "รอบ [" + rocketName + "] | เวลา " + timeSec + "s", "color": "#FFFFFF", "size": "xs", "align": "center", "margin": "xs" }
+          ]
+        },
+        "body": {
+          "type": "box",
+          "layout": "vertical",
+          "spacing": "sm",
+          "paddingAll": "md",
+          "contents": p2pBodies
+        }
+      };
+      sendAdminMessageToLine('ALL', p2pFlex);
+    }
+  } catch(e) {
+    Logger.log("Error pushing P2P breakdown flex: " + e.toString());
+  }
+
   setRocketRoundStatus('ACTIVE');
   return getDashboardData();
 }
@@ -3023,7 +3134,7 @@ function adminVoidRound() {
       status === 'matched' ||
       status === 'pending_cancel' ||
       status === 'pre_quote_matched' ||
-      (betType === 'pre_quote' && (status === 'pending_match' || status === 'pre_quote_matched'));
+      (betType === 'pre_quote' && (status === 'pending_match' || status === 'pre_quote_matched' || status === 'pending_hold'));
     if (eligible) {
       const orderNo = bData[i][0];
       const lowId = bData[i][1];
@@ -5434,6 +5545,13 @@ function adminBroadcastQuote(targetId, name, minVal, maxVal, isChotoy) {
   setActiveRocketRound(roundName, numMin, numMax, chotoyBool);
   adminOpenRound(roundName);
 
+  setQuoteReleased(true);
+  try {
+    releasePreQuoteBets(numMin, numMax);
+  } catch (releaseErr) {
+    Logger.log('[releasePreQuoteBets] Error after broadcast: ' + releaseErr.toString());
+  }
+
   var quoteFlex = {
     "type": "bubble",
     "size": "kilo",
@@ -5459,6 +5577,126 @@ function adminBroadcastQuote(targetId, name, minVal, maxVal, isChotoy) {
     }
   };
   return sendAdminMessageToLine(targetId || 'ALL', quoteFlex);
+}
+
+/**
+ * Releases ALL held pre-quote bets (status=pending_hold) against the officially
+ * broadcast ราคาช่าง band. Applies band ± each order's stored offset, flips them to
+ * pending_match, auto-matches same-amount low/high pairs, and DMs affected players.
+ * @param {number} bandMin
+ * @param {number} bandMax
+ * @returns {{released: number, matched: number}}
+ */
+function releasePreQuoteBets(bandMin, bandMax) {
+  const bandMinN = Number(bandMin) || 330;
+  const bandMaxN = Number(bandMax) || 380;
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const bSheet = ss.getSheetByName('Bets');
+  const bData = bSheet.getDataRange().getValues();
+
+  const pushRequests = [];
+  const pendingLogs = [];
+  let released = 0;
+
+  for (let i = 1; i < bData.length; i++) {
+    const row = bData[i];
+    const status = row[9];
+    const betType = (row[6] || '').toString();
+    if (status === 'pending_hold' && betType === 'pre_quote') {
+      const storedOffset = row[7] ? Number(row[7]) : 0;
+      const newMin = bandMinN + storedOffset;
+      const newMax = bandMaxN + storedOffset;
+      bSheet.getRange(i + 1, 7, 1, 4).setValues([[ 'range', newMin, newMax, 'pending_match' ]]);
+      released++;
+
+      const creatorId = row[1] ? cleanUserId(row[1]) : cleanUserId(row[3]);
+      const creatorName = row[1] ? row[2] : row[4];
+      const orderNo = row[0].toString();
+      const amt = Number(row[5]) || 0;
+      const notice = '✅ ราคาช่างอย่างเป็นทางการแล้ว: ' + bandMinN + '-' + bandMaxN + ' วิ\n' +
+        '🧾 Order #' + orderNo + ' (' + amt.toLocaleString() + ' pt) ปล่อยรอคู่แล้ว ระบบจับคู่ให้อัตโนมัติครับ 🚀';
+      const req = createLinePushRequest(creatorId, notice);
+      if (req) pushRequests.push(req);
+      if (creatorId) {
+        pendingLogs.push({ userId: creatorId, displayName: creatorName, sender: 'bot', text: '[Pre-Quote Released]', type: 'text' });
+      }
+    }
+  }
+
+  if (pushRequests.length > 0) {
+    try { UrlFetchApp.fetchAll(pushRequests); } catch (pushErr) { Logger.log('[releasePreQuoteBets] push error: ' + pushErr.toString()); }
+  }
+  if (pendingLogs.length > 0) {
+    batchLogLineChatMessages(pendingLogs);
+  }
+
+  // Auto-match same-amount opposite-side pairs now that orders are pending_match
+  let matched = 0;
+  if (released > 0) {
+    const before = getPendingBetsList().length;
+    autoMatchPendingBets(ss, bSheet);
+    const afterData = bSheet.getDataRange().getValues();
+    for (let i = 1; i < afterData.length; i++) {
+      if (afterData[i][9] === 'matched') matched++;
+    }
+    Logger.log('[releasePreQuoteBets] before=' + before + ' after matched=' + afterData.filter(function(r){ return r[9] === 'matched'; }).length);
+  }
+
+  Logger.log('[releasePreQuoteBets] Released ' + released + ' held pre-quote bets, matched ' + matched + '.');
+  return { released: released, matched: matched };
+}
+
+/**
+ * Cancels all remaining held pre-quote bets (status=pending_hold, type=pre_quote)
+ * with a full refund to the creator and a DM notification. Used when a round ends
+ * without the ราคาช่าง ever being officially released.
+ * @returns {{cancelled: number}}
+ */
+function cancelHeldPreQuoteBets() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const bSheet = ss.getSheetByName('Bets');
+  const bData = bSheet.getDataRange().getValues();
+
+  const pushRequests = [];
+  const pendingLogs = [];
+  let cancelled = 0;
+
+  for (let i = 1; i < bData.length; i++) {
+    const row = bData[i];
+    const status = row[9];
+    const betType = (row[6] || '').toString();
+    if (status === 'pending_hold' && betType === 'pre_quote') {
+      const amt = Number(row[5]) || 0;
+      const creatorId = row[1] ? cleanUserId(row[1]) : cleanUserId(row[3]);
+      const creatorName = row[1] ? row[2] : row[4];
+      const orderNo = row[0].toString();
+
+      // Refund the full held amount back to the creator
+      if (creatorId && amt > 0) {
+        adjustPlayerBalance(creatorId, amt, creatorName);
+      }
+
+      bSheet.getRange(i + 1, 10).setValue('cancelled');
+      cancelled++;
+
+      const notice = '🚫 Order #' + orderNo + ' ถูกยกเลิกอัตโนมัติ เนื่องจากจบรอบดวลโดยไม่มีการประกาศราคาช่างอย่างเป็นทางการ ✅ (คืนแต้ม ' + amt.toLocaleString() + ' pt)';
+      const req = createLinePushRequest(creatorId, notice);
+      if (req) pushRequests.push(req);
+      if (creatorId) {
+        pendingLogs.push({ userId: creatorId, displayName: creatorName, sender: 'bot', text: '[Pre-Quote Cancelled + Refund]', type: 'text' });
+      }
+    }
+  }
+
+  if (pushRequests.length > 0) {
+    try { UrlFetchApp.fetchAll(pushRequests); } catch (pushErr) { Logger.log('[cancelHeldPreQuoteBets] push error: ' + pushErr.toString()); }
+  }
+  if (pendingLogs.length > 0) {
+    batchLogLineChatMessages(pendingLogs);
+  }
+
+  Logger.log('[cancelHeldPreQuoteBets] Cancelled + refunded ' + cancelled + ' held pre-quote bets.');
+  return { cancelled: cancelled };
 }
 
 function constructFinalCallFlex() {
@@ -5504,6 +5742,10 @@ function constructFinalCallFlex() {
 }
 
 function adminBroadcastFinalCall(targetId) {
+  // If the ราคาช่าง was never officially released, cancel + refund all held pre-quote bets.
+  if (!getQuoteReleased()) {
+    try { cancelHeldPreQuoteBets(); } catch (cancelErr) { Logger.log('[adminBroadcastFinalCall] cancelHeldPreQuoteBets error: ' + cancelErr.toString()); }
+  }
   setRocketRoundStatus('CLOSED');
   var closeFlex = constructFinalCallFlex();
   return sendAdminMessageToLine(targetId || 'ALL', closeFlex);
@@ -6088,6 +6330,25 @@ function setRocketRoundStatus(status) {
 }
 
 /**
+ * Returns true when the ราคาช่าง (target band) has been officially broadcast/released.
+ * Opening a round alone does NOT release the quote — only adminBroadcastQuote or the
+ * inline `ราคา330-380` command marks it released.
+ * @returns {boolean}
+ */
+function getQuoteReleased() {
+  return PropertiesService.getScriptProperties().getProperty('QUOTE_RELEASED') === 'true';
+}
+
+/**
+ * Mark the current round's ราคาช่าง as officially released (true) or not (false).
+ * @param {boolean|string} flag
+ */
+function setQuoteReleased(flag) {
+  PropertiesService.getScriptProperties().setProperty('QUOTE_RELEASED', (flag === true || flag === 'true') ? 'true' : 'false');
+  Logger.log('[ROUND] quoteReleased set to: ' + (flag === true || flag === 'true' ? 'true' : 'false'));
+}
+
+/**
  * Returns true if the admin has locked the current round (no more custom-range bets).
  * Reads from ScriptProperties — consistent across concurrent webhook invocations.
  * @returns {boolean}
@@ -6108,6 +6369,7 @@ function getActiveRocketRound() {
     try {
       var parsed = JSON.parse(roundJson);
       if (parsed && parsed.name && parsed.targetMin && parsed.targetMax) {
+        parsed.quoteReleased = getQuoteReleased();
         return parsed;
       }
     } catch(_) {}
@@ -6122,7 +6384,8 @@ function getActiveRocketRound() {
     targetMin: minVal,
     targetMax: maxVal,
     isChotoy: isChotoy,
-    status: status
+    status: status,
+    quoteReleased: getQuoteReleased()
   };
 }
 
