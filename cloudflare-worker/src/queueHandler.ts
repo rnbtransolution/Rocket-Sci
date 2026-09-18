@@ -1356,11 +1356,16 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
 
 
 async function recordActiveGroup(groupId: string, env: Env): Promise<void> {
-  await env.KV_CACHE.put('ACTIVE_GROUP_ID', groupId);
-  const existing = await env.KV_CACHE.get(`GROUP_${groupId}`);
+  if (!groupId || typeof groupId !== 'string') return;
+  const gid = groupId.trim();
+  // Valid LINE Group ID starts with 'C' (or room 'R') followed by 32 hex characters
+  if (!/^[CR][0-9a-f]{32}$/i.test(gid)) return;
+
+  await env.KV_CACHE.put('ACTIVE_GROUP_ID', gid);
+  const existing = await env.KV_CACHE.get(`GROUP_${gid}`);
   if (!existing) {
-    await env.KV_CACHE.put(`GROUP_${groupId}`, JSON.stringify({
-      id: groupId,
+    await env.KV_CACHE.put(`GROUP_${gid}`, JSON.stringify({
+      id: gid,
       firstSeen: Date.now(),
       lastActive: Date.now(),
     }));

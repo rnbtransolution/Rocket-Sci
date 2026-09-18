@@ -40,7 +40,7 @@ async function resolveTargetGroupIds(target: string | undefined, env: Env): Prom
 
   const targetSet = new Set<string>();
   const activeGroupId = await env.KV_CACHE.get('ACTIVE_GROUP_ID');
-  if (activeGroupId && activeGroupId.trim()) {
+  if (activeGroupId && /^[CR][0-9a-f]{32}$/i.test(activeGroupId.trim())) {
     targetSet.add(activeGroupId.trim());
   }
 
@@ -50,7 +50,7 @@ async function resolveTargetGroupIds(target: string | undefined, env: Env): Prom
       const groups = JSON.parse(lineGroupsRaw);
       if (Array.isArray(groups)) {
         groups.forEach((g: any) => {
-          if (g && g.id && typeof g.id === 'string' && g.id.trim()) {
+          if (g && g.id && typeof g.id === 'string' && /^[CR][0-9a-f]{32}$/i.test(g.id.trim())) {
             targetSet.add(g.id.trim());
           }
         });
@@ -213,9 +213,13 @@ export default {
           const players = await getPlayersList(env);
           const transactions = await getTransactionsList(env);
           const lineGroupsRaw = await env.KV_CACHE.get('LINE_GROUPS');
-          const lineGroups = lineGroupsRaw
-            ? JSON.parse(lineGroupsRaw)
-            : (activeGroupId ? [{ id: activeGroupId, name: `🚀 กลุ่มดวลสด (#${activeGroupId.slice(-4)})`, lastMessage: '', timestamp: 'Live' }] : []);
+          let parsedGroups = lineGroupsRaw ? JSON.parse(lineGroupsRaw) : [];
+          if (!Array.isArray(parsedGroups)) parsedGroups = [];
+          const validGroups = parsedGroups.filter((g: any) => g && g.id && /^[CR][0-9a-f]{32}$/i.test(String(g.id).trim()));
+          const validActiveGroupId = (activeGroupId && /^[CR][0-9a-f]{32}$/i.test(activeGroupId.trim())) ? activeGroupId.trim() : 'C61efb2aa1ad6fc26fefdc41fb710b431';
+          const lineGroups = validGroups.length > 0
+            ? validGroups
+            : [{ id: validActiveGroupId, name: '.Test', lastMessage: 'เชื่อมต่อแล้ว', timestamp: 'Live' }];
           const chatLogsRaw = await env.KV_CACHE.get('CHAT_LOGS');
           const chatLogs = chatLogsRaw ? JSON.parse(chatLogsRaw) : [];
 
@@ -248,7 +252,7 @@ export default {
             transactions,
             bets: pendingBets,
             chatLogs,
-            activeGroupId: activeGroupId || '',
+            activeGroupId: validActiveGroupId,
             lineGroups,
             activeRound: roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380, status: 'ACTIVE' },
             roundStatus: roundStr ? (JSON.parse(roundStr).status || 'ACTIVE') : 'ACTIVE',
