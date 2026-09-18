@@ -551,22 +551,28 @@ export default function App() {
 
     } else if (isGitHubPages) {
       // GitHub Pages hosted: poll the Cloudflare Worker (LINE webhook authority) via RPC
-      const fetchFromWorkerApi = async () => {
-        try {
-          const data = await runBackendFunction('getDashboardData', []);
-          if (data) {
-            applyData(data);
+      // ── Zero-Delay Continuous Polling (timeout = 0) ──
+      // Re-fetches immediately after each cycle completes. The awaited
+      // while-loop guarantees no request stacking (unlike setInterval(fn, 0)).
+      let cancelled = false;
+      const continuousPoll = async () => {
+        while (!cancelled) {
+          try {
+            const data = await runBackendFunction('getDashboardData', []);
+            if (data) {
+              applyData(data);
+            }
+          } catch (e) {
+            console.warn('[GitHub Pages Worker Polling Note]:', e?.message || e);
           }
-        } catch (e) {
-          console.warn('[GitHub Pages Worker Polling Note]:', e?.message || e);
+          await new Promise((r) => setTimeout(r, 0));
         }
       };
 
-      fetchFromWorkerApi();
-      const interval = setInterval(fetchFromWorkerApi, 2500);
+      continuousPoll();
 
       return () => {
-        clearInterval(interval);
+        cancelled = true;
       };
 
     } else if (isLiveBackend) {
