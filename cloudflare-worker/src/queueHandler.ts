@@ -86,13 +86,22 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     const clean = text.replace(/\s+/g, '').toLowerCase();
     const balanceKeywords = ['เช็คยอด', 'คงเหลือ', 'balance', 'สอบถามยอด', 'ยอด', 'ยอดเงิน', 'ดูยอด', 'กระเป๋า', 'กระเป๋าเงิน'];
     if (balanceKeywords.includes(clean)) {
-      // The Google Sheets database is the single source of truth for credit balances.
-      // Re-sync from the DB before replying so a stale KV cache can never report
-      // a different balance than what the admin actually set (e.g. 0 credits).
-      // The sync is bounded by a hard timeout so a slow/cold GAS call can NEVER
-      // block the reply token — the bot must always answer "เช็คยอด".
-      const syncedProfile = await syncProfileBalanceFromDb(profile, env, ctx);
-      const balanceFlex = generateBalanceFlex(syncedProfile.displayName, syncedProfile.balance);
+      // ── Instant-Reply Balance Architecture ──
+      // Reply IMMEDIATELY from the KV-cached balance (never block the reply token on
+      // a remote Google Sheets call — GAS latency measured 1.3s–6.4s caused LINE to
+      // disconnect at ~3s before the reply dispatched, producing silent dead taps).
+      // The authoritative Sheets sync then runs in the background; if the authority
+      // differs, a corrected balance card is pushed afterwards.
+      const balanceFlex = generateBalanceFlex(profile.displayName, profile.balance);
+      const bgSync = syncProfileBalanceFromDb(profile, env, ctx)
+        .then((synced) => {
+          if (synced && synced.balance !== profile.balance) {
+            console.log(`[Balance] Background sync corrected balance ${profile.balance} -> ${synced.balance}; pushing correction`);
+            return pushToLine(userId, generateBalanceFlex(synced.displayName, synced.balance), env);
+          }
+        })
+        .catch((err) => console.warn('[Balance] Background sync error (non-fatal):', err?.message || err));
+      if (ctx) ctx.waitUntil(bgSync);
       await deliverPrivateNotice(userId, replyToken, groupId, balanceFlex, env);
       return;
     }
@@ -402,6 +411,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         targetMax: 380,
         status: 'ACTIVE',
         isChotoy: false,
+        quoteReleased: false,
         updatedAt: Date.now(),
       }));
       if (replyToken) {
@@ -493,6 +503,7 @@ async function handleCreateOrder(
   let rangeMin = 330;
   let rangeMax = 380;
   let isCustom = false;
+  let offsetDelta = 0;
 
   // Check if round is closed
   const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
@@ -515,9 +526,13 @@ async function handleCreateOrder(
     const cmd = match[2];
     side = ['ชล', 'ล', 'สูง', 'ไล่'].includes(cmd) ? 'high' : 'low';
     amount = parseInt(match[3], 10) || 500;
-    if (round) {
-      rangeMin = round.targetMin;
-      rangeMax = round.targetMax;
+    if (match && match[1]) {
+      const rawOffset = match[1].replace('+', '');
+      offsetDelta = parseInt(rawOffset, 10) || 0;
+      if (![5, -5, 10, -10].includes(offsetDelta)) {
+        await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)`, env);
+        return;
+      }
     }
   }
 
@@ -545,8 +560,11 @@ async function handleCreateOrder(
     return;
   }
 
-  // Deduct balance in memory
+  // Deduct balance in memory (held for pre-quote orders until price released)
   profile.balance -= amount;
+
+  const quoteReleased = !!(round && round.quoteReleased === true);
+  const isPreQuote = !isCustom && !quoteReleased;
 
   const orderNumber = Math.floor(1000 + Math.random() * 9000).toString();
   const newOrder: Order = {
@@ -556,13 +574,14 @@ async function handleCreateOrder(
     creatorLineUserId: profile.lineUserId,
     side,
     amount,
-    betType: isCustom ? 'custom_range' : 'range',
-    rangeMin,
-    rangeMax,
-    status: 'pending_match',
+    betType: isPreQuote ? 'pre_quote' : (isCustom ? 'custom_range' : 'range'),
+    rangeMin: isPreQuote ? offsetDelta : (isCustom ? rangeMin : ((round?.targetMin || 330) + offsetDelta)),
+    rangeMax: isPreQuote ? offsetDelta : (isCustom ? rangeMax : ((round?.targetMax || 380) + offsetDelta)),
+    status: isPreQuote ? 'pending_hold' : 'pending_match',
     groupId,
     userTypedCmd: text,
     rocketName: round?.name || null,
+    offset: isPreQuote ? offsetDelta : undefined,
     createdAt: Date.now(),
   };
 
@@ -580,8 +599,14 @@ async function handleCreateOrder(
   await Promise.all([
     savePlayerProfile(profile, env, ctx),
     env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder)),
-    addToPendingOrdersList(newOrder, env),
+    isPreQuote
+      ? Promise.resolve()
+      : addToPendingOrdersList(newOrder, env),
   ]);
+
+  if (isPreQuote) {
+    await deliverPrivateNotice(userId, replyToken, groupId, `⏳ Order #${orderNumber} ถูกถืออยู่รอราคาช่างครับ (จำนวน ${amount.toLocaleString()} pt)\nเมื่อแอดมินเปิดราคาช่างอย่างเป็นทางการ ระบบจะจับคู่ดวลให้อัตโนมัติครับ 🚀`, env);
+  }
 }
 
 async function handleMatchOrder(
@@ -714,7 +739,7 @@ export async function clearAllPendingOrders(env: Env, ctx?: ExecutionContext): P
     // 1. Immediately reset PENDING_ORDERS_LIST with empty array in KV_CACHE
     await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 });
 
-    // 2. Scan and cancel ONLY pending_match orders, refunding creators
+    // 2. Scan and cancel ONLY pending_match + pending_hold (pre_quote) orders, refunding creators
     let cursor: string | undefined = undefined;
     do {
       const listRes: any = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 100, cursor });
@@ -724,7 +749,7 @@ export async function clearAllPendingOrders(env: Env, ctx?: ExecutionContext): P
           if (!raw) continue;
           try {
             const order = JSON.parse(raw) as Order;
-            if (order.status === 'pending_match') {
+            if (order.status === 'pending_match' || order.status === 'pending_hold') {
               order.status = 'cancelled';
               await env.KV_ORDERS.put(k.name, JSON.stringify(order));
               clearedCount++;
@@ -746,11 +771,190 @@ export async function clearAllPendingOrders(env: Env, ctx?: ExecutionContext): P
       cursor = listRes.list_complete ? undefined : listRes.cursor;
     } while (cursor);
 
-    console.log(`[Worker] clearAllPendingOrders: Cancelled and refunded ${clearedCount} pending unmatched orders.`);
+    console.log(`[Worker] clearAllPendingOrders: Cancelled and refunded ${clearedCount} pending unmatched + held pre-quote orders.`);
   } catch (err) {
     console.error('[Worker] clearAllPendingOrders error:', err);
   }
   return { cleared: clearedCount };
+}
+
+/**
+ * Cancels ONLY held pre-quote orders (pending_hold) created while ราคาช่าง was unreleased.
+ * Refunds creators and notifies them via DM. Used when a round ends without an official quote.
+ */
+export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext): Promise<{ cancelled: number }> {
+  let cancelledCount = 0;
+  try {
+    let cursor: string | undefined = undefined;
+    do {
+      const listRes: any = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 100, cursor });
+      if (listRes.keys && listRes.keys.length > 0) {
+        for (const k of listRes.keys) {
+          const raw = await env.KV_ORDERS.get(k.name);
+          if (!raw) continue;
+          try {
+            const order = JSON.parse(raw) as Order;
+            if (order.status === 'pending_hold' && order.betType === 'pre_quote') {
+              order.status = 'cancelled';
+              await env.KV_ORDERS.put(k.name, JSON.stringify(order));
+              cancelledCount++;
+              const amt = Number(order.amount) || 0;
+              const notifyPromise = deliverPrivateNotice(
+                order.creatorId,
+                undefined,
+                order.groupId || null,
+                `🚫 Order #${order.orderNumber} ถูกยกเลิกอัตโนมัติ เนื่องจากจบรอบดวลโดยไม่มีการประกาศราคาช่างอย่างเป็นทางการ ✅ (คืนแต้ม ${amt.toLocaleString()} pt)`,
+                env
+              );
+              if (order.creatorId && amt > 0) {
+                const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
+                const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+                if (profileRaw) {
+                  const p = JSON.parse(profileRaw) as PlayerProfile;
+                  p.balance = (Number(p.balance) || 0) + amt;
+                  await savePlayerProfile(p, env, ctx);
+                }
+              }
+              await notifyPromise;
+            }
+          } catch (_) {}
+        }
+      }
+      cursor = listRes.list_complete ? undefined : listRes.cursor;
+    } while (cursor);
+    console.log(`[Worker] cancelHeldPreQuoteOrders: Cancelled + refunded ${cancelledCount} held pre-quote orders.`);
+  } catch (err) {
+    console.error('[Worker] cancelHeldPreQuoteOrders error:', err);
+  }
+  return { cancelled: cancelledCount };
+}
+
+/**
+ * Applies the officially released ราคาช่าง band (minVal-maxVal) to all held pre-quote orders:
+ *  - Converts pending_hold pre_quote orders to real band ± offset, status -> pending_match
+ *  - Re-adds them to the pending board
+ *  - Auto-matches same-amount opposite-side pairs, notifying both players via DM.
+ * Called from adminBroadcastQuote whenever a price tier is officially released.
+ */
+export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, env: Env, ctx?: ExecutionContext): Promise<{ converted: number; matched: number }> {
+  const bandMin = Number(minVal) || 330;
+  const bandMax = Number(maxVal) || 380;
+  const held: Order[] = [];
+  let cursor: string | undefined = undefined;
+  do {
+    const listRes: any = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 100, cursor });
+    if (listRes.keys && listRes.keys.length > 0) {
+      for (const k of listRes.keys) {
+        const raw = await env.KV_ORDERS.get(k.name);
+        if (!raw) continue;
+        try {
+          const order = JSON.parse(raw) as Order;
+          if (order.status === 'pending_hold' && order.betType === 'pre_quote') {
+            held.push(order);
+          }
+        } catch (_) {}
+      }
+    }
+    cursor = listRes.list_complete ? undefined : listRes.cursor;
+  } while (cursor);
+
+  let converted = 0;
+  for (const order of held) {
+    const offset = Number(order.offset) || 0;
+    order.betType = 'range';
+    order.rangeMin = bandMin + offset;
+    order.rangeMax = bandMax + offset;
+    order.status = 'pending_match';
+    await Promise.all([
+      env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order)),
+      addToPendingOrdersList(order, env),
+    ]);
+    converted++;
+  }
+
+  // Auto-match same-amount opposite-side pairs
+  const matched = await autoMatchPendingPairs(env, ctx);
+
+  // Notify each converted player that their pre-quote order is now active
+  const notifyPromises = held
+    .filter((o) => o.status === 'pending_match')
+    .map((o) =>
+      deliverPrivateNotice(
+        o.creatorId,
+        undefined,
+        o.groupId || null,
+        `✅ ราคาช่างอย่างเป็นทางการแล้ว: ${bandMin}-${bandMax} วิ\n🧾 Order #${o.orderNumber} (${o.amount.toLocaleString()} pt ${o.side === 'low' ? 'ชถ/ต่ำ' : 'ชล/สูง'}) เปิดรอคู่แล้ว พร้อมจับคู่ครับ 🚀`,
+        env
+      )
+    );
+  await Promise.all(notifyPromises);
+
+  console.log(`[Worker] releaseHeldPreQuoteOrders: released ${converted} held pre-quote orders, auto-matched ${matched} pairs.`);
+  return { converted, matched };
+}
+
+/**
+ * Pairs up pending_match orders of the same amount on opposite sides (low vs high),
+ * marks both as matched to each other, refund-agnostic (balances already held),
+ * and notifies both players via DM with the match flex.
+ */
+export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): Promise<number> {
+  try {
+    const pending = await getPendingOrdersList(env);
+    if (pending.length < 2) return 0;
+
+    // Group by amount
+    const byAmount = new Map<number, Order[]>();
+    for (const o of pending) {
+      const key = Number(o.amount);
+      if (!byAmount.has(key)) byAmount.set(key, []);
+      byAmount.get(key)!.push(o);
+    }
+
+    let paired = 0;
+    for (const [amount, group] of byAmount) {
+      const lows = group.filter((o) => o.side === 'low').sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      const highs = group.filter((o) => o.side === 'high').sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      const pairCount = Math.min(lows.length, highs.length);
+      if (pairCount === 0) continue;
+
+      for (let i = 0; i < pairCount; i++) {
+        const low = lows[i];
+        const high = highs[i];
+        const matchFlex = generateMatchNotificationFlex(low);
+        const lowNotify = (await env.KV_CACHE.get(`RAW_LINE_${low.creatorId}`)) || low.creatorLineUserId || low.creatorId;
+        const highNotify = (await env.KV_CACHE.get(`RAW_LINE_${high.creatorId}`)) || high.creatorLineUserId || high.creatorId;
+
+        // Mark low as the primary matched order, high is the matcher
+        low.status = 'matched';
+        low.matcherId = high.creatorId;
+        low.matcherName = high.creatorName;
+        low.matchedAt = Date.now();
+
+        // High mirrors as matched for settlement bookkeeping (keeping both records)
+        high.status = 'matched';
+        high.matcherId = low.creatorId;
+        high.matcherName = low.creatorName;
+        high.matchedAt = Date.now();
+
+        await Promise.all([
+          env.KV_ORDERS.put(`ORDER_${low.orderNumber}`, JSON.stringify(low)),
+          env.KV_ORDERS.put(`ORDER_${high.orderNumber}`, JSON.stringify(high)),
+          removeFromPendingOrdersList(low.orderNumber, env),
+          removeFromPendingOrdersList(high.orderNumber, env),
+          pushToLine(lowNotify, matchFlex, env),
+          pushToLine(highNotify, matchFlex, env),
+        ]);
+        if (ctx) ctx.waitUntil(Promise.resolve());
+        paired++;
+      }
+    }
+    console.log(`[Worker] autoMatchPendingPairs: auto-matched ${paired} pairs.`);
+    return paired;
+  } catch (err) {
+    console.error('[Worker] autoMatchPendingPairs error:', err);
+    return 0;
+  }
 }
 
 /**
@@ -1117,16 +1321,31 @@ export async function syncProfileBalanceFromDb(
   if (!env.GAS_FALLBACK_URL) return profile;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 3000);
+  const _t0 = Date.now();
   try {
     const syncRes = await fetch(`${env.GAS_FALLBACK_URL}?action=getDashboardData&_t=${Date.now()}`, {
       signal: controller.signal,
     });
-    if (!syncRes.ok) return profile;
+    if (!syncRes.ok) {
+      console.warn(`[Balance] Sync HTTP ${syncRes.status} after ${Date.now() - _t0}ms — keeping cached balance ${profile.balance}`);
+      return profile;
+    }
     const syncJson: any = await syncRes.json();
     if (!syncJson || syncJson.success === false) return profile; // Failed read — keep cached value
     const dash = syncJson?.data || syncJson;
     if (!Array.isArray(dash?.players)) return profile; // Corrupt / partial payload — never zero a player on bad data
     const players: any[] = dash.players;
+    // ── Empty-Ledger Guard ──
+    // The authority ledger must never be trusted when it contains ZERO players.
+    // An empty sheet means the DB was never populated (or was wiped) — treating it
+    // as truth would zero out every player's KV-cached balance (observed live:
+    // getDashboardData returned players:[] and silently zeroed a 1,000 pt account).
+    // In that state the KV cache is the freshest surviving copy of the ledger and
+    // is authoritative until the DB is repopulated.
+    if (players.length === 0) {
+      console.warn(`[Balance] Authority ledger EMPTY (${Date.now() - _t0}ms) — keeping cached balance ${profile.balance}`);
+      return profile;
+    }
     const match = players.find(
       (p: any) => p && (p.lineUserId === profile.lineUserId || p.id === profile.shortId)
     );
@@ -1287,6 +1506,7 @@ async function deliverPrivateNotice(
   payload: any,
   env: Env
 ): Promise<void> {
+  const _t0 = Date.now();
   // 1. If in 1-on-1 private chat with LINE OA:
   if (!groupId) {
     // Keep the floating main-menu Quick Reply visible after every private reply,

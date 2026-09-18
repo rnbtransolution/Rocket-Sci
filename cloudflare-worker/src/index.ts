@@ -3,6 +3,9 @@ import { verifyLineSignature } from './signature.js';
 import {
   processLineEvent,
   clearAllPendingOrders,
+  cancelHeldPreQuoteOrders,
+  releaseHeldPreQuoteOrders,
+  autoMatchPendingPairs,
   voidAllRoundOrders,
   getPendingOrdersList,
   getPlayersList,
@@ -234,6 +237,51 @@ export default {
             serverTime: new Date().toISOString(),
             lineQuota,
           };
+        } else if (functionName === 'getP2PResults') {
+          const keysList = await env.KV_ORDERS.list({ prefix: 'ORDER_' });
+          const p2p: any[] = [];
+          if (keysList.keys && keysList.keys.length > 0) {
+            for (const key of keysList.keys) {
+              const raw = await env.KV_ORDERS.get(key.name);
+              if (!raw) continue;
+              try {
+                const order = JSON.parse(raw);
+                if (order.status === 'settled' && order.winnerSide && order.winnerSide !== 'draw') {
+                  const winnerName = order.winnerName || '-';
+                  const loserName =
+                    order.winnerSide === 'low'
+                      ? (order.side === 'high' ? (order.matcherName || order.creatorName) : order.creatorName)
+                      : (order.side === 'high' ? (order.matcherName || order.creatorName) : order.creatorName);
+                  p2p.push({
+                    orderNumber: order.orderNumber,
+                    amount: Number(order.amount) || 0,
+                    winnerSide: order.winnerSide,
+                    winnerName,
+                    loserName,
+                    finalTime: order.finalTime || null,
+                    settleAt: order.settledAt || null,
+                  });
+                }
+              } catch (_) {}
+            }
+          }
+          result = { success: true, p2pResults: p2p };
+        } else if (functionName === 'getHeldPreQuoteOrders') {
+          const keysList = await env.KV_ORDERS.list({ prefix: 'ORDER_' });
+          const held: any[] = [];
+          if (keysList.keys && keysList.keys.length > 0) {
+            for (const key of keysList.keys) {
+              const raw = await env.KV_ORDERS.get(key.name);
+              if (!raw) continue;
+              try {
+                const order = JSON.parse(raw);
+                if (order.status === 'pending_hold' && order.betType === 'pre_quote') {
+                  held.push(order);
+                }
+              } catch (_) {}
+            }
+          }
+          result = { success: true, heldPreQuoteOrders: held };
         } else if (functionName === 'adminGetLineQuota') {
           try {
             const token = env.LINE_CHANNEL_ACCESS_TOKEN;
@@ -417,6 +465,7 @@ export default {
             targetMax: 380,
             status: 'ACTIVE',
             isChotoy: false,
+            quoteReleased: false,
             updatedAt: Date.now(),
           }));
           result = { success: true, round: roundName };
@@ -585,9 +634,12 @@ export default {
             targetMax: max,
             status: 'ACTIVE',
             isChotoy,
+            quoteReleased: true,
             updatedAt: Date.now(),
           };
           await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(roundData));
+
+          await releaseHeldPreQuoteOrders(min, max, env, ctx);
 
           const quoteFlex = {
             type: 'flex',
@@ -804,7 +856,7 @@ export default {
           const target = args[0];
           const warnFlex = {
             type: 'flex',
-            altText: '🚨 เตือนความปลอดภัย 🚨',
+            altText: '🚨 เตือนความปลอดภัย',
             contents: {
               type: 'bubble',
               size: 'kilo',
@@ -814,7 +866,7 @@ export default {
                 backgroundColor: '#FDE68A',
                 paddingAll: 'md',
                 contents: [
-                  { type: 'text', text: '🚨 เตือนความปลอดภัย 🚨', weight: 'bold', color: '#92400E', size: 'sm', align: 'center', wrap: true },
+                  { type: 'text', text: '🚨 เตือนความปลอดภัย', weight: 'bold', color: '#92400E', size: 'sm', align: 'center', wrap: true },
                 ],
               },
               body: {
@@ -822,6 +874,7 @@ export default {
                 layout: 'vertical',
                 backgroundColor: '#FEFCE8',
                 spacing: 'xs',
+                paddingAll: 'md',
                 contents: [
                   { type: 'text', text: '⚠️ ฝาก-ถอน ติดต่อที่ LINE OA เท่านั้น', weight: 'bold', color: '#B45309', size: 'xs', align: 'center', wrap: true },
                 ],
@@ -927,6 +980,10 @@ export default {
           const activeRoundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
           const activeRound = activeRoundStr ? JSON.parse(activeRoundStr) : { name: 'บั้งไฟสด' };
 
+          // Any orders still held as pre_quote (price never released this round) must be
+          // auto-cancelled + refunded before settlement.
+          await cancelHeldPreQuoteOrders(env, ctx);
+
           for (const key of keysList.keys) {
             const raw = await env.KV_ORDERS.get(key.name);
             if (!raw) continue;
@@ -1029,6 +1086,55 @@ export default {
               },
             };
             await Promise.all(targets.map((to) => pushToLine(to, settleFlex, env)));
+
+            // Task 3: P2P per-pair result breakdown broadcast to active groups
+            const pairBodies: any[] = resolvedOrders
+              .filter((o) => o.winnerSide && o.winnerSide !== 'draw')
+              .slice(0, 20)
+              .map((o) => {
+                const winName = o.winnerName || '-';
+                const loseName = o.winnerSide === 'low'
+                  ? (o.side === 'high' ? o.matcherName || o.creatorName : o.creatorName)
+                  : (o.side === 'high' ? o.matcherName || o.creatorName : o.creatorName);
+                return {
+                  type: 'box',
+                  layout: 'horizontal',
+                  spacing: 'sm',
+                  contents: [
+                    { type: 'text', text: `#${o.orderNumber}`, size: 'xs', color: '#64748B', flex: 2, wrap: true },
+                    { type: 'text', text: `💰 ${Number(o.amount).toLocaleString()}`, size: 'xs', color: '#0F172A', weight: 'bold', flex: 2, align: 'end' },
+                    { type: 'text', text: `👑 ${String(winName).slice(0, 14)}`, size: 'xs', color: '#059669', weight: 'bold', flex: 4, wrap: true },
+                    { type: 'text', text: `💥 ${String(loseName).slice(0, 14)}`, size: 'xs', color: '#DC2626', flex: 4, wrap: true },
+                  ],
+                };
+              });
+            if (pairBodies.length > 0) {
+              const p2pFlex = {
+                type: 'flex',
+                altText: `🤝 ผลดวลตัวต่อตัว ${pairBodies.length} แผล (ผู้ชนะครบ 2x)`,
+                contents: {
+                  type: 'bubble',
+                  size: 'giga',
+                  header: {
+                    type: 'box',
+                    layout: 'vertical',
+                    backgroundColor: '#064E3B',
+                    paddingAll: 'md',
+                    contents: [
+                      { type: 'text', text: '🤝 ผลดวลตัวต่อตัว (P2P)', weight: 'bold', color: '#FDE047', size: 'sm', align: 'center' },
+                      { type: 'text', text: `รอบ [${activeRound.name || 'บั้งไฟสด'}] | เวลา ${finalSeconds}s`, color: '#FFFFFF', size: 'xs', align: 'center', margin: 'xs' },
+                    ],
+                  },
+                  body: {
+                    type: 'box',
+                    layout: 'vertical',
+                    spacing: 'sm',
+                    contents: pairBodies,
+                  },
+                },
+              };
+              await Promise.all(targets.map((to) => pushToLine(to, p2pFlex, env)));
+            }
           }
 
           result = { success: true, resolvedCount: resolvedOrders.length, finalTime: finalSeconds };
