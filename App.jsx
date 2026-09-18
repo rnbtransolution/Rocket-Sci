@@ -692,7 +692,7 @@ export default function App() {
 
   // Expose reset state for debug button (preventing reference error)
   const resetConsoleState = async () => {
-    if (!window.confirm("⚠️ คุณต้องการล้างระเบียนข้อมูลระบบทั้งหมดใช่หรือไม่?\n\nการกระทำนี้จะล้างข้อมูลผู้เล่น ธุรกรรม ประวัติการเดิมพัน และบันทึกแชททั้งหมดใน Google Sheets ให้กลับสู่ค่าเริ่มต้น")) {
+    if (!window.confirm("⚠️ คุณต้องการล้างระเบียนข้อมูลระบบทั้งหมดใช่หรือไม่?\n\nการกระทำนี้จะล้างข้อมูลผู้เล่น ธุรกรรม ประวัติการเดิมพัน และบันทึกแชททั้งหมดในฐานข้อมูล ให้กลับสู่ค่าเริ่มต้น")) {
       return;
     }
     
@@ -727,7 +727,7 @@ export default function App() {
   };
 
   const forceSyncFreshData = async () => {
-    addToast('⏳ กำลังดึงข้อมูลล่าสุดจาก Google Sheets...', 'info');
+    addToast('⏳ กำลังดึงข้อมูลล่าสุดจากฐานข้อมูล...', 'info');
     try {
       if (typeof window !== 'undefined') {
         localStorage.removeItem('rocket_sci_dashboard_cache');
@@ -788,7 +788,7 @@ export default function App() {
               if (typeof window !== 'undefined') {
                 localStorage.setItem('rocket_sci_dashboard_cache', JSON.stringify(d));
               }
-              addToast('✅ ดึงข้อมูลสดจาก Google Sheets สำเร็จ', 'success');
+              addToast('✅ ดึงข้อมูลสดจากฐานข้อมูลสำเร็จ', 'success');
             }
           }
         }
@@ -1748,7 +1748,7 @@ export default function App() {
     if (isGAS) {
       window.google.script.run
         .withSuccessHandler(() => {
-          addToast('ขอยกเลิกแผลสดใน Google Sheets สำเร็จ รอคู่ตอบรับ...', 'info');
+          addToast('ขอยกเลิกแผลสดในฐานข้อมูลสำเร็จ รอคู่ตอบรับ...', 'info');
         })
         .adminRequestCancelBet(betId);
     } else {
@@ -3472,6 +3472,12 @@ export default function App() {
                         🔥 บั้งไฟกำลังขึ้นแท่นยิง
                       </button>
                       <button
+                        onClick={() => setCustomBroadcastText('🚀 บั้งไฟออกแล้ว! เปิดรับดวลรอบใหม่เร็ว ๆ นี้ ติดตามประกาศจากสนามได้เลยครับ')}
+                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95"
+                      >
+                        🚀 บั้งไฟออกแล้ว
+                      </button>
+                      <button
                         onClick={() => setCustomBroadcastText('🏁 สรุปผลการแข่งขันและการดวลประจำวันเสร็จสิ้นเรียบร้อย ขอบพระคุณสมาชิกทุกท่านที่ร่วมสนุกครับ')}
                         className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95"
                       >
@@ -3956,7 +3962,7 @@ export default function App() {
                       <div className="text-xs font-bold text-rose-600 mt-0.5">เครดิตคงเหลือ: {confirmDelete.player.balance.toLocaleString()} pt</div>
                     </div>
                   </div>
-                  <p className="text-sm text-slate-600">การลบนี้จะ<strong>ลบข้อมูลผู้เล่นทั้งหมด</strong>ออกจาก Google Sheet ทันที และไม่สามารถกู้คืนได้</p>
+                  <p className="text-sm text-slate-600">การลบนี้จะ<strong>ลบข้อมูลผู้เล่นทั้งหมด</strong>ออกจากฐานข้อมูลทันที และไม่สามารถกู้คืนได้</p>
                 </div>
                 <div className="px-6 pb-5 flex gap-3">
                   <button onClick={() => setConfirmDelete(null)} className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-600 text-sm font-bold rounded-xl hover:bg-slate-50 transition-all">ยกเลิก</button>

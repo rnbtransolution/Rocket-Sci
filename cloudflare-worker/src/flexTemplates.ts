@@ -726,7 +726,7 @@ export function generateRuleGuideFlex(): any {
               },
               {
                 type: 'text',
-                text: '⚠️ ช่วงราคาต้องห่างกัน 50 วิพอดี เช่น\n• 300-350ล500 | 300-350ถ500\n• 350-400ล500 | 350-400ถ500',
+                text: '⚠️ ช่วงราคาต้องห่างกันไม่เกิน 50 วิ เช่น\n• 300-350ล500 | 300-350ถ500\n• 350-400ล500 | 350-400ถ500',
                 color: '#0284C7',
                 size: 'xxs',
                 wrap: true,
@@ -776,6 +776,23 @@ export function generateRuleGuideFlex(): any {
           },
         ],
       },
+    },
+  };
+}
+
+// ── 6. Main Menu Quick Reply (เมนูหลักระบบดวล — 1:1 chat only) ──
+export function generateMainMenuQuickReply(displayName: string, balance: number): any {
+  return {
+    type: 'text',
+    text: '🚀 Rocket Science เมนูหลัก (1:1)\n\nดูแต้ม เติมเงิน ถอนเงิน และกติกาได้จากปุ่มด้านล่างเลยครับ 👇',
+    quickReply: {
+      items: [
+        { type: 'action', action: { type: 'message', label: '💳 เช็คยอด', text: 'เช็คยอด' } },
+        { type: 'action', action: { type: 'message', label: '💰 ฝากเงิน', text: 'ฝากเงิน' } },
+        { type: 'action', action: { type: 'message', label: '💸 ถอนเงิน', text: 'ถอนเงิน' } },
+        { type: 'action', action: { type: 'message', label: '📖 กติกา', text: 'กติกา' } },
+        { type: 'action', action: { type: 'message', label: '📋 กระดานดวล', text: 'กระดานดวล' } },
+      ],
     },
   };
 }

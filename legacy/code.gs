@@ -1451,11 +1451,11 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
         return;
       }
 
-      if (rangeMax - rangeMin !== 50) {
+if (rangeMax - rangeMin > 50) {
         var diff = rangeMax - rangeMin;
-        var windowErrMsg = groupId
-          ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ ช่วงราคาต้องห่างกัน 50 วินาทีพอดีครับ เช่น 300-350' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ' ห่าง ' + diff + ' วิ)'
-          : '⚠️ ช่วงราคาต้องห่างกัน 50 วินาทีพอดีครับ เช่น 300-350' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ' ห่าง ' + diff + ' วิ)';
+        const msg = groupId
+          ? '👤 [ถึงคุณ @' + displayName + ']: ⚠️ ช่วงราคาต้องห่างกันไม่เกิน 50 วินาทีครับ เช่น 300-350' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ' ห่าง ' + diff + ' วิ)'
+          : '⚠️ ช่วงราคาต้องห่างกันไม่เกิน 50 วินาทีครับ เช่น 300-350' + rCmd + ' (คุณระบุ ' + rangeMin + '-' + rangeMax + ' ห่าง ' + diff + ' วิ)';
         replyToLine(replyToken, windowErrMsg, userId);
         return;
       }
@@ -1510,7 +1510,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
       return;
     }
 
-    var orderNumber = (Math.floor(Math.random() * 900000) + 100000).toString();
+    var orderNumber = (Math.floor(Math.random() * 9000) + 1000).toString();
     var isPreQuoteBet = (betType === 'pre_quote');
     var userTypedCmdStr = cleanBetText || null;
     var saveResult = saveOpenBet(orderNumber, userId, displayName, side, amount, betType, rangeMin, rangeMax, groupId, userTypedCmdStr, isPreQuoteBet, messageId);
@@ -1626,7 +1626,7 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   // 10. MAIN MENU & HELP
   // ─────────────────────────────────────────────────────────────
   if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start' || clean === 'help' || clean === 'สวัสดี' || clean === 'ช่วยเหลือ') {
-    deliverPrivateNotice(userId, replyToken, groupId, constructMainMenuFlex());
+    deliverPrivateNotice(userId, replyToken, groupId, constructMainMenuQuickReply());
     return;
   }
 
@@ -2367,14 +2367,18 @@ function replyToLine(replyToken, text, userId) {
   let messageObj;
   
   if (typeof text === 'object' && text !== null) {
-    var alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
-      || (text.contents && text.contents[0] && text.contents[0].header && text.contents[0].header.contents && text.contents[0].header.contents[0].text)
-      || 'ระบบบริการ Rocket Science 🚀';
-    messageObj = {
-      type: 'flex',
-      altText: alt,
-      contents: text
-    };
+    if (text.type === 'text') {
+      messageObj = { type: 'text', text: text.text || '🚀 Rocket Science', quickReply: text.quickReply };
+    } else {
+      var alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
+        || (text.contents && text.contents[0] && text.contents[0].header && text.contents[0].header.contents && text.contents[0].header.contents[0].text)
+        || 'ระบบบริการ Rocket Science 🚀';
+      messageObj = {
+        type: 'flex',
+        altText: alt,
+        contents: text
+      };
+    }
   } else {
     let outText = String(text);
     const pName = (userId ? getPlayerNameFromDb(userId) : null) || 'ผู้เล่น';
@@ -3244,14 +3248,18 @@ function createLinePushRequest(userId, text) {
   
   var messageObj;
   if (typeof text === 'object' && text !== null) {
-    var alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
-      ? text.header.contents[0].text
-      : 'ระบบบริการ Rocket Science 🚀';
-    messageObj = {
-      type: 'flex',
-      altText: alt,
-      contents: text
-    };
+    if (text.type === 'text') {
+      messageObj = { type: 'text', text: text.text || '🚀 Rocket Science', quickReply: text.quickReply };
+    } else {
+      var alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
+        ? text.header.contents[0].text
+        : 'ระบบบริการ Rocket Science 🚀';
+      messageObj = {
+        type: 'flex',
+        altText: alt,
+        contents: text
+      };
+    }
   } else {
     messageObj = { type: 'text', text: String(text) };
   }
@@ -3546,6 +3554,23 @@ function constructEditAlertFlex(displayName, originalText, newText, orderNo) {
             }
           ]
         }
+      ]
+    }
+  };
+}
+
+function constructMainMenuQuickReply() {
+  return {
+    type: 'text',
+    text: '🚀 Rocket Science เมนูหลัก (1:1)\n\nเลือกเมนูที่ต้องการด้านล่างได้เลยครับ 👇',
+    quickReply: {
+      items: [
+        { type: 'action', action: { type: 'message', label: '💳 เช็คยอด', text: 'เช็คยอด' } },
+        { type: 'action', action: { type: 'message', label: '💰 ฝากเงิน', text: 'ฝากเงิน' } },
+        { type: 'action', action: { type: 'message', label: '💸 ถอนเงิน', text: 'ถอนเงิน' } },
+        { type: 'action', action: { type: 'message', label: '⚔️ รายการดวล', text: 'รายการดวล' } },
+        { type: 'action', action: { type: 'message', label: '📖 กติกา', text: 'กติกา' } },
+        { type: 'action', action: { type: 'message', label: '📋 กระดานดวล', text: 'กระดานดวล' } },
       ]
     }
   };
@@ -4238,7 +4263,7 @@ function constructRuleGuideFlex() {
             },
             {
               "type": "text",
-              "text": "⚠️ ช่วงราคาต้องห่างกัน 50 วิพอดี เช่น\n• 300-350ล500 | 300-350ถ500\n• 350-400ล500 | 350-400ถ500",
+              "text": "⚠️ ช่วงราคาต้องห่างกันไม่เกิน 50 วิ เช่น\n• 300-350ล500 | 300-350ถ500\n• 350-400ล500 | 350-400ถ500",
               "color": "#0284C7",
               "size": "xxs",
               "wrap": true,
@@ -4308,7 +4333,7 @@ var RULE_GUIDE_TEXT = "📖 [คู่มือคีย์เวิร์ดก
   "-----------------------------\n\n" +
   "📌 กฏที่ 2: การเปิดราคาเอง (กรณีช่างไม่ต่อย / ต้องมีเครดิตพอ)\n\n" +
   "💰 การเปิดราคาเอง (เปิดแผลสดใหม่):\n" +
-  "⚠️ ช่วงราคาต้องห่างกัน 50 วิพอดี เช่น\n" +
+  "⚠️ ช่วงราคาต้องห่างกันไม่เกิน 50 วิ เช่น\n" +
   "• 300-350ล500 | 300-350ถ500\n" +
   "• 350-400ล500 | 350-400ถ500\n\n" +
   "⬆️ ช่างต่อยยกเลิก (ชตย)\n" +
@@ -5343,7 +5368,7 @@ function adminBroadcastScamWarning(targetId) {
       { "type": "text", "text": "🚨 เตือนความปลอดภัย", "weight": "bold", "color": "#92400E", "size": "sm", "align": "center", "wrap": true }
     ]},
     "body": { "type": "box", "layout": "vertical", "backgroundColor": "#FEFCE8", "spacing": "xs", "paddingAll": "md", "contents": [
-      { "type": "text", "text": "⚠️ ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1:1 เท่านั้นครับ", "weight": "bold", "color": "#B45309", "size": "xs", "align": "center", "wrap": true }
+      { "type": "text", "text": "⚠️ ฝาก-ถอน ติดต่อที่ LINE OA เท่านั้น", "weight": "bold", "color": "#B45309", "size": "xs", "align": "center", "wrap": true }
     ]}
   };
   return sendAdminMessageToLine(targetId || 'ALL', warnFlex);
@@ -5809,7 +5834,7 @@ function constructSecurityWarningFlex() {
       "contents": [
         {
           "type": "text",
-          "text": "ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1-on-1 เท่านั้นครับ ห้ามโอนเงินผ่านแชตกลุ่มเด็ดขาด ❌",
+          "text": "ฝาก-ถอน ติดต่อที่ LINE OA เท่านั้น",
           "weight": "bold",
           "color": "#B45309",
           "size": "xs",

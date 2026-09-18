@@ -823,7 +823,7 @@ export default {
                 backgroundColor: '#FEFCE8',
                 spacing: 'xs',
                 contents: [
-                  { type: 'text', text: '⚠️ ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1:1 เท่านั้นครับ', weight: 'bold', color: '#B45309', size: 'xs', align: 'center', wrap: true },
+                  { type: 'text', text: '⚠️ ฝาก-ถอน ติดต่อที่ LINE OA เท่านั้น', weight: 'bold', color: '#B45309', size: 'xs', align: 'center', wrap: true },
                 ],
               },
             },

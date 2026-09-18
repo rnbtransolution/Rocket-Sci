@@ -52,7 +52,7 @@ export async function createOrder(
   const collectionRef = firestore.collection(ORDERS_COLLECTION);
   const docRef = collectionRef.doc();
   
-  const orderNumber = orderData.orderNumber || (Math.floor(Math.random() * 900000) + 100000).toString();
+  const orderNumber = orderData.orderNumber || (Math.floor(Math.random() * 9000) + 1000).toString();
 
   const newOrder: OrderData = {
     ...orderData,

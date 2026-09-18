@@ -5,7 +5,7 @@ import {
   generateBalanceFlex,
   generatePendingBoardFlex,
   generateRuleGuideFlex,
-  generateMainMenuFlex,
+  generateMainMenuQuickReply,
   generateDepositFlex,
   generateDepositInvoiceFlex,
   generateWithdrawalFlex,
@@ -84,7 +84,11 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     const clean = text.replace(/\s+/g, '').toLowerCase();
     const balanceKeywords = ['เช็คยอด', 'คงเหลือ', 'balance', 'สอบถามยอด', 'ยอด', 'ยอดเงิน', 'ดูยอด', 'กระเป๋า', 'กระเป๋าเงิน'];
     if (balanceKeywords.includes(clean)) {
-      const balanceFlex = generateBalanceFlex(profile.displayName, profile.balance);
+      // The Google Sheets database is the single source of truth for credit balances.
+      // Re-sync from the DB before replying so a stale KV cache can never report
+      // a different balance than what the admin actually set (e.g. 0 credits).
+      const syncedProfile = await syncProfileBalanceFromDb(profile, env, ctx);
+      const balanceFlex = generateBalanceFlex(syncedProfile.displayName, syncedProfile.balance);
       await deliverPrivateNotice(userId, replyToken, groupId, balanceFlex, env);
       return;
     }
@@ -101,8 +105,8 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
           env
         );
       } else {
-        const menuFlex = generateMainMenuFlex(profile.displayName, profile.balance);
-        await deliverPrivateNotice(userId, replyToken, groupId, menuFlex, env);
+        const menuPayload = generateMainMenuQuickReply(profile.displayName, profile.balance);
+        await deliverPrivateNotice(userId, replyToken, groupId, menuPayload, env);
       }
       return;
     }
@@ -518,6 +522,18 @@ async function handleCreateOrder(
     return;
   }
 
+  if (isCustom) {
+    if (rangeMin >= rangeMax) {
+      await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-350 (คุณระบุ ${rangeMin}-${rangeMax})`, env);
+      return;
+    }
+    if (rangeMax - rangeMin > 50) {
+      const diff = rangeMax - rangeMin;
+      await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ช่วงราคาต้องห่างกันไม่เกิน 50 วินาทีครับ (คุณระบุ ${rangeMin}-${rangeMax} ห่าง ${diff} วิ)`, env);
+      return;
+    }
+  }
+
   if (profile.balance < amount) {
     const needed = amount - profile.balance;
     const msg = `⚠️ แต้มไม่พอครับ (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt)\n💡 พิมพ์ "ฝากเงิน" ในแชตนี้เพื่อเติมเครดิตได้เลยครับ 🚀`;
@@ -528,7 +544,7 @@ async function handleCreateOrder(
   // Deduct balance in memory
   profile.balance -= amount;
 
-  const orderNumber = Math.floor(100000 + Math.random() * 900000).toString();
+  const orderNumber = Math.floor(1000 + Math.random() * 9000).toString();
   const newOrder: Order = {
     orderNumber,
     creatorId: profile.shortId,
@@ -1039,13 +1055,73 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
     shortId,
     lineUserId: userId,
     displayName,
-    balance: 1000, // Demo starter balance if not yet synced with Sheets
+    balance: 0, // Real balance is synced from the authoritative Sheets DB below, never a fabricated demo value
     registeredAt: Date.now(),
     updatedAt: Date.now(),
   };
 
+  // The Google Sheets database is the single source of truth for credit balances.
+  // Before caching a fresh profile, pull the player's real balance from the DB so a
+  // zero-credit player is never reported / synchronized as 1,000 pts.
+  if (env.GAS_FALLBACK_URL) {
+    try {
+      const syncRes = await fetch(`${env.GAS_FALLBACK_URL}?action=getDashboardData&_t=${Date.now()}`);
+      if (syncRes.ok) {
+        const syncJson: any = await syncRes.json();
+        const dash = syncJson?.data || syncJson;
+        const players: any[] = Array.isArray(dash?.players) ? dash.players : [];
+        const match = players.find(
+          (p: any) => p && (p.lineUserId === userId || p.id === newProfile.shortId)
+        );
+        if (match) {
+          newProfile.balance = Number(match.balance) || 0;
+          if (match.name) newProfile.displayName = match.name;
+        }
+      }
+    } catch (err) {
+      console.warn('[Worker] getOrCreatePlayerProfile balance sync error:', err);
+    }
+  }
+
   await savePlayerProfile(newProfile, env, ctx);
   return newProfile;
+}
+
+/**
+ * Re-sync a player's credit balance with the authoritative Google Sheets database.
+ * The DB is the single source of truth; a stale KV cache must never overshadow an
+ * admin-set balance (e.g. a player zeroed out in the DB but still cached at 1,000).
+ * Returns the (possibly in-place updated) profile with the authoritative balance.
+ */
+export async function syncProfileBalanceFromDb(
+  profile: PlayerProfile,
+  env: Env,
+  ctx?: ExecutionContext
+): Promise<PlayerProfile> {
+  if (!env.GAS_FALLBACK_URL) return profile;
+  try {
+    const syncRes = await fetch(`${env.GAS_FALLBACK_URL}?action=getDashboardData&_t=${Date.now()}`);
+    if (!syncRes.ok) return profile;
+    const syncJson: any = await syncRes.json();
+    const dash = syncJson?.data || syncJson;
+    const players: any[] = Array.isArray(dash?.players) ? dash.players : [];
+    const match = players.find(
+      (p: any) => p && (p.lineUserId === profile.lineUserId || p.id === profile.shortId)
+    );
+    if (!match) return profile; // Not yet registered in DB — keep current (fresh) value
+
+    const dbBalance = Number(match.balance) || 0;
+    const dbName = match.name || profile.displayName;
+    if (dbBalance !== profile.balance || dbName !== profile.displayName) {
+      profile.balance = dbBalance;
+      profile.displayName = dbName;
+      profile.updatedAt = Date.now();
+      await savePlayerProfile(profile, env, ctx);
+    }
+  } catch (err) {
+    console.warn('[Worker] syncProfileBalanceFromDb error:', err);
+  }
+  return profile;
 }
 
 async function recordActiveGroup(groupId: string, env: Env): Promise<void> {

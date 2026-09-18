@@ -26,7 +26,7 @@ export function generateUniqueOrderNumber() {
   let orderNo;
   let tries = 0;
   do {
-    orderNo = Math.floor(Math.random() * 900000 + 100000);
+    orderNo = Math.floor(Math.random() * 9000 + 1000);
     tries++;
   } while (tries < 50 && bets.some((b) => String(b.orderNumber) === String(orderNo)));
   return orderNo;

@@ -113,14 +113,18 @@ export async function replyToLine(replyToken, text, userId) {
   let messageObj;
   
   if (typeof text === 'object' && text !== null) {
-    const alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
-      || (text.contents && text.contents[0] && text.contents[0].header && text.contents[0].header.contents && text.contents[0].header.contents[0].text)
-      || '🚀 Rocket Science';
-    messageObj = {
-      type: 'flex',
-      altText: alt,
-      contents: text
-    };
+    if (text.type === 'text') {
+      messageObj = { type: 'text', text: text.text || '🚀 Rocket Science', quickReply: text.quickReply };
+    } else {
+      const alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
+        || (text.contents && text.contents[0] && text.contents[0].header && text.contents[0].header.contents && text.contents[0].header.contents[0].text)
+        || '🚀 Rocket Science';
+      messageObj = {
+        type: 'flex',
+        altText: alt,
+        contents: text
+      };
+    }
   } else {
     let outText = String(text);
     const pName = (userId ? db.getPlayerNameFromDb(userId) : null) || 'ผู้เล่น';
@@ -200,6 +204,31 @@ export async function pushToLine(targetId, text) {
   const url = 'https://api.line.me/v2/bot/message/push';
   
   if (typeof text === 'object' && text !== null) {
+    // 1a. Pre-built text message with Quick Reply (1:1 menu style)
+    if (text.type === 'text') {
+      const textPayload = {
+        to: rawLineId,
+        messages: [{ type: 'text', text: text.text || '🚀 Rocket Science', quickReply: text.quickReply }]
+      };
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + LINE_CHANNEL_ACCESS_TOKEN
+          },
+          body: JSON.stringify(textPayload)
+        });
+        const resText = await response.text();
+        console.log(`[LINE Push Text Result to ${rawLineId}]: Status ${response.status} - ${resText}`);
+        if (response.status === 400 && resText.includes('Failed to send messages')) {
+          if (isGroupId) db.markGroupDead(rawLineId);
+        }
+      } catch (err) {
+        console.error(`[LINE Push Text Error to ${rawLineId}]:`, err);
+      }
+      return;
+    }
     // 1. Try pushing Flex Message Card directly
     const flexPayload = {
       to: rawLineId,
@@ -412,7 +441,7 @@ export async function adminBroadcastScamWarning(targetId) {
       { type: 'text', text: '🚨 เตือนความปลอดภัย', weight: 'bold', color: '#92400E', size: 'sm', align: 'center', wrap: true }
     ]},
     body: { type: 'box', layout: 'vertical', backgroundColor: '#FEFCE8', spacing: 'xs', paddingAll: 'md', contents: [
-      { type: 'text', text: '⚠️ ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1:1 เท่านั้นครับ', weight: 'bold', color: '#B45309', size: 'xs', align: 'center', wrap: true }
+      { type: 'text', text: '⚠️ ฝาก-ถอน ติดต่อที่ LINE OA เท่านั้น', weight: 'bold', color: '#B45309', size: 'xs', align: 'center', wrap: true }
     ]}
   };
   return await sendAdminMessageToLine(targetId || 'ALL', warnFlex);
@@ -724,7 +753,7 @@ export async function handleTextMessage(text, userId, displayName, replyToken, g
 
   // I. HELP MENU — private only
   if (clean === 'เมนู' || clean === 'menu' || clean === 'เริ่ม' || clean === 'start' || clean === 'ช่วยเหลือ') {
-    await deliverPrivateNotice(userId, replyToken, groupId, constructMainMenuFlex());
+    await deliverPrivateNotice(userId, replyToken, groupId, constructMainMenuQuickReply());
     return;
   }
 
@@ -1119,10 +1148,10 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
         return true;
       }
 
-      // 2. Check strict 50-second range window
-      if (maxVal - minVal !== 50) {
+      // 2. Check maximum 50-second range window
+      if (maxVal - minVal > 50) {
         const diff = maxVal - minVal;
-        await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ช่วงราคาต้องห่างกัน 50 วินาทีพอดีครับ เช่น 300-350${cmd} (คุณระบุ ${minVal}-${maxVal} ห่าง ${diff} วิ)`);
+        await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ช่วงราคาต้องห่างกันไม่เกิน 50 วินาทีครับ เช่น 300-350${cmd} (คุณระบุ ${minVal}-${maxVal} ห่าง ${diff} วิ)`);
         return true;
       }
 
@@ -1233,6 +1262,23 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
 }
 
 // --- LINE FLEX CONSTRUCTORS ---
+
+export function constructMainMenuQuickReply() {
+  return {
+    type: 'text',
+    text: '🚀 Rocket Science เมนูหลัก (1:1)\n\nเลือกเมนูที่ต้องการด้านล่างได้เลยครับ 👇',
+    quickReply: {
+      items: [
+        { type: 'action', action: { type: 'message', label: '💳 เช็คยอด', text: 'เช็คยอด' } },
+        { type: 'action', action: { type: 'message', label: '💰 ฝากเงิน', text: 'ฝากเงิน' } },
+        { type: 'action', action: { type: 'message', label: '💸 ถอนเงิน', text: 'ถอนเงิน' } },
+        { type: 'action', action: { type: 'message', label: '⚔️ รายการดวล', text: 'รายการดวล' } },
+        { type: 'action', action: { type: 'message', label: '📖 กติกา', text: 'กติกา' } },
+        { type: 'action', action: { type: 'message', label: '📋 กระดานดวล', text: 'กระดานดวล' } },
+      ]
+    }
+  };
+}
 
 export function constructMainMenuFlex() {
   return {
@@ -2162,7 +2208,7 @@ export function constructRuleGuideFlex() {
             },
             {
               "type": "text",
-              "text": "⚠️ ช่วงราคาต้องห่างกัน 50 วิพอดี เช่น\n• 300-350ล500 | 300-350ถ500\n• 350-400ล500 | 350-400ถ500",
+              "text": "⚠️ ช่วงราคาต้องห่างกันไม่เกิน 50 วิ เช่น\n• 300-350ล500 | 300-350ถ500\n• 350-400ล500 | 350-400ถ500",
               "color": "#0284C7",
               "size": "xxs",
               "wrap": true,
@@ -2238,7 +2284,7 @@ export const RULE_GUIDE_TEXT = `📖 [คู่มือคีย์เวิร
 📌 กฏที่ 2: การเปิดราคาเอง (กรณีช่างไม่ต่อย / ต้องมีเครดิตพอ)
 
 💰 การเปิดราคาเอง (เปิดแผลสดใหม่):
-⚠️ ช่วงราคาต้องห่างกัน 50 วิพอดี เช่น
+⚠️ ช่วงราคาต้องห่างกันไม่เกิน 50 วิ เช่น
 • 300-350ล500 | 300-350ถ500
 • 350-400ล500 | 350-400ถ500
 
@@ -3281,7 +3327,7 @@ export function constructSecurityWarningFlex() {
       "contents": [
         {
           "type": "text",
-          "text": "ฝาก-ถอน กรุณาทักแชตตรงหา LINE OA 1-on-1 เท่านั้นครับ ❌",
+          "text": "ฝาก-ถอน ติดต่อที่ LINE OA เท่านั้น",
           "weight": "bold",
           "color": "#B45309",
           "size": "xxs",
