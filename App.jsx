@@ -2188,6 +2188,15 @@ export default function App() {
             <span>ออกราคาช่าง</span>
           </button>
           <button 
+            onClick={() => setAdminTab('broadcast')}
+            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
+              adminTab === 'broadcast' ? 'bg-purple-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            }`}
+          >
+            <Radio size={15} className={adminTab === 'broadcast' ? 'text-purple-200' : 'text-purple-600'} />
+            <span>บรอดแคสต์ & คีย์ลัด</span>
+          </button>
+          <button 
             onClick={() => setAdminTab('settle')}
             className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
               adminTab === 'settle' ? 'bg-sky-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
@@ -2244,15 +2253,6 @@ export default function App() {
           >
             <Database size={15} className={adminTab === 'logs' ? 'text-slate-300' : 'text-slate-500'} />
             <span>ทรานแซคชัน</span>
-          </button>
-          <button 
-            onClick={() => setAdminTab('broadcast')}
-            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
-              adminTab === 'broadcast' ? 'bg-purple-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
-            }`}
-          >
-            <Radio size={15} className={adminTab === 'broadcast' ? 'text-purple-200' : 'text-purple-600'} />
-            <span>บรอดแคสต์ & คีย์ลัด</span>
           </button>
         </div>
 
