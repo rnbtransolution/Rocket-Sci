@@ -1392,32 +1392,32 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
     var matchedBet = matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmount);
 
     if (matchedBet && matchedBet.error === 'BELOW_MIN_PERCENT_LIMIT') {
-      deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ยอดดวลขั้นต่ำคือ 20% (' + (matchedBet.minAllowed || 0) + ' pt) ของ Order #' + (matchedBet.orderNumber || targetOrderNo) + ' ครับ (คุณระบุ ' + (matchedBet.provided || 0) + ' pt)');
+      deliverPrivateNotice(userId, replyToken, groupId, constructMatchMismatchFlex(matchedBet.orderNumber || targetOrderNo, 'ยอดดวลขั้นต่ำคือ 20% (' + (matchedBet.minAllowed || 0) + ' pt) ของ Order #' + (matchedBet.orderNumber || targetOrderNo) + ' ครับ (คุณระบุ ' + (matchedBet.provided || 0) + ' pt)', 'พิมพ์ "ต <เลข order>" พร้อมยอดที่มากกว่า 20% ของแผลครับ'));
       return;
     } else if (matchedBet && matchedBet.error === 'OWN_BET') {
-      deliverPrivateNotice(userId, replyToken, groupId, '⚠️ คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ');
+      deliverPrivateNotice(userId, replyToken, groupId, constructMatchMismatchFlex(matchedBet.orderNumber || targetOrderNo, 'คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ', 'เลือกแผลของผู้เล่นอื่นเพื่อเปิดการดวลครับ'));
       return;
     } else if (matchedBet && matchedBet.error === 'CANCELLED') {
-      deliverPrivateNotice(userId, replyToken, groupId, '🚫 แผล Order #' + (matchedBet.orderNumber || targetOrderNo) + ' ถูกยกเลิกไปแล้วครับ');
+      deliverPrivateNotice(userId, replyToken, groupId, constructMatchMismatchFlex(matchedBet.orderNumber || targetOrderNo, 'แผล Order #' + (matchedBet.orderNumber || targetOrderNo) + ' ถูกยกเลิกไปแล้วครับ', 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ'));
       return;
     } else if (matchedBet && matchedBet.error === 'ALREADY_MATCHED') {
-      deliverPrivateNotice(userId, replyToken, groupId, '⚠️ แผล Order #' + (matchedBet.orderNumber || targetOrderNo) + ' มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ');
+      deliverPrivateNotice(userId, replyToken, groupId, constructMatchMismatchFlex(matchedBet.orderNumber || targetOrderNo, 'แผล Order #' + (matchedBet.orderNumber || targetOrderNo) + ' มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ', 'พิมพ์ "ต <เลข order>" เพื่อรับแผลอื่นครับ'));
       return;
     } else if (matchedBet && matchedBet.error === 'INSUFFICIENT_BALANCE') {
       var needed = (matchedBet.required || 0) - (matchedBet.current || 0);
-      deliverPrivateNotice(userId, replyToken, groupId, '⚠️ แต้มไม่พอ (มี ' + (matchedBet.current || 0) + 'pt | ขาด ' + needed + 'pt) พิมพ์ "ฝากเงิน"');
+      deliverPrivateNotice(userId, replyToken, groupId, constructMatchMismatchFlex(matchedBet.orderNumber || targetOrderNo, 'แต้มไม่พอ (มี ' + (matchedBet.current || 0) + 'pt | ขาด ' + needed + 'pt)', 'พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ'));
       return;
     } else if (matchedBet && matchedBet.error === 'BELOW_MIN_LIMIT') {
-      deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + (matchedBet.provided || 0) + ' pt)');
+      deliverPrivateNotice(userId, replyToken, groupId, constructMatchMismatchFlex(matchedBet.orderNumber || targetOrderNo, 'ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ' + (matchedBet.provided || 0) + ' pt)', 'พิมพ์ "ต <เลข order> <ยอด>" โดยยอดไม่ต่ำกว่า 100 pt ครับ'));
       return;
     } else if (matchedBet && matchedBet.error === 'NOT_FOUND') {
       var notFoundMsg = targetOrderNo
-        ? ('🚫 ไม่พบแผล Order #' + targetOrderNo + ' ในระบบครับ')
-        : '🚫 ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ในขณะนี้ครับ';
-      deliverPrivateNotice(userId, replyToken, groupId, notFoundMsg);
+        ? ('ไม่พบแผล Order #' + targetOrderNo + ' ในระบบครับ')
+        : 'ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ในขณะนี้ครับ';
+      deliverPrivateNotice(userId, replyToken, groupId, constructMatchMismatchFlex(targetOrderNo, notFoundMsg, 'พิมพ์ "ชล" หรือ "ชถ" เพื่อเปิดแผลใหม่ได้เลยครับ 🚀'));
       return;
     } else if (matchedBet && matchedBet.error === 'EXCEEDS_ORDER_AMOUNT') {
-      deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ยอดรับดวล (' + (matchedBet.provided || 0) + ' pt) เกินยอดของ Order #' + (matchedBet.orderNumber || targetOrderNo) + ' (รับได้สูงสุด ' + (matchedBet.maxAllowed || 0) + ' pt ครับ)');
+      deliverPrivateNotice(userId, replyToken, groupId, constructMatchMismatchFlex(matchedBet.orderNumber || targetOrderNo, 'ยอดรับดวล (' + (matchedBet.provided || 0) + ' pt) เกินยอดของ Order #' + (matchedBet.orderNumber || targetOrderNo) + ' (รับได้สูงสุด ' + (matchedBet.maxAllowed || 0) + ' pt ครับ)', 'พิมพ์ "ต <เลข order> <ยอด>" โดยยอดไม่เกิน Order ครับ'));
       return;
     } else if (matchedBet && matchedBet.orderNumber) {
       var rocketLabel = matchedBet.rocketName || getActiveRocketName();
@@ -2437,6 +2437,14 @@ function replyToLine(replyToken, text, userId) {
     if (text.type === 'text') {
       // Pass-through for pre-built text messages with Quick Reply menus (1:1 only)
       messageObj = { type: 'text', text: text.text || '🚀 Rocket Science', quickReply: text.quickReply };
+    } else if (text.type === 'flex') {
+      // Full flex message object (bubble/carousel already wrapped with altText + quickReply)
+      messageObj = {
+        type: 'flex',
+        altText: text.altText || 'ระบบบริการ Rocket Science 🚀',
+        contents: text.contents,
+        quickReply: text.quickReply
+      };
     } else {
       var alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
         || (text.contents && text.contents[0] && text.contents[0].header && text.contents[0].header.contents && text.contents[0].header.contents[0].text)
@@ -2493,15 +2501,17 @@ function replyToLine(replyToken, text, userId) {
  */
 function deliverPrivateNotice(userId, replyToken, groupId, payload) {
   if (!userId) return;
+  // Keep the floating main-menu Quick Reply visible after every private reply.
+  var enriched = attachMainMenuQuickReply_(payload);
   if (groupId) {
-    pushToLine(userId, payload);
+    pushToLine(userId, enriched);
     return;
   }
   if (replyToken && replyToken !== 'MOCK_REPLY_TOKEN') {
-    replyToLine(replyToken, payload, userId);
+    replyToLine(replyToken, enriched, userId);
     return;
   }
-  pushToLine(userId, payload);
+  pushToLine(userId, enriched);
 }
 
 function getActiveRocketName() {
@@ -3319,13 +3329,20 @@ function createLinePushRequest(userId, text) {
   if (typeof text === 'object' && text !== null) {
     if (text.type === 'text') {
       messageObj = { type: 'text', text: text.text || '🚀 Rocket Science', quickReply: text.quickReply };
+    } else if (text.type === 'flex') {
+      messageObj = {
+        type: 'flex',
+        altText: text.altText || 'ระบบบริการ Rocket Science 🚀',
+        contents: text.contents,
+        quickReply: text.quickReply
+      };
     } else {
-      var alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
+      var alt2 = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
         ? text.header.contents[0].text
         : 'ระบบบริการ Rocket Science 🚀';
       messageObj = {
         type: 'flex',
-        altText: alt,
+        altText: alt2,
         contents: text
       };
     }
@@ -3628,19 +3645,41 @@ function constructEditAlertFlex(displayName, originalText, newText, orderNo) {
   };
 }
 
+var MAIN_MENU_QUICK_REPLY_ITEMS_ = [
+  { type: 'action', action: { type: 'message', label: '💳 เช็คยอด', text: 'เช็คยอด' } },
+  { type: 'action', action: { type: 'message', label: '💰 ฝากเงิน', text: 'ฝากเงิน' } },
+  { type: 'action', action: { type: 'message', label: '💸 ถอนเงิน', text: 'ถอนเงิน' } },
+  { type: 'action', action: { type: 'message', label: '⚔️ รายการดวล', text: 'รายการดวล' } },
+  { type: 'action', action: { type: 'message', label: '📖 กติกา', text: 'กติกา' } },
+  { type: 'action', action: { type: 'message', label: '📋 กระดานดวล', text: 'กระดานดวล' } },
+];
+
+/**
+ * Attach the floating main-menu Quick Reply to any private-chat message so the
+ * menu keys stay visible after EVERY bot reply (not only after the "เมนู" command).
+ */
+function attachMainMenuQuickReply_(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  var type = payload.type;
+  if (type === 'bubble' || type === 'carousel') return payload;
+  if (type !== 'text' && type !== 'flex') return payload;
+  if (type === 'flex' && String(payload.altText || payload.text || '').indexOf('เมนูหลัก') !== -1) return payload;
+  if (payload.quickReply && payload.quickReply.items && payload.quickReply.items.length > 0) return payload;
+  return {
+    type: type,
+    text: payload.text,
+    altText: payload.altText,
+    contents: payload.contents,
+    quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS_ }
+  };
+}
+
 function constructMainMenuQuickReply() {
   return {
     type: 'text',
     text: '🚀 Rocket Science เมนูหลัก\n\nเลือกเมนูที่ต้องการด้านล่างได้เลยครับ 👇',
     quickReply: {
-      items: [
-        { type: 'action', action: { type: 'message', label: '💳 เช็คยอด', text: 'เช็คยอด' } },
-        { type: 'action', action: { type: 'message', label: '💰 ฝากเงิน', text: 'ฝากเงิน' } },
-        { type: 'action', action: { type: 'message', label: '💸 ถอนเงิน', text: 'ถอนเงิน' } },
-        { type: 'action', action: { type: 'message', label: '⚔️ รายการดวล', text: 'รายการดวล' } },
-        { type: 'action', action: { type: 'message', label: '📖 กติกา', text: 'กติกา' } },
-        { type: 'action', action: { type: 'message', label: '📋 กระดานดวล', text: 'กระดานดวล' } },
-      ]
+      items: MAIN_MENU_QUICK_REPLY_ITEMS_
     }
   };
 }
@@ -4226,7 +4265,7 @@ function constructRuleGuideFlex() {
         },
         {
           "type": "text",
-          "text": "📖 คู่มือคีย์เวิร์ดกติกาการเล่น",
+          "text": "📖 กติกาการเล่น",
           "weight": "bold",
           "color": "#FFFFFF",
           "size": "sm",
@@ -4385,7 +4424,7 @@ function constructRuleGuideFlex() {
   };
 }
 
-var RULE_GUIDE_TEXT = "📖 [คู่มือคีย์เวิร์ดกติกาการเล่น]\n\n" +
+var RULE_GUIDE_TEXT = "📖 [กติกาการเล่น]\n\n" +
   "📌 กฏที่ 1: เล่นราคาช่าง\n\n" +
   "🎉 ทายว่าชนะ (สูง):\n" +
   "• ช่างไล่ / ชล / ไล่ / ลง\n" +
@@ -4567,6 +4606,66 @@ function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isC
       "spacing": "xs",
       "paddingAll": "sm",
       "contents": bodyContents
+    }
+  };
+}
+
+function constructMatchMismatchFlex(orderNo, reason, hint) {
+  var title = orderNo ? ('🚫 จับคู่ไม่สำเร็จ #' + orderNo) : '🚫 จับคู่ไม่สำเร็จ';
+  var contents = [
+    {
+      "type": "text",
+      "text": reason,
+      "color": "#1E293B",
+      "weight": "bold",
+      "size": "sm",
+      "align": "center",
+      "wrap": true
+    }
+  ];
+  if (hint) {
+    contents.push(
+      { "type": "separator", "margin": "xs", "color": "#E2E8F0" },
+      {
+        "type": "text",
+        "text": hint,
+        "color": "#64748B",
+        "size": "xs",
+        "align": "center",
+        "wrap": true
+      }
+    );
+  }
+  return {
+    "type": "flex",
+    "altText": '🚫 จับคู่ไม่สำเร็จ' + (orderNo ? (' Order #' + orderNo) : ''),
+    "contents": {
+      "type": "bubble",
+      "size": "kilo",
+      "header": {
+        "type": "box",
+        "layout": "vertical",
+        "backgroundColor": "#DC2626",
+        "paddingAll": "sm",
+        "contents": [
+          {
+            "type": "text",
+            "text": title,
+            "weight": "bold",
+            "color": "#FFFFFF",
+            "size": "sm",
+            "align": "center",
+            "wrap": true
+          }
+        ]
+      },
+      "body": {
+        "type": "box",
+        "layout": "vertical",
+        "spacing": "sm",
+        "paddingAll": "md",
+        "contents": contents
+      }
     }
   };
 }

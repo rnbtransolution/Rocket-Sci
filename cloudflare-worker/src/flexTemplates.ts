@@ -244,6 +244,66 @@ export function generateMatchNotificationFlex(order: Order): any {
   };
 }
 
+// ── 2b. Match Mismatch / Rejection Card (Red Theme) ──
+// Shown when a match attempt FAILS: own bet, already matched, cancelled, not found,
+// insufficient balance, or no opposite-side order available.
+export function generateMatchMismatchFlex(orderNo: string | undefined, reason: string, hint?: string): any {
+  const title = orderNo ? `🚫 จับคู่ไม่สำเร็จ #${orderNo}` : '🚫 จับคู่ไม่สำเร็จ';
+  return {
+    type: 'flex',
+    altText: `🚫 จับคู่ไม่สำเร็จ${orderNo ? ` Order #${orderNo}` : ''}`,
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#DC2626',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: title,
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'sm',
+            align: 'center',
+            wrap: true,
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        paddingAll: 'md',
+        contents: [
+          {
+            type: 'text',
+            text: reason,
+            color: '#1E293B',
+            weight: 'bold',
+            size: 'sm',
+            align: 'center',
+            wrap: true,
+          },
+          ...(hint ? [
+            { type: 'separator', margin: 'xs', color: '#E2E8F0' },
+            {
+              type: 'text',
+              text: hint,
+              color: '#64748B',
+              size: 'xs',
+              align: 'center',
+              wrap: true,
+            },
+          ] : []),
+        ],
+      },
+    },
+  };
+}
+
 // ── 3. Player Balance Card ──
 export function generateBalanceFlex(displayName: string, balance: number): any {
   return {
@@ -596,11 +656,11 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
   };
 }
 
-// ── 5. Rule Guide Card (คู่มือคีย์เวิร์ดกติกาการเล่น) ──
+// ── 5. Rule Guide Card (กติกาการเล่น) ──
 export function generateRuleGuideFlex(): any {
   return {
     type: 'flex',
-    altText: '📖 คู่มือคีย์เวิร์ดกติกาการเล่น 🚀',
+    altText: '📖 กติกาการเล่น 🚀',
     contents: {
       type: 'bubble',
       size: 'mega',
@@ -620,7 +680,7 @@ export function generateRuleGuideFlex(): any {
           },
           {
             type: 'text',
-            text: '📖 คู่มือคีย์เวิร์ดกติกาการเล่น',
+            text: '📖 กติกาการเล่น',
             weight: 'bold',
             color: '#FFFFFF',
             size: 'sm',
@@ -781,18 +841,44 @@ export function generateRuleGuideFlex(): any {
 }
 
 // ── 6. Main Menu Quick Reply (เมนูหลักระบบดวล — 1:1 chat only) ──
+const MAIN_MENU_QUICK_REPLY_ITEMS = [
+  { type: 'action', action: { type: 'message', label: '💳 เช็คยอด', text: 'เช็คยอด' } },
+  { type: 'action', action: { type: 'message', label: '💰 ฝากเงิน', text: 'ฝากเงิน' } },
+  { type: 'action', action: { type: 'message', label: '💸 ถอนเงิน', text: 'ถอนเงิน' } },
+  { type: 'action', action: { type: 'message', label: '📖 กติกา', text: 'กติกา' } },
+  { type: 'action', action: { type: 'message', label: '📋 กระดานดวล', text: 'กระดานดวล' } },
+];
+
+/**
+ * Attach the floating main-menu Quick Reply to any outgoing private-chat message.
+ * This guarantees the menu keys stay visible after EVERY bot reply (not only after
+ * the "เมนู" command). SKIPPED when the payload is an interactive menu object that
+ * must render inside LINE's input area (e.g. welcome/menu flex cards) — in those
+ * cases users reach the menu through the splash screen instead.
+ */
+export function attachMainMenuQuickReply(payload: any): any {
+  if (!payload || typeof payload !== 'object') return payload;
+  const type = payload.type;
+  // Only wrap LINE message objects (text / flex). Pure bubbles/carousels are nested
+  // objects, not standalone message objects — never attach quickReply to those.
+  if (type === 'bubble' || type === 'carousel') return payload;
+  if (type !== 'text' && type !== 'flex') return payload;
+  // Skip the interactive menu flex card (it duplicates the Quick Reply itself).
+  const text = (payload.text || payload.altText || '').toString();
+  if (text.includes('เมนูหลัก') && type === 'flex') return payload;
+  // Never override a payload that already defines its own Quick Reply.
+  if (payload.quickReply && Array.isArray(payload.quickReply.items) && payload.quickReply.items.length > 0) {
+    return payload;
+  }
+  return { ...payload, quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS } };
+}
+
 export function generateMainMenuQuickReply(displayName: string, balance: number): any {
   return {
     type: 'text',
     text: '🚀 Rocket Science เมนูหลัก (1:1)\n\nดูแต้ม เติมเงิน ถอนเงิน และกติกาได้จากปุ่มด้านล่างเลยครับ 👇',
     quickReply: {
-      items: [
-        { type: 'action', action: { type: 'message', label: '💳 เช็คยอด', text: 'เช็คยอด' } },
-        { type: 'action', action: { type: 'message', label: '💰 ฝากเงิน', text: 'ฝากเงิน' } },
-        { type: 'action', action: { type: 'message', label: '💸 ถอนเงิน', text: 'ถอนเงิน' } },
-        { type: 'action', action: { type: 'message', label: '📖 กติกา', text: 'กติกา' } },
-        { type: 'action', action: { type: 'message', label: '📋 กระดานดวล', text: 'กระดานดวล' } },
-      ],
+      items: [...MAIN_MENU_QUICK_REPLY_ITEMS],
     },
   };
 }

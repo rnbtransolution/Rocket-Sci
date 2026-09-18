@@ -115,6 +115,13 @@ export async function replyToLine(replyToken, text, userId) {
   if (typeof text === 'object' && text !== null) {
     if (text.type === 'text') {
       messageObj = { type: 'text', text: text.text || '🚀 Rocket Science', quickReply: text.quickReply };
+    } else if (text.type === 'flex') {
+      messageObj = {
+        type: 'flex',
+        altText: text.altText || text.text || '🚀 Rocket Science',
+        contents: text.contents,
+        quickReply: text.quickReply
+      };
     } else {
       const alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
         || (text.contents && text.contents[0] && text.contents[0].header && text.contents[0].header.contents && text.contents[0].header.contents[0].text)
@@ -234,8 +241,11 @@ export async function pushToLine(targetId, text) {
       to: rawLineId,
       messages: [{
         type: 'flex',
-        altText: text.header?.contents?.[0]?.text || 'ระบบบริการ Rocket Science 🚀',
-        contents: text
+        altText: text.type === 'flex'
+          ? (text.altText || text.header?.contents?.[0]?.text || 'ระบบบริการ Rocket Science 🚀')
+          : (text.header?.contents?.[0]?.text || 'ระบบบริการ Rocket Science 🚀'),
+        contents: text.type === 'flex' ? text.contents : text,
+        ...(text.type === 'flex' && text.quickReply ? { quickReply: text.quickReply } : {})
       }]
     };
     try {
@@ -318,15 +328,17 @@ export async function pushToLine(targetId, text) {
  */
 export async function deliverPrivateNotice(userId, replyToken, groupId, payload) {
   if (!userId) return;
+  // Keep the floating main-menu Quick Reply visible after every private reply.
+  const enriched = attachMainMenuQuickReply(payload);
   if (groupId) {
-    await pushToLine(userId, payload);
+    await pushToLine(userId, enriched);
     return;
   }
   if (replyToken && replyToken !== 'MOCK_REPLY_TOKEN') {
-    await replyToLine(replyToken, payload, userId);
+    await replyToLine(replyToken, enriched, userId);
     return;
   }
-  await pushToLine(userId, payload);
+  await pushToLine(userId, enriched);
 }
 
 function getActiveRocketName() {
@@ -1052,36 +1064,36 @@ async function parseBetCommand(text, userId, displayName, replyToken, groupId, m
     const matched = await db.matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmount);
 
     if (matched && matched.error === 'BELOW_MIN_PERCENT_LIMIT') {
-      await sendNotice(`⚠️ ยอดดวลขั้นต่ำคือ 20% (${matched.minAllowed} pt) ของ Order #${matched.orderNumber} ครับ (คุณระบุ ${matched.provided} pt)`);
+      await sendNotice(constructMatchMismatchFlex(matched.orderNumber || targetOrderNo, `ยอดดวลขั้นต่ำคือ 20% (${matched.minAllowed} pt) ของ Order #${matched.orderNumber || targetOrderNo} ครับ (คุณระบุ ${matched.provided} pt)`, 'พิมพ์ "ต <เลข order>" พร้อมยอดที่มากกว่า 20% ของแผลครับ'));
       return true;
     }
     if (matched && matched.error === 'BELOW_MIN_LIMIT') {
-      await sendNotice(`⚠️ ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${matched.provided} pt)`);
+      await sendNotice(constructMatchMismatchFlex(matched.orderNumber || targetOrderNo, `ยอดดวลขั้นต่ำคือ 100 pt ครับ (คุณระบุ ${matched.provided} pt)`, 'พิมพ์ "ต <เลข order> <ยอด>" โดยยอดไม่ต่ำกว่า 100 pt ครับ'));
       return true;
     }
     if (matched && matched.error === 'INSUFFICIENT_BALANCE') {
       const needed = matched.required - matched.current;
-      await sendNotice(`⚠️ แต้มไม่พอ (มี ${matched.current}pt | ขาด ${needed}pt) พิมพ์ "ฝากเงิน"`);
+      await sendNotice(constructMatchMismatchFlex(matched.orderNumber || targetOrderNo, `แต้มไม่พอ (มี ${matched.current}pt | ขาด ${needed}pt)`, 'พิมพ์ "ฝากเงิน" เพื่อเติมเครดิตครับ'));
       return true;
     }
     if (matched && matched.error === 'OWN_BET') {
-      await sendNotice(`⚠️ คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ`);
+      await sendNotice(constructMatchMismatchFlex(matched.orderNumber || targetOrderNo, 'คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ', 'เลือกแผลของผู้เล่นอื่นเพื่อเปิดการดวลครับ'));
       return true;
     }
     if (matched && matched.error === 'CANCELLED') {
-      await sendNotice(`🚫 แผล Order #${matched.orderNumber} ถูกยกเลิกไปแล้วครับ`);
+      await sendNotice(constructMatchMismatchFlex(matched.orderNumber || targetOrderNo, `แผล Order #${matched.orderNumber || targetOrderNo} ถูกยกเลิกไปแล้วครับ`, 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ'));
       return true;
     }
     if (matched && matched.error === 'ALREADY_MATCHED') {
-      await sendNotice(`⚠️ แผล Order #${matched.orderNumber} มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ`);
+      await sendNotice(constructMatchMismatchFlex(matched.orderNumber || targetOrderNo, `แผล Order #${matched.orderNumber || targetOrderNo} มีคู่ดวลแล้ว ไม่สามารถรับซ้ำได้ครับ`, 'พิมพ์ "ต <เลข order>" เพื่อรับแผลอื่นครับ'));
       return true;
     }
     if (matched && matched.error === 'NOT_FOUND') {
-      await sendNotice(`🚫 ไม่พบแผล Order #${matched.targetOrderNo || targetOrderNo} ในระบบครับ`);
+      await sendNotice(constructMatchMismatchFlex(matched.targetOrderNo || targetOrderNo, `ไม่พบแผล Order #${matched.targetOrderNo || targetOrderNo} ในระบบครับ`, 'พิมพ์ "ชล" หรือ "ชถ" เพื่อเปิดแผลใหม่ได้เลยครับ 🚀'));
       return true;
     }
     if (matched && matched.error === 'EXCEEDS_ORDER_AMOUNT') {
-      await sendNotice(`⚠️ ยอดรับดวล (${matched.provided} pt) เกินยอดของ Order #${matched.orderNumber} (รับได้สูงสุด ${matched.maxAllowed} pt ครับ)`);
+      await sendNotice(constructMatchMismatchFlex(matched.orderNumber || targetOrderNo, `ยอดรับดวล (${matched.provided} pt) เกินยอดของ Order #${matched.orderNumber || targetOrderNo} (รับได้สูงสุด ${matched.maxAllowed} pt ครับ)`, 'พิมพ์ "ต <เลข order> <ยอด>" โดยยอดไม่เกิน Order ครับ'));
       return true;
     }
 
@@ -1263,19 +1275,41 @@ async function processOpenBetRequest(side, amount, type, minVal, maxVal, userId,
 
 // --- LINE FLEX CONSTRUCTORS ---
 
+const MAIN_MENU_QUICK_REPLY_ITEMS = [
+  { type: 'action', action: { type: 'message', label: '💳 เช็คยอด', text: 'เช็คยอด' } },
+  { type: 'action', action: { type: 'message', label: '💰 ฝากเงิน', text: 'ฝากเงิน' } },
+  { type: 'action', action: { type: 'message', label: '💸 ถอนเงิน', text: 'ถอนเงิน' } },
+  { type: 'action', action: { type: 'message', label: '⚔️ รายการดวล', text: 'รายการดวล' } },
+  { type: 'action', action: { type: 'message', label: '📖 กติกา', text: 'กติกา' } },
+  { type: 'action', action: { type: 'message', label: '📋 กระดานดวล', text: 'กระดานดวล' } },
+];
+
+/**
+ * Attach the floating main-menu Quick Reply to any private-chat message so the
+ * menu keys stay visible after EVERY bot reply (not only after the "เมนู" command).
+ */
+export function attachMainMenuQuickReply(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  const type = payload.type;
+  if (type === 'bubble' || type === 'carousel') return payload;
+  if (type !== 'text' && type !== 'flex') return payload;
+  if (type === 'flex' && String(payload.altText || payload.text || '').includes('เมนูหลัก')) return payload;
+  if (payload.quickReply && payload.quickReply.items && payload.quickReply.items.length > 0) return payload;
+  return {
+    type,
+    text: payload.text,
+    altText: payload.altText,
+    contents: payload.contents,
+    quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS }
+  };
+}
+
 export function constructMainMenuQuickReply() {
   return {
     type: 'text',
     text: '🚀 Rocket Science เมนูหลัก (1:1)\n\nเลือกเมนูที่ต้องการด้านล่างได้เลยครับ 👇',
     quickReply: {
-      items: [
-        { type: 'action', action: { type: 'message', label: '💳 เช็คยอด', text: 'เช็คยอด' } },
-        { type: 'action', action: { type: 'message', label: '💰 ฝากเงิน', text: 'ฝากเงิน' } },
-        { type: 'action', action: { type: 'message', label: '💸 ถอนเงิน', text: 'ถอนเงิน' } },
-        { type: 'action', action: { type: 'message', label: '⚔️ รายการดวล', text: 'รายการดวล' } },
-        { type: 'action', action: { type: 'message', label: '📖 กติกา', text: 'กติกา' } },
-        { type: 'action', action: { type: 'message', label: '📋 กระดานดวล', text: 'กระดานดวล' } },
-      ]
+      items: MAIN_MENU_QUICK_REPLY_ITEMS
     }
   };
 }
@@ -2102,7 +2136,7 @@ export function constructRuleGuideFlex() {
         },
         {
           "type": "text",
-          "text": "📖 คู่มือคีย์เวิร์ดกติกาการเล่น",
+          "text": "📖 กติกาการเล่น",
           "weight": "bold",
           "color": "#FFFFFF",
           "size": "sm",
@@ -2261,7 +2295,7 @@ export function constructRuleGuideFlex() {
   };
 }
 
-export const RULE_GUIDE_TEXT = `📖 [คู่มือคีย์เวิร์ดกติกาการเล่น]
+export const RULE_GUIDE_TEXT = `📖 [กติกาการเล่น]
 
 📌 กฏที่ 1: เล่นราคาช่าง
 
@@ -2442,6 +2476,66 @@ export function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeIn
       "spacing": "xs",
       "paddingAll": "sm",
       "contents": bodyContents
+    }
+  };
+}
+
+export function constructMatchMismatchFlex(orderNo, reason, hint) {
+  const title = orderNo ? `🚫 จับคู่ไม่สำเร็จ #${orderNo}` : '🚫 จับคู่ไม่สำเร็จ';
+  const contents = [
+    {
+      type: 'text',
+      text: reason,
+      color: '#1E293B',
+      weight: 'bold',
+      size: 'sm',
+      align: 'center',
+      wrap: true
+    }
+  ];
+  if (hint) {
+    contents.push(
+      { type: 'separator', margin: 'xs', color: '#E2E8F0' },
+      {
+        type: 'text',
+        text: hint,
+        color: '#64748B',
+        size: 'xs',
+        align: 'center',
+        wrap: true
+      }
+    );
+  }
+  return {
+    type: 'flex',
+    altText: `🚫 จับคู่ไม่สำเร็จ${orderNo ? ` Order #${orderNo}` : ''}`,
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#DC2626',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: title,
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'sm',
+            align: 'center',
+            wrap: true
+          }
+        ]
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        paddingAll: 'md',
+        contents
+      }
     }
   };
 }
