@@ -1175,10 +1175,12 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
     } else {
       list.push(profile);
     }
-    await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(list));
+    // Cap the list document to keep the KV value well under the 25MB limit
+    await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(list.slice(-500)));
 
-    // Offload sync to Google Sheets in background
-    if (env.GAS_FALLBACK_URL) {
+    // Offload sync to Google Sheets in background — throttled to 1 write/min/user
+    // so bet-storm balance writes never pile up on slow GAS execution.
+    if (env.GAS_FALLBACK_URL && !(await isGasSyncThrottled('SAVE', profile.lineUserId, env))) {
       const syncPromise = fetch(env.GAS_FALLBACK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -1192,6 +1194,23 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
     }
   } catch (err) {
     console.error('[Worker] savePlayerProfile error:', err);
+  }
+}
+
+/**
+ * Per-user GAS sync throttle (60s window). Google Sheets is a reporting mirror,
+ * not the live ledger — during bet storms this keeps the hot path completely off
+ * slow (1-6s) GAS round-trips, capping Sheets load at 1 call/user/minute.
+ * Fail-open by design: if the throttle check itself errors, prefer syncing.
+ */
+async function isGasSyncThrottled(scope: string, userId: string, env: Env): Promise<boolean> {
+  try {
+    const key = `GAS_SYNC_${scope}_${userId}`;
+    if (await env.KV_CACHE.get(key)) return true;
+    await env.KV_CACHE.put(key, '1', { expirationTtl: 60 });
+    return false;
+  } catch (_) {
+    return false;
   }
 }
 
@@ -1319,6 +1338,9 @@ export async function syncProfileBalanceFromDb(
   ctx?: ExecutionContext
 ): Promise<PlayerProfile> {
   if (!env.GAS_FALLBACK_URL) return profile;
+  // Throttle: max 1 Sheets read per user per 60s. The instant reply already went
+  // out from KV cache; this background correction does not need to be real-time.
+  if (await isGasSyncThrottled('BAL', profile.lineUserId, env)) return profile;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 3000);
   const _t0 = Date.now();
