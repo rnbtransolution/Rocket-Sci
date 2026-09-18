@@ -51,10 +51,52 @@ export const RULE_GUIDE_TEXT = `📖 [กติกาการเล่น]
  * Executes all order validation, atomic balance locking, and LINE API calls with sub-second latency.
  */
 export async function processLineEvent(event: LineEvent, env: Env, ctx?: ExecutionContext): Promise<void> {
+  // ── Cross-Path Dedup Guard ──
+  // Every webhook event is processed inline (sub-100ms reply path) AND mirrored
+  // to the Queue for the background consumer. Without this guard both paths
+  // executed the full handler: double replies, double balance writes, double
+  // order records. First executor wins (inline normally); the queue copy acks.
+  if (event.webhookEventId) {
+    const dedupKey = `EVT_${event.webhookEventId}`;
+    try {
+      if (await env.KV_CACHE.get(dedupKey)) return;
+      await env.KV_CACHE.put(dedupKey, '1', { expirationTtl: 120 });
+    } catch (_) { /* fail-open: prefer processing over dropping */ }
+  }
+
   const source = event.source || {};
   const userId = source.userId;
   const groupId = source.groupId || source.roomId || null;
   const isGroup = !!groupId;
+
+  // ── Universal Inbound Chat Log (admin conversation monitor feed) ──
+  // Previously inbound user messages were never recorded anywhere — only
+  // admin-sent messages were — leaving the dashboard chat feed blind.
+  if (event.type === 'message' && userId) {
+    const msgType = event.message?.type || 'unknown';
+    const displayText =
+      msgType === 'text'
+        ? (event.message?.text || '').trim()
+        : msgType === 'image'
+          ? '[รูปภาพ — สลิปโอนเงิน]'
+          : `[${msgType}]`;
+    const evtTime = new Date(event.timestamp || Date.now()).toLocaleTimeString('th-TH', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    });
+    let displayName = 'ผู้เล่น';
+    try {
+      const cached = await env.KV_CACHE.get(`USER_${userId}`);
+      if (cached) displayName = JSON.parse(cached).displayName || displayName;
+    } catch (_) {}
+    ctx?.waitUntil(logUserMessage(env, {
+      timestamp: evtTime,
+      userId,
+      displayName,
+      sender: 'user',
+      text: displayText || '[empty]',
+      type: msgType,
+    }));
+  }
 
   // Offload group activity recording to background (0ms on critical path)
   if (groupId && ctx) {
@@ -1227,6 +1269,27 @@ export async function getTransactionsList(env: Env): Promise<Transaction[]> {
   }
 }
 
+/**
+ * Record an inbound user message into the CHAT_LOGS dashboard feed.
+ * Previously the ONLY chat-log writer was the admin-send path in index.ts —
+ * inbound LINE user messages were never logged anywhere, leaving the admin
+ * conversation monitor permanently blind under the queue architecture.
+ * Mirrors appendChatLog() in index.ts (admin sender) with sender: 'user'.
+ */
+export async function logUserMessage(
+  env: Env,
+  log: { timestamp: string; userId: string; displayName: string; sender: string; text: string; type: string }
+): Promise<void> {
+  try {
+    const raw = await env.KV_CACHE.get('CHAT_LOGS');
+    const logs = raw ? JSON.parse(raw) : [];
+    logs.push(log);
+    await env.KV_CACHE.put('CHAT_LOGS', JSON.stringify(logs.slice(-100)));
+  } catch (err) {
+    console.warn('[logUserMessage Error]:', err);
+  }
+}
+
 export async function addTransaction(tx: Transaction, env: Env, ctx?: ExecutionContext): Promise<void> {
   try {
     const list = await getTransactionsList(env);
@@ -1374,12 +1437,18 @@ export async function syncProfileBalanceFromDb(
     // DB is the single source of truth. A successful, non-cached DB read that does
     // NOT contain this player means the account has no credited balance (0) — never
     // report a stale KV demo value (e.g. the old hardcoded 1,000) for a solo account.
+    // ── Merge-Safe Guard (replaces old !match → balance=0 zeroing) ──
+    // The sheet can legitimately lag KV (throttled writes, sync latency, operator
+    // edits in-flight). Zeroing here wiped the 1,000 pt balance AND any newly
+    // created user record seconds after creation. The Ledger Authority Ladder:
+    //   1. adminSetPlayerBalance (explicit operator action) — always wins
+    //   2. KV ledger (live gameplay writes)               — wins over a missing row
+    //   3. Sheet row (reporting mirror, may lag)          — wins only when present
+    // Sheets CATCHES UP via savePlayerProfile's throttled adminSetPlayerBalance write.
     if (!match) {
-      if (profile.balance !== 0) {
-        profile.balance = 0;
-        profile.updatedAt = Date.now();
-        await savePlayerProfile(profile, env, ctx);
-      }
+      console.warn(
+        `[Balance] Player ${profile.shortId || profile.lineUserId} absent from sheet — keeping KV balance ${profile.balance} (sheet lags; a queued save will restore the row)`
+      );
       return profile;
     }
 

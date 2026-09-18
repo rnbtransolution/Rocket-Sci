@@ -44,6 +44,8 @@ export interface LineEvent {
   timestamp: number;
   source: LineSource;
   replyToken?: string;
+  /** UUID injected by the webhook for end-to-end dedup between inline + queue paths */
+  webhookEventId?: string;
   message?: LineMessage;
   postback?: LinePostback;
   unsend?: {

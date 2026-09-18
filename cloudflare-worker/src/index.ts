@@ -13,6 +13,7 @@ import {
   getTransactionsList,
   addTransaction,
   pushToLine,
+  logUserMessage,
 } from './queueHandler.js';
 import {
   generateRuleGuideFlex,
@@ -141,10 +142,27 @@ export default {
 
       // ── High-Speed Interactive Execution (< 150ms) ──
       if (events.length > 0) {
+        // Inject a per-event UUID so the inline path and the queue consumer can
+        // dedup against each other. Previously BOTH paths executed the full
+        // processLineEvent(), double-charging replies/pushes and double-writing
+        // ledger entries for every single user message.
+        for (const event of events) {
+          event.webhookEventId = event.webhookEventId || crypto.randomUUID();
+        }
+
+        // Replay-probe isolation: LINE Console "Verify" button sends a synthetic
+        // event with a fake replyToken (no real user behind it). Reply/push calls
+        // on it fail noisily and pollute logs — acknowledge without processing.
+        const isVerifyProbe = events.some(
+          (e) => e.replyToken && /^0000[0-9a-f]{26,}$/.test(e.replyToken)
+        );
+
         const interactiveProcessing = Promise.all(
           events.map(async (event) => {
             try {
-              await processLineEvent(event, env, ctx);
+              if (!isVerifyProbe) {
+                await processLineEvent(event, env, ctx);
+              }
             } catch (err) {
               console.error('[Worker] Event processing error:', err);
             }
@@ -154,7 +172,7 @@ export default {
         if (env.LINE_EVENTS_QUEUE) {
           const queueBatch = events.map((event) => ({
             body: {
-              id: crypto.randomUUID(),
+              id: event.webhookEventId!,
               receivedAt: Date.now(),
               event,
             } as QueueMessage,
@@ -525,6 +543,11 @@ export default {
             roundStatus: 'ACTIVE',
           };
         } else if (functionName === 'syncWithSheets') {
+          // ── Merge-Safe Force Sync ──
+          // Previously this REPLACED the dashboard payload with the raw GAS sheet
+          // response — an empty/stale sheet blanked out live KV players, chats and
+          // transactions in the admin view. Now: KV stays authoritative; sheet rows
+          // are merged in only when non-empty (never overwrite, only enrich).
           let sheetsData: any = null;
           if (env.GAS_FALLBACK_URL) {
             try {
@@ -535,13 +558,37 @@ export default {
               console.warn('[Worker] syncWithSheets fetch error:', e);
             }
           }
-          if (sheetsData) {
-            result = sheetsData;
+          const kvPlayers = await getPlayersList(env);
+          const kvTx = await getTransactionsList(env);
+          const kvBets = await getPendingOrdersList(env);
+          if (sheetsData && Array.isArray(sheetsData.players) && sheetsData.players.length > 0) {
+            const merged = [...kvPlayers];
+            for (const sp of sheetsData.players) {
+              const kvMatch = merged.find(
+                (kp: any) => kp && sp && (kp.lineUserId === sp.lineUserId || kp.shortId === sp.id || kp.lineUserId === sp.id)
+              );
+              if (!kvMatch) {
+                merged.push({
+                  shortId: sp.id || sp.shortId,
+                  lineUserId: sp.lineUserId || sp.id,
+                  displayName: sp.name || sp.displayName || 'ผู้เล่น',
+                  balance: Number(sp.balance) || 0,
+                });
+              }
+            }
+            result = {
+              players: merged,
+              transactions: Array.isArray(sheetsData.transactions) && sheetsData.transactions.length > 0
+                ? [...kvTx, ...sheetsData.transactions].slice(0, 100)
+                : kvTx,
+              bets: kvBets,
+              activeGroupId: (await env.KV_CACHE.get('ACTIVE_GROUP_ID')) || '',
+            };
           } else {
             result = {
-              players: await getPlayersList(env),
-              transactions: await getTransactionsList(env),
-              bets: await getPendingOrdersList(env),
+              players: kvPlayers,
+              transactions: kvTx,
+              bets: kvBets,
               activeGroupId: (await env.KV_CACHE.get('ACTIVE_GROUP_ID')) || '',
             };
           }
@@ -1218,9 +1265,14 @@ export default {
   async queue(batch: MessageBatch<QueueMessage>, env: Env): Promise<void> {
     for (const message of batch.messages) {
       try {
-        message.ack(); // Acknowledge archived event
+        // ── REAL queue processing (previously a stub that acked + discarded every
+        // event: the queue existed but nobody consumed it) ──
+        await processLineEvent(message.body.event, env);
+        message.ack();
       } catch (err) {
-        console.error('[Queue Consumer] Error acknowledging message:', message.id, err);
+        console.error('[Queue Consumer] Error processing message:', message.id, err);
+        // Retry up to max_retries; the dead-letter queue catches poison messages
+        message.retry();
       }
     }
   },
