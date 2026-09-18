@@ -840,8 +840,8 @@ export function generateRuleGuideFlex(): any {
   };
 }
 
-// ── 6. Main Menu Quick Reply (เมนูหลักระบบดวล — 1:1 chat only) ──
-const MAIN_MENU_QUICK_REPLY_ITEMS = [
+// ── 6. Main Menu Quick Reply (เมนูหลักระบบดวล — Floating at all times) ──
+export const MAIN_MENU_QUICK_REPLY_ITEMS = [
   { type: 'action', action: { type: 'message', label: '💳 เช็คยอด', text: 'เช็คยอด' } },
   { type: 'action', action: { type: 'message', label: '💰 ฝากเงิน', text: 'ฝากเงิน' } },
   { type: 'action', action: { type: 'message', label: '💸 ถอนเงิน', text: 'ถอนเงิน' } },
@@ -850,27 +850,54 @@ const MAIN_MENU_QUICK_REPLY_ITEMS = [
 ];
 
 /**
- * Attach the floating main-menu Quick Reply to any outgoing private-chat message.
- * This guarantees the menu keys stay visible after EVERY bot reply (not only after
- * the "เมนู" command). SKIPPED when the payload is an interactive menu object that
- * must render inside LINE's input area (e.g. welcome/menu flex cards) — in those
- * cases users reach the menu through the splash screen instead.
+ * Attach the floating main-menu Quick Reply to any outgoing message.
+ * This guarantees the quick reply buttons stay visible and floating at all times
+ * across all bot replies, notices, and interactions without requiring "เมนู".
  */
 export function attachMainMenuQuickReply(payload: any): any {
-  if (!payload || typeof payload !== 'object') return payload;
-  const type = payload.type;
-  // Only wrap LINE message objects (text / flex). Pure bubbles/carousels are nested
-  // objects, not standalone message objects — never attach quickReply to those.
-  if (type === 'bubble' || type === 'carousel') return payload;
-  if (type !== 'text' && type !== 'flex') return payload;
-  // Skip the interactive menu flex card (it duplicates the Quick Reply itself).
-  const text = (payload.text || payload.altText || '').toString();
-  if (text.includes('เมนูหลัก') && type === 'flex') return payload;
-  // Never override a payload that already defines its own Quick Reply.
-  if (payload.quickReply && Array.isArray(payload.quickReply.items) && payload.quickReply.items.length > 0) {
-    return payload;
+  if (payload === null || payload === undefined) {
+    return {
+      type: 'text',
+      text: '🚀 Rocket Science',
+      quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
+    };
   }
-  return { ...payload, quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS } };
+
+  // 1. Plain string or number payload
+  if (typeof payload === 'string' || typeof payload === 'number') {
+    return {
+      type: 'text',
+      text: String(payload),
+      quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
+    };
+  }
+
+  // 2. Structured objects
+  if (typeof payload === 'object') {
+    // If it is a raw bubble or carousel container, wrap into a flex message with quickReply
+    if (payload.type === 'bubble' || payload.type === 'carousel') {
+      const altText = payload.header?.contents?.[0]?.text || payload.altText || '🚀 Rocket Science';
+      return {
+        type: 'flex',
+        altText,
+        contents: payload,
+        quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
+      };
+    }
+
+    // If it's already a text or flex message object
+    if (payload.type === 'text' || payload.type === 'flex') {
+      if (payload.quickReply && Array.isArray(payload.quickReply.items) && payload.quickReply.items.length > 0) {
+        return payload;
+      }
+      return {
+        ...payload,
+        quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
+      };
+    }
+  }
+
+  return payload;
 }
 
 export function generateMainMenuQuickReply(displayName: string, balance: number): any {

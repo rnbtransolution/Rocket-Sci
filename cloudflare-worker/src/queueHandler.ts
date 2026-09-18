@@ -8,6 +8,7 @@ import {
   generateRuleGuideFlex,
   generateMainMenuQuickReply,
   attachMainMenuQuickReply,
+  MAIN_MENU_QUICK_REPLY_ITEMS,
   generateDepositFlex,
   generateDepositInvoiceFlex,
   generateWithdrawalFlex,
@@ -468,10 +469,18 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
 
     // ── Fallback for Unrecognized Private Messages ──
     if (!isGroup) {
-      const fallbackMsg = `🤖 ได้รับข้อความแล้วครับ 💬\nท่านสามารถพิมพ์ "เมนู" เพื่อเปิดเมนูทำรายการ หรือพิมพ์ "ฝากเงิน", "เช็คยอด", "ถอนเงิน", "กติกา" ได้ทันทีครับ 🚀`;
+      const fallbackMsg = `🤖 ได้รับข้อความแล้วครับ 💬\nท่านสามารถแตะเลือกทำรายการ เช็คยอด, ฝากเงิน, ถอนเงิน หรือกติกาจากปุ่มด้านล่างได้ทันทีครับ 👇`;
       await deliverPrivateNotice(userId, replyToken, null, fallbackMsg, env);
       return;
     }
+  }
+
+  // ── Follow Event (User Adds or Unblocks Bot) ──
+  if (event.type === 'follow' && userId) {
+    const profile = await getOrCreatePlayerProfile(userId, env, ctx);
+    const welcomeMsg = `🚀 ยินดีต้อนรับคุณ ${profile.displayName} สู่ระบบดวล Rocket Science!\n\nท่านสามารถแตะเมนูด้านล่างเพื่อ เช็คยอด, ฝากเงิน, ถอนเงิน หรือดูกติกาได้ตลอดเวลาครับ 👇`;
+    await deliverPrivateNotice(userId, event.replyToken, null, welcomeMsg, env);
+    return;
   }
 
   // ── Image Message Handler (Slip Upload) ──
@@ -1376,20 +1385,25 @@ async function recordActiveGroup(groupId: string, env: Env): Promise<void> {
 
 // ── LINE HTTP Dispatchers ──
 
-async function replyToLine(replyToken: string, payload: any, env: Env): Promise<boolean> {
+async function replyToLine(replyToken: string, payload: any, env: Env, attachQuickReply = true): Promise<boolean> {
   try {
+    const processed = attachQuickReply ? attachMainMenuQuickReply(payload) : payload;
     let messageObj: any;
-    if (typeof payload === 'string') {
-      messageObj = { type: 'text', text: payload };
-    } else if (payload && payload.type === 'flex') {
-      messageObj = payload;
-    } else if (payload && (payload.type === 'bubble' || payload.type === 'carousel')) {
-      const altText = payload.header?.contents?.[0]?.text || payload.altText || '🚀 Rocket Science';
-      messageObj = { type: 'flex', altText, contents: payload };
-    } else if (payload && payload.type === 'text') {
-      messageObj = payload;
+    if (typeof processed === 'string') {
+      messageObj = { type: 'text', text: processed };
+    } else if (processed && processed.type === 'flex') {
+      messageObj = processed;
+    } else if (processed && (processed.type === 'bubble' || processed.type === 'carousel')) {
+      const altText = processed.header?.contents?.[0]?.text || processed.altText || '🚀 Rocket Science';
+      messageObj = { type: 'flex', altText, contents: processed };
+    } else if (processed && processed.type === 'text') {
+      messageObj = processed;
     } else {
-      messageObj = { type: 'text', text: String(payload) };
+      messageObj = { type: 'text', text: String(processed) };
+    }
+
+    if (attachQuickReply && (!messageObj.quickReply || !Array.isArray(messageObj.quickReply.items) || messageObj.quickReply.items.length === 0)) {
+      messageObj.quickReply = { items: MAIN_MENU_QUICK_REPLY_ITEMS };
     }
 
     const messages = [messageObj];
@@ -1415,18 +1429,24 @@ async function replyToLine(replyToken: string, payload: any, env: Env): Promise<
 
 export async function pushToLine(to: string, payload: any, env: Env): Promise<{ success: boolean; code?: number; error?: string }> {
   try {
+    const isUserDM = to && to.startsWith('U');
+    const processed = isUserDM ? attachMainMenuQuickReply(payload) : payload;
     let messageObj: any;
-    if (typeof payload === 'string') {
-      messageObj = { type: 'text', text: payload };
-    } else if (payload && payload.type === 'flex') {
-      messageObj = payload;
-    } else if (payload && (payload.type === 'bubble' || payload.type === 'carousel')) {
-      const altText = payload.header?.contents?.[0]?.text || payload.altText || '🚀 Rocket Science';
-      messageObj = { type: 'flex', altText, contents: payload };
-    } else if (payload && payload.type === 'text') {
-      messageObj = payload;
+    if (typeof processed === 'string') {
+      messageObj = { type: 'text', text: processed };
+    } else if (processed && processed.type === 'flex') {
+      messageObj = processed;
+    } else if (processed && (processed.type === 'bubble' || processed.type === 'carousel')) {
+      const altText = processed.header?.contents?.[0]?.text || processed.altText || '🚀 Rocket Science';
+      messageObj = { type: 'flex', altText, contents: processed };
+    } else if (processed && processed.type === 'text') {
+      messageObj = processed;
     } else {
-      messageObj = { type: 'text', text: String(payload) };
+      messageObj = { type: 'text', text: String(processed) };
+    }
+
+    if (isUserDM && (!messageObj.quickReply || !Array.isArray(messageObj.quickReply.items) || messageObj.quickReply.items.length === 0)) {
+      messageObj.quickReply = { items: MAIN_MENU_QUICK_REPLY_ITEMS };
     }
 
     const messages = [messageObj];
@@ -1483,11 +1503,12 @@ async function deliverPrivateNotice(
     if (raw) targetLineId = raw;
   }
 
+  const enriched = attachMainMenuQuickReply(payload);
+
   // 1. If in 1-on-1 private chat with LINE OA:
   if (!groupId) {
-    const enriched = attachMainMenuQuickReply(payload);
     if (replyToken) {
-      const sent = await replyToLine(replyToken, enriched, env);
+      const sent = await replyToLine(replyToken, enriched, env, true);
       if (sent) return;
     }
     if (targetLineId && targetLineId.startsWith('U')) {
@@ -1500,7 +1521,7 @@ async function deliverPrivateNotice(
   // Attempt private delivery via DM for players who have friended the bot
   let pushSuccess = false;
   if (targetLineId && targetLineId.startsWith('U')) {
-    const res = await pushToLine(targetLineId, attachMainMenuQuickReply(payload), env);
+    const res = await pushToLine(targetLineId, enriched, env);
     pushSuccess = !!(res && res.success);
   }
 
@@ -1511,6 +1532,6 @@ async function deliverPrivateNotice(
     if (displayName) {
       summaryText = `📢 @${displayName}\n${summaryText}`;
     }
-    await replyToLine(replyToken, summaryText, env);
+    await replyToLine(replyToken, attachMainMenuQuickReply(summaryText), env, true);
   }
 }

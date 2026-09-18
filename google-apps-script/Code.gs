@@ -3770,19 +3770,46 @@ var MAIN_MENU_QUICK_REPLY_ITEMS_ = [
  * menu keys stay visible after EVERY bot reply (not only after the "เมนู" command).
  */
 function attachMainMenuQuickReply_(payload) {
-  if (!payload || typeof payload !== 'object') return payload;
-  var type = payload.type;
-  if (type === 'bubble' || type === 'carousel') return payload;
-  if (type !== 'text' && type !== 'flex') return payload;
-  if (type === 'flex' && String(payload.altText || payload.text || '').indexOf('เมนูหลัก') !== -1) return payload;
-  if (payload.quickReply && payload.quickReply.items && payload.quickReply.items.length > 0) return payload;
-  return {
-    type: type,
-    text: payload.text,
-    altText: payload.altText,
-    contents: payload.contents,
-    quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS_ }
-  };
+  if (payload === null || payload === undefined) {
+    return {
+      type: 'text',
+      text: '🚀 Rocket Science',
+      quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS_ }
+    };
+  }
+
+  if (typeof payload === 'string' || typeof payload === 'number') {
+    return {
+      type: 'text',
+      text: String(payload),
+      quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS_ }
+    };
+  }
+
+  if (typeof payload === 'object') {
+    if (payload.type === 'bubble' || payload.type === 'carousel') {
+      var altText = (payload.header && payload.header.contents && payload.header.contents[0] && payload.header.contents[0].text) || payload.altText || '🚀 Rocket Science';
+      return {
+        type: 'flex',
+        altText: altText,
+        contents: payload,
+        quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS_ }
+      };
+    }
+
+    if (payload.type === 'text' || payload.type === 'flex') {
+      if (payload.quickReply && payload.quickReply.items && payload.quickReply.items.length > 0) return payload;
+      return {
+        type: payload.type,
+        text: payload.text,
+        altText: payload.altText,
+        contents: payload.contents,
+        quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS_ }
+      };
+    }
+  }
+
+  return payload;
 }
 
 function constructMainMenuQuickReply() {
