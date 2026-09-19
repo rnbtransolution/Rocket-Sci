@@ -1270,7 +1270,7 @@ export default function App() {
           const ref = useCustomSlip ? 'CUSTX' + Date.now().toString().slice(-4) : (preset ? preset.refCode : 'MOCKREF');
 
           const presetBankName = preset ? (preset.bankName.includes('SCB') ? 'SCB' : preset.bankName.includes('KBANK') ? 'KBANK' : preset.bankName.includes('BBL') ? 'BBL' : 'KTB') : 'SCB';
-          const presetAccountNo = '064-2-35656-6';
+          const presetAccountNo = '890-1-23456-7';
 
           const tDoneStr = new Date().toLocaleTimeString().slice(0, 5);
 
@@ -3677,7 +3677,7 @@ export default function App() {
                     <input
                       type="text"
                       inputMode="numeric"
-                      placeholder="เช่น 0642356566"
+                      placeholder="เช่น 890-1-23456-7"
                       value={bankEditForm.bankAccount}
                       onChange={e => setBankEditForm(f => ({ ...f, bankAccount: e.target.value }))}
                       className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-400"
@@ -3689,7 +3689,7 @@ export default function App() {
                     <label className="text-xs font-bold text-slate-600 block">ชื่อเจ้าของบัญชี (Account Name)</label>
                     <input
                       type="text"
-                      placeholder="ชื่อ-นามสกุล ตามสมุดบัญชี"
+                      placeholder="เช่น Somchai Jongcharoen"
                       value={bankEditForm.accountName}
                       onChange={e => setBankEditForm(f => ({ ...f, accountName: e.target.value }))}
                       className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"

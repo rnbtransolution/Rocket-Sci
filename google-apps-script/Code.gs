@@ -4217,7 +4217,7 @@ function constructDepositInvoiceFlex(depositAmt) {
               "layout": "horizontal",
               "contents": [
                 { "type": "text", "text": "🏦 SCB", "color": "#94A3B8", "size": "xxs", "flex": 4 },
-                { "type": "text", "text": "064-2-35656-6", "weight": "bold", "color": "#334155", "size": "xxs", "flex": 6, "align": "end" }
+                { "type": "text", "text": "890-1-23456-7", "weight": "bold", "color": "#334155", "size": "xxs", "flex": 6, "align": "end" }
               ]
             },
             {
@@ -4225,7 +4225,7 @@ function constructDepositInvoiceFlex(depositAmt) {
               "layout": "horizontal",
               "contents": [
                 { "type": "text", "text": "👤 ชื่อ", "color": "#94A3B8", "size": "xxs", "flex": 4 },
-                { "type": "text", "text": "อิทธิรัตน์ แนวหล่า", "weight": "bold", "color": "#334155", "size": "xxs", "flex": 6, "align": "end" }
+                { "type": "text", "text": "Somchai Jongcharoen", "weight": "bold", "color": "#334155", "size": "xxs", "flex": 6, "align": "end" }
               ]
             }
           ]
