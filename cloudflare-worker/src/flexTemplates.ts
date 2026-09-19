@@ -900,6 +900,26 @@ export function attachMainMenuQuickReply(payload: any): any {
   return payload;
 }
 
+/**
+ * Explicitly strip/delete any quickReply property from outgoing payloads.
+ * Guarantees that messages sent to LINE groups or rooms NEVER carry floating quick reply menus.
+ */
+export function stripQuickReply(payload: any): any {
+  if (payload === null || payload === undefined) return payload;
+  if (typeof payload === 'object') {
+    if (Array.isArray(payload)) {
+      return payload.map(stripQuickReply);
+    }
+    const clone = { ...payload };
+    delete clone.quickReply;
+    if (clone.contents && typeof clone.contents === 'object') {
+      clone.contents = stripQuickReply(clone.contents);
+    }
+    return clone;
+  }
+  return payload;
+}
+
 export function generateMainMenuQuickReply(displayName: string, balance: number): any {
   return {
     type: 'text',

@@ -2445,42 +2445,46 @@ function getLineUserProfile(userId) {
   }
 }
 
-function replyToLine(replyToken, text, userId) {
+function replyToLine(replyToken, text, userId, attachQuickReply) {
   if (replyToken === 'MOCK_REPLY_TOKEN') return; // Simulator bypass
   
   const url = 'https://api.line.me/v2/bot/message/reply';
   let messageObj;
+  var isDM = attachQuickReply === true || (userId && typeof userId === 'string' && userId.startsWith('U'));
+  var processed = isDM ? text : stripMainMenuQuickReply_(text);
   
-  if (typeof text === 'object' && text !== null) {
-    if (text.type === 'text') {
-      // Pass-through for pre-built text messages with Quick Reply menus (1:1 only)
-      messageObj = { type: 'text', text: text.text || '🚀 Rocket Science', quickReply: text.quickReply };
-    } else if (text.type === 'flex') {
-      // Full flex message object (bubble/carousel already wrapped with altText + quickReply)
+  if (typeof processed === 'object' && processed !== null) {
+    if (processed.type === 'text') {
+      messageObj = { type: 'text', text: processed.text || '🚀 Rocket Science', quickReply: isDM ? processed.quickReply : undefined };
+    } else if (processed.type === 'flex') {
       messageObj = {
         type: 'flex',
-        altText: text.altText || 'ระบบบริการ Rocket Science 🚀',
-        contents: text.contents,
-        quickReply: text.quickReply
+        altText: processed.altText || 'ระบบบริการ Rocket Science 🚀',
+        contents: processed.contents,
+        quickReply: isDM ? processed.quickReply : undefined
       };
     } else {
-      var alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
-        || (text.contents && text.contents[0] && text.contents[0].header && text.contents[0].header.contents && text.contents[0].header.contents[0].text)
+      var alt = (processed.header && processed.header.contents && processed.header.contents[0] && processed.header.contents[0].text)
+        || (processed.contents && processed.contents[0] && processed.contents[0].header && processed.contents[0].header.contents && processed.contents[0].header.contents[0].text)
         || 'ระบบบริการ Rocket Science 🚀';
       messageObj = {
         type: 'flex',
         altText: alt,
-        contents: text
+        contents: processed
       };
     }
   } else {
-    let outText = String(text);
+    let outText = String(processed);
     const pName = (userId ? getPlayerNameFromDb(userId) : null) || 'ผู้เล่น';
     const tagStr = `@${pName}`;
     if (userId && outText.indexOf('@') === -1 && outText.indexOf('ถึงคุณ') === -1) {
       outText = `👤 [ถึงคุณ ${tagStr}]: ` + outText;
     }
     messageObj = { type: 'text', text: outText };
+  }
+
+  if (!isDM) {
+    delete messageObj.quickReply;
   }
   
   const payload = {
@@ -3436,29 +3440,36 @@ function createLinePushRequest(userId, text) {
     : getRawLineUserId(userId);
   if (!rawLineUserId) return null;
   
+  var isGroup = rawLineUserId.startsWith('C') || rawLineUserId.startsWith('R');
+  var processed = isGroup ? stripMainMenuQuickReply_(text) : text;
+
   var messageObj;
-  if (typeof text === 'object' && text !== null) {
-    if (text.type === 'text') {
-      messageObj = { type: 'text', text: text.text || '🚀 Rocket Science', quickReply: text.quickReply };
-    } else if (text.type === 'flex') {
+  if (typeof processed === 'object' && processed !== null) {
+    if (processed.type === 'text') {
+      messageObj = { type: 'text', text: processed.text || '🚀 Rocket Science', quickReply: isGroup ? undefined : processed.quickReply };
+    } else if (processed.type === 'flex') {
       messageObj = {
         type: 'flex',
-        altText: text.altText || 'ระบบบริการ Rocket Science 🚀',
-        contents: text.contents,
-        quickReply: text.quickReply
+        altText: processed.altText || 'ระบบบริการ Rocket Science 🚀',
+        contents: processed.contents,
+        quickReply: isGroup ? undefined : processed.quickReply
       };
     } else {
-      var alt2 = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
-        ? text.header.contents[0].text
+      var alt2 = (processed.header && processed.header.contents && processed.header.contents[0] && processed.header.contents[0].text)
+        ? processed.header.contents[0].text
         : 'ระบบบริการ Rocket Science 🚀';
       messageObj = {
         type: 'flex',
         altText: alt2,
-        contents: text
+        contents: processed
       };
     }
   } else {
-    messageObj = { type: 'text', text: String(text) };
+    messageObj = { type: 'text', text: String(processed) };
+  }
+
+  if (isGroup) {
+    delete messageObj.quickReply;
   }
   
   return {
@@ -3809,6 +3820,26 @@ function attachMainMenuQuickReply_(payload) {
     }
   }
 
+  return payload;
+}
+
+/**
+ * Explicitly strip/delete any quickReply property from outgoing payloads.
+ * Guarantees that messages sent to LINE groups or rooms NEVER carry floating quick reply menus.
+ */
+function stripMainMenuQuickReply_(payload) {
+  if (payload === null || payload === undefined) return payload;
+  if (typeof payload === 'object') {
+    if (Array.isArray(payload)) {
+      return payload.map(stripMainMenuQuickReply_);
+    }
+    var clone = Object.assign({}, payload);
+    delete clone.quickReply;
+    if (clone.contents && typeof clone.contents === 'object') {
+      clone.contents = stripMainMenuQuickReply_(clone.contents);
+    }
+    return clone;
+  }
   return payload;
 }
 

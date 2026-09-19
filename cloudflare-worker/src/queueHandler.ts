@@ -8,6 +8,7 @@ import {
   generateRuleGuideFlex,
   generateMainMenuQuickReply,
   attachMainMenuQuickReply,
+  stripQuickReply,
   MAIN_MENU_QUICK_REPLY_ITEMS,
   generateDepositFlex,
   generateDepositInvoiceFlex,
@@ -113,9 +114,9 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     // ── 0. Utility Command: !groupid ──
     if (text.toLowerCase() === '!groupid' && replyToken) {
       if (groupId) {
-        await replyToLine(replyToken, `🆔 LINE Group ID: ${groupId}`, env);
+        await replyToLine(replyToken, `🆔 LINE Group ID: ${groupId}`, env, false);
       } else {
-        await replyToLine(replyToken, '⚠️ คำสั่งนี้ใช้งานได้เฉพาะในกลุ่ม LINE เท่านั้น', env);
+        await replyToLine(replyToken, '⚠️ คำสั่งนี้ใช้งานได้เฉพาะในกลุ่ม LINE เท่านั้น', env, true);
       }
       return;
     }
@@ -310,7 +311,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       const res = await clearAllPendingOrders(env);
       const msg = `🧹 ล้างกระดานดวลสดและเคลียร์แคชเรียบร้อยแล้วครับ! (ลบทั้งหมด ${res.cleared} รายการ, กระดานว่าง 0 แผล)`;
       if (replyToken) {
-        await replyToLine(replyToken, msg, env);
+        await replyToLine(replyToken, msg, env, !isGroup);
       } else {
         await pushToLine(userId, msg, env);
       }
@@ -443,7 +444,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         updatedAt: Date.now(),
       }));
       if (replyToken) {
-        await replyToLine(replyToken, `🚀 เปิดรอบดวล: ${roundName} (ราคาช่าง 330-380s) เรียบร้อยครับ`, env);
+        await replyToLine(replyToken, `🚀 เปิดรอบดวล: ${roundName} (ราคาช่าง 330-380s) เรียบร้อยครับ`, env, !isGroup);
       }
       return;
     }
@@ -460,7 +461,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       // Also clear pending unmatched orders so board resets cleanly for next round
       await clearAllPendingOrders(env);
       if (replyToken) {
-        await replyToLine(replyToken, `⛔ ปิดรับดวลรอบ ${roundName} เรียบร้อยแล้วครับ! (ล้างกระดานรอคู่เรียบร้อย 0 แผล)`, env);
+        await replyToLine(replyToken, `⛔ ปิดรับดวลรอบ ${roundName} เรียบร้อยแล้วครับ! (ล้างกระดานรอคู่เรียบร้อย 0 แผล)`, env, !isGroup);
       } else {
         await pushToLine(userId, `⛔ ปิดรับดวลรอบ ${roundName} เรียบร้อยแล้วครับ! (ล้างกระดานรอคู่เรียบร้อย 0 แผล)`, env);
       }
@@ -625,7 +626,7 @@ async function handleCreateOrder(
   const flexCard = generateOrderFlex(newOrder);
   let cardDispatched = false;
   if (replyToken) {
-    cardDispatched = await replyToLine(replyToken, flexCard, env);
+    cardDispatched = await replyToLine(replyToken, flexCard, env, false);
   }
   if (!cardDispatched && groupId) {
     await pushToLine(groupId, flexCard, env);
@@ -713,7 +714,7 @@ async function handleMatchOrder(
   const matchPromises: Promise<any>[] = [updatePersistence];
   
   if (replyToken) {
-    matchPromises.push(replyToLine(replyToken, matchFlex, env));
+    matchPromises.push(replyToLine(replyToken, matchFlex, env, !groupId));
   } else {
     matchPromises.push(pushToLine(userId, matchFlex, env));
   }
@@ -1390,9 +1391,9 @@ async function recordActiveGroup(groupId: string, env: Env): Promise<void> {
 
 // ── LINE HTTP Dispatchers ──
 
-async function replyToLine(replyToken: string, payload: any, env: Env, attachQuickReply = true): Promise<boolean> {
+async function replyToLine(replyToken: string, payload: any, env: Env, attachQuickReply = false): Promise<boolean> {
   try {
-    const processed = attachQuickReply ? attachMainMenuQuickReply(payload) : payload;
+    const processed = attachQuickReply ? attachMainMenuQuickReply(payload) : stripQuickReply(payload);
     let messageObj: any;
     if (typeof processed === 'string') {
       messageObj = { type: 'text', text: processed };
@@ -1407,8 +1408,13 @@ async function replyToLine(replyToken: string, payload: any, env: Env, attachQui
       messageObj = { type: 'text', text: String(processed) };
     }
 
-    if (attachQuickReply && (!messageObj.quickReply || !Array.isArray(messageObj.quickReply.items) || messageObj.quickReply.items.length === 0)) {
-      messageObj.quickReply = { items: MAIN_MENU_QUICK_REPLY_ITEMS };
+    if (attachQuickReply) {
+      if (!messageObj.quickReply || !Array.isArray(messageObj.quickReply.items) || messageObj.quickReply.items.length === 0) {
+        messageObj.quickReply = { items: MAIN_MENU_QUICK_REPLY_ITEMS };
+      }
+    } else {
+      // Explicitly delete quickReply if attachQuickReply is false (e.g. Group messages)
+      delete messageObj.quickReply;
     }
 
     const messages = [messageObj];
@@ -1434,8 +1440,8 @@ async function replyToLine(replyToken: string, payload: any, env: Env, attachQui
 
 export async function pushToLine(to: string, payload: any, env: Env): Promise<{ success: boolean; code?: number; error?: string }> {
   try {
-    const isUserDM = to && to.startsWith('U');
-    const processed = isUserDM ? attachMainMenuQuickReply(payload) : payload;
+    const isUserDM = !!(to && to.startsWith('U'));
+    const processed = isUserDM ? attachMainMenuQuickReply(payload) : stripQuickReply(payload);
     let messageObj: any;
     if (typeof processed === 'string') {
       messageObj = { type: 'text', text: processed };
@@ -1450,8 +1456,13 @@ export async function pushToLine(to: string, payload: any, env: Env): Promise<{ 
       messageObj = { type: 'text', text: String(processed) };
     }
 
-    if (isUserDM && (!messageObj.quickReply || !Array.isArray(messageObj.quickReply.items) || messageObj.quickReply.items.length === 0)) {
-      messageObj.quickReply = { items: MAIN_MENU_QUICK_REPLY_ITEMS };
+    if (isUserDM) {
+      if (!messageObj.quickReply || !Array.isArray(messageObj.quickReply.items) || messageObj.quickReply.items.length === 0) {
+        messageObj.quickReply = { items: MAIN_MENU_QUICK_REPLY_ITEMS };
+      }
+    } else {
+      // Groups (C...) and Rooms (R...) must NEVER carry floating Quick Reply menus
+      delete messageObj.quickReply;
     }
 
     const messages = [messageObj];
@@ -1508,10 +1519,9 @@ async function deliverPrivateNotice(
     if (raw) targetLineId = raw;
   }
 
-  const enriched = attachMainMenuQuickReply(payload);
-
   // 1. If in 1-on-1 private chat with LINE OA:
   if (!groupId) {
+    const enriched = attachMainMenuQuickReply(payload);
     if (replyToken) {
       const sent = await replyToLine(replyToken, enriched, env, true);
       if (sent) return;
@@ -1526,17 +1536,19 @@ async function deliverPrivateNotice(
   // Attempt private delivery via DM for players who have friended the bot
   let pushSuccess = false;
   if (targetLineId && targetLineId.startsWith('U')) {
-    const res = await pushToLine(targetLineId, enriched, env);
+    // pushToLine for 'U...' will automatically attachMainMenuQuickReply in the private DM
+    const res = await pushToLine(targetLineId, payload, env);
     pushSuccess = !!(res && res.success);
   }
 
   // If DM push failed (e.g. user hasn't added the bot as friend) OR if replyToken is available:
-  // Provide an instant inline response in the group so the bot is never silent
+  // Provide an instant inline response in the group so the bot is never silent.
+  // CRITICAL: This response is delivered in the LINE GROUP, so quickReply MUST be stripped!
   if (!pushSuccess && replyToken) {
     let summaryText = typeof payload === 'string' ? payload : (payload.altText || payload.text || '⚠️ ไม่สามารถทำรายการได้ครับ');
     if (displayName) {
       summaryText = `📢 @${displayName}\n${summaryText}`;
     }
-    await replyToLine(replyToken, attachMainMenuQuickReply(summaryText), env, true);
+    await replyToLine(replyToken, stripQuickReply(summaryText), env, false);
   }
 }
