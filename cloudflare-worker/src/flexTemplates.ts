@@ -1167,7 +1167,7 @@ export function generateMainMenuFlex(displayName: string, balance: number): any 
   };
 }
 
-// ── 7. Deposit Options Card (เลือกยอดฝาก) ──
+// ── 7. Deposit Options Card (เลือกยอดฝาก + ข้อมูลธนาคาร) ──
 export function generateDepositFlex(): any {
   return {
     type: 'flex',
@@ -1198,17 +1198,51 @@ export function generateDepositFlex(): any {
         paddingAll: 'sm',
         contents: [
           {
-            type: 'text',
-            text: 'เลือกยอดเงินที่ต้องการฝาก หรือพิมพ์จำนวนเงิน เช่น "1000"',
-            size: 'xxs',
-            color: '#64748B',
-            align: 'center',
-            wrap: true,
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: '#F8FAFC',
+            cornerRadius: 'md',
+            paddingAll: 'sm',
+            spacing: 'xs',
+            contents: [
+              {
+                type: 'box',
+                layout: 'horizontal',
+                contents: [
+                  { type: 'text', text: '🏦 ธนาคาร', color: '#94A3B8', size: 'xxs', flex: 4 },
+                  { type: 'text', text: 'SCB (ไทยพาณิชย์)', weight: 'bold', color: '#334155', size: 'xxs', flex: 6, align: 'end' },
+                ],
+              },
+              {
+                type: 'box',
+                layout: 'horizontal',
+                contents: [
+                  { type: 'text', text: '🔢 เลขบัญชี', color: '#94A3B8', size: 'xxs', flex: 4 },
+                  { type: 'text', text: '890-1-23456-7', weight: 'bold', color: '#0369A1', size: 'xs', flex: 6, align: 'end' },
+                ],
+              },
+              {
+                type: 'box',
+                layout: 'horizontal',
+                contents: [
+                  { type: 'text', text: '👤 ชื่อบัญชี', color: '#94A3B8', size: 'xxs', flex: 4 },
+                  { type: 'text', text: 'Somchai Jongcharoen', weight: 'bold', color: '#334155', size: 'xxs', flex: 6, align: 'end' },
+                ],
+              },
+            ],
           },
           {
             type: 'separator',
             margin: 'xs',
             color: '#F1F5F9',
+          },
+          {
+            type: 'text',
+            text: 'เลือกยอดเงิน หรือพิมพ์จำนวนเงิน เช่น "1000"',
+            size: 'xxs',
+            color: '#64748B',
+            align: 'center',
+            wrap: true,
           },
           {
             type: 'box',
@@ -1255,11 +1289,17 @@ export function generateDepositFlex(): any {
             ],
           },
           {
+            type: 'separator',
+            margin: 'xs',
+            color: '#F1F5F9',
+          },
+          {
             type: 'text',
-            text: '💡 หรือพิมพ์จำนวนเงินที่ต้องการฝากเข้ามาได้ทันที',
+            text: '⚠️ โอนเสร็จแล้ว กรุณาส่ง "รูปสลิป" เข้ามาในแชทนี้ได้เลยครับ ระบบจะตรวจสอบและเติมเครดิตให้อัตโนมัติ 🙏',
             size: 'xxs',
-            color: '#94A3B8',
+            color: '#EA580C',
             align: 'center',
+            wrap: true,
             margin: 'xs',
           },
         ],

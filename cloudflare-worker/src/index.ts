@@ -20,6 +20,7 @@ import {
   generateBalanceFlex,
   generateCreditAdjustmentFlex,
   generateDepositFlex,
+  generateDepositInvoiceFlex,
   generatePendingBoardFlex,
   generateWithdrawalFlex,
   generateOrderFlex,
@@ -309,15 +310,22 @@ export default {
           try {
             const token = env.LINE_CHANNEL_ACCESS_TOKEN;
             const headers = { Authorization: `Bearer ${token}` };
-            const [qRes, cRes] = await Promise.all([
+            const [qRes, cRes, epRes] = await Promise.all([
               fetch('https://api.line.me/v2/bot/message/quota', { headers }),
               fetch('https://api.line.me/v2/bot/message/quota/consumption', { headers }),
+              fetch('https://api.line.me/v2/bot/channel/webhook/endpoint', { headers }),
             ]);
             const qJson: any = await qRes.json();
             const cJson: any = await cRes.json();
+            let webhookEndpoint = '';
+            try {
+              const epJson: any = await epRes.json();
+              webhookEndpoint = epJson.endpoint || '';
+            } catch (_) {}
             const totalLimit = qJson.value || 0;
             const used = cJson.totalUsage || 0;
             result = {
+              webhookEndpoint,
               type: qJson.type || 'limited',
               limit: totalLimit,
               totalUsage: used,
@@ -1040,6 +1048,40 @@ export default {
               results: sendResults,
             };
           }
+        } else if (functionName === 'adminTestDepositInvoice') {
+          const target = args[0] || 'Ua34bcbb1d365c657cc1a7f3576c76e26';
+          const amt = Number(args[1]) || 1000;
+          const invoiceFlex = generateDepositInvoiceFlex(amt);
+          const pushResult = await pushToLine(target, invoiceFlex, env);
+          result = { success: pushResult.success, pushResult, invoiceFlex };
+        } else if (functionName === 'adminSimulatePrivateUserMessage') {
+          const text = args[0] || '1000';
+          const userId = args[1] || 'Ua34bcbb1d365c657cc1a7f3576c76e26';
+          const mockEvent: LineEvent = {
+            type: 'message',
+            timestamp: Date.now(),
+            webhookEventId: crypto.randomUUID(),
+            source: {
+              type: 'user',
+              userId: userId,
+            },
+            message: {
+              id: `sim_${Date.now()}`,
+              type: 'text',
+              text: String(text),
+            },
+          };
+          await processLineEvent(mockEvent, env, ctx);
+          const lastDelivery = await env.KV_CACHE.get('LAST_DELIVERY_DEBUG');
+          const lastError = await env.KV_CACHE.get('LAST_LINE_ERROR');
+          const lastSuccess = await env.KV_CACHE.get('LAST_LINE_SUCCESS');
+          result = {
+            success: true,
+            simulatedText: text,
+            lastDelivery: lastDelivery ? JSON.parse(lastDelivery) : null,
+            lastError: lastError ? JSON.parse(lastError) : null,
+            lastSuccess: lastSuccess ? JSON.parse(lastSuccess) : null,
+          };
         } else if (functionName === 'adminDiscoverGroupIds') {
           const activeGroupId = await env.KV_CACHE.get('ACTIVE_GROUP_ID');
           const lineGroupsRaw = await env.KV_CACHE.get('LINE_GROUPS');

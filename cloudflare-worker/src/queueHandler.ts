@@ -161,14 +161,17 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       return;
     }
 
-    // ── 1.3 Deposit Amount Request (in 1-on-1 private chat: e.g. "1000", "ฝาก 1000", "ฝาก1000") ──
-    const pureNumRegex = /^\d+$/;
-    const depositTextRegex = /^(?:ฝาก|ฝากเงิน|เติม|เติมเงิน)\s*(\d+)$/;
+    // ── 1.3 Deposit Amount Request (in 1-on-1 private chat: e.g. "1000", "1,000", "ฝาก 1000", "ฝาก 1,000 บาท") ──
+    const cleanWithoutCommas = clean.replace(/,/g, '');
+    const pureNumRegex = /^(\d+)\s*(?:บาท|thb|pt)?$/i;
+    const depositTextRegex = /^(?:ฝาก|ฝากเงิน|เติม|เติมเงิน)\s*(\d+)\s*(?:บาท|thb|pt)?$/i;
     let depositAmt: number | null = null;
-    if (!isGroup && pureNumRegex.test(clean)) {
-      depositAmt = parseInt(clean, 10);
-    } else if (depositTextRegex.test(clean)) {
-      depositAmt = parseInt(clean.match(depositTextRegex)![1], 10);
+    if (!isGroup && pureNumRegex.test(cleanWithoutCommas)) {
+      const match = cleanWithoutCommas.match(pureNumRegex)!;
+      depositAmt = parseInt(match[1], 10);
+    } else if (depositTextRegex.test(cleanWithoutCommas)) {
+      const match = cleanWithoutCommas.match(depositTextRegex)!;
+      depositAmt = parseInt(match[1], 10);
     }
 
     if (depositAmt !== null) {
@@ -233,10 +236,10 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       return;
     }
 
-    // ── 1.6 Withdrawal Execution ("ถอน 500", "ถอน500") ──
-    const withdrawAmtRegex = /^(?:ถอน|ถอนเงิน|ถอนยอด)\s*(\d+)$/;
-    if (withdrawAmtRegex.test(clean)) {
-      const match = clean.match(withdrawAmtRegex)!;
+    // ── 1.6 Withdrawal Execution ("ถอน 500", "ถอน 1,000", "ถอน 500 บาท") ──
+    const withdrawAmtRegex = /^(?:ถอน|ถอนเงิน|ถอนยอด)\s*(\d+)\s*(?:บาท|thb|pt)?$/i;
+    if (withdrawAmtRegex.test(cleanWithoutCommas)) {
+      const match = cleanWithoutCommas.match(withdrawAmtRegex)!;
       const withdrawAmt = parseInt(match[1], 10);
       if (withdrawAmt < 100) {
         await deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ยอดถอนขั้นต่ำ 100 pt ครับ', env);
@@ -1429,11 +1432,35 @@ async function replyToLine(replyToken: string, payload: any, env: Env, attachQui
     if (!res.ok) {
       const errBody = await res.text();
       console.error(`[LINE Reply Error] status=${res.status}: ${errBody}`);
+      try {
+        await env.KV_CACHE.put('LAST_LINE_ERROR', JSON.stringify({
+          action: 'replyToLine',
+          status: res.status,
+          error: errBody,
+          replyToken,
+          time: new Date().toISOString()
+        }));
+      } catch (_) {}
       return false;
     }
+    try {
+      await env.KV_CACHE.put('LAST_LINE_SUCCESS', JSON.stringify({
+        action: 'replyToLine',
+        status: res.status,
+        time: new Date().toISOString()
+      }));
+    } catch (_) {}
     return true;
   } catch (err: any) {
     console.error('[LINE Reply Exception]:', err?.message || err);
+    try {
+      await env.KV_CACHE.put('LAST_LINE_ERROR', JSON.stringify({
+        action: 'replyToLine',
+        status: 'exception',
+        error: err?.message || String(err),
+        time: new Date().toISOString()
+      }));
+    } catch (_) {}
     return false;
   }
 }
@@ -1477,6 +1504,15 @@ export async function pushToLine(to: string, payload: any, env: Env): Promise<{ 
     if (!res.ok) {
       const errBody = await res.text();
       console.error(`[LINE Push Error] to=${to} status=${res.status}: ${errBody}`);
+      try {
+        await env.KV_CACHE.put('LAST_LINE_ERROR', JSON.stringify({
+          action: 'pushToLine',
+          to,
+          status: res.status,
+          error: errBody,
+          time: new Date().toISOString()
+        }));
+      } catch (_) {}
       if (res.status === 429 || errBody.includes('monthly limit')) {
         return {
           success: false,
@@ -1497,9 +1533,26 @@ export async function pushToLine(to: string, payload: any, env: Env): Promise<{ 
         error: `LINE API Error (HTTP ${res.status}): ${errBody}`,
       };
     }
+    try {
+      await env.KV_CACHE.put('LAST_LINE_SUCCESS', JSON.stringify({
+        action: 'pushToLine',
+        to,
+        status: res.status,
+        time: new Date().toISOString()
+      }));
+    } catch (_) {}
     return { success: true, code: 200 };
   } catch (err: any) {
     console.error(`[LINE Push Exception] to=${to}:`, err?.message || err);
+    try {
+      await env.KV_CACHE.put('LAST_LINE_ERROR', JSON.stringify({
+        action: 'pushToLine',
+        to,
+        status: 'exception',
+        error: err?.message || String(err),
+        time: new Date().toISOString()
+      }));
+    } catch (_) {}
     return { success: false, error: err?.message || 'Network exception' };
   }
 }
@@ -1522,13 +1575,27 @@ async function deliverPrivateNotice(
   // 1. If in 1-on-1 private chat with LINE OA:
   if (!groupId) {
     const enriched = attachMainMenuQuickReply(payload);
+    let replyOk = false;
     if (replyToken) {
-      const sent = await replyToLine(replyToken, enriched, env, true);
-      if (sent) return;
+      replyOk = await replyToLine(replyToken, enriched, env, true);
     }
-    if (targetLineId && targetLineId.startsWith('U')) {
-      await pushToLine(targetLineId, enriched, env);
+    let pushOk = false;
+    if (!replyOk && targetLineId && targetLineId.startsWith('U')) {
+      const res = await pushToLine(targetLineId, enriched, env);
+      pushOk = !!(res && res.success);
     }
+    try {
+      await env.KV_CACHE.put('LAST_DELIVERY_DEBUG', JSON.stringify({
+        userId,
+        targetLineId,
+        hasReplyToken: !!replyToken,
+        replyOk,
+        pushOk,
+        payloadType: typeof payload === 'object' ? payload?.type : 'primitive',
+        altText: payload?.altText || '',
+        time: new Date().toISOString()
+      }));
+    } catch (_) {}
     return;
   }
 

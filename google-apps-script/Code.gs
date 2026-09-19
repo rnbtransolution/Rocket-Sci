@@ -1670,10 +1670,11 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   }
 
   // D. Process Explicit Deposit Amount ("ฝาก [amount]", "เติม [amount]")
-  const depositTextRegex = /^(ฝาก|ฝากเงิน|เติม|เติมเงิน|deposit)\s*(\d+)$/i;
-  if (depositTextRegex.test(rawTrimmed) || depositTextRegex.test(clean)) {
-    const match = rawTrimmed.match(depositTextRegex) || clean.match(depositTextRegex);
-    const depositAmt = parseInt(match[2]);
+  const cleanWithoutCommas = clean.replace(/,/g, '');
+  const depositTextRegex = /^(?:ฝาก|ฝากเงิน|เติม|เติมเงิน|deposit)\s*(\d+)\s*(?:บาท|thb|pt)?$/i;
+  if (depositTextRegex.test(rawTrimmed.replace(/,/g, '')) || depositTextRegex.test(cleanWithoutCommas)) {
+    const match = rawTrimmed.replace(/,/g, '').match(depositTextRegex) || cleanWithoutCommas.match(depositTextRegex);
+    const depositAmt = parseInt(match[1]);
     if (depositAmt < 100 || depositAmt > 10000) {
       deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ขออภัยครับ ระบบรองรับการฝากยอดขั้นต่ำ 100 THB และสูงสุดไม่เกิน 10,000 THB ต่อครั้งครับ');
       return;
@@ -1684,8 +1685,10 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   }
 
   // E. Process Standalone Pure Number in 1-on-1 DM (strictly not in group)
-  if (!groupId && /^\d+$/.test(clean)) {
-    const pureNum = parseInt(clean);
+  const pureNumRegex = /^(\d+)\s*(?:บาท|thb|pt)?$/i;
+  if (!groupId && pureNumRegex.test(cleanWithoutCommas)) {
+    const match = cleanWithoutCommas.match(pureNumRegex);
+    const pureNum = parseInt(match[1]);
     if (pureNum >= 100 && pureNum <= 10000) {
       logTransaction(userId, displayName, pureNum, 0, 'PENDING_SLIP', 'escalated', 'Waiting for user to upload pay slip');
       deliverPrivateNotice(userId, replyToken, groupId, constructDepositInvoiceFlex(pureNum));
@@ -4068,7 +4071,7 @@ function constructDepositFlex() {
       "contents": [
         {
           "type": "text",
-          "text": "💰 ฝากเครดิต",
+          "text": "💰 ฝากเครดิต (Deposit)",
           "weight": "bold",
           "color": "#FFFFFF",
           "size": "xs",
@@ -4083,17 +4086,51 @@ function constructDepositFlex() {
       "paddingAll": "sm",
       "contents": [
         {
-          "type": "text",
-          "text": "เลือกยอดเงินที่ต้องการฝากครับ",
-          "size": "xxs",
-          "color": "#64748B",
-          "align": "center",
-          "wrap": true
+          "type": "box",
+          "layout": "vertical",
+          "backgroundColor": "#F8FAFC",
+          "cornerRadius": "md",
+          "paddingAll": "sm",
+          "spacing": "xs",
+          "contents": [
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                { "type": "text", "text": "🏦 ธนาคาร", "color": "#94A3B8", "size": "xxs", "flex": 4 },
+                { "type": "text", "text": "SCB (ไทยพาณิชย์)", "weight": "bold", "color": "#334155", "size": "xxs", "flex": 6, "align": "end" }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                { "type": "text", "text": "🔢 เลขบัญชี", "color": "#94A3B8", "size": "xxs", "flex": 4 },
+                { "type": "text", "text": "890-1-23456-7", "weight": "bold", "color": "#0369A1", "size": "xs", "flex": 6, "align": "end" }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                { "type": "text", "text": "👤 ชื่อบัญชี", "color": "#94A3B8", "size": "xxs", "flex": 4 },
+                { "type": "text", "text": "Somchai Jongcharoen", "weight": "bold", "color": "#334155", "size": "xxs", "flex": 6, "align": "end" }
+              ]
+            }
+          ]
         },
         {
           "type": "separator",
           "margin": "xs",
           "color": "#F1F5F9"
+        },
+        {
+          "type": "text",
+          "text": "เลือกยอดเงิน หรือพิมพ์จำนวนเงิน เช่น \"1000\"",
+          "size": "xxs",
+          "color": "#64748B",
+          "align": "center",
+          "wrap": true
         },
         {
           "type": "box",
@@ -4154,6 +4191,20 @@ function constructDepositFlex() {
               }
             }
           ]
+        },
+        {
+          "type": "separator",
+          "margin": "xs",
+          "color": "#F1F5F9"
+        },
+        {
+          "type": "text",
+          "text": "⚠️ โอนเสร็จแล้ว กรุณาส่ง \"รูปสลิป\" เข้ามาในแชทนี้ได้เลยครับ ระบบจะตรวจสอบและเติมเครดิตให้อัตโนมัติ 🙏",
+          "size": "xxs",
+          "color": "#EA580C",
+          "align": "center",
+          "wrap": true,
+          "margin": "xs"
         }
       ]
     }
