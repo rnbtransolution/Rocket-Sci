@@ -2630,11 +2630,12 @@ function adminSetPlayerBalance(userId, newBalance, displayName, suppressPush) {
         const tSheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Transactions');
         const txId = 'ADJ' + new Date().getTime();
         tSheet.appendRow([txId, col0 || searchId, data[i][1] || 'ผู้เล่น', bal - oldBalance, bal, 'ADMIN_ADJUST', 'success', `Admin set balance: ${oldBalance} → ${bal}`, new Date()]);
-        if (!suppressPush && searchId.startsWith('U')) {
+        const targetLine = (searchId && searchId.startsWith('U')) ? searchId : (col7 && col7.startsWith('U') ? col7 : '');
+        if (!suppressPush && targetLine) {
           const delta = bal - oldBalance;
           const sign = delta >= 0 ? '+' : '';
           try {
-            pushToLine(searchId, `💰 ปรับยอดเครดิตของคุณ\n\nยอดเก่า: ${oldBalance} แต้ม\nปรับ: ${sign}${delta} แต้ม\nยอดใหม่: ${bal} แต้ม`);
+            pushToLine(targetLine, `💰 แจ้งเตือนปรับยอดเครดิต\n\n👤 คุณ ${data[i][1] || displayName || 'ผู้เล่น'}\nยอดเดิม: ${oldBalance.toLocaleString()} pt\nปรับ: ${sign}${delta.toLocaleString()} pt\nยอดคงเหลือใหม่: ${bal.toLocaleString()} pt\n\n💡 พิมพ์ "ฝาก" หรือ "ถอน"`);
           } catch (_) {}
         }
       }

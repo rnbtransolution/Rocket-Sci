@@ -327,6 +327,101 @@ export function generateBalanceFlex(displayName: string, balance: number): any {
   };
 }
 
+// ── 3b. Credit Adjustment Notification Card (แจ้งเตือนปรับยอดเครดิตแมนนวล) ──
+export function generateCreditAdjustmentFlex(displayName: string, oldBalance: number, newBalance: number): any {
+  const delta = newBalance - oldBalance;
+  const isPositive = delta >= 0;
+  const deltaSign = isPositive ? '+' : '';
+  const deltaColor = isPositive ? '#059669' : '#DC2626';
+
+  return {
+    type: 'flex',
+    altText: `💰 แจ้งเตือนปรับยอดเครดิต: ${newBalance.toLocaleString()} pt`,
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#0F172A',
+        paddingAll: 'md',
+        contents: [
+          {
+            type: 'text',
+            text: '💰 แจ้งเตือนปรับยอดเครดิต',
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'sm',
+            align: 'center',
+          },
+          {
+            type: 'text',
+            text: 'แอดมินได้ปรับยอดแต้มคงเหลือของคุณ',
+            color: '#94A3B8',
+            size: 'xxs',
+            align: 'center',
+            margin: 'xs',
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: 'md',
+        spacing: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: `👤 คุณ ${displayName}`,
+            color: '#64748B',
+            size: 'xs',
+            weight: 'bold',
+          },
+          {
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: '#F8FAFC',
+            cornerRadius: 'md',
+            paddingAll: 'sm',
+            margin: 'xs',
+            contents: [
+              {
+                type: 'box',
+                layout: 'horizontal',
+                contents: [
+                  { type: 'text', text: 'ยอดเดิม:', color: '#64748B', size: 'xs' },
+                  { type: 'text', text: `${oldBalance.toLocaleString()} pt`, color: '#64748B', size: 'xs', align: 'end' },
+                ],
+              },
+              {
+                type: 'box',
+                layout: 'horizontal',
+                margin: 'xs',
+                contents: [
+                  { type: 'text', text: 'ยอดปรับ:', color: '#64748B', size: 'xs' },
+                  { type: 'text', text: `${deltaSign}${delta.toLocaleString()} pt`, color: deltaColor, size: 'xs', weight: 'bold', align: 'end' },
+                ],
+              },
+            ],
+          },
+          { type: 'separator', margin: 'sm', color: '#E2E8F0' },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            margin: 'sm',
+            alignItems: 'center',
+            contents: [
+              { type: 'text', text: 'ยอดคงเหลือใหม่', weight: 'bold', color: '#1E293B', size: 'xs' },
+              { type: 'text', text: `${newBalance.toLocaleString()} pt`, weight: 'bold', color: '#059669', size: 'lg', align: 'end' },
+            ],
+          },
+          { type: 'text', text: '💡 พิมพ์ "ฝาก" หรือ "ถอน"', color: '#94A3B8', size: 'xxs', wrap: true, margin: 'sm' },
+        ],
+      },
+    },
+  };
+}
+
 // ── 4. Live Betting Board Card (กระดานดวลสด) ──
 export function generatePendingBoardFlex(pendingList: Order[]): any {
   if (!pendingList || pendingList.length === 0) {

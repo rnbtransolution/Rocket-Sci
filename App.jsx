@@ -3593,7 +3593,23 @@ export default function App() {
                       try {
                         let lastData = null;
                         if (nameChanged) lastData = await runBackendFunction('adminUpdatePlayerName', [p.id, playerEditForm.name.trim()]);
-                        if (balChanged) lastData = await runBackendFunction('adminSetPlayerBalance', [p.id, playerEditForm.balance]);
+                        if (balChanged) {
+                          lastData = await runBackendFunction('adminSetPlayerBalance', [p.id, playerEditForm.balance, playerEditForm.name.trim()]);
+                          const delta = playerEditForm.balance - p.balance;
+                          const sign = delta >= 0 ? '+' : '';
+                          const now = new Date().toLocaleTimeString('th-TH', { hour12: false, hour: '2-digit', minute: '2-digit' });
+                          setChatLogs(prev => [
+                            ...prev,
+                            {
+                              timestamp: now,
+                              userId: p.lineUserId || p.id,
+                              displayName: 'แอดมิน',
+                              sender: 'admin',
+                              text: `💰 แจ้งเตือนปรับยอดเครดิต: ${p.balance.toLocaleString()} pt → ${playerEditForm.balance.toLocaleString()} pt (${sign}${delta.toLocaleString()} pt)`,
+                              type: 'flex',
+                            }
+                          ]);
+                        }
                         if (!nameChanged && !balChanged) lastData = await runBackendFunction('getDashboardData', []);
                         
                         setPlayers(prev => prev.map(pl => pl.id === p.id ? { ...pl, name: playerEditForm.name.trim(), balance: playerEditForm.balance } : pl));
@@ -3601,7 +3617,7 @@ export default function App() {
                         if (lastData && lastData.transactions) setTransactions(lastData.transactions);
                         setPlayerEditSaving(false);
                         setPlayerEditModal(null);
-                        addToast(`✅ อัปเดตข้อมูล ${p.name} สำเร็จ`, 'success');
+                        addToast(balChanged ? `✅ ปรับเครดิต ${playerEditForm.name} เป็น ${playerEditForm.balance.toLocaleString()} pt (ส่ง DM เรียบร้อย)` : `✅ อัปเดตข้อมูล ${p.name} สำเร็จ`, 'success');
                       } catch (err) {
                         setPlayerEditSaving(false);
                         addToast('❌ ' + (err.message || err), 'error');

@@ -18,6 +18,7 @@ import {
 import {
   generateRuleGuideFlex,
   generateBalanceFlex,
+  generateCreditAdjustmentFlex,
   generateDepositFlex,
   generatePendingBoardFlex,
   generateWithdrawalFlex,
@@ -420,22 +421,50 @@ export default {
         } else if (functionName === 'adminSetPlayerBalance') {
           const userId = args[0];
           const newBal = Number(args[1]) || 0;
-          const rawLine = await env.KV_CACHE.get(`RAW_LINE_${userId}`) || userId;
-          const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+          const passedName = args[2] ? String(args[2]).trim() : '';
+
+          const players = await getPlayersList(env);
+          const player = players.find(p => p.id === userId || p.lineUserId === userId || (p.shortId && p.shortId === userId));
+          const targetLineUserId = player?.lineUserId || (await env.KV_CACHE.get(`RAW_LINE_${userId}`)) || userId;
+          const displayName = player?.name || player?.displayName || passedName || 'ผู้เล่น';
+          let oldBal = player ? (Number(player.balance) || 0) : 0;
+
+          const profileRaw = await env.KV_CACHE.get(`USER_${targetLineUserId}`);
           if (profileRaw) {
             const p = JSON.parse(profileRaw);
+            if (p.balance !== undefined) oldBal = Number(p.balance) || 0;
             p.balance = newBal;
+            if (passedName) p.displayName = passedName;
             await savePlayerProfile(p, env, ctx);
           } else {
             await savePlayerProfile({
               shortId: userId.startsWith('PL') ? userId : `PL${userId.slice(-6).toUpperCase()}`,
-              lineUserId: rawLine,
-              displayName: 'ผู้เล่น',
+              lineUserId: targetLineUserId,
+              displayName: displayName,
               balance: newBal,
               registeredAt: Date.now(),
               updatedAt: Date.now(),
             }, env, ctx);
           }
+
+          // Push DM to LINE user so they are immediately aware of their updated credit amount
+          if (targetLineUserId && targetLineUserId.startsWith('U')) {
+            try {
+              const adjustFlex = generateCreditAdjustmentFlex(displayName, oldBal, newBal);
+              await pushToLine(targetLineUserId, adjustFlex, env);
+              await appendChatLog(env, {
+                timestamp: formatTime(),
+                userId: targetLineUserId,
+                displayName: 'แอดมิน',
+                sender: 'admin',
+                text: `💰 แจ้งเตือนปรับยอดเครดิต: ${oldBal.toLocaleString()} pt → ${newBal.toLocaleString()} pt`,
+                type: 'flex',
+              });
+            } catch (pushErr) {
+              console.error('[Worker] Error pushing credit adjustment to DM:', pushErr);
+            }
+          }
+
           result = { success: true, balance: newBal };
         } else if (functionName === 'adminCreatePlayer') {
           const lineId = args[0];
@@ -451,6 +480,24 @@ export default {
             updatedAt: Date.now(),
           };
           await savePlayerProfile(newP, env, ctx);
+
+          if (bal > 0 && lineId && lineId.startsWith('U')) {
+            try {
+              const adjustFlex = generateCreditAdjustmentFlex(newP.displayName, 0, bal);
+              await pushToLine(lineId, adjustFlex, env);
+              await appendChatLog(env, {
+                timestamp: formatTime(),
+                userId: lineId,
+                displayName: 'แอดมิน',
+                sender: 'admin',
+                text: `💰 แจ้งเตือนยอดเครดิตเริ่มต้น: ${bal.toLocaleString()} pt`,
+                type: 'flex',
+              });
+            } catch (pushErr) {
+              console.error('[Worker] Error pushing initial credit to DM:', pushErr);
+            }
+          }
+
           result = { success: true, player: newP };
         } else if (functionName === 'adminUpdatePlayerName') {
           const userId = args[0];
