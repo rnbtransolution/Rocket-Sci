@@ -320,7 +320,7 @@ export function generateBalanceFlex(displayName: string, balance: number): any {
         contents: [
           { type: 'text', text: `👤 คุณ ${displayName}`, color: '#64748B', size: 'xs' },
           { type: 'text', text: `${balance.toLocaleString()} pt`, weight: 'bold', color: '#059669', size: 'xl' },
-          { type: 'text', text: '💡 พิมพ์ "ฝากเงิน" เพื่อเติมแต้ม หรือ "ถอนเงิน" เพื่อแจ้งถอน', color: '#94A3B8', size: 'xxs' },
+          { type: 'text', text: '💡 พิมพ์ "ฝาก" หรือ "ถอน"', color: '#94A3B8', size: 'xxs', wrap: true },
         ],
       },
     },

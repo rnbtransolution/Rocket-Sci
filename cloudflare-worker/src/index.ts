@@ -627,7 +627,7 @@ export default {
                 const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
                 const profile = profileRaw ? JSON.parse(profileRaw) : null;
                 payload = generateBalanceFlex(profile?.displayName || 'ผู้เล่น', profile?.balance || 0);
-              } else if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit') {
+              } else if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit' || clean === 'ฝาก') {
                 payload = generateDepositFlex();
               } else if (clean === 'กระดานดวล' || clean === 'กระดาน' || clean === 'board') {
                 const pending = await getPendingOrdersList(env);
