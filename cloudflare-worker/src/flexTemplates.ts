@@ -5,6 +5,35 @@ import { Order } from './types.js';
  * Avoids recursive object re-allocations and heavy serialization overhead.
  */
 
+export function generateRocketLaunchedFlex(): any {
+  return {
+    type: 'flex',
+    altText: '🚀 บั้งไฟออกแล้ว! 🚀',
+    contents: {
+      type: 'bubble',
+      size: 'medium',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#EF4444',
+        paddingAll: 'md',
+        contents: [
+          { type: 'text', text: '🚀 บั้งไฟออกแล้ว! 🚀', weight: 'bold', color: '#FFFFFF', size: 'md', align: 'center' },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'md',
+        contents: [
+          { type: 'text', text: 'เตรียมพบกับรอบดวลใหม่ เร็วๆ นี้!', weight: 'bold', color: '#1F2937', size: 'sm', align: 'center' },
+          { type: 'text', text: 'ติดตามประกาศจากสนามได้เลยครับ 📢', color: '#6B7280', size: 'xs', align: 'center' },
+        ],
+      },
+    },
+  };
+}
+
 // ── 1. Order Creation Card (Open for Matching in Group Chat) ──
 export function generateOrderFlex(order: Order): any {
   const { orderNumber, amount, side, userTypedCmd, isChotoy, rocketName, rangeMin, rangeMax } = order as any;

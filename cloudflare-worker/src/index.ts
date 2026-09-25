@@ -688,32 +688,7 @@ export default {
                 const profile = profileRaw ? JSON.parse(profileRaw) : null;
                 payload = generateBalanceFlex(profile?.displayName || 'ผู้เล่น', profile?.balance || 0);
               } else if (clean === 'บั้งไฟออก' || clean === 'rocketout') {
-                payload = {
-                  type: 'flex',
-                  altText: '🚀 บั้งไฟออกแล้ว! 🚀',
-                  contents: {
-                    type: 'bubble',
-                    size: 'medium',
-                    header: {
-                      type: 'box',
-                      layout: 'vertical',
-                      backgroundColor: '#EF4444',
-                      paddingAll: 'md',
-                      contents: [
-                        { type: 'text', text: '🚀 บั้งไฟออกแล้ว! 🚀', weight: 'bold', color: '#FFFFFF', size: 'md', align: 'center' },
-                      ],
-                    },
-                    body: {
-                      type: 'box',
-                      layout: 'vertical',
-                      spacing: 'md',
-                      contents: [
-                        { type: 'text', text: 'เตรียมพบกับรอบดวลใหม่ เร็วๆ นี้!', weight: 'bold', color: '#1F2937', size: 'sm', align: 'center' },
-                        { type: 'text', text: 'ติดตามประกาศจากสนามได้เลยครับ 📢', color: '#6B7280', size: 'xs', align: 'center' },
-                      ],
-                    },
-                  },
-                };
+                payload = generateRocketLaunchedFlex();
               } else if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit' || clean === 'ฝาก') {
                 payload = generateDepositFlex();
               } else if (clean === 'กระดานดวล' || clean === 'กระดาน' || clean === 'board') {
@@ -743,8 +718,8 @@ export default {
               userId: targets[0],
               displayName: 'แอดมิน',
               sender: 'admin',
-              text: isObj ? '[Flex Message]' : String(messageText),
-              type: isObj ? 'flex' : 'text',
+              text: typeof payload === 'object' ? '[Flex Message]' : String(messageText),
+              type: typeof payload === 'object' ? 'flex' : 'text',
             });
 
             result = {
@@ -761,32 +736,7 @@ export default {
           }
         } else if (functionName === 'adminBroadcastRocketLaunched') {
           const target = args[0];
-          const rocketLaunchFlex = {
-            type: 'flex',
-            altText: '🚀 บั้งไฟออกแล้ว! 🚀',
-            contents: {
-              type: 'bubble',
-              size: 'medium',
-              header: {
-                type: 'box',
-                layout: 'vertical',
-                backgroundColor: '#EF4444',
-                paddingAll: 'md',
-                contents: [
-                  { type: 'text', text: '🚀 บั้งไฟออกแล้ว! 🚀', weight: 'bold', color: '#FFFFFF', size: 'md', align: 'center' },
-                ],
-              },
-              body: {
-                type: 'box',
-                layout: 'vertical',
-                spacing: 'md',
-                contents: [
-                  { type: 'text', text: 'เตรียมพบกับรอบดวลใหม่ เร็วๆ นี้!', weight: 'bold', color: '#1F2937', size: 'sm', align: 'center' },
-                  { type: 'text', text: 'ติดตามประกาศจากสนามได้เลยครับ 📢', color: '#6B7280', size: 'xs', align: 'center' },
-                ],
-              },
-            },
-          };
+          const rocketLaunchFlex = generateRocketLaunchedFlex();
 
           const targets = await resolveTargetGroupIds(target, env);
           if (targets.length === 0) {
@@ -1051,33 +1001,7 @@ export default {
           }
         } else if (functionName === 'adminBroadcastScamWarning') {
           const target = args[0];
-          const warnFlex = {
-            type: 'flex',
-            altText: '🚨 เตือนความปลอดภัย',
-            contents: {
-              type: 'bubble',
-              size: 'kilo',
-              header: {
-                type: 'box',
-                layout: 'vertical',
-                backgroundColor: '#FDE68A',
-                paddingAll: 'md',
-                contents: [
-                  { type: 'text', text: '🚨 เตือนความปลอดภัย', weight: 'bold', color: '#92400E', size: 'sm', align: 'center', wrap: true },
-                ],
-              },
-              body: {
-                type: 'box',
-                layout: 'vertical',
-                backgroundColor: '#FEFCE8',
-                spacing: 'xs',
-                paddingAll: 'md',
-                contents: [
-                  { type: 'text', text: '⚠️ ฝาก-ถอน ติดต่อที่ LINE OA เท่านั้น', weight: 'bold', color: '#B45309', size: 'xs', align: 'center', wrap: true },
-                ],
-              },
-            },
-          };
+          const warnFlex = generateRocketLaunchedFlex();
 
           const targets = await resolveTargetGroupIds(target, env);
           if (targets.length === 0) {
@@ -1092,7 +1016,7 @@ export default {
               userId: targets[0],
               displayName: 'ระบบ',
               sender: 'admin',
-              text: '[🚨 เตือนความปลอดภัย]',
+              text: '[🚀 บั้งไฟออกแล้ว]',
               type: 'flex',
             });
 
