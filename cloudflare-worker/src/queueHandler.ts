@@ -1088,30 +1088,9 @@ export async function getPendingOrdersList(env: Env): Promise<Order[]> {
       const list = JSON.parse(cached) as Order[];
       return list.filter((o) => o && (o.status === 'pending_match' || o.status === 'pending_hold') && (o.createdAt || 0) > twoHoursAgo);
     }
-
-    // Fallback: Query KV_ORDERS
-    const listRes = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 40 });
-    if (!listRes.keys || listRes.keys.length === 0) {
-      await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 });
-      return [];
-    }
-
-    const orderPromises = listRes.keys.map((k) => env.KV_ORDERS.get(k.name));
-    const rawOrders = await Promise.all(orderPromises);
-    const pending: Order[] = [];
-    for (const raw of rawOrders) {
-      if (!raw) continue;
-      try {
-        const o = JSON.parse(raw) as Order;
-        if (o.status === 'pending_match' && (o.createdAt || 0) > twoHoursAgo) {
-          pending.push(o);
-        }
-      } catch (_) {}
-    }
-
-    pending.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(pending), { expirationTtl: 1800 });
-    return pending;
+    // Fallback removed: KV_ORDERS.list is too slow for the hot path.
+    // PENDING_ORDERS_LIST is the primary index.
+    return [];
   } catch (err) {
     console.error('[Worker] getPendingOrdersList error:', err);
     return [];
