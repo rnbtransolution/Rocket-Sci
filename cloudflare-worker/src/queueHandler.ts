@@ -294,7 +294,8 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     const boardRegex = /^(?:📊\s*)?(กระดานดวล|แผลค้าง|เปิดรอคู่|รอคู่|กระดาน|board)$/i;
     if (boardRegex.test(clean) || boardRegex.test(text)) {
       const pendingList = await getPendingOrdersList(env);
-      const boardFlex = generatePendingBoardFlex(pendingList);
+      const openMatches = pendingList.filter((o) => o && o.status === 'pending_match');
+      const boardFlex = generatePendingBoardFlex(openMatches);
       // Strictly deliver board to private message to keep group chat quiet and clean
       await deliverPrivateNotice(userId, replyToken, groupId, boardFlex, env);
       return;
@@ -635,10 +636,8 @@ async function handleCreateOrder(
   newOrder.status = isPreQuote ? 'pending_hold' : 'pending_match';
   await env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder));
 
-  // 5. Update index
-  if (!isPreQuote) {
-    await addToPendingOrdersList(newOrder, env);
-  }
+  // 5. Update index (tracks both pending_match and pending_hold pre-quote orders)
+  await addToPendingOrdersList(newOrder, env);
 
   // 6. Send Order Flex to Group Chat
   const flexCard = generateOrderFlex(newOrder);
@@ -786,44 +785,40 @@ async function cancelOrder(
 export async function clearAllPendingOrders(env: Env, ctx?: ExecutionContext): Promise<{ cleared: number }> {
   let clearedCount = 0;
   try {
+    const pendingOrders = await getPendingOrdersList(env);
+
     // 1. Immediately reset PENDING_ORDERS_LIST with empty array in KV_CACHE
     await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 });
 
-    // 2. Scan and cancel ONLY pending_match + pending_hold (pre_quote) orders, refunding creators
-    let cursor: string | undefined = undefined;
-    do {
-      const listRes: any = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 100, cursor });
-      if (listRes.keys && listRes.keys.length > 0) {
-        for (const k of listRes.keys) {
-          const raw = await env.KV_ORDERS.get(k.name);
-          if (!raw) continue;
-          try {
-            const order = JSON.parse(raw) as Order;
-            if (order.status === 'pending_match' || order.status === 'pending_hold' || order.status === 'refunding') {
-              const isRecovering = order.status === 'refunding';
-              order.status = 'refunding';
-              await env.KV_ORDERS.put(k.name, JSON.stringify(order));
+    // 2. Cancel and refund ONLY pending_match + pending_hold (pre_quote) orders
+    for (const item of pendingOrders) {
+      if (!item || !item.orderNumber) continue;
+      const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
+      if (!raw) continue;
+      try {
+        const order = JSON.parse(raw) as Order;
+        if (order.status === 'pending_match' || order.status === 'pending_hold' || order.status === 'refunding') {
+          const isRecovering = order.status === 'refunding';
+          order.status = 'refunding';
+          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
 
-              // Refund creator
-              if (order.creatorId && Number(order.amount) > 0) {
-                const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
-                const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
-                if (profileRaw) {
-                  const p = JSON.parse(profileRaw) as PlayerProfile;
-                  p.balance = (Number(p.balance) || 0) + Number(order.amount);
-                  await savePlayerProfile(p, env, ctx);
-                }
-              }
-
-              order.status = 'cancelled';
-              await env.KV_ORDERS.put(k.name, JSON.stringify(order));
-              if (!isRecovering) clearedCount++;
+          // Refund creator
+          if (order.creatorId && Number(order.amount) > 0) {
+            const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
+            const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+            if (profileRaw) {
+              const p = JSON.parse(profileRaw) as PlayerProfile;
+              p.balance = (Number(p.balance) || 0) + Number(order.amount);
+              await savePlayerProfile(p, env, ctx);
             }
-          } catch (_) {}
+          }
+
+          order.status = 'cancelled';
+          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+          if (!isRecovering) clearedCount++;
         }
-      }
-      cursor = listRes.list_complete ? undefined : listRes.cursor;
-    } while (cursor);
+      } catch (_) {}
+    }
 
     console.log(`[Worker] clearAllPendingOrders: Cancelled and refunded ${clearedCount} pending unmatched + held pre-quote orders.`);
   } catch (err) {
@@ -839,44 +834,44 @@ export async function clearAllPendingOrders(env: Env, ctx?: ExecutionContext): P
 export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext): Promise<{ cancelled: number }> {
   let cancelledCount = 0;
   try {
-    let cursor: string | undefined = undefined;
-    do {
-      const listRes: any = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 100, cursor });
-      if (listRes.keys && listRes.keys.length > 0) {
-        for (const k of listRes.keys) {
-          const raw = await env.KV_ORDERS.get(k.name);
-          if (!raw) continue;
-          try {
-            const order = JSON.parse(raw) as Order;
-            if (order.status === 'pending_hold' && order.betType === 'pre_quote') {
-              order.status = 'cancelled';
-              await env.KV_ORDERS.put(k.name, JSON.stringify(order));
-              cancelledCount++;
-              const amt = Number(order.amount) || 0;
-              const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
-              const notifyPromise = deliverPrivateNotice(
-                rawLine,
-                undefined,
-                order.groupId || null,
-                `🚫 Order #${order.orderNumber} ถูกยกเลิกอัตโนมัติ เนื่องจากจบรอบดวลโดยไม่มีการประกาศราคาช่างอย่างเป็นทางการ ✅ (คืนแต้ม ${amt.toLocaleString()} pt)`,
-                env,
-                order.creatorName
-              );
-              if (rawLine && amt > 0) {
-                const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
-                if (profileRaw) {
-                  const p = JSON.parse(profileRaw) as PlayerProfile;
-                  p.balance = (Number(p.balance) || 0) + amt;
-                  await savePlayerProfile(p, env, ctx);
-                }
-              }
-              await notifyPromise;
+    const pendingList = await getPendingOrdersList(env);
+    const heldOrders = pendingList.filter((o) => o && o.status === 'pending_hold' && o.betType === 'pre_quote');
+    const remainingOrders = pendingList.filter((o) => !(o && o.status === 'pending_hold' && o.betType === 'pre_quote'));
+
+    for (const item of heldOrders) {
+      if (!item || !item.orderNumber) continue;
+      const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
+      if (!raw) continue;
+      try {
+        const order = JSON.parse(raw) as Order;
+        if (order.status === 'pending_hold' && order.betType === 'pre_quote') {
+          order.status = 'cancelled';
+          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+          cancelledCount++;
+          const amt = Number(order.amount) || 0;
+          const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
+          const notifyPromise = deliverPrivateNotice(
+            rawLine,
+            undefined,
+            order.groupId || null,
+            `🚫 Order #${order.orderNumber} ถูกยกเลิกอัตโนมัติ เนื่องจากจบรอบดวลโดยไม่มีการประกาศราคาช่างอย่างเป็นทางการ ✅ (คืนแต้ม ${amt.toLocaleString()} pt)`,
+            env,
+            order.creatorName
+          );
+          if (rawLine && amt > 0) {
+            const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+            if (profileRaw) {
+              const p = JSON.parse(profileRaw) as PlayerProfile;
+              p.balance = (Number(p.balance) || 0) + amt;
+              await savePlayerProfile(p, env, ctx);
             }
-          } catch (_) {}
+          }
+          await notifyPromise;
         }
-      }
-      cursor = listRes.list_complete ? undefined : listRes.cursor;
-    } while (cursor);
+      } catch (_) {}
+    }
+
+    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(remainingOrders), { expirationTtl: 1800 });
     console.log(`[Worker] cancelHeldPreQuoteOrders: Cancelled + refunded ${cancelledCount} held pre-quote orders.`);
   } catch (err) {
     console.error('[Worker] cancelHeldPreQuoteOrders error:', err);
@@ -894,56 +889,50 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
 export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, env: Env, ctx?: ExecutionContext): Promise<{ converted: number; matched: number }> {
   const bandMin = Number(minVal) || 330;
   const bandMax = Number(maxVal) || 380;
-  const held: Order[] = [];
-  let cursor: string | undefined = undefined;
-  do {
-    const listRes: any = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 100, cursor });
-    if (listRes.keys && listRes.keys.length > 0) {
-      for (const k of listRes.keys) {
-        const raw = await env.KV_ORDERS.get(k.name);
-        if (!raw) continue;
-        try {
-          const order = JSON.parse(raw) as Order;
-          if (order.status === 'pending_hold' && order.betType === 'pre_quote') {
-            held.push(order);
-          }
-        } catch (_) {}
-      }
-    }
-    cursor = listRes.list_complete ? undefined : listRes.cursor;
-  } while (cursor);
+  const pending = await getPendingOrdersList(env);
+  const held = pending.filter((o) => o && o.status === 'pending_hold' && o.betType === 'pre_quote');
+  const nonHeld = pending.filter((o) => !(o && o.status === 'pending_hold' && o.betType === 'pre_quote'));
 
   let converted = 0;
-  for (const order of held) {
-    const offset = Number(order.offset) || 0;
-    order.betType = 'range';
-    order.rangeMin = bandMin + offset;
-    order.rangeMax = bandMax + offset;
-    order.status = 'pending_match';
-    await Promise.all([
-      env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order)),
-      addToPendingOrdersList(order, env),
-    ]);
-    converted++;
+  const convertedOrders: Order[] = [];
+
+  for (const item of held) {
+    const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
+    if (!raw) continue;
+    try {
+      const order = JSON.parse(raw) as Order;
+      if (order.status === 'pending_hold' && order.betType === 'pre_quote') {
+        const offset = Number(order.offset) || 0;
+        order.betType = 'range';
+        order.rangeMin = bandMin + offset;
+        order.rangeMax = bandMax + offset;
+        order.status = 'pending_match';
+        await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+        convertedOrders.push(order);
+        converted++;
+      }
+    } catch (_) {}
   }
+
+  // Update PENDING_ORDERS_LIST with newly converted pending_match orders
+  const updatedPending = [...convertedOrders, ...nonHeld].slice(0, 300);
+  await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updatedPending), { expirationTtl: 1800 });
 
   // Auto-match same-amount opposite-side pairs
   const matched = await autoMatchPendingPairs(env, ctx);
 
   // Notify each converted player that their pre-quote order is now active
-  const notifyPromises = held
-    .filter((o) => o.status === 'pending_match')
-    .map(async (o) => {
-      const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${o.creatorId}`)) || o.creatorLineUserId || o.creatorId;
-      return deliverPrivateNotice(
-        rawLine,
-        undefined,
-        o.groupId || null,
-        `✅ ราคาช่างอย่างเป็นทางการแล้ว: ${bandMin}-${bandMax} วิ\n🧾 Order #${o.orderNumber} (${o.amount.toLocaleString()} pt ${o.side === 'low' ? 'ชถ/ต่ำ' : 'ชล/สูง'}) เปิดรอคู่แล้ว พร้อมจับคู่ครับ 🚀`,
-        env,
-        o.creatorName
-      );
-    });
+  const notifyPromises = convertedOrders.map(async (o) => {
+    const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${o.creatorId}`)) || o.creatorLineUserId || o.creatorId;
+    return deliverPrivateNotice(
+      rawLine,
+      undefined,
+      o.groupId || null,
+      `✅ ราคาช่างอย่างเป็นทางการแล้ว: ${bandMin}-${bandMax} วิ\n🧾 Order #${o.orderNumber} (${o.amount.toLocaleString()} pt ${o.side === 'low' ? 'ชถ/ต่ำ' : 'ชล/สูง'}) เปิดรอคู่แล้ว พร้อมจับคู่ครับ 🚀`,
+      env,
+      o.creatorName
+    );
+  });
   await Promise.all(notifyPromises);
 
   console.log(`[Worker] releaseHeldPreQuoteOrders: released ${converted} held pre-quote orders, auto-matched ${matched} pairs.`);
@@ -999,6 +988,8 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
           env.KV_ORDERS.put(`ORDER_${high.orderNumber}`, JSON.stringify(high)),
           removeFromPendingOrdersList(low.orderNumber, env),
           removeFromPendingOrdersList(high.orderNumber, env),
+          addToMatchedOrdersList(low, env),
+          addToMatchedOrdersList(high, env),
           pushToLine(lowNotify, matchFlex, env),
           pushToLine(highNotify, matchFlex, env),
         ]);
@@ -1021,57 +1012,64 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
 export async function voidAllRoundOrders(env: Env, ctx?: ExecutionContext): Promise<{ voided: number }> {
   let voidedCount = 0;
   try {
-    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 });
+    const [pendingList, matchedList] = await Promise.all([
+      getPendingOrdersList(env),
+      getMatchedOrdersList(env),
+    ]);
 
-    let cursor: string | undefined = undefined;
-    do {
-      const listRes: any = await env.KV_ORDERS.list({ prefix: 'ORDER_', limit: 100, cursor });
-      if (listRes.keys && listRes.keys.length > 0) {
-        for (const k of listRes.keys) {
-          const raw = await env.KV_ORDERS.get(k.name);
-          if (!raw) continue;
-          try {
-            const order = JSON.parse(raw) as Order;
-            if (order.status === 'pending_match' || order.status === 'matched' || order.status === 'refunding') {
-              const wasMatched = order.status === 'matched' || (order.matcherId && order.status === 'refunding');
-              const isRecovering = order.status === 'refunding';
+    await Promise.all([
+      env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 }),
+      env.KV_CACHE.put('MATCHED_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 }),
+    ]);
 
-              order.status = 'refunding';
-              await env.KV_ORDERS.put(k.name, JSON.stringify(order));
+    const allRoundOrders = [...pendingList, ...matchedList];
+    const seen = new Set<string>();
 
-              const amt = Number(order.amount) || 0;
+    for (const item of allRoundOrders) {
+      if (!item || !item.orderNumber || seen.has(item.orderNumber)) continue;
+      seen.add(item.orderNumber);
 
-              // Refund creator
-              if (order.creatorId && amt > 0) {
-                const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
-                const cpRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
-                if (cpRaw) {
-                  const cp = JSON.parse(cpRaw) as PlayerProfile;
-                  cp.balance = (Number(cp.balance) || 0) + amt;
-                  await savePlayerProfile(cp, env, ctx);
-                }
-              }
+      const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
+      if (!raw) continue;
+      try {
+        const order = JSON.parse(raw) as Order;
+        if (order.status === 'pending_match' || order.status === 'matched' || order.status === 'pending_hold' || order.status === 'refunding') {
+          const wasMatched = order.status === 'matched' || (order.matcherId && order.status === 'refunding');
+          const isRecovering = order.status === 'refunding';
 
-              // Refund matcher if matched
-              if (wasMatched && order.matcherId && amt > 0) {
-                const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.matcherId}`)) || order.matcherId;
-                const mpRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
-                if (mpRaw) {
-                  const mp = JSON.parse(mpRaw) as PlayerProfile;
-                  mp.balance = (Number(mp.balance) || 0) + amt;
-                  await savePlayerProfile(mp, env, ctx);
-                }
-              }
+          order.status = 'refunding';
+          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
 
-              order.status = 'cancelled';
-              await env.KV_ORDERS.put(k.name, JSON.stringify(order));
-              if (!isRecovering) voidedCount++;
+          const amt = Number(order.amount) || 0;
+
+          // Refund creator
+          if (order.creatorId && amt > 0) {
+            const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
+            const cpRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+            if (cpRaw) {
+              const cp = JSON.parse(cpRaw) as PlayerProfile;
+              cp.balance = (Number(cp.balance) || 0) + amt;
+              await savePlayerProfile(cp, env, ctx);
             }
-          } catch (_) {}
+          }
+
+          // Refund matcher if matched
+          if (wasMatched && order.matcherId && amt > 0) {
+            const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.matcherId}`)) || order.matcherId;
+            const mpRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+            if (mpRaw) {
+              const mp = JSON.parse(mpRaw) as PlayerProfile;
+              mp.balance = (Number(mp.balance) || 0) + amt;
+              await savePlayerProfile(mp, env, ctx);
+            }
+          }
+
+          order.status = 'cancelled';
+          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+          if (!isRecovering) voidedCount++;
         }
-      }
-      cursor = listRes.list_complete ? undefined : listRes.cursor;
-    } while (cursor);
+      } catch (_) {}
+    }
 
     console.log(`[Worker] voidAllRoundOrders: Voided and refunded ${voidedCount} orders 100%.`);
   } catch (err) {
@@ -1097,11 +1095,11 @@ export async function getPendingOrdersList(env: Env): Promise<Order[]> {
   }
 }
 
-async function addToPendingOrdersList(order: Order, env: Env): Promise<void> {
+export async function addToPendingOrdersList(order: Order, env: Env): Promise<void> {
   try {
     const list = await getPendingOrdersList(env);
-    const updated = [order, ...list.filter((o) => o.orderNumber !== order.orderNumber)].slice(0, 30);
-    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updated));
+    const updated = [order, ...list.filter((o) => o.orderNumber !== order.orderNumber)].slice(0, 300);
+    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
   } catch (err) {
     console.error('[Worker] addToPendingOrdersList error:', err);
   }
@@ -1112,7 +1110,7 @@ async function removeFromPendingOrdersList(orderNo: string, env: Env): Promise<v
     const cleanNo = orderNo.trim().replace(/^#/, '');
     const list = await getPendingOrdersList(env);
     const updated = list.filter((o) => o.orderNumber !== cleanNo);
-    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updated));
+    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
   } catch (err) {
     console.error('[Worker] removeFromPendingOrdersList error:', err);
   }
@@ -1121,8 +1119,8 @@ async function removeFromPendingOrdersList(orderNo: string, env: Env): Promise<v
 export async function addToMatchedOrdersList(order: Order, env: Env): Promise<void> {
   try {
     const list = await getMatchedOrdersList(env);
-    const updated = [order, ...list.filter((o) => o.orderNumber !== order.orderNumber)].slice(0, 100);
-    await env.KV_CACHE.put('MATCHED_ORDERS_LIST', JSON.stringify(updated));
+    const updated = [order, ...list.filter((o) => o.orderNumber !== order.orderNumber)].slice(0, 300);
+    await env.KV_CACHE.put('MATCHED_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
   } catch (err) {
     console.error('[Worker] addToMatchedOrdersList error:', err);
   }
