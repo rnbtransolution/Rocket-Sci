@@ -77,13 +77,17 @@ export interface Order {
   betType: 'range' | 'custom_range' | 'pre_quote';
   rangeMin: number;
   rangeMax: number;
-  status: 'pending_match' | 'pending_hold' | 'matched' | 'cancelled' | 'resolved' | 'settled' | 'void';
+  status: 'pending_match' | 'pending_hold' | 'matched' | 'cancelled' | 'resolved' | 'settled' | 'void' | 'PRE_CHARGE' | 'refunding';
   groupId?: string | null;
   userTypedCmd?: string | null;
   rocketName?: string | null;
   offset?: number;
   createdAt: number;
   matchedAt?: number | null;
+  winnerSide?: 'low' | 'high' | 'draw';
+  winnerName?: string | null;
+  finalTime?: number | null;
+  settledAt?: number;
 }
 
 export interface PlayerProfile {

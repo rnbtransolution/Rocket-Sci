@@ -2732,30 +2732,45 @@ function getDashboardData(forceFresh) {
   }
 
   // 2. Transactions sheet (compacted to 80 most recent)
-  const tData = ss.getSheetByName('Transactions').getDataRange().getValues();
+  const tSheet = ss.getSheetByName('Transactions');
+  const tLastRow = tSheet.getLastRow();
   const transactions = [];
-  for (let i = tData.length - 1; i >= 1 && transactions.length < 80; i--) { // Reverse order = newest first
-    const row = tData[i];
-    transactions.push({
-      id: row[0].toString(),
-      playerId: row[1].toString(),
-      playerName: row[2].toString(),
-      requestedAmount: Number(row[3]) || 0,
-      actualAmount: Number(row[4]) || 0,
-      slipRef: row[5] ? row[5].toString() : '',
-      status: row[6] ? row[6].toString() : 'pending',
-      reviewReason: row[7] ? row[7].toString() : '',
-      timestamp: safeFormatDate(row[8], 'HH:mm:ss'),
-      logs: [`Verified in Sheets Database`, `Status: ${row[6] || 'pending'}`]
-    });
+  if (tLastRow < 2) {
+    // already empty array
+  } else {
+    const tStartRow = Math.max(1, tLastRow - 100);
+    const tData = tSheet.getRange(tStartRow, 1, tLastRow - tStartRow + 1, tSheet.getLastColumn()).getValues();
+    for (let i = tData.length - 1; i >= 0; i--) {
+      const row = tData[i];
+      if (row[0] === 'ID' || row[0] === 'Transaction ID') continue; // Skip header
+      if (transactions.length >= 80) break;
+      transactions.push({
+        id: row[0].toString(),
+        playerId: row[1].toString(),
+        playerName: row[2].toString(),
+        requestedAmount: Number(row[3]) || 0,
+        actualAmount: Number(row[4]) || 0,
+        slipRef: row[5] ? row[5].toString() : '',
+        status: row[6] ? row[6].toString() : 'pending',
+        reviewReason: row[7] ? row[7].toString() : '',
+        timestamp: safeFormatDate(row[8], 'HH:mm:ss'),
+        logs: [`Verified in Sheets Database`, `Status: ${row[6] || 'pending'}`]
+      });
+    }
   }
 
   // 3. Bets sheet (compacted to 100 most recent)
-  const bData = ss.getSheetByName('Bets').getDataRange().getValues();
+  const bSheet = ss.getSheetByName('Bets');
+  const bLastRow = bSheet.getLastRow();
+  const bStartRow = Math.max(1, bLastRow - 300);
+  const bData = bSheet.getRange(bStartRow, 1, bLastRow - bStartRow + 1, bSheet.getLastColumn()).getValues();
   const bets = [];
-  const startBetIdx = Math.max(1, bData.length - 100);
-  for (let i = startBetIdx; i < bData.length; i++) {
+  for (let i = 0; i < bData.length; i++) {
     const row = bData[i];
+    if (row[0] === 'Order No' || row[0] === 'ID') continue; // Skip header
+    if (bets.length >= 100) break;
+    // Only include if it's within the last 100 rows of the sheet
+    if (bStartRow + i < bLastRow - 100) continue;
     bets.push({
       id: 'bet_' + row[0].toString(),
       orderNumber: row[0].toString(),

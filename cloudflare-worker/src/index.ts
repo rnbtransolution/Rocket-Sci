@@ -14,6 +14,10 @@ import {
   addTransaction,
   pushToLine,
   logUserMessage,
+  getMatchedOrdersList,
+  getSettledOrdersList,
+  addToSettledOrdersList,
+  removeFromMatchedOrdersList,
 } from './queueHandler.js';
 import {
   generateRuleGuideFlex,
@@ -262,49 +266,30 @@ export default {
             lineQuota,
           };
         } else if (functionName === 'getP2PResults') {
-          const keysList = await env.KV_ORDERS.list({ prefix: 'ORDER_' });
+          const settledOrders = await getSettledOrdersList(env);
           const p2p: any[] = [];
-          if (keysList.keys && keysList.keys.length > 0) {
-            for (const key of keysList.keys) {
-              const raw = await env.KV_ORDERS.get(key.name);
-              if (!raw) continue;
-              try {
-                const order = JSON.parse(raw);
-                if (order.status === 'settled' && order.winnerSide && order.winnerSide !== 'draw') {
-                  const winnerName = order.winnerName || '-';
-                  const loserName =
-                    order.winnerSide === 'low'
-                      ? (order.side === 'high' ? (order.matcherName || order.creatorName) : order.creatorName)
-                      : (order.side === 'high' ? (order.matcherName || order.creatorName) : order.creatorName);
-                  p2p.push({
-                    orderNumber: order.orderNumber,
-                    amount: Number(order.amount) || 0,
-                    winnerSide: order.winnerSide,
-                    winnerName,
-                    loserName,
-                    finalTime: order.finalTime || null,
-                    settleAt: order.settledAt || null,
-                  });
-                }
-              } catch (_) {}
+          for (const order of settledOrders) {
+            if (order.winnerSide && order.winnerSide !== 'draw') {
+              const winnerName = order.winnerName || '-';
+              const loserName =
+                order.winnerSide === 'low'
+                  ? (order.side === 'high' ? (order.matcherName || order.creatorName) : order.creatorName)
+                  : (order.side === 'high' ? (order.matcherName || order.creatorName) : order.creatorName);
+              p2p.push({
+                orderNumber: order.orderNumber,
+                amount: Number(order.amount) || 0,
+                winnerSide: order.winnerSide,
+                winnerName,
+                loserName,
+                finalTime: order.finalTime || null,
+                settleAt: order.settledAt || null,
+              });
             }
           }
           result = { success: true, p2pResults: p2p };
         } else if (functionName === 'getHeldPreQuoteOrders') {
-          const keysList = await env.KV_ORDERS.list({ prefix: 'ORDER_' });
-          const held: any[] = [];
-          if (keysList.keys && keysList.keys.length > 0) {
-            for (const key of keysList.keys) {
-              const raw = await env.KV_ORDERS.get(key.name);
-              if (!raw) continue;
-              try {
-                const order = JSON.parse(raw);
-                if (order.status === 'pending_hold' && order.betType === 'pre_quote') {
-                  held.push(order);
-                }
-              } catch (_) {}
-            }
-          }
+          const pending = await getPendingOrdersList(env);
+          const held = pending.filter(order => order.status === 'pending_hold' && order.betType === 'pre_quote');
           result = { success: true, heldPreQuoteOrders: held };
         } else if (functionName === 'adminGetLineQuota') {
           try {
@@ -360,7 +345,7 @@ export default {
               if (isWithdrawal) {
                 // Withdrawal: balance was already deducted upon request. Notify player of success.
                 if (rawLine) {
-                  await pushToLine(rawLine, `💸 [ถอนเงินสำเร็จ]: ยอด ${targetTx.requestedAmount.toLocaleString()} บาท แอดมินได้โอนเข้าบัญชีของคุณเรียบร้อยแล้วครับ 🚀`, env);
+                  ctx?.waitUntil(pushToLine(rawLine, `💸 [ถอนเงินสำเร็จ]: ยอด ${targetTx.requestedAmount.toLocaleString()} บาท แอดมินได้โอนเข้าบัญชีของคุณเรียบร้อยแล้วครับ 🚀`, env).catch(e => console.error(e)));
                 }
               } else {
                 // Deposit: credit player balance
@@ -379,7 +364,7 @@ export default {
 
                 // Push notice to player
                 if (rawLine) {
-                  await pushToLine(rawLine, `✅ อนุมัติยอดเงินฝาก ${targetTx.requestedAmount.toLocaleString()} บาท เรียบร้อยแล้วครับ!\nแต้มคงเหลือปัจจุบัน: ${player.balance.toLocaleString()} pt 🚀`, env);
+                  ctx?.waitUntil(pushToLine(rawLine, `✅ อนุมัติยอดเงินฝาก ${targetTx.requestedAmount.toLocaleString()} บาท เรียบร้อยแล้วครับ!\nแต้มคงเหลือปัจจุบัน: ${player.balance.toLocaleString()} pt 🚀`, env).catch(e => console.error(e)));
                 }
               }
             }
@@ -416,11 +401,11 @@ export default {
                 }, env, ctx);
 
                 if (rawLine) {
-                  await pushToLine(rawLine, `❌ [ปฏิเสธการถอนเงิน]: ยอด ${targetTx.requestedAmount.toLocaleString()} pt (สาเหตุ: ${reason})\nระบบได้คืนแต้มเข้ากระเป๋าเรียบร้อย แต้มคงเหลือ: ${player.balance.toLocaleString()} pt 🚀`, env);
+                  ctx?.waitUntil(pushToLine(rawLine, `❌ [ปฏิเสธการถอนเงิน]: ยอด ${targetTx.requestedAmount.toLocaleString()} pt (สาเหตุ: ${reason})\nระบบได้คืนแต้มเข้ากระเป๋าเรียบร้อย แต้มคงเหลือ: ${player.balance.toLocaleString()} pt 🚀`, env).catch(e => console.error(e)));
                 }
               } else {
                 if (rawLine) {
-                  await pushToLine(rawLine, `❌ [ปฏิเสธการฝากเงิน]: ยอด ${targetTx.requestedAmount.toLocaleString()} บาท (สาเหตุ: ${reason})`, env);
+                  ctx?.waitUntil(pushToLine(rawLine, `❌ [ปฏิเสธการฝากเงิน]: ยอด ${targetTx.requestedAmount.toLocaleString()} บาท (สาเหตุ: ${reason})`, env).catch(e => console.error(e)));
                 }
               }
             }
@@ -443,6 +428,22 @@ export default {
             if (p.balance !== undefined) oldBal = Number(p.balance) || 0;
             p.balance = newBal;
             if (passedName) p.displayName = passedName;
+
+            // Ledger-First: Record admin adjustment before updating profile
+            await addTransaction({
+              id: `ADJ${Date.now().toString().slice(-6)}`,
+              playerId: p.shortId,
+              playerName: p.displayName,
+              requestedAmount: newBal - oldBal,
+              actualAmount: newBal - oldBal,
+              slipRef: 'ADMIN_ADJUST',
+              status: 'success',
+              reviewReason: `Admin set balance: ${oldBal} → ${newBal}`,
+              timestamp: formatTime(),
+              type: 'deposit',
+              createdAt: Date.now(),
+            }, env, ctx);
+
             await savePlayerProfile(p, env, ctx);
           } else {
             await savePlayerProfile({
@@ -459,15 +460,17 @@ export default {
           if (targetLineUserId && targetLineUserId.startsWith('U')) {
             try {
               const adjustFlex = generateCreditAdjustmentFlex(displayName, oldBal, newBal);
-              await pushToLine(targetLineUserId, adjustFlex, env);
-              await appendChatLog(env, {
-                timestamp: formatTime(),
-                userId: targetLineUserId,
-                displayName: 'แอดมิน',
-                sender: 'admin',
-                text: `💰 แจ้งเตือนปรับยอดเครดิต: ${oldBal.toLocaleString()} pt → ${newBal.toLocaleString()} pt`,
-                type: 'flex',
-              });
+              ctx?.waitUntil(Promise.all([
+                pushToLine(targetLineUserId, adjustFlex, env).catch(e => console.error(e)),
+                appendChatLog(env, {
+                  timestamp: formatTime(),
+                  userId: targetLineUserId,
+                  displayName: 'แอดมิน',
+                  sender: 'admin',
+                  text: `💰 แจ้งเตือนปรับยอดเครดิต: ${oldBal.toLocaleString()} pt → ${newBal.toLocaleString()} pt`,
+                  type: 'flex',
+                }).catch(e => console.error(e))
+              ]));
             } catch (pushErr) {
               console.error('[Worker] Error pushing credit adjustment to DM:', pushErr);
             }
@@ -492,15 +495,17 @@ export default {
           if (bal > 0 && lineId && lineId.startsWith('U')) {
             try {
               const adjustFlex = generateCreditAdjustmentFlex(newP.displayName, 0, bal);
-              await pushToLine(lineId, adjustFlex, env);
-              await appendChatLog(env, {
-                timestamp: formatTime(),
-                userId: lineId,
-                displayName: 'แอดมิน',
-                sender: 'admin',
-                text: `💰 แจ้งเตือนยอดเครดิตเริ่มต้น: ${bal.toLocaleString()} pt`,
-                type: 'flex',
-              });
+              ctx?.waitUntil(Promise.all([
+                pushToLine(lineId, adjustFlex, env).catch(e => console.error(e)),
+                appendChatLog(env, {
+                  timestamp: formatTime(),
+                  userId: lineId,
+                  displayName: 'แอดมิน',
+                  sender: 'admin',
+                  text: `💰 แจ้งเตือนยอดเครดิตเริ่มต้น: ${bal.toLocaleString()} pt`,
+                  type: 'flex',
+                }).catch(e => console.error(e))
+              ]));
             } catch (pushErr) {
               console.error('[Worker] Error pushing initial credit to DM:', pushErr);
             }
@@ -682,6 +687,33 @@ export default {
                 const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
                 const profile = profileRaw ? JSON.parse(profileRaw) : null;
                 payload = generateBalanceFlex(profile?.displayName || 'ผู้เล่น', profile?.balance || 0);
+              } else if (clean === 'บั้งไฟออก' || clean === 'rocketout') {
+                payload = {
+                  type: 'flex',
+                  altText: '🚀 บั้งไฟออกแล้ว! 🚀',
+                  contents: {
+                    type: 'bubble',
+                    size: 'medium',
+                    header: {
+                      type: 'box',
+                      layout: 'vertical',
+                      backgroundColor: '#EF4444',
+                      paddingAll: 'md',
+                      contents: [
+                        { type: 'text', text: '🚀 บั้งไฟออกแล้ว! 🚀', weight: 'bold', color: '#FFFFFF', size: 'md', align: 'center' },
+                      ],
+                    },
+                    body: {
+                      type: 'box',
+                      layout: 'vertical',
+                      spacing: 'md',
+                      contents: [
+                        { type: 'text', text: 'เตรียมพบกับรอบดวลใหม่ เร็วๆ นี้!', weight: 'bold', color: '#1F2937', size: 'sm', align: 'center' },
+                        { type: 'text', text: 'ติดตามประกาศจากสนามได้เลยครับ 📢', color: '#6B7280', size: 'xs', align: 'center' },
+                      ],
+                    },
+                  },
+                };
               } else if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit' || clean === 'ฝาก') {
                 payload = generateDepositFlex();
               } else if (clean === 'กระดานดวล' || clean === 'กระดาน' || clean === 'board') {
@@ -722,6 +754,61 @@ export default {
               error: allSuccess
                 ? undefined
                 : (quotaError?.error || 'ส่งเข้าบางกลุ่มไม่สำเร็จ (กรุณาเช็คสิทธิ์ LINE OA ในกลุ่ม)'),
+              code: quotaError ? 429 : (allSuccess ? 200 : 400),
+              isQuotaExhausted: !!quotaError,
+              results: sendResults,
+            };
+          }
+        } else if (functionName === 'adminBroadcastRocketLaunched') {
+          const target = args[0];
+          const rocketLaunchFlex = {
+            type: 'flex',
+            altText: '🚀 บั้งไฟออกแล้ว! 🚀',
+            contents: {
+              type: 'bubble',
+              size: 'medium',
+              header: {
+                type: 'box',
+                layout: 'vertical',
+                backgroundColor: '#EF4444',
+                paddingAll: 'md',
+                contents: [
+                  { type: 'text', text: '🚀 บั้งไฟออกแล้ว! 🚀', weight: 'bold', color: '#FFFFFF', size: 'md', align: 'center' },
+                ],
+              },
+              body: {
+                type: 'box',
+                layout: 'vertical',
+                spacing: 'md',
+                contents: [
+                  { type: 'text', text: 'เตรียมพบกับรอบดวลใหม่ เร็วๆ นี้!', weight: 'bold', color: '#1F2937', size: 'sm', align: 'center' },
+                  { type: 'text', text: 'ติดตามประกาศจากสนามได้เลยครับ 📢', color: '#6B7280', size: 'xs', align: 'center' },
+                ],
+              },
+            },
+          };
+
+          const targets = await resolveTargetGroupIds(target, env);
+          if (targets.length === 0) {
+            result = { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ' };
+          } else {
+            const sendResults = await Promise.all(targets.map((to) => pushToLine(to, rocketLaunchFlex, env)));
+            const allSuccess = sendResults.every((r) => r.success);
+            const quotaError = sendResults.find((r) => r.code === 429);
+
+            await appendChatLog(env, {
+              timestamp: formatTime(),
+              userId: targets[0],
+              displayName: 'ระบบ',
+              sender: 'admin',
+              text: '[🚀 บั้งไฟออกแล้ว]',
+              type: 'flex',
+            });
+
+            result = {
+              success: allSuccess,
+              targets,
+              error: allSuccess ? undefined : (quotaError?.error || 'ส่งข้อความเข้าบางกลุ่มไม่สำเร็จ'),
               code: quotaError ? 429 : (allSuccess ? 200 : 400),
               isQuotaExhausted: !!quotaError,
               results: sendResults,
@@ -1119,7 +1206,7 @@ export default {
           const tMin = Number(args[1]) || 330;
           const tMax = Number(args[2]) || 380;
 
-          const keysList = await env.KV_ORDERS.list({ prefix: 'ORDER_' });
+          const matchedOrders = await getMatchedOrdersList(env);
           const resolvedOrders: any[] = [];
           const activeRoundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
           const activeRound = activeRoundStr ? JSON.parse(activeRoundStr) : { name: 'บั้งไฟสด' };
@@ -1128,13 +1215,8 @@ export default {
           // auto-cancelled + refunded before settlement.
           await cancelHeldPreQuoteOrders(env, ctx);
 
-          for (const key of keysList.keys) {
-            const raw = await env.KV_ORDERS.get(key.name);
-            if (!raw) continue;
-            try {
-              const order = JSON.parse(raw);
-              if (order.status === 'matched') {
-                const amt = Number(order.amount) || 0;
+          for (const order of matchedOrders) {
+            const amt = Number(order.amount) || 0;
                 let winnerSide: 'low' | 'high' | 'draw' = 'draw';
                 if (finalSeconds < tMin) {
                   winnerSide = 'low';
@@ -1147,10 +1229,10 @@ export default {
                 let winnerName = '-';
                 let winnerLineId = '';
                 if (winnerSide === 'low') {
-                  winnerName = order.side === 'low' ? order.creatorName : order.matcherName;
+                  winnerName = (order.side === 'low' ? order.creatorName : order.matcherName) || '-';
                   winnerLineId = order.side === 'low' ? order.creatorId : (order.matcherId || '');
                 } else if (winnerSide === 'high') {
-                  winnerName = order.side === 'high' ? order.creatorName : order.matcherName;
+                  winnerName = (order.side === 'high' ? order.creatorName : order.matcherName) || '-';
                   winnerLineId = order.side === 'high' ? order.creatorId : (order.matcherId || '');
                 }
 
@@ -1159,7 +1241,9 @@ export default {
                 order.winnerSide = winnerSide;
                 order.winnerName = winnerName;
                 order.settledAt = Date.now();
-                await env.KV_ORDERS.put(key.name, JSON.stringify(order));
+                await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+                await addToSettledOrdersList(order, env);
+                await removeFromMatchedOrdersList(order.orderNumber, env);
                 resolvedOrders.push(order);
 
                 if (winnerLineId && winnerSide !== 'draw') {
@@ -1190,9 +1274,8 @@ export default {
                     }
                   }
                 }
-              }
-            } catch (_) {}
           }
+
 
           activeRound.status = 'CLOSED';
           activeRound.finalTime = finalSeconds;
