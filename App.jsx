@@ -3296,9 +3296,10 @@ export default function App() {
                           addToast('❌ ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
-                      className="w-full py-2 px-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 shadow-sm"
+                      style={{ backgroundColor: '#ea580c', color: '#ffffff' }}
+                      className="w-full py-2 px-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
                     >
-                      <span>🚀 ส่งประกาศ บั้งไฟออกแล้ว!</span>
+                      <span className="text-white font-bold">🚀 ส่งประกาศ บั้งไฟออกแล้ว!</span>
                     </button>
                   </div>
                 </div>
