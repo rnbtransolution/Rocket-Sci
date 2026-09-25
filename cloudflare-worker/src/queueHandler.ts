@@ -14,7 +14,6 @@ import {
   generateDepositInvoiceFlex,
   generateWithdrawalFlex,
   generateBankRegistrationFlex,
-  generateRocketLaunchedFlex,
 } from './flexTemplates.js';
 
 export const RULE_GUIDE_TEXT = `📖 [กติกาการเล่น]
@@ -318,18 +317,6 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         await replyToLine(replyToken, msg, env, !isGroup);
       } else {
         await pushToLine(userId, msg, env);
-      }
-      return;
-    }
-
-    // ── 1.3b Hotkey Command: Rocket Launched ("!ออก", "!ยิง", "บั้งไฟออกแล้ว", "บั้งไฟออก") ──
-    const rocketLaunchedRegex = /^(?:🚀\s*)?(?:!ออก|!ยิง|\/launch|\/ออก|บั้งไฟออกแล้ว|บั้งไฟออก)(?:\s*🚀)?$/i;
-    if (rocketLaunchedRegex.test(clean) || rocketLaunchedRegex.test(text)) {
-      const rocketLaunchFlex = generateRocketLaunchedFlex();
-      if (replyToken) {
-        await replyToLine(replyToken, rocketLaunchFlex, env, false);
-      } else if (groupId) {
-        await pushToLine(groupId, rocketLaunchFlex, env);
       }
       return;
     }
