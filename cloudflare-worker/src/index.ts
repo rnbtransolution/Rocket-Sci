@@ -28,6 +28,7 @@ import {
   generatePendingBoardFlex,
   generateWithdrawalFlex,
   generateOrderFlex,
+  generateRocketLaunchedFlex,
 } from './flexTemplates.js';
 
 function formatTime(timestamp?: number): string {

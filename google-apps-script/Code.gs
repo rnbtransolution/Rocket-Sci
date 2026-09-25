@@ -538,6 +538,7 @@ function executeAdminAction(functionName, args) {
     case 'adminBroadcastVoidRound': return adminBroadcastVoidRound(args[0]);
     case 'adminBroadcastRuleGuide': return adminBroadcastRuleGuide(args[0]);
     case 'adminBroadcastScamWarning': return adminBroadcastScamWarning(args[0]);
+    case 'adminBroadcastRocketLaunched': return adminBroadcastRocketLaunched(args[0]);
     case 'adminSetActiveGroupId': return adminSetActiveGroupId(args[0]);
     case 'adminDiscoverGroupIds': return adminDiscoverGroupIds();
     case 'adminTestPushGroupMessage': return adminTestPushGroupMessage(args[0]);
@@ -5907,6 +5908,45 @@ function adminBroadcastScamWarning(targetId) {
     ]}
   };
   return sendAdminMessageToLine(targetId || 'ALL', warnFlex);
+}
+
+function adminBroadcastRocketLaunched(targetId) {
+  var rocketLaunchFlex = {
+    "type": "bubble",
+    "size": "kilo",
+    "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#DC2626",
+      "paddingAll": "lg",
+      "spacing": "xs",
+      "contents": [
+        { "type": "text", "text": "🔥 LIVE ACTION 🔥", "weight": "bold", "color": "#FEF08A", "size": "xxs", "align": "center" },
+        { "type": "text", "text": "🚀 บั้งไฟออกแล้ว! 🚀", "weight": "bold", "color": "#FFFFFF", "size": "xl", "align": "center", "wrap": true }
+      ]
+    },
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#FFF7ED",
+      "paddingAll": "md",
+      "spacing": "sm",
+      "contents": [
+        {
+          "type": "box",
+          "layout": "vertical",
+          "backgroundColor": "#FFEDD5",
+          "cornerRadius": "md",
+          "paddingAll": "sm",
+          "contents": [
+            { "type": "text", "text": "⚡ พุ่งทะยานสู่ท้องฟ้าเรียบร้อยแล้ว!", "weight": "bold", "color": "#C2410C", "size": "xs", "align": "center", "wrap": true },
+            { "type": "text", "text": "⏱️ รอลุ้นเวลาและสรุปผลหลังบั้งไฟลง 💥", "weight": "bold", "color": "#9A3412", "size": "xxs", "align": "center", "wrap": true, "margin": "xs" }
+          ]
+        }
+      ]
+    }
+  };
+  return sendAdminMessageToLine(targetId || 'ALL', rocketLaunchFlex);
 }
 
 // ============================================================

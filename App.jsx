@@ -3273,30 +3273,32 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Scam Warning */}
-                  <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
+                  {/* Rocket Launched Broadcast Card */}
+                  <div className="bg-orange-50/80 border border-orange-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-indigo-900 font-heading">🚨 เตือนมิจฉาชีพ</span>
-                        <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-200 text-indigo-900 rounded-md">Security</span>
+                        <span className="text-xs font-black text-orange-950 font-heading flex items-center gap-1">
+                          <span>🚀 บั้งไฟออกแล้ว!</span>
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-orange-200 text-orange-900 rounded-md">Live Action</span>
                       </div>
-                      <p className="text-[10.5px] text-indigo-800/80 font-sans leading-relaxed">
-                        เตือนภัยผู้เล่นให้ฝาก-ถอนผ่านแชตทางการ 1:1 เท่านั้น ป้องกันบัญชีม้าในกลุ่ม
+                      <p className="text-[10.5px] text-orange-900/80 font-sans leading-relaxed">
+                        ส่ง Flex Card "🚀 บั้งไฟออกแล้ว! 🚀" แจ้งเตือนด่วนเข้ากลุ่ม LINE ทันที เมื่อบั้งไฟพุ่งขึ้นฟ้า
                       </p>
                     </div>
                     <button
                       onClick={async () => {
                         try {
-                          const res = await runBackendFunction('adminBroadcastScamWarning', [broadcastTargetGroup || 'ALL']);
+                          const res = await runBackendFunction('adminBroadcastRocketLaunched', [broadcastTargetGroup || 'ALL']);
                           if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
-                          else addToast('🚨 ส่งเตือนความปลอดภัยแล้ว', 'info');
+                          else addToast('🚀 ส่งประกาศบั้งไฟออกแล้ว!', 'info');
                         } catch(e) {
                           addToast('❌ ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
-                      className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                      className="w-full py-2 px-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 shadow-sm"
                     >
-                      <span>🚨 ส่งเตือนความปลอดภัย</span>
+                      <span>🚀 ส่งประกาศ บั้งไฟออกแล้ว!</span>
                     </button>
                   </div>
                 </div>
