@@ -143,10 +143,8 @@
 }
 
 /* Base resets & typography (Zero Box-Shadow Standard) */
-* {
+*, ::before, ::after {
   box-sizing: border-box;
-  margin: 0;
-  padding: 0;
   box-shadow: none !important;
   text-shadow: none !important;
 }
