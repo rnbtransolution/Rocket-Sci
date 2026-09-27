@@ -471,7 +471,7 @@ function doGet(e) {
     html = HtmlService.createHtmlOutputFromFile('Index');
   }
   return html
-    .setTitle('Rocket Science - ระบบดูแลบิลลิงและควบคุม')
+    .setTitle('Bang Fai Commander - ระบบดูแลบิลลิงและควบคุม')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }

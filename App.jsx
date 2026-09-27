@@ -36,7 +36,8 @@ import {
   Eye,
   EyeOff,
   LogIn,
-  LogOut
+  LogOut,
+  Cloud
 } from 'lucide-react';
 
 const INITIAL_PLAYERS = [];
@@ -318,7 +319,7 @@ export default function App() {
   // Private chat states
   const [myPrivateInput, setMyPrivateInput] = useState('');
   const [privateMessages, setPrivateMessages] = useState([
-    { id: 'bot_welcome', sender: 'bot', text: '🏦 ยินดีต้อนรับสู่ระบบเติมทุนหลังบ้าน Rocket Science 🚀\n\nโอนเงินด้วยยอดที่ท่านเลือก และส่งสลิปที่มี QR code ระบบจะเติมเครดิตให้อัตโนมัติในสเกล 1:1 ครับ\n\nกรุณาเลือกบริการจากเมนูด้านล่าง หรือพิมพ์บอกเราได้เลยครับ\n(เช่น พิมพ์ "ฝากเงิน", "ถอนยอด" หรือ "เช็คยอด")', time: '13:00' }
+    { id: 'bot_welcome', sender: 'bot', text: '🏦 ยินดีต้อนรับสู่ระบบบริหารจัดการธุรกรรม Bang Fai Commander\n\nโอนเงินด้วยยอดที่ท่านเลือก และส่งสลิปที่มี QR code ระบบจะเติมเครดิตให้อัตโนมัติในสเกล 1:1 ครับ\n\nกรุณาเลือกบริการจากเมนูด้านล่าง หรือพิมพ์บอกเราได้เลยครับ\n(เช่น พิมพ์ "ฝากเงิน", "ถอนยอด" หรือ "เช็คยอด")', time: '13:00' }
   ]);
 
   // Real LINE OA chat states
@@ -1137,8 +1138,8 @@ export default function App() {
           
           msgs.push({
             id: `bet_match_sys_${b.orderNumber}`,
-            sender: 'ระบบบอทดูด 🚀',
-            text: `✅ จับคู่สำเร็จ! (Order #${b.orderNumber})\nยอดดวล: ${b.amount} แต้ม\nฝั่งต่ำ (Low): ${b.playerLowName}\nฝั่งสูง (High): ${b.playerHighName}\nสถานะ: ล็อกเครดิตเรียบร้อย รอออกผลจรวด ☄️`,
+            sender: 'ระบบบอทดูด (Bang Fai Commander)',
+            text: `✅ จับคู่สำเร็จ! (Order #${b.orderNumber})\nยอดดวล: ${b.amount} แต้ม\nฝั่งต่ำ (Low): ${b.playerLowName}\nฝั่งสูง (High): ${b.playerHighName}\nสถานะ: ล็อกเครดิตเรียบร้อย รอประมวลผลเวลาบั้งไฟ ⏱️`,
             time: t
           });
         }
@@ -1399,7 +1400,7 @@ export default function App() {
     setBillingResult(null);
     setScannerLogs([]);
     setPrivateMessages([
-      { id: 'bot_welcome', sender: 'bot', text: '🏦 ยินดีต้อนรับสู่ระบบเติมทุนหลังบ้าน Rocket Science 🚀\n\nโอนเงินด้วยยอดที่ท่านเลือก และส่งสลิปที่มี QR code ระบบจะเติมเครดิตให้อัตโนมัติในสเกล 1:1 ครับ\n\nกรุณาเลือกบริการจากเมนูด้านล่าง หรือพิมพ์บอกเราได้เลยครับ\n(เช่น พิมพ์ "ฝากเงิน", "ถอนยอด" หรือ "เช็คยอด")', time: '13:00' }
+      { id: 'bot_welcome', sender: 'bot', text: '🏦 ยินดีต้อนรับสู่ระบบบริหารจัดการธุรกรรม Bang Fai Commander\n\nโอนเงินด้วยยอดที่ท่านเลือก และส่งสลิปที่มี QR code ระบบจะเติมเครดิตให้อัตโนมัติในสเกล 1:1 ครับ\n\nกรุณาเลือกบริการจากเมนูด้านล่าง หรือพิมพ์บอกเราได้เลยครับ\n(เช่น พิมพ์ "ฝากเงิน", "ถอนยอด" หรือ "เช็คยอด")', time: '13:00' }
     ]);
   };
 
@@ -1779,7 +1780,7 @@ export default function App() {
   // Submit manual telemetry flight result (No flight animation, resolve immediately)
   const handleSubmitOnsiteResult = (finalTime) => {
     if (!finalTime || finalTime <= 0) {
-      addToast('⚠️ กรุณาระบุเวลาผลการบินของจรวดให้ถูกต้อง', 'warning');
+      addToast('⚠️ กรุณาระบุเวลาผลการบินของบั้งไฟให้ถูกต้อง', 'warning');
       return;
     }
 
@@ -2026,27 +2027,32 @@ export default function App() {
         ))}
       </div>
 
-      {/* Header Panel */}
-      <header className="w-full max-w-6xl mb-6 text-center md:text-left flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-        <div>
-          <div className="flex items-center justify-center md:justify-start gap-2.5">
-            <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider ${
-              (window.isNodeJS || isGAS) ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-slate-100 border border-slate-200 text-slate-600'
-            }`}>
-              {(window.isNodeJS || isGAS) ? '🟢 Connected' : '🧪 Demo Mode'}
-            </span>
-            <h1 className="text-xl md:text-2xl font-black tracking-tight text-slate-800 uppercase font-heading">
-              Rocket Commander
-            </h1>
+      {/* Header Panel - Cloud PMS Corporate Bar */}
+      <header className="w-full max-w-6xl mb-6 bg-white border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-sky-600 flex items-center justify-center text-white shrink-0">
+            <Cloud size={22} />
           </div>
-          <p className="text-[11px] text-slate-500 mt-1 font-sans">
-            ระบบจัดการธุรกรรมเครดิตและการแข่งขันบั้งไฟสดภาคสนาม
-          </p>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-xl md:text-2xl font-black tracking-tight text-slate-900 uppercase font-heading">
+                Bang Fai Commander
+              </h1>
+              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                (window.isNodeJS || isGAS) ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-slate-100 border border-slate-200 text-slate-600'
+              }`}>
+                {(window.isNodeJS || isGAS) ? '🟢 Cloud Connected' : '🧪 Sandbox Mode'}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5 font-sans">
+              ระบบบริหารจัดการธุรกรรมเครดิตและการแข่งขันบั้งไฟสดภาคสนาม (Cloud PMS Console)
+            </p>
+          </div>
         </div>
-        <div className="flex gap-2 justify-center flex-wrap">
+        <div className="flex gap-2 justify-center md:justify-end flex-wrap">
           <button 
             onClick={handleClosePortal}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 flex items-center gap-1.5 transition-all active:scale-95"
+            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
             title="รีเซ็ตและปิดรอบพอร์ทัลปัจจุบัน โดยไม่ลบข้อมูลผู้เล่นหรือประวัติธุรกรรม"
           >
             <RotateCcw size={13} className="text-amber-700" />
@@ -2054,15 +2060,15 @@ export default function App() {
           </button>
           <button 
             onClick={forceSyncFreshData}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-50 hover:bg-sky-100 border border-sky-300 text-sky-800 flex items-center gap-1.5 transition-all active:scale-95"
+            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
             title="ดึงข้อมูลล่าสุดจากฐานข้อมูลและล้างแคชในเบราว์เซอร์ทันที"
           >
-            <RefreshCw size={13} className="text-sky-600" />
+            <RefreshCw size={13} className="text-white" />
             <span>ซิงค์ข้อมูลสด</span>
           </button>
           <button 
             onClick={resetConsoleState}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 flex items-center gap-1.5 transition-all active:scale-95"
+            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-slate-700 hover:text-rose-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
             title="ล้างข้อมูลระบบทั้งหมดกลับสู่ค่าเริ่มต้นโรงงาน"
           >
             <RotateCcw size={13} className="text-rose-600" />
@@ -2070,7 +2076,7 @@ export default function App() {
           </button>
           <button 
             onClick={handleAdminLogout}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 hover:bg-rose-50 hover:border-rose-300 border border-slate-300 text-slate-700 hover:text-rose-700 flex items-center gap-1.5 transition-all active:scale-95"
+            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
             title="ออกจากระบบแอดมิน"
           >
             <LogOut size={13} className="text-slate-500" />
@@ -2082,19 +2088,19 @@ export default function App() {
       {/* Main Sandbox Grid (Standardized to corporate light 100% width column) */}
       <main className="w-full max-w-6xl space-y-5">
         
-        {/* Top metrics bar stretching 100% width */}
+        {/* Top metrics bar stretching 100% width - Cloud PMS Style */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
           <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                 ยอดฝากเครดิตรวม
               </span>
-              <span className="p-1.5 rounded-lg bg-emerald-50 text-emerald-700">
+              <span className="p-1.5 rounded-lg bg-sky-50 text-sky-600 border border-sky-100">
                 <Wallet size={15} />
               </span>
             </div>
             <div className="mt-2.5 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-slate-800 font-mono tracking-tight">
+              <span className="text-2xl font-black text-slate-900 font-mono tracking-tight">
                 {transactions.filter(t => t.status === 'success').reduce((acc, t) => acc + t.actualAmount, 0).toLocaleString()}
               </span>
               <span className="text-xs font-bold text-slate-400">THB</span>
@@ -2106,10 +2112,10 @@ export default function App() {
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                 รอตรวจหลักฐาน
               </span>
-              <span className="p-1.5 rounded-lg bg-amber-50 text-amber-700 relative">
+              <span className="p-1.5 rounded-lg bg-amber-50 text-amber-600 border border-amber-100 relative">
                 <ShieldAlert size={15} />
                 {transactions.filter(t => t.status === 'escalated').length > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
                 )}
               </span>
             </div>
@@ -2126,8 +2132,8 @@ export default function App() {
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                 แผลจับคู่สด
               </span>
-              <span className="p-1.5 rounded-lg bg-sky-50 text-sky-700">
-                <Rocket size={15} />
+              <span className="p-1.5 rounded-lg bg-sky-50 text-sky-600 border border-sky-100">
+                <Layers size={15} />
               </span>
             </div>
             <div className="mt-2.5 flex items-baseline gap-1.5">
@@ -2143,12 +2149,12 @@ export default function App() {
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                 บัญชีผู้เล่น
               </span>
-              <span className="p-1.5 rounded-lg bg-indigo-50 text-indigo-700">
+              <span className="p-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
                 <Users size={15} />
               </span>
             </div>
             <div className="mt-2.5 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-indigo-700 font-mono tracking-tight">
+              <span className="text-2xl font-black text-slate-900 font-mono tracking-tight">
                 {players.length}
               </span>
               <span className="text-xs font-bold text-slate-400">บัญชี</span>
@@ -2156,82 +2162,102 @@ export default function App() {
           </div>
         </div>
 
-        {/* Tab Selection Bar stretching 100% width */}
-        <div className="glass-panel p-1.5 flex text-xs md:text-sm font-bold tracking-wide shrink-0 overflow-x-auto gap-1.5 bg-slate-100/80 border border-slate-200/80">
+        {/* Tab Selection Bar - Cloud PMS Segmented Tabs */}
+        <div className="bg-white p-1.5 flex text-xs md:text-sm font-semibold tracking-wide shrink-0 overflow-x-auto gap-1.5 rounded-xl border border-slate-200">
           <button 
             onClick={() => setAdminTab('quote')}
-            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
-              (adminTab === 'quote' || adminTab === 'rocket') ? 'bg-emerald-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
+              (adminTab === 'quote' || adminTab === 'rocket') 
+                ? 'bg-sky-600 text-white font-bold' 
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
-            <Rocket size={15} className={(adminTab === 'quote' || adminTab === 'rocket') ? 'text-emerald-200' : 'text-emerald-600'} />
+            <Layers size={15} className={(adminTab === 'quote' || adminTab === 'rocket') ? 'text-white' : 'text-slate-500'} />
             <span>ออกราคาช่าง</span>
           </button>
           <button 
             onClick={() => setAdminTab('broadcast')}
-            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
-              adminTab === 'broadcast' ? 'bg-purple-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
+              adminTab === 'broadcast' 
+                ? 'bg-sky-600 text-white font-bold' 
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
-            <Radio size={15} className={adminTab === 'broadcast' ? 'text-purple-200' : 'text-purple-600'} />
+            <Radio size={15} className={adminTab === 'broadcast' ? 'text-white' : 'text-slate-500'} />
             <span>บรอดแคสต์ & คีย์ลัด</span>
           </button>
           <button 
             onClick={() => setAdminTab('settle')}
-            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
-              adminTab === 'settle' ? 'bg-sky-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
+              adminTab === 'settle' 
+                ? 'bg-sky-600 text-white font-bold' 
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
-            <Zap size={15} className={adminTab === 'settle' ? 'text-sky-200' : 'text-sky-600'} />
+            <Zap size={15} className={adminTab === 'settle' ? 'text-white' : 'text-slate-500'} />
             <span>ป้อนผลเวลา</span>
           </button>
           <button 
             onClick={() => setAdminTab('bets')}
-            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
-              adminTab === 'bets' ? 'bg-indigo-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
+              adminTab === 'bets' 
+                ? 'bg-sky-600 text-white font-bold' 
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
-            <Trophy size={15} className={adminTab === 'bets' ? 'text-indigo-200' : 'text-indigo-600'} />
+            <Trophy size={15} className={adminTab === 'bets' ? 'text-white' : 'text-slate-500'} />
             <span>กระดานดวลสด</span>
             {bets.filter(b => b.status === 'matched' || b.status === 'pending_match').length > 0 && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${adminTab === 'bets' ? 'bg-white text-indigo-800' : 'bg-indigo-600 text-white'}`}>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                adminTab === 'bets' ? 'bg-white text-sky-800' : 'bg-sky-600 text-white'
+              }`}>
                 {bets.filter(b => b.status === 'matched' || b.status === 'pending_match').length}
               </span>
             )}
           </button>
           <button 
             onClick={() => { setAdminTab('review'); setTxStatusFilter('escalated'); }}
-            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
-              adminTab === 'review' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
+              adminTab === 'review' 
+                ? 'bg-sky-600 text-white font-bold' 
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
-            <FileText size={15} className={adminTab === 'review' ? 'text-amber-200' : 'text-amber-600'} />
+            <FileText size={15} className={adminTab === 'review' ? 'text-white' : 'text-slate-500'} />
             <span>สลิปค้างรีวิว</span>
             {transactions.filter(t => t.status === 'escalated').length > 0 && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${adminTab === 'review' ? 'bg-white text-amber-800' : 'bg-amber-500 text-white'}`}>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                adminTab === 'review' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'
+              }`}>
                 {transactions.filter(t => t.status === 'escalated').length}
               </span>
             )}
           </button>
           <button 
             onClick={() => setAdminTab('players')}
-            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
-              adminTab === 'players' ? 'bg-teal-700 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
+              adminTab === 'players' 
+                ? 'bg-sky-600 text-white font-bold' 
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
-            <Users size={15} className={adminTab === 'players' ? 'text-teal-200' : 'text-teal-600'} />
+            <Users size={15} className={adminTab === 'players' ? 'text-white' : 'text-slate-500'} />
             <span>เครดิตผู้เล่น</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${adminTab === 'players' ? 'bg-teal-900/60 text-teal-100' : 'bg-slate-200 text-slate-700'}`}>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+              adminTab === 'players' ? 'bg-sky-800 text-white' : 'bg-slate-200 text-slate-700'
+            }`}>
               {players.length}
             </span>
           </button>
           <button 
             onClick={() => { setAdminTab('logs'); setTxStatusFilter('all'); }}
-            className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide ${
-              adminTab === 'logs' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
+              adminTab === 'logs' 
+                ? 'bg-sky-600 text-white font-bold' 
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
-            <Database size={15} className={adminTab === 'logs' ? 'text-slate-300' : 'text-slate-500'} />
+            <Database size={15} className={adminTab === 'logs' ? 'text-white' : 'text-slate-500'} />
             <span>ทรานแซคชัน</span>
           </button>
         </div>
@@ -2245,7 +2271,7 @@ export default function App() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
                 <div>
                   <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
-                    <Rocket size={18} className="text-emerald-600" />
+                    <Layers size={18} className="text-sky-600" />
                     ออกราคาช่างเปิดรับดวล
                   </h3>
                   <p className="text-xs text-slate-500 font-sans mt-0.5">
@@ -2399,9 +2425,9 @@ export default function App() {
                 {/* Broadcast Quote Primary Button */}
                 <button
                   onClick={() => handleBroadcastFastQuote()}
-                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs transition-all active:scale-95 flex items-center justify-center gap-2 font-heading tracking-wide"
+                  className="w-full py-3 px-4 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg text-xs transition-all active:scale-95 flex items-center justify-center gap-2 font-heading tracking-wide cursor-pointer"
                 >
-                  <Rocket size={15} />
+                  <Send size={15} />
                   <span>ประกาศราคาช่าง {targetMin && targetMax ? `${targetMin}-${targetMax}s` : ''} ลง{broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่มดวลสด' : 'กลุ่มที่เลือก'}</span>
                 </button>
 
@@ -2430,7 +2456,7 @@ export default function App() {
                     ป้อนผลเวลาบินจริง & สรุปผลรอบ
                   </h3>
                   <p className="text-xs text-slate-500 font-sans mt-0.5">
-                    ป้อนเวลาวินาทีที่จรวดบินสำเร็จจริง เพื่อคำนวณผู้ชนะและโอนจ่ายแต้มผลการดวลทั้งหมดในรอบนี้
+                    ป้อนเวลาวินาทีที่บั้งไฟทะยานขึ้นจริง เพื่อคำนวณผู้ชนะและโอนจ่ายแต้มผลการดวลทั้งหมดในรอบนี้
                   </p>
                 </div>
                 <span className="self-start sm:self-auto text-[10px] text-sky-700 font-extrabold bg-sky-50 px-2.5 py-1 rounded-full border border-sky-200">
@@ -2445,7 +2471,7 @@ export default function App() {
                   {/* Actual Air Time Input */}
                   <div className="space-y-1 bg-white p-3.5 rounded-xl border border-slate-200">
                     <label className="text-xs font-bold text-slate-700 flex items-center gap-1 font-heading">
-                      <Clock size={14} className="text-indigo-600" />
+                      <Clock size={14} className="text-sky-600" />
                       ผลยิงจริงในสนาม (Actual Air Time in Seconds):
                     </label>
                     <div className="flex items-center gap-2">
@@ -2454,10 +2480,10 @@ export default function App() {
                         step="0.1"
                         value={customRocketTime}
                         onChange={(e) => setCustomRocketTime(e.target.value)}
-                        className="w-full bg-indigo-50/50 border border-indigo-200 text-indigo-950 font-black px-3 py-2 rounded-xl text-base font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        className="w-full bg-sky-50/50 border border-sky-200 text-sky-950 font-black px-3 py-2 rounded-lg text-base font-mono focus:ring-2 focus:ring-sky-500 focus:outline-none"
                         placeholder="เช่น 355.0"
                       />
-                      <span className="text-sm text-indigo-700 font-mono font-black">s</span>
+                      <span className="text-sm text-sky-700 font-mono font-black">s</span>
                     </div>
                   </div>
 
@@ -2502,10 +2528,10 @@ export default function App() {
                 {/* Settle Round Primary Button */}
                 <button
                   onClick={() => handleSubmitOnsiteResult(Number(customRocketTime) || 355)}
-                  className="w-full py-3.5 px-6 bg-sky-600 hover:bg-sky-500 text-white font-black text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-sky-600/20 active:scale-95 transition-all font-heading"
+                  className="w-full py-3.5 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider rounded-lg flex items-center justify-center gap-2 active:scale-95 transition-all font-heading cursor-pointer"
                 >
-                  <Zap size={16} />
-                  ⚡ สรุปผลและชำระแต้มดีลทั้งหมด / SETTLE ONSITE ROUND (ผลลัพธ์ยิงจริง: {customRocketTime || 0}s)
+                  <CheckCircle size={16} />
+                  <span>⚡ สรุปผลและชำระแต้มดีลทั้งหมด / SETTLE ONSITE ROUND (ผลลัพธ์ยิงจริง: {customRocketTime || 0}s)</span>
                 </button>
               </div>
 
@@ -4005,16 +4031,18 @@ export default function App() {
         </div>
       </main>
 
-      {/* Dynamic Settle Outcome Result Report Popup Overlay Modal */}
+      {/* Dynamic Settle Outcome Result Report Popup Overlay Modal - Cloud PMS Style */}
       {settlementResult && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[99999] p-4 animate-fade-in font-sans">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 max-w-md w-full text-slate-800 space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-[99999] p-4 font-sans">
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 max-w-md w-full text-slate-800 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="text-center space-y-2">
-              <div className="text-4xl">🚀</div>
+              <div className="w-12 h-12 bg-sky-50 text-sky-600 rounded-xl flex items-center justify-center mx-auto border border-sky-100">
+                <Cloud size={28} />
+              </div>
               <h3 className="text-lg font-black text-slate-900 font-heading">
-                สรุปผลการจับเวลาขีปนาวุธ ({settlementResult.rocketName || 'โชคน้องกวาง'})
+                สรุปผลการจับเวลาบั้งไฟ ({settlementResult.rocketName || 'ค่ายบั้งไฟ'})
               </h3>
-              <p className="text-xs text-slate-500">ผลการปล่อยจรวดเปรียบเทียบเกณฑ์เส้นแบ่งราคาช่าง</p>
+              <p className="text-xs text-slate-500">ผลการบินเปรียบเทียบเกณฑ์เส้นแบ่งราคาช่าง (Bang Fai Commander)</p>
             </div>
             
             <div className="grid grid-cols-2 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100 text-center font-mono">
@@ -4069,7 +4097,7 @@ export default function App() {
                 setRocketStatus('idle');
                 setRocketFlightTime(0.00);
               }}
-              className="w-full py-2.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition-all active:scale-95 shadow-md flex items-center justify-center gap-1.5"
+              className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <CheckCircle size={14} />
               ปิดหน้าต่างและเริ่มรอบใหม่
@@ -4149,19 +4177,21 @@ function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, p
   };
 
   return (
-    <div className="w-full max-w-4xl min-h-screen p-4 md:p-6 flex flex-col font-sans text-slate-800 bg-slate-50/50">
-      {/* Brand Header */}
-      <header className="mb-6 flex justify-between items-center border-b border-slate-200 pb-4">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-teal-600 flex items-center justify-center text-white text-lg">💳</div>
+    <div className="w-full max-w-4xl min-h-screen p-4 md:p-6 flex flex-col font-sans text-slate-800 bg-slate-50">
+      {/* Brand Header - Cloud PMS Style */}
+      <header className="mb-6 flex justify-between items-center border-b border-slate-200 pb-4 bg-white p-4 rounded-xl">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-sky-600 flex items-center justify-center text-white">
+            <Cloud size={20} />
+          </div>
           <div>
-            <h1 className="text-lg font-black tracking-tight text-teal-800 uppercase font-heading">
-              Demo Statement Console
+            <h1 className="text-lg font-black tracking-tight text-slate-900 uppercase font-heading">
+              Bang Fai Commander
             </h1>
-            <p className="text-[10px] text-slate-500">ระบบตรวจสอบรายการเดินบัญชีผู้เล่นรายบุคคล</p>
+            <p className="text-[10px] text-slate-500">ระบบตรวจสอบรายการเดินบัญชีผู้เล่นรายบุคคล (Player Statement Console)</p>
           </div>
         </div>
-        <span className="px-2.5 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-teal-100 text-teal-800 border border-teal-200">
+        <span className="px-2.5 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-sky-50 text-sky-700 border border-sky-200">
           Player View
         </span>
       </header>
@@ -4170,7 +4200,7 @@ function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, p
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 flex-grow">
         {/* Left Card: Account Summary */}
         <div className="md:col-span-1 space-y-4">
-          <div className="glass-panel p-5 bg-gradient-to-br from-teal-700 to-emerald-800 text-white rounded-2xl shadow-lg border-none">
+          <div className="p-5 bg-gradient-to-br from-sky-700 to-sky-900 text-white rounded-xl border border-sky-800">
             <span className="text-[10px] uppercase font-bold tracking-wider opacity-80 block">เครดิตทั้งหมด (Balance)</span>
             <span className="text-3xl font-black mt-2 block font-mono">
               {player.balance.toLocaleString('th-TH', { minimumFractionDigits: 2 })} <span className="text-sm font-bold opacity-80">แต้ม</span>
@@ -4187,7 +4217,7 @@ function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, p
             </div>
           </div>
 
-          <div className="glass-panel p-5 space-y-3">
+          <div className="bg-white p-5 rounded-xl border border-slate-200 space-y-3">
             <h3 className="text-xs font-black text-slate-700 uppercase tracking-widest border-b border-slate-100 pb-2">ข้อมูลธนาคารรับเงินโอนคืน</h3>
             <div className="space-y-2 text-xs font-semibold">
               <div>
@@ -4207,24 +4237,24 @@ function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, p
         </div>
 
         {/* Right Area: Tabs and details */}
-        <div className="md:col-span-2 flex flex-col glass-panel overflow-hidden h-[600px]">
+        <div className="md:col-span-2 flex flex-col bg-white rounded-xl border border-slate-200 overflow-hidden h-[600px]">
           {/* Tab switches */}
-          <div className="flex border-b border-slate-200/80 bg-slate-50/50 text-xs font-bold text-slate-500">
+          <div className="flex border-b border-slate-200 bg-slate-50 text-xs font-bold text-slate-500">
             <button
               onClick={() => setActiveTab('statement')}
-              className={`flex-1 py-3 border-b-2 text-center transition-all ${
-                activeTab === 'statement' ? 'border-teal-600 text-teal-700 bg-white font-black' : 'border-transparent hover:text-slate-700'
+              className={`flex-1 py-3 border-b-2 text-center transition-all cursor-pointer ${
+                activeTab === 'statement' ? 'border-sky-600 text-sky-700 bg-white font-black' : 'border-transparent hover:text-slate-700'
               }`}
             >
               📊 ประวัติการเงิน ({transactions.length})
             </button>
             <button
               onClick={() => setActiveTab('bets')}
-              className={`flex-1 py-3 border-b-2 text-center transition-all ${
-                activeTab === 'bets' ? 'border-teal-600 text-teal-700 bg-white font-black' : 'border-transparent hover:text-slate-700'
+              className={`flex-1 py-3 border-b-2 text-center transition-all cursor-pointer ${
+                activeTab === 'bets' ? 'border-sky-600 text-sky-700 bg-white font-black' : 'border-transparent hover:text-slate-700'
               }`}
             >
-              🚀 รายการดวล ({bets.length})
+              ⏱️ รายการดวลบั้งไฟ ({bets.length})
             </button>
           </div>
 
@@ -4243,7 +4273,7 @@ function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, p
                       <div key={t.id} className="p-3.5 border border-slate-100 rounded-xl flex items-center justify-between hover:border-slate-200 transition-all font-sans">
                         <div className="space-y-1">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            !isWithdrawal ? 'bg-teal-50 text-teal-700 border border-teal-100' : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            !isWithdrawal ? 'bg-sky-50 text-sky-700 border border-sky-100' : 'bg-slate-100 text-slate-600 border border-slate-200'
                           }`}>
                             {!isWithdrawal ? 'ฝากเงิน' : 'ถอนเงิน'}
                           </span>
@@ -4251,7 +4281,7 @@ function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, p
                           <span className="text-[9px] text-slate-400 block">{t.timestamp}</span>
                         </div>
                         <div className="text-right space-y-1.5">
-                          <span className={`text-sm font-black font-mono block ${!isWithdrawal ? 'text-teal-600' : 'text-slate-600'}`}>
+                          <span className={`text-sm font-black font-mono block ${!isWithdrawal ? 'text-sky-600' : 'text-slate-600'}`}>
                             {amountText} บาท
                           </span>
                           <span className={`text-[9.5px] px-2 py-0.5 rounded-md font-bold uppercase block w-max ml-auto ${
@@ -4275,7 +4305,7 @@ function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, p
             {activeTab === 'bets' && (
               <div className="space-y-3">
                 {bets.length === 0 ? (
-                  <div className="text-center py-12 text-slate-400 text-xs italic font-sans">ไม่มีประวัติการส่งข้อมูลดวลความเร็วขีปนาวุธ</div>
+                  <div className="text-center py-12 text-slate-400 text-xs italic font-sans">ไม่มีประวัติการส่งข้อมูลดวลเวลาบั้งไฟ</div>
                 ) : (
                   bets.slice().reverse().map(b => {
                     const isLow = b.playerLowId === playerUserId;
@@ -4326,7 +4356,7 @@ function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, p
                           <div className="text-[10px] text-slate-500 pt-1.5 border-t border-slate-50 flex justify-between font-sans">
                             <span>คู่ดวล: {opponentText}</span>
                             {b.finalTime !== undefined && (
-                              <span>เวลาจรวด: <strong className="text-slate-700">{b.finalTime}s</strong></span>
+                              <span>เวลาบั้งไฟ: <strong className="text-slate-700">{b.finalTime}s</strong></span>
                             )}
                           </div>
                         )}
@@ -4336,7 +4366,6 @@ function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, p
                 )}
               </div>
             )}
-
 
           </div>
         </div>
@@ -4414,20 +4443,24 @@ function AdminLockScreen({
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-slate-900 px-4 font-sans" style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div className="w-full max-w-md bg-slate-800 border border-slate-700 p-8 rounded-2xl shadow-2xl space-y-6 text-white" style={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#ffffff', borderRadius: '1rem', padding: '2rem', maxWidth: '28rem', width: '100%' }}>
-        <div className="text-center space-y-2" style={{ textAlign: 'center' }}>
-          <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/30 rounded-full flex items-center justify-center mx-auto text-emerald-400" style={{ width: '4rem', height: '4rem', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)', borderRadius: '9999px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto', color: '#34d399' }}>
-            <Lock size={28} />
+    <div className="min-h-screen w-full flex items-center justify-center bg-slate-50 px-4 font-sans">
+      <div className="w-full max-w-md bg-white border border-slate-200 p-8 rounded-2xl space-y-6 text-slate-800">
+        <div className="text-center space-y-2">
+          <div className="w-16 h-16 bg-sky-50 border border-sky-100 rounded-2xl flex items-center justify-center mx-auto text-sky-600">
+            <Cloud size={30} />
           </div>
-          <h2 className="text-2xl font-black font-heading tracking-tight" style={{ color: '#ffffff', fontSize: '1.5rem', fontWeight: 900 }}>เข้าสู่ระบบแอดมิน</h2>
-          <p className="text-xs text-slate-400" style={{ color: '#94a3b8', fontSize: '0.75rem' }}>ระบบควบคุมจรวดและธนาคารจำลอง (Rocket Science Admin Console)</p>
+          <h2 className="text-2xl font-black font-heading tracking-tight text-slate-900">
+            Bang Fai Commander
+          </h2>
+          <p className="text-xs text-slate-500">
+            ระบบบริหารจัดการธุรกรรมและการแข่งขันภาคสนาม (Cloud PMS Console)
+          </p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-4" style={{ marginTop: '1.5rem' }}>
           {/* Username Field */}
           <div className="space-y-1.5" style={{ marginBottom: '1rem' }}>
-            <label className="text-xs font-bold text-slate-300 block" style={{ color: '#cbd5e1', fontSize: '0.75rem', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>
+            <label className="text-xs font-bold text-slate-700 block">
               ชื่อผู้ใช้ (Username)
             </label>
             <div className="relative">
@@ -4442,8 +4475,7 @@ function AdminLockScreen({
                 placeholder="ป้อนชื่อผู้ใช้ (เช่น admin)..."
                 value={usernameInput}
                 onChange={(e) => setUsernameInput(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-white font-sans text-sm tracking-normal"
-                style={{ width: '100%', paddingLeft: '2.5rem', paddingRight: '1rem', paddingTop: '0.625rem', paddingBottom: '0.625rem', backgroundColor: '#020617', color: '#ffffff', borderColor: '#334155', borderRadius: '0.75rem', fontSize: '0.875rem' }}
+                className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 text-slate-900 font-sans text-sm tracking-normal"
                 autoFocus
               />
             </div>
@@ -4451,7 +4483,7 @@ function AdminLockScreen({
 
           {/* Password Field */}
           <div className="space-y-1.5" style={{ marginBottom: '1rem' }}>
-            <label className="text-xs font-bold text-slate-300 block" style={{ color: '#cbd5e1', fontSize: '0.75rem', fontWeight: 700, display: 'block', marginBottom: '0.25rem' }}>
+            <label className="text-xs font-bold text-slate-700 block">
               รหัสผ่าน (Password)
             </label>
             <div className="relative">
@@ -4464,13 +4496,12 @@ function AdminLockScreen({
                 placeholder="ป้อนรหัสผ่าน..."
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
-                className="w-full pl-10 pr-10 py-2.5 bg-slate-950 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-white font-mono text-sm tracking-wider"
-                style={{ width: '100%', paddingLeft: '2.5rem', paddingRight: '2.5rem', paddingTop: '0.625rem', paddingBottom: '0.625rem', backgroundColor: '#020617', color: '#ffffff', borderColor: '#334155', borderRadius: '0.75rem', fontSize: '0.875rem' }}
+                className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 text-slate-900 font-mono text-sm tracking-wider"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-200 transition-colors"
+                className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
                 tabIndex={-1}
               >
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -4479,8 +4510,8 @@ function AdminLockScreen({
           </div>
 
           {loginError && (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-center justify-center gap-2">
-              <span className="text-xs font-semibold text-rose-400 text-center" style={{ color: '#fb7185', fontSize: '0.75rem', textAlign: 'center' }}>
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-center justify-center gap-2">
+              <span className="text-xs font-semibold text-rose-700 text-center">
                 ⚠️ {loginError}
               </span>
             </div>
@@ -4489,18 +4520,17 @@ function AdminLockScreen({
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 active:scale-98 disabled:opacity-50 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
-            style={{ width: '100%', padding: '0.75rem', backgroundColor: '#059669', color: '#ffffff', border: 'none', borderRadius: '0.75rem', fontSize: '0.875rem', fontWeight: 700, cursor: 'pointer' }}
+            className="w-full py-3 bg-sky-600 hover:bg-sky-700 active:bg-sky-800 disabled:opacity-50 text-white rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
           >
             <LogIn size={16} />
             {isSubmitting ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบ (Sign In)'}
           </button>
         </form>
 
-        <div className="pt-2 border-t border-slate-700/60 text-center">
-          <p className="text-[11px] text-slate-500 flex items-center justify-center gap-1">
-            <ShieldCheck size={13} className="text-emerald-500/70" />
-            <span>256-Bit SSL Protected System Console</span>
+        <div className="pt-2 border-t border-slate-200 text-center">
+          <p className="text-[11px] text-slate-500 flex items-center justify-center gap-1.5">
+            <ShieldCheck size={13} className="text-sky-600" />
+            <span>256-Bit SSL Protected Enterprise Property Console</span>
           </p>
         </div>
       </div>

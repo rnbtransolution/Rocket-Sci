@@ -1,29 +1,91 @@
-@import url('https://fonts.googleapis.com/css2?family=Anuphan:wght@300;400;500;600;700;800&family=Google+Sans:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
+/* -------------------------------------------------------------
+   LOCAL FONT DEFINITIONS: Google Sans (Local mac font injection)
+   ------------------------------------------------------------- */
+@font-face {
+  font-family: 'Google Sans';
+  font-style: normal;
+  font-weight: 400;
+  src: local('Google Sans Regular'), local('Google Sans'), local('GoogleSans'), local('GoogleSans-Regular'),
+       url('file:///Users/ittmacair/Library/Fonts/GoogleSans-Regular.ttf') format('truetype');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Google Sans';
+  font-style: normal;
+  font-weight: 500;
+  src: local('Google Sans Medium'), local('GoogleSans-Medium'),
+       url('file:///Users/ittmacair/Library/Fonts/GoogleSans-Medium.ttf') format('truetype');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Google Sans';
+  font-style: normal;
+  font-weight: 700;
+  src: local('Google Sans Bold'), local('GoogleSans-Bold'),
+       url('file:///Users/ittmacair/Library/Fonts/GoogleSans-Bold.ttf') format('truetype');
+  font-display: swap;
+}
+
 :root {
-  /* Clean Corporate Light Mode Colors */
-  --bg-space: #f8fafc; /* Very light slate gray background */
-  --bg-space-dark: #f1f5f9; /* Slate 100 background */
-  --glass-bg: rgba(255, 255, 255, 0.95); /* Pure white glass cards */
-  --glass-border: rgba(226, 232, 240, 0.8); /* Slate 200 borders */
-  --glass-shadow: rgba(15, 23, 42, 0.05); /* Soft, premium drop shadow */
-  
-  --line-header: #0284c7; /* Professional Sky Blue for LINE */
+  /* -------------------------------------------------------------
+     CLOUD PMS COLOR PALETTE (pmscloud.com Inspired)
+     ------------------------------------------------------------- */
+  /* Primary Brand: Bright Professional Blue / Azure / Cyan */
+  --pms-blue-50: #f0f9ff;
+  --pms-blue-100: #e0f2fe;
+  --pms-blue-200: #bae6fd;
+  --pms-blue-500: #0ea5e9;
+  --pms-blue-600: #0284c7; /* Primary Brand Core */
+  --pms-blue-700: #0369a1; /* Deep Corporate Navy */
+  --pms-blue-800: #075985;
+  --pms-blue-900: #0c4a6e;
+
+  /* Accent CTAs: Strong Orange & Operational Green */
+  --pms-orange-50: #fff7ed;
+  --pms-orange-100: #ffedd5;
+  --pms-orange-500: #f97316;
+  --pms-orange-600: #ea580c; /* High-contrast CTA */
+  --pms-orange-700: #c2410c;
+
+  --pms-green-50: #f0fdf4;
+  --pms-green-100: #dcfce7;
+  --pms-green-600: #16a34a; /* Operational Confirmation */
+  --pms-green-700: #15803d;
+
+  /* Neutrals: Crisp White, Light Gray, Dark Charcoal */
+  --pms-bg: #f8fafc;        /* Slate 50 content background */
+  --pms-bg-subtle: #f1f5f9; /* Slate 100 sub-panels */
+  --pms-card: #ffffff;      /* Pure white container */
+  --pms-border: #e2e8f0;    /* Slate 200 clean hairline border */
+  --pms-border-dark: #cbd5e1;
+  --pms-text-main: #0f172a; /* Slate 900 dark charcoal */
+  --pms-text-body: #334155; /* Slate 700 standard text */
+  --pms-text-muted: #64748b;/* Slate 500 captions */
+
+  /* Legacy system compat mappings */
+  --bg-space: #f8fafc;
+  --bg-space-dark: #f1f5f9;
+  --line-header: #0284c7;
   --line-chat-bg: #f8fafc;
-  
-  --color-low: #0ea5e9; /* Sky 500 */
-  --color-low-bg: rgba(14, 165, 233, 0.08);
-  --color-high: #e11d48; /* Rose 600 */
+  --color-low: #0284c7;
+  --color-low-bg: rgba(2, 132, 199, 0.08);
+  --color-high: #e11d48;
   --color-high-bg: rgba(225, 29, 72, 0.08);
-  
-  --color-success: #16a34a; /* Green 600 */
-  --color-warning: #ea580c; /* Orange 600 */
-  --color-danger: #dc2626; /* Red 600 */
-  
-  /* Corporate Fonts (Google Sans & Anuphan) */
-  --font-sans: 'Anuphan', 'Google Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-heading: 'Google Sans', 'Anuphan', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --color-success: #16a34a;
+  --color-warning: #ea580c;
+  --color-danger: #dc2626;
+
+  /* -------------------------------------------------------------
+     STRICT TYPOGRAPHY: Sarabun (Thai) + Google Sans (English)
+     ------------------------------------------------------------- */
+  --font-sans: 'Google Sans', 'Sarabun', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-heading: 'Google Sans', 'Sarabun', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-thai: 'Sarabun', 'Google Sans', sans-serif;
 }
 
 /* Base resets & typography (Zero Box-Shadow Standard) */
@@ -35,7 +97,7 @@
   text-shadow: none !important;
 }
 
-/* Contrast Rule 1: Solid Dark / Deep Red / Deep Blue / Deep Slate -> White text */
+/* High-Contrast Corporate Rules */
 .bg-slate-900 { background-color: #0f172a !important; color: #ffffff !important; }
 .bg-slate-800 { background-color: #1e293b !important; color: #ffffff !important; }
 .bg-slate-950 { background-color: #020617 !important; color: #ffffff !important; }
@@ -43,25 +105,22 @@
 .bg-dark,
 .bg-red-600, .bg-red-700, .bg-red-800, .bg-red-900,
 .bg-rose-600, .bg-rose-700, .bg-rose-800, .bg-rose-900,
-.bg-teal-600, .bg-teal-700, .bg-teal-800,
 .bg-sky-600, .bg-sky-700, .bg-sky-800, .bg-sky-900,
-.bg-emerald-600, .bg-emerald-700, .bg-emerald-800, .bg-emerald-900,
+.bg-emerald-600, .bg-emerald-700, .bg-emerald-800,
 .bg-indigo-950 {
   color: #ffffff !important;
 }
 
-.bg-teal-600 { background-color: #0d9488 !important; }
-.bg-teal-700 { background-color: #0f766e !important; }
-.bg-sky-600  { background-color: #0284c7 !important; }
-.bg-sky-700  { background-color: #0369a1 !important; }
-.bg-emerald-600 { background-color: #059669 !important; }
-.bg-emerald-700 { background-color: #047857 !important; }
+.bg-sky-600  { background-color: #0284c7 !important; color: #ffffff !important; }
+.bg-sky-700  { background-color: #0369a1 !important; color: #ffffff !important; }
+.bg-emerald-600 { background-color: #16a34a !important; color: #ffffff !important; }
+.bg-emerald-700 { background-color: #15803d !important; color: #ffffff !important; }
 
 .text-bright-white {
   color: #ffffff !important;
 }
 
-/* Contrast Rule 2: Pastel / Light backgrounds -> Dark text (NOT white) */
+/* Pastel / Light backgrounds -> Dark text (NOT white) */
 .bg-emerald-50, .bg-emerald-100 { color: #064e3b !important; }
 .bg-indigo-50, .bg-indigo-100 { color: #1e1b4b !important; }
 .bg-amber-50, .bg-amber-100 { color: #78350f !important; }
@@ -70,125 +129,126 @@
 .bg-slate-50, .bg-slate-100 { color: #0f172a !important; }
 
 body {
-  background-color: var(--bg-space);
-  background-image: 
-    radial-gradient(at 10% 20%, rgba(14, 165, 233, 0.03) 0px, transparent 40%),
-    radial-gradient(at 90% 10%, rgba(225, 29, 72, 0.02) 0px, transparent 40%);
-  color: #334155; /* Slate 700 */
+  background-color: var(--pms-bg);
+  color: var(--pms-text-body);
   font-family: var(--font-sans);
   min-height: 100vh;
   overflow-x: hidden;
   letter-spacing: -0.01em;
 }
 
-/* Custom premium scrollbar */
+/* Custom corporate scrollbar */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.02);
+  background: #f1f5f9;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 99px;
+  background: #cbd5e1;
+  border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--line-header);
+  background: var(--pms-blue-600);
 }
 
-/* Clean Corporate Cards */
-.glass-panel {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  transition: all 0.2s ease-in-out;
-}
-
-.glass-panel-hover:hover {
-  border-color: #cbd5e1;
+/* Clean Corporate SaaS Cards (Flat with Crisp Hairline Borders) */
+.glass-panel, .pms-card {
   background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  transition: border-color 0.15s ease-in-out;
+}
+
+.glass-panel-hover:hover, .pms-card-hover:hover {
+  border-color: #cbd5e1;
+}
+
+/* Cloud PMS Segmented Tabs */
+.pms-tab-active {
+  background-color: #0284c7 !important;
+  color: #ffffff !important;
+  font-weight: 700;
 }
 
 /* Text styles */
 .glow-text-cyan {
-  color: #0369a1; /* Sky 700 */
+  color: #0369a1;
 }
 .glow-text-magenta {
-  color: #be123c; /* Rose 700 */
+  color: #be123c;
 }
 .glow-text-success {
-  color: #15803d; /* Green 700 */
+  color: #15803d;
 }
 
 /* LINE chat bubbles */
 .line-bubble-bot {
-  background: white;
+  background: #ffffff;
   color: #1e293b;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   border: 1px solid #e2e8f0;
 }
 
 .line-bubble-user {
-  background: #9beb52;
-  color: #1e293b;
-  box-shadow: 0 1px 3px rgba(155, 235, 82, 0.2);
-  border: 1px solid #86d23b;
+  background: #0284c7;
+  color: #ffffff;
+  border: 1px solid #0369a1;
 }
 
-/* LINE OA Custom Rich Menu gradient */
+/* LINE OA Custom Rich Menu */
 .rich-menu-gradient {
-  background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+  background: #f8fafc;
   border-top: 1px solid #cbd5e1;
 }
 
 .rich-menu-btn {
-  background: linear-gradient(145deg, #ffffff 0%, #f1f5f9 100%);
+  background: #ffffff;
   border: 1px solid #cbd5e1;
   color: #334155;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
   transition: all 0.15s ease;
 }
 .rich-menu-btn:hover {
-  background: #ffffff;
-  border-color: #94a3b8;
+  background: #f0f9ff;
+  border-color: #0284c7;
+  color: #0284c7;
 }
 .rich-menu-btn:active {
-  transform: scale(0.97);
+  transform: scale(0.98);
 }
 
 /* Spring motion for message popin */
 @keyframes pop-in {
-  0% { transform: scale(0.96) translateY(5px); opacity: 0; }
+  0% { transform: scale(0.97) translateY(4px); opacity: 0; }
   100% { transform: scale(1) translateY(0); opacity: 1; }
 }
 
 .msg-popin {
-  animation: pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: pop-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* Custom premium badge gradients */
+/* Custom Corporate Badges */
 .badge-low {
-  background: var(--color-low-bg);
-  border: 1px solid rgba(14, 165, 233, 0.2);
+  background: rgba(2, 132, 199, 0.08);
+  border: 1px solid rgba(2, 132, 199, 0.25);
   color: #0369a1;
 }
 
 .badge-high {
-  background: var(--color-high-bg);
-  border: 1px solid rgba(225, 29, 72, 0.2);
+  background: rgba(225, 29, 72, 0.08);
+  border: 1px solid rgba(225, 29, 72, 0.25);
   color: #be123c;
 }
 
 .badge-success {
   background: rgba(22, 163, 74, 0.08);
-  border: 1px solid rgba(22, 163, 74, 0.2);
+  border: 1px solid rgba(22, 163, 74, 0.25);
   color: #15803d;
 }
 
 .badge-warning {
   background: rgba(234, 88, 12, 0.08);
-  border: 1px solid rgba(234, 88, 12, 0.2);
+  border: 1px solid rgba(234, 88, 12, 0.25);
   color: #c2410c;
 }
 
@@ -197,16 +257,3 @@ body {
   text-align: center;
   margin-bottom: 12px;
 }
-
-/* Watermark backdrop image/icon containers */
-.watermark-container {
-  position: relative;
-  overflow: hidden;
-}
-
-/* Subtle corporate patterns */
-.grid-dots-pattern {
-  background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
-  background-size: 16px 16px;
-}
-
