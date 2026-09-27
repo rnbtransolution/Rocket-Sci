@@ -57,21 +57,19 @@ js_content = template_literal_pattern.sub(escape_slashes_in_template_literals, j
 # Solution: extract @import rules from CSS, convert to <link rel="stylesheet">
 # tags (which GAS does NOT sanitize), then inline only the remaining CSS.
 # -----------------------------------------------------------------------
-import_pattern = re.compile(r'@import\s+"([^"]+)"\s*;?\s*', re.IGNORECASE)
+import_pattern = re.compile(r'@import\s+(?:url\([\'"]?([^\'")]+)[\'"]?\)|["\']([^"\']+)["\'])\s*;?\s*', re.IGNORECASE)
 font_link_tags = []
 for match in import_pattern.finditer(css_content):
-    url = match.group(1)
-    font_link_tags.append(f'<link rel="stylesheet" href="{url}" />')
-    print(f"  Extracted @import: {url[:90]}...")
+    url = match.group(1) or match.group(2)
+    if url and url not in html_content:
+        font_link_tags.append(f'<link rel="stylesheet" href="{url}" />')
+        print(f"  Extracted @import: {url[:90]}...")
 
 # Remove all @import lines from the inlined CSS block
 css_content_clean = import_pattern.sub('', css_content).strip()
 
 # Strip ' in oklab' from linear-gradient to ensure 100% cross-browser backwards compatibility
 css_content_clean = re.sub(r'\s+in\s+oklab', '', css_content_clean)
-
-if not font_link_tags:
-    print("  Warning: No @import rules found in CSS.")
 
 # Locate CSS link tag in HTML and replace it with clean inlined CSS
 css_href = f'href="/assets/{css_name}"'
@@ -80,8 +78,8 @@ if css_idx != -1:
     start_link = html_content.rfind("<link", 0, css_idx)
     end_link = html_content.find(">", css_idx) + 1
     old_link_tag = html_content[start_link:end_link]
-    font_links_html = "\n    ".join(font_link_tags)
-    replacement = f"{font_links_html}\n    <style>\n{css_content_clean}\n</style>"
+    font_links_html = ("\n    ".join(font_link_tags) + "\n    ") if font_link_tags else ""
+    replacement = f"{font_links_html}<style>\n{css_content_clean}\n</style>"
     html_content = html_content.replace(old_link_tag, replacement)
     print(f"  CSS inlined ({len(css_content_clean):,} chars). {len(font_link_tags)} @import(s) moved to <link> tags.")
 else:

@@ -2,7 +2,17 @@
 @import "tailwindcss";
 
 /* -------------------------------------------------------------
-   LOCAL FONT DEFINITIONS: Google Sans (Local mac font injection)
+   TAILWIND v4 THEME MAPPINGS
+   ------------------------------------------------------------- */
+@theme {
+  --font-sans: 'Google Sans', 'Sarabun', 'TH SarabunPSK', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-heading: 'Google Sans', 'Sarabun', 'TH SarabunPSK', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-thai: 'Sarabun', 'TH SarabunPSK', 'Google Sans', sans-serif;
+}
+
+/* -------------------------------------------------------------
+   LOCAL FONT DEFINITIONS: Google Sans (Latin & Numerics ONLY)
+   Strictly restricted to Latin Unicode so Thai falls through to Sarabun
    ------------------------------------------------------------- */
 @font-face {
   font-family: 'Google Sans';
@@ -10,6 +20,7 @@
   font-weight: 400;
   src: local('Google Sans Regular'), local('Google Sans'), local('GoogleSans'), local('GoogleSans-Regular'),
        url('file:///Users/ittmacair/Library/Fonts/GoogleSans-Regular.ttf') format('truetype');
+  unicode-range: U+0000-02AF, U+1E00-1EFF, U+2000-206F, U+2070-209F, U+20A0-20CF, U+2100-214F, U+2190-21FF, U+2200-22FF;
   font-display: swap;
 }
 
@@ -19,6 +30,7 @@
   font-weight: 500;
   src: local('Google Sans Medium'), local('GoogleSans-Medium'),
        url('file:///Users/ittmacair/Library/Fonts/GoogleSans-Medium.ttf') format('truetype');
+  unicode-range: U+0000-02AF, U+1E00-1EFF, U+2000-206F, U+2070-209F, U+20A0-20CF, U+2100-214F, U+2190-21FF, U+2200-22FF;
   font-display: swap;
 }
 
@@ -28,6 +40,49 @@
   font-weight: 700;
   src: local('Google Sans Bold'), local('GoogleSans-Bold'),
        url('file:///Users/ittmacair/Library/Fonts/GoogleSans-Bold.ttf') format('truetype');
+  unicode-range: U+0000-02AF, U+1E00-1EFF, U+2000-206F, U+2070-209F, U+20A0-20CF, U+2100-214F, U+2190-21FF, U+2200-22FF;
+  font-display: swap;
+}
+
+/* -------------------------------------------------------------
+   SARABUN FONT DEFINITIONS (Thai Standard)
+   Supports local Mac fonts and Google Fonts CDN fallbacks
+   ------------------------------------------------------------- */
+@font-face {
+  font-family: 'Sarabun';
+  font-style: normal;
+  font-weight: 400;
+  src: local('Sarabun Regular'), local('Sarabun'), local('TH SarabunPSK'), local('THSarabunPSK'), local('TH Sarabun New'),
+       url('file:///Users/ittmacair/Library/Fonts/THSarabun.ttf') format('truetype'),
+       url('https://fonts.gstatic.com/s/sarabun/v17/DtVjJx26TKEr37c9aAFJn3YO5gjupg.woff2') format('woff2');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Sarabun';
+  font-style: normal;
+  font-weight: 700;
+  src: local('Sarabun Bold'), local('Sarabun-Bold'), local('TH SarabunPSK Bold'), local('THSarabunPSK-Bold'), local('TH Sarabun New Bold'),
+       url('file:///Users/ittmacair/Library/Fonts/THSarabun%20Bold.ttf') format('truetype'),
+       url('https://fonts.gstatic.com/s/sarabun/v17/DtVmJx26TKEr37c9YK5sik8s6yLUrwB0lw.woff2') format('woff2');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'TH SarabunPSK';
+  font-style: normal;
+  font-weight: 400;
+  src: local('TH SarabunPSK'), local('THSarabunPSK'), local('TH Sarabun New'), local('Sarabun'),
+       url('file:///Users/ittmacair/Library/Fonts/THSarabun.ttf') format('truetype');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'TH SarabunPSK';
+  font-style: normal;
+  font-weight: 700;
+  src: local('TH SarabunPSK Bold'), local('THSarabunPSK-Bold'), local('TH Sarabun New Bold'), local('Sarabun Bold'),
+       url('file:///Users/ittmacair/Library/Fonts/THSarabun%20Bold.ttf') format('truetype');
   font-display: swap;
 }
 
@@ -57,7 +112,6 @@
   --pms-green-600: #16a34a; /* Operational Confirmation */
   --pms-green-700: #15803d;
 
-  /* Neutrals: Crisp White, Light Gray, Dark Charcoal */
   --pms-bg: #f8fafc;        /* Slate 50 content background */
   --pms-bg-subtle: #f1f5f9; /* Slate 100 sub-panels */
   --pms-card: #ffffff;      /* Pure white container */
@@ -83,9 +137,9 @@
   /* -------------------------------------------------------------
      STRICT TYPOGRAPHY: Sarabun (Thai) + Google Sans (English)
      ------------------------------------------------------------- */
-  --font-sans: 'Google Sans', 'Sarabun', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-heading: 'Google Sans', 'Sarabun', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-thai: 'Sarabun', 'Google Sans', sans-serif;
+  --font-sans: 'Google Sans', 'Sarabun', 'TH SarabunPSK', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-heading: 'Google Sans', 'Sarabun', 'TH SarabunPSK', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-thai: 'Sarabun', 'TH SarabunPSK', 'Google Sans', sans-serif;
 }
 
 /* Base resets & typography (Zero Box-Shadow Standard) */
@@ -135,6 +189,19 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
   letter-spacing: -0.01em;
+}
+
+/* Enforce Strict Typography Hierarchy */
+html, body, button, input, select, textarea, [class*="font-sans"], .font-sans {
+  font-family: var(--font-sans) !important;
+}
+
+.font-heading {
+  font-family: var(--font-heading) !important;
+}
+
+.font-thai {
+  font-family: var(--font-thai) !important;
 }
 
 /* Custom corporate scrollbar */
