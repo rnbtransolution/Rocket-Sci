@@ -551,6 +551,16 @@ export class FinancialCoordinator {
       if (unsettled > 0) {
         throw new CoordinatorError('INVALID_STATE', 'Player has unsettled orders');
       }
+      const pendingTransactions = this.state.storage.sql
+        .exec<{ count: number }>(
+          `SELECT COUNT(*) AS count FROM transactions
+           WHERE player_id = ? AND status = 'pending'`,
+          input.playerId,
+        )
+        .toArray()[0]?.count ?? 0;
+      if (pendingTransactions > 0) {
+        throw new CoordinatorError('INVALID_STATE', 'Player has pending financial transactions');
+      }
       this.state.storage.sql.exec(
         'UPDATE accounts SET active = 0, updated_at = ? WHERE player_id = ?',
         Date.now(),

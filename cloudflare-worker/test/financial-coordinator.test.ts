@@ -155,7 +155,7 @@ it('blocks deactivation while a player has a nonzero balance', async () => {
   expect(await client.getAccount(playerId)).toMatchObject({ active: true, balanceHundredths: 100 });
 });
 
-it('reserves a withdrawal once and refunds it only once when rejected', async () => {
+it('blocks deactivation during a withdrawal and keeps the account active after rejection refunds it', async () => {
   const client = createCoordinatorClient(env);
   const playerId = `player-withdraw-${crypto.randomUUID()}`;
   await client.createPlayer({
@@ -169,10 +169,20 @@ it('reserves a withdrawal once and refunds it only once when rejected', async ()
     idempotencyKey: `${playerId}-withdrawal`,
     transactionId: `${playerId}-transaction`,
     playerId,
-    amountHundredths: 2_000,
+    amountHundredths: 5_000,
     bankName: 'Test Bank',
     accountNumber: '123456',
     accountName: 'Test Player',
+  });
+  await expect(client.deactivatePlayer({
+    idempotencyKey: `${playerId}-deactivate`,
+    playerId,
+    actorId: 'admin-test',
+  })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+
+  expect(await client.getAccount(playerId)).toMatchObject({
+    active: true,
+    balanceHundredths: 0,
   });
   const review = {
     idempotencyKey: `${playerId}-review`,
@@ -186,7 +196,10 @@ it('reserves a withdrawal once and refunds it only once when rejected', async ()
   await client.reviewTransaction(review);
   await client.reviewTransaction(review);
 
-  expect(await client.getAccount(playerId)).toMatchObject({ balanceHundredths: 5_000 });
+  expect(await client.getAccount(playerId)).toMatchObject({
+    active: true,
+    balanceHundredths: 5_000,
+  });
   expect(await client.getLedgerEntries(playerId)).toHaveLength(3);
 });
 
