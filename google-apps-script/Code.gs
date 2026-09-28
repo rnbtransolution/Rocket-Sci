@@ -473,7 +473,6 @@ var WORKER_PROXY_ACTIONS_ = {
   adminSetPlayerBank: true,
   adminResolveBets: true,
   adminRequestCancelBet: true,
-  saveOpenBet: true,
   adminVoidRound: true
 };
 

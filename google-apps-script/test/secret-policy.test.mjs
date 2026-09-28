@@ -200,6 +200,20 @@ test('admin RPCs proxy to the Worker with the supplied session token', () => {
   });
 });
 
+test('unsupported saveOpenBet is rejected instead of proxied', () => {
+  const calls = [];
+  const { context } = createGasContext({ WORKER_API_URL: 'https://worker.example/api/run' });
+  context.UrlFetchApp.fetch = (...args) => {
+    calls.push(args);
+    throw new Error('Unsupported action must not reach the Worker');
+  };
+
+  const result = context.executeAdminAction('saveOpenBet', ['order-1'], 'session-1');
+
+  assert.equal(result.error, 'MIGRATION_REQUIRED');
+  assert.deepEqual(calls, []);
+});
+
 test('GAS dashboard admin login is forwarded to the Worker', () => {
   const calls = [];
   const { context } = createGasContext({ WORKER_API_URL: 'https://worker.example/api/run' });
@@ -209,14 +223,14 @@ test('GAS dashboard admin login is forwarded to the Worker', () => {
       getResponseCode: () => 200,
       getContentText: () => JSON.stringify({
         success: true,
-        data: { success: true, sessionToken: 'local-session-token' },
+        data: { success: true, token: 'local-session-token', expiresAt: 1234, username: 'admin' },
       }),
     };
   };
 
   const result = context.executeAdminAction('adminLogin', ['admin', 'local-password']);
 
-  assert.equal(result.sessionToken, 'local-session-token');
+  assert.equal(result.token, 'local-session-token');
   assert.equal(calls.length, 1);
   assert.deepEqual(JSON.parse(calls[0].options.payload), {
     functionName: 'adminLogin',

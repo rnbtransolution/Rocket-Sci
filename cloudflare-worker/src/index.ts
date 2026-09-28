@@ -2,6 +2,7 @@ import { Env, LineWebhookPayload, QueueMessage, LineEvent } from './types.js';
 import { verifyLineSignature } from './signature.js';
 import { createCoordinatorClient } from './financial/client.js';
 import { CoordinatorError, type LedgerOrder } from './financial/types.js';
+import { createAdminSession, verifyAdminSession } from './adminSession.js';
 import {
   processLineEvent,
   clearAllPendingOrders,
@@ -95,7 +96,7 @@ export default {
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-key, x-admin-api-key',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     };
 
     if (request.method === 'OPTIONS') {
@@ -194,25 +195,22 @@ export default {
       try {
         const body = (await request.json()) as any;
         const { functionName, args = [] } = body;
-
-        const bearerToken = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
-        const authHeader = request.headers.get('x-admin-key')
-          || request.headers.get('x-admin-api-key')
-          || bearerToken
-          || body?.adminKey
-          || body?.apiKey;
-        const isReadOnly = functionName === 'getDashboardData' || functionName === 'adminLogin';
-        if (functionName !== 'getDashboardData' && !env.ADMIN_API_KEY) {
+        const isLogin = functionName === 'adminLogin';
+        if (isLogin && (!env.ADMIN_USERNAME || !env.ADMIN_PASSWORD || !env.ADMIN_SESSION_SECRET)) {
           return new Response(JSON.stringify({ error: 'Admin authentication is not configured' }), {
             status: 503,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
           });
         }
-        if (!isReadOnly && authHeader !== env.ADMIN_API_KEY) {
+        if (!isLogin) {
+          const bearerToken = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+          if (!bearerToken || !env.ADMIN_SESSION_SECRET || !env.ADMIN_USERNAME ||
+              !(await verifyAdminSession(bearerToken, env.ADMIN_SESSION_SECRET, env.ADMIN_USERNAME))) {
           return new Response(JSON.stringify({ error: 'Unauthorized' }), {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
           });
+        }
         }
 
         let result: any = null;
@@ -328,15 +326,22 @@ export default {
         } else if (functionName === 'adminLogin') {
           const username = args[0] || '';
           const password = args[1] || '';
-          if ((username.toLowerCase() === 'admin') && (password === env.ADMIN_API_KEY)) {
+          if (username === env.ADMIN_USERNAME && password === env.ADMIN_PASSWORD) {
+            const session = await createAdminSession(username, env.ADMIN_SESSION_SECRET!);
             result = {
               success: true,
-              adminKey: env.ADMIN_API_KEY,
-              sessionToken: env.ADMIN_API_KEY,
-              username: 'Admin',
+              token: session.token,
+              expiresAt: session.expiresAt,
+              username,
             };
           } else {
-            result = { success: false, error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
+            return new Response(JSON.stringify({
+              error: 'Unauthorized',
+              data: { success: false, error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' },
+            }), {
+              status: 401,
+              headers: { 'Content-Type': 'application/json', ...corsHeaders },
+            });
           }
         } else if (functionName === 'adminApproveTransaction') {
           const txId = String(args[0] || '');

@@ -2,9 +2,10 @@ import { beforeAll, expect, it } from 'vitest';
 import { env, fetchMock, SELF } from 'cloudflare:test';
 import { createCoordinatorClient } from '../src/financial/client';
 import worker from '../src/index';
+import { createAdminSession } from '../src/adminSession';
 
 const lineSecret = 'local-test-secret';
-const adminKey = 'local-test-admin-key';
+const adminPassword = 'local-test-admin-password';
 
 beforeAll(() => {
   fetchMock.activate();
@@ -12,21 +13,34 @@ beforeAll(() => {
 });
 
 async function adminRun(functionName: string, args: unknown[], requestId?: string) {
+  if (functionName === 'adminLogin') {
+    return SELF.fetch('https://worker.test/api/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ functionName, args, requestId }),
+    });
+  }
+  const login = await SELF.fetch('https://worker.test/api/run', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ functionName: 'adminLogin', args: ['admin', adminPassword] }),
+  });
+  const loginBody = await login.json() as { data: { token: string } };
   return SELF.fetch('https://worker.test/api/run', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-admin-key': adminKey,
+      Authorization: `Bearer ${loginBody.data.token}`,
     },
     body: JSON.stringify({ functionName, args, requestId }),
   });
 }
 
 it('accepts the authenticated proxy bearer token for protected Worker RPCs', async () => {
-  const login = await adminRun('adminLogin', ['admin', adminKey]);
+  const login = await adminRun('adminLogin', ['admin', adminPassword]);
   expect(login.status).toBe(200);
-  const loginBody = await login.json() as { data: { sessionToken: string } };
-  const sessionToken = loginBody.data.sessionToken;
+  const loginBody = await login.json() as { data: { token: string } };
+  const sessionToken = loginBody.data.token;
   expect(typeof sessionToken).toBe('string');
   expect(sessionToken.length).toBeGreaterThan(0);
 
@@ -53,7 +67,7 @@ it('fails admin login explicitly when the Worker credential is missing', async (
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ functionName: 'adminLogin', args: ['admin', ''] }),
     }),
-    { ADMIN_API_KEY: '' } as never,
+    { ADMIN_USERNAME: 'admin', ADMIN_PASSWORD: '', ADMIN_SESSION_SECRET: '' } as never,
     {} as never,
   );
 
@@ -81,6 +95,8 @@ it('returns an explicit dashboard failure when the player snapshot fails', async
     },
   };
   const mockEnv = {
+    ADMIN_USERNAME: 'admin',
+    ADMIN_SESSION_SECRET: 'local-test-session-secret',
     FINANCIAL_COORDINATOR: {
       idFromName: () => 'financial-coordinator',
       get: () => coordinatorStub,
@@ -90,11 +106,15 @@ it('returns an explicit dashboard failure when the player snapshot fails', async
       put: async () => undefined,
     },
   };
+  const session = await createAdminSession('admin', mockEnv.ADMIN_SESSION_SECRET);
 
   const response = await worker.fetch(
     new Request('https://worker.test/api/run', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        Authorization: `Bearer ${session.token}`,
+      },
       body: JSON.stringify({ functionName: 'getDashboardData' }),
     }),
     mockEnv as never,

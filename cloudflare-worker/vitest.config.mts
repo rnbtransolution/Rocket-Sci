@@ -9,7 +9,9 @@ export default defineWorkersConfig({
           bindings: {
             LINE_CHANNEL_SECRET: 'local-test-secret',
             LINE_CHANNEL_ACCESS_TOKEN: 'local-test-token',
-            ADMIN_API_KEY: 'local-test-admin-key',
+            ADMIN_USERNAME: 'admin',
+            ADMIN_PASSWORD: 'local-test-admin-password',
+            ADMIN_SESSION_SECRET: 'local-test-session-secret',
             GAS_FALLBACK_URL: '',
             GAS_PROJECTION_URL: 'https://gas-projection.test/exec',
             PROJECTION_API_KEY: 'local-projection-key',

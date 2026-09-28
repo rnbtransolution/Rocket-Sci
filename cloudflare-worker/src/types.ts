@@ -8,7 +8,9 @@ export interface Env {
   // Secrets
   LINE_CHANNEL_SECRET: string;
   LINE_CHANNEL_ACCESS_TOKEN: string;
-  ADMIN_API_KEY: string;
+  ADMIN_USERNAME?: string;
+  ADMIN_PASSWORD?: string;
+  ADMIN_SESSION_SECRET?: string;
   GOOGLE_SERVICE_ACCOUNT_JSON?: string;
   PROJECTION_API_KEY?: string;
 
