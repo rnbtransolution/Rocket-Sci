@@ -7,8 +7,8 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
+node_modules/
+dist/
 dist-server
 dist-ssr
 *.local
@@ -27,15 +27,18 @@ service-account.json
 
 # Environment variables & Secret Keys
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 *.json
 !package.json
 !package-lock.json
 !tsconfig.json
 !vercel.json
 !google-apps-script/appsscript.json
-!google-apps-script/.clasp.json
+/cloudflare-worker/.clasp.json
+/cloudflare-worker/our-tracker-503004-a7-7bfd1d9819e2.json
+/cloudflare-worker/index.html
+/cloudflare-worker/google-apps-script/index.html
 
 # Screenshots & Upload Artifacts
 .worktrees/
@@ -48,4 +51,3 @@ S__*
 !public/*.png
 !public/*.jpg
 .wrangler/
-.wrangler
