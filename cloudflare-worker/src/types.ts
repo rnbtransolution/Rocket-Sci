@@ -3,6 +3,7 @@ export interface Env {
   KV_CACHE: KVNamespace;
   KV_ORDERS: KVNamespace;
   LINE_EVENTS_QUEUE?: Queue<QueueMessage>;
+  FINANCIAL_COORDINATOR: DurableObjectNamespace;
   
   // Secrets
   LINE_CHANNEL_SECRET: string;

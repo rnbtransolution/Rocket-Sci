@@ -30,6 +30,7 @@ import {
   generateOrderFlex,
   generateRocketLaunchedFlex,
 } from './flexTemplates.js';
+export { FinancialCoordinator } from './financial/FinancialCoordinator';
 
 function formatTime(timestamp?: number): string {
   const d = timestamp ? new Date(timestamp) : new Date();

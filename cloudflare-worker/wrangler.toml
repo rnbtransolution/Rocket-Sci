@@ -3,6 +3,14 @@ main = "src/index.ts"
 compatibility_date = "2024-09-01"
 compatibility_flags = ["nodejs_compat"]
 
+[[durable_objects.bindings]]
+name = "FINANCIAL_COORDINATOR"
+class_name = "FinancialCoordinator"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["FinancialCoordinator"]
+
 # ── Cloudflare KV Namespace Bindings ──
 [[kv_namespaces]]
 binding = "KV_CACHE"
