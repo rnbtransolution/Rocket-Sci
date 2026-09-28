@@ -1154,34 +1154,29 @@ async function resolveOrderNumber(
 // ── User Profile, Transactions & Group Helpers ──
 
 export async function getPlayersList(env: Env): Promise<any[]> {
-  try {
-    const snapshot = await createCoordinatorClient(env).getSnapshot();
-    const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
-    const players = snapshot.accounts.filter((account) => account.kind === 'player' && account.active);
-    return await Promise.all(players.map(async (account, idx) => {
-      const cached = account.lineUserId
-        ? await env.KV_CACHE.get(`USER_${account.lineUserId}`)
-        : null;
-      const profile = cached ? JSON.parse(cached) as PlayerProfile : null;
-      return {
-        id: account.playerId,
-        name: profile?.displayName || account.displayName || 'ผู้เล่น',
-        balance: account.balanceHundredths / 100,
-        joinDate: profile?.registeredAt
-          ? new Date(profile.registeredAt).toLocaleDateString('th-TH')
-          : '-',
-        bankName: profile?.bankName || '',
-        bankAccount: profile?.accountNumber || '',
-        accountName: profile?.accountName || profile?.displayName || account.displayName,
-        isUser: false,
-        avatar: avatars[idx % avatars.length],
-        lineUserId: account.lineUserId || '',
-      };
-    }));
-  } catch (err) {
-    console.error('[Worker] getPlayersList error:', err);
-    return [];
-  }
+  const snapshot = await createCoordinatorClient(env).getSnapshot();
+  const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
+  const players = snapshot.accounts.filter((account) => account.kind === 'player' && account.active);
+  return await Promise.all(players.map(async (account, idx) => {
+    const cached = account.lineUserId
+      ? await env.KV_CACHE.get(`USER_${account.lineUserId}`)
+      : null;
+    const profile = cached ? JSON.parse(cached) as PlayerProfile : null;
+    return {
+      id: account.playerId,
+      name: profile?.displayName || account.displayName || 'ผู้เล่น',
+      balance: account.balanceHundredths / 100,
+      joinDate: profile?.registeredAt
+        ? new Date(profile.registeredAt).toLocaleDateString('th-TH')
+        : '-',
+      bankName: profile?.bankName || '',
+      bankAccount: profile?.accountNumber || '',
+      accountName: profile?.accountName || profile?.displayName || account.displayName,
+      isUser: false,
+      avatar: avatars[idx % avatars.length],
+      lineUserId: account.lineUserId || '',
+    };
+  }));
 }
 
 export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: ExecutionContext): Promise<void> {

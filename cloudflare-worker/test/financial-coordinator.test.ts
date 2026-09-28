@@ -837,7 +837,7 @@ it('voids a closed but unsettled round by refunding each matched stake once', as
   expect((await client.getLedgerEntries(matcherId)).filter((entry) => entry.eventType === 'order_cancelled')).toHaveLength(1);
 });
 
-it('replaces an unquoted round by refunding pending orders while preserving matched custom orders', async () => {
+it('refuses to replace a round while matched orders remain unsettled', async () => {
   const client = createCoordinatorClient(env);
   const oldRoundId = `round-replaced-${crypto.randomUUID()}`;
   const nextRoundId = `round-replacement-${crypto.randomUUID()}`;
@@ -897,15 +897,24 @@ it('replaces an unquoted round by refunding pending orders while preserving matc
     matcherName: 'Replacement Matcher',
   });
 
-  await client.openRound({ idempotencyKey: `${nextRoundId}-open`, roundId: nextRoundId, name: 'Replacement Round' });
-  await client.openRound({ idempotencyKey: `${nextRoundId}-open`, roundId: nextRoundId, name: 'Replacement Round' });
+  await expect(client.openRound({
+    idempotencyKey: `${nextRoundId}-open`,
+    roundId: nextRoundId,
+    name: 'Replacement Round',
+  })).rejects.toMatchObject({ code: 'INVALID_STATE' });
 
-  expect(await client.getAccount(creatorId)).toMatchObject({ balanceHundredths: 9_000 });
+  expect(await client.getOrder(held.orderNumber)).toMatchObject({ status: 'pending_hold' });
+  expect(await client.getOrder(unmatchedCustom.orderNumber)).toMatchObject({ status: 'pending_match' });
+  expect(await client.getOrder(matchedCustom.orderNumber)).toMatchObject({ status: 'matched' });
+  expect(await client.getAccount(creatorId)).toMatchObject({ balanceHundredths: 7_000 });
   expect(await client.getAccount(matcherId)).toMatchObject({ balanceHundredths: 9_000 });
-  expect((await client.getLedgerEntries(creatorId)).filter((entry) =>
-    entry.eventType === 'order_cancelled' &&
-    [held.orderNumber, unmatchedCustom.orderNumber].includes(entry.referenceId ?? ''),
-  )).toHaveLength(2);
+
+  await client.closeRound({ idempotencyKey: `${oldRoundId}-close`, roundId: oldRoundId });
+  await expect(client.openRound({
+    idempotencyKey: `${nextRoundId}-open`,
+    roundId: nextRoundId,
+    name: 'Replacement Round',
+  })).rejects.toMatchObject({ code: 'INVALID_STATE' });
 
   const settled = await client.resolveRound({
     idempotencyKey: `${oldRoundId}-resolve`,
@@ -917,6 +926,15 @@ it('replaces an unquoted round by refunding pending orders while preserving matc
     status: 'settled',
     winnerSide: 'low',
   })]);
+
+  await client.openRound({ idempotencyKey: `${nextRoundId}-open`, roundId: nextRoundId, name: 'Replacement Round' });
+  await client.openRound({ idempotencyKey: `${nextRoundId}-open`, roundId: nextRoundId, name: 'Replacement Round' });
+
   expect(await client.getAccount(creatorId)).toMatchObject({ balanceHundredths: 9_000 });
   expect(await client.getAccount(matcherId)).toMatchObject({ balanceHundredths: 10_900 });
+  expect((await client.getLedgerEntries(creatorId)).filter((entry) =>
+    entry.eventType === 'order_cancelled' &&
+    [held.orderNumber, unmatchedCustom.orderNumber].includes(entry.referenceId ?? ''),
+  )).toHaveLength(2);
+  expect(await client.getOrder(matchedCustom.orderNumber)).toMatchObject({ status: 'settled' });
 });

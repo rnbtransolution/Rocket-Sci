@@ -978,6 +978,15 @@ export class FinancialCoordinator {
         throw new CoordinatorError('DUPLICATE_ID', 'Round ID already exists');
       }
       const now = Date.now();
+      const matchedOrder = this.state.storage.sql
+        .exec<OrderRow>(`SELECT * FROM orders WHERE status = 'matched' LIMIT 1`)
+        .toArray()[0];
+      if (matchedOrder) {
+        throw new CoordinatorError(
+          'INVALID_STATE',
+          `Cannot open a replacement round while matched orders remain unsettled (order ${matchedOrder.order_number})`,
+        );
+      }
       const activeRounds = this.state.storage.sql
         .exec<RoundRow>(`SELECT * FROM rounds WHERE status = 'active' ORDER BY created_at`)
         .toArray();

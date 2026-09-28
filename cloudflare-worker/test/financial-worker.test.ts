@@ -1,6 +1,7 @@
 import { beforeAll, expect, it } from 'vitest';
 import { env, fetchMock, SELF } from 'cloudflare:test';
 import { createCoordinatorClient } from '../src/financial/client';
+import worker from '../src/index';
 
 const lineSecret = 'local-test-secret';
 const adminKey = 'local-test-admin-key';
@@ -20,6 +21,110 @@ async function adminRun(functionName: string, args: unknown[], requestId?: strin
     body: JSON.stringify({ functionName, args, requestId }),
   });
 }
+
+it('returns an explicit dashboard failure when the player snapshot fails', async () => {
+  let snapshotCalls = 0;
+  const coordinatorStub = {
+    fetch: async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const { operation } = JSON.parse(String(init?.body));
+      if (operation === 'getOrdersByStatus') return Response.json({ result: [] });
+      if (operation === 'getSnapshot') {
+        snapshotCalls++;
+        if (snapshotCalls === 1) {
+          return Response.json(
+            { error: { code: 'INTERNAL', message: 'Snapshot temporarily unavailable' } },
+            { status: 500 },
+          );
+        }
+        return Response.json({ result: { accounts: [], transactions: [], totalBalanceHundredths: 0 } });
+      }
+      throw new Error(`Unexpected coordinator operation: ${operation}`);
+    },
+  };
+  const mockEnv = {
+    FINANCIAL_COORDINATOR: {
+      idFromName: () => 'financial-coordinator',
+      get: () => coordinatorStub,
+    },
+    KV_CACHE: {
+      get: async () => null,
+      put: async () => undefined,
+    },
+  };
+
+  const response = await worker.fetch(
+    new Request('https://worker.test/api/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ functionName: 'getDashboardData' }),
+    }),
+    mockEnv as never,
+    {} as never,
+  );
+
+  expect(response.status).toBe(500);
+  expect(await response.json()).toMatchObject({
+    error: { code: 'INTERNAL', message: 'Snapshot temporarily unavailable' },
+  });
+  expect(snapshotCalls).toBe(1);
+});
+
+it('keeps the active Worker round when replacement is blocked by an unsettled match', async () => {
+  const client = createCoordinatorClient(env);
+  const initialRequestId = `round-lock-open-${crypto.randomUUID()}`;
+  expect((await adminRun('adminOpenRound', ['Round With Match'], initialRequestId)).status).toBe(200);
+  const activeRound = JSON.parse((await env.KV_CACHE.get('ACTIVE_ROUND'))!);
+  const creatorId = `player-round-lock-creator-${crypto.randomUUID()}`;
+  const matcherId = `player-round-lock-matcher-${crypto.randomUUID()}`;
+
+  for (const playerId of [creatorId, matcherId]) {
+    await client.createPlayer({
+      idempotencyKey: `${playerId}-opening`,
+      playerId,
+      lineUserId: `${playerId}-line`,
+      displayName: 'Round Lock Participant',
+      openingBalanceHundredths: 10_000,
+    });
+  }
+  const order = await client.createOrder({
+    idempotencyKey: `${creatorId}-order`,
+    roundId: activeRound.roundId,
+    creatorId,
+    side: 'high',
+    stakeHundredths: 1_000,
+    betType: 'custom_range',
+    rangeMin: 30,
+    rangeMax: 40,
+    creatorName: 'Round Lock Creator',
+    groupId: 'round-lock-test-group',
+  });
+  await client.matchOrder({
+    idempotencyKey: `${order.orderNumber}-match`,
+    orderNumber: order.orderNumber,
+    matcherId,
+    stakeHundredths: 1_000,
+    matcherName: 'Round Lock Matcher',
+  });
+
+  const replacement = await adminRun('adminOpenRound', ['Replacement Round'], `replacement-${crypto.randomUUID()}`);
+
+  expect(replacement.status).toBe(409);
+  expect(await replacement.json()).toMatchObject({
+    error: { code: 'INVALID_STATE', message: expect.stringContaining('matched orders remain unsettled') },
+  });
+  expect(JSON.parse((await env.KV_CACHE.get('ACTIVE_ROUND'))!).roundId).toBe(activeRound.roundId);
+  expect(await client.getOrder(order.orderNumber)).toMatchObject({ status: 'matched' });
+  expect(await client.getAccount(creatorId)).toMatchObject({ balanceHundredths: 9_000 });
+  expect(await client.getAccount(matcherId)).toMatchObject({ balanceHundredths: 9_000 });
+  await client.closeRound({
+    idempotencyKey: `${activeRound.roundId}-test-close`,
+    roundId: activeRound.roundId,
+  });
+  await client.voidRound({
+    idempotencyKey: `${activeRound.roundId}-test-void`,
+    roundId: activeRound.roundId,
+  });
+});
 
 async function signedWebhook(event: Record<string, unknown>) {
   const body = JSON.stringify({ events: [event] });
