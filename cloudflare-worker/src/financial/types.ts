@@ -5,7 +5,12 @@ export type LedgerEventType =
   | 'opening_balance'
   | 'admin_adjustment'
   | 'withdrawal_requested'
-  | 'withdrawal_rejected';
+  | 'withdrawal_rejected'
+  | 'order_hold'
+  | 'order_matched'
+  | 'order_cancelled'
+  | 'order_settled'
+  | 'house_fee';
 
 export type CoordinatorErrorCode =
   | 'AUTHORITY_NOT_READY'

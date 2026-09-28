@@ -1,6 +1,7 @@
 import { beforeAll, expect, it } from 'vitest';
 import { env, fetchMock } from 'cloudflare:test';
 import { createCoordinatorClient } from '../src/financial/client';
+import { calculateWinPayout } from '../src/financial/payout';
 import { validateStakeHundredths, wholePointsToHundredths } from '../src/financial/types';
 
 beforeAll(() => {
@@ -263,4 +264,260 @@ it('deactivates a zero-balance account without deleting its ledger', async () =>
 
   expect(account).toMatchObject({ active: false, balanceHundredths: 0 });
   expect(await client.getLedgerEntries(playerId)).toHaveLength(2);
+});
+
+it('creates and replays pending_hold and pending_match order lifecycle with quotes', async () => {
+  const client = createCoordinatorClient(env);
+  const roundId = `round-order-lifecycle-${crypto.randomUUID()}`;
+  const creatorId = `player-order-creator-${crypto.randomUUID()}`;
+  const matcherId = `player-order-matcher-${crypto.randomUUID()}`;
+
+  await client.createPlayer({ idempotencyKey: `${creatorId}-opening`, playerId: creatorId, lineUserId: `${creatorId}-line`, displayName: 'Creator', openingBalanceHundredths: 10_000 });
+  await client.createPlayer({ idempotencyKey: `${matcherId}-opening`, playerId: matcherId, lineUserId: `${matcherId}-line`, displayName: 'Matcher', openingBalanceHundredths: 10_000 });
+  await client.openRound({ idempotencyKey: `${roundId}-open`, roundId, name: 'Lifecycle Round' });
+
+  const standard = await client.createOrder({
+    idempotencyKey: `${roundId}-standard`,
+    roundId,
+    creatorId,
+    side: 'low',
+    stakeHundredths: 1_000,
+    betType: 'pre_quote',
+    rangeMin: 10,
+    rangeMax: 20,
+    creatorName: 'Creator',
+    groupId: 'group-order-1',
+  });
+  expect(standard.status).toBe('pending_hold');
+  expect(standard.orderNumber).toMatch(/^\d{4}$/);
+  expect((await client.getAccount(creatorId))?.balanceHundredths).toBe(9_000);
+
+  const custom = await client.createOrder({
+    idempotencyKey: `${roundId}-custom`,
+    roundId,
+    creatorId: matcherId,
+    side: 'high',
+    stakeHundredths: 1_000,
+    betType: 'custom_range',
+    rangeMin: 30,
+    rangeMax: 40,
+    creatorName: 'Matcher',
+    groupId: 'group-order-1',
+  });
+  expect(custom.status).toBe('pending_match');
+
+  const released = await client.releaseQuote({
+    idempotencyKey: `${roundId}-quote`,
+    roundId,
+    targetMin: 5,
+    targetMax: 25,
+  });
+  expect(released.releasedOrderNumbers).toContain(standard.orderNumber);
+  expect(released.round.quoteReleased).toBe(true);
+
+  const replay = await client.createOrder({
+    ...{
+      idempotencyKey: `${roundId}-standard`,
+      roundId,
+      creatorId,
+      side: 'low',
+      stakeHundredths: 1_000,
+      betType: 'pre_quote',
+      rangeMin: 10,
+      rangeMax: 20,
+      creatorName: 'Creator',
+      groupId: 'group-order-1',
+    },
+  });
+  expect(replay.orderNumber).toBe(standard.orderNumber);
+  expect((await client.getAccount(creatorId))?.balanceHundredths).toBe(9_000);
+});
+
+it('computes exact payout and draw semantics', () => {
+  expect(calculateWinPayout(10_000)).toEqual({
+    winnerCreditHundredths: 19_000,
+    houseFeeHundredths: 1_000,
+  });
+  expect(calculateWinPayout(5_100)).toEqual({
+    winnerCreditHundredths: 9_690,
+    houseFeeHundredths: 510,
+  });
+});
+
+it('prevents self-match, duplicate match, and mismatched stake attempts', async () => {
+  const client = createCoordinatorClient(env);
+  const roundId = `round-match-${crypto.randomUUID()}`;
+  const creatorId = `player-match-creator-${crypto.randomUUID()}`;
+  const matcherId = `player-match-matcher-${crypto.randomUUID()}`;
+  await client.createPlayer({ idempotencyKey: `${creatorId}-opening`, playerId: creatorId, lineUserId: `${creatorId}-line`, displayName: 'Creator', openingBalanceHundredths: 10_000 });
+  await client.createPlayer({ idempotencyKey: `${matcherId}-opening`, playerId: matcherId, lineUserId: `${matcherId}-line`, displayName: 'Matcher', openingBalanceHundredths: 10_000 });
+  await client.openRound({ idempotencyKey: `${roundId}-open`, roundId, name: 'Match Guard Round' });
+  const order = await client.createOrder({
+    idempotencyKey: `${roundId}-order`,
+    roundId,
+    creatorId,
+    side: 'high',
+    stakeHundredths: 1_000,
+    betType: 'custom_range',
+    rangeMin: 10,
+    rangeMax: 20,
+    creatorName: 'Creator',
+    groupId: 'group-match-1',
+  });
+
+  await expect(client.matchOrder({
+    idempotencyKey: `${order.orderNumber}-self`,
+    orderNumber: order.orderNumber,
+    matcherId: creatorId,
+    stakeHundredths: 1_000,
+    matcherName: 'Creator',
+  })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+
+  const matched = await client.matchOrder({
+    idempotencyKey: `${order.orderNumber}-match`,
+    orderNumber: order.orderNumber,
+    matcherId,
+    stakeHundredths: 1_000,
+    matcherName: 'Matcher',
+  });
+  expect(matched.matcherId).toBe(matcherId);
+
+  await expect(client.matchOrder({
+    idempotencyKey: `${order.orderNumber}-double`,
+    orderNumber: order.orderNumber,
+    matcherId: 'player-other',
+    stakeHundredths: 1_000,
+    matcherName: 'Other',
+  })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+
+  const mismatchedBalance = await client.getAccount(matcherId);
+  expect(mismatchedBalance?.balanceHundredths).toBe(9_000);
+
+  const otherId = `player-match-other-${crypto.randomUUID()}`;
+  await client.createPlayer({
+    idempotencyKey: `${otherId}-opening`,
+    playerId: otherId,
+    lineUserId: `${otherId}-line`,
+    displayName: 'Other Matcher',
+    openingBalanceHundredths: 10_000,
+  });
+  const badStakeOrder = await client.createOrder({
+    idempotencyKey: `${roundId}-bad-stake-order`,
+    roundId,
+    creatorId,
+    side: 'low',
+    stakeHundredths: 1_000,
+    betType: 'custom_range',
+    rangeMin: 50,
+    rangeMax: 60,
+    creatorName: 'Creator',
+    groupId: 'group-match-2',
+  });
+
+  await expect(client.matchOrder({
+    idempotencyKey: `${badStakeOrder.orderNumber}-bad-stake`,
+    orderNumber: badStakeOrder.orderNumber,
+    matcherId: otherId,
+    stakeHundredths: 2_000,
+    matcherName: 'Other Matcher',
+  })).rejects.toMatchObject({ code: 'STAKE_MISMATCH' });
+  expect((await client.getAccount(otherId))?.balanceHundredths).toBe(10_000);
+});
+
+it('refunds pending order cancellation and blocks deactivation during unsettled orders', async () => {
+  const client = createCoordinatorClient(env);
+  const playerId = `player-cancel-${crypto.randomUUID()}`;
+  await client.createPlayer({
+    idempotencyKey: `${playerId}-opening`,
+    playerId,
+    lineUserId: `${playerId}-line`,
+    displayName: 'Cancel Player',
+    openingBalanceHundredths: 5_000,
+  });
+  const roundId = `round-cancel-${crypto.randomUUID()}`;
+  await client.openRound({ idempotencyKey: `${roundId}-open`, roundId, name: 'Cancel Round' });
+  const order = await client.createOrder({
+    idempotencyKey: `${roundId}-order`,
+    roundId,
+    creatorId: playerId,
+    side: 'low',
+    stakeHundredths: 1_000,
+    betType: 'pre_quote',
+    rangeMin: 5,
+    rangeMax: 15,
+    creatorName: 'Cancel Player',
+    groupId: 'group-cancel-1',
+  });
+  const cancelled = await client.cancelOrder({ idempotencyKey: `${roundId}-cancel`, orderNumber: order.orderNumber, actorId: playerId });
+  expect(cancelled.status).toBe('cancelled');
+  expect((await client.getAccount(playerId))?.balanceHundredths).toBe(5_000);
+  expect((await client.getLedgerEntries(playerId)).filter((entry) => entry.eventType === 'order_cancelled')).toHaveLength(1);
+
+  await expect(client.deactivatePlayer({
+    idempotencyKey: `${playerId}-deactivate`,
+    playerId,
+    actorId: 'admin-test',
+  })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+});
+
+it('closes unsettled rounds, voids unpaid pending orders, and rejects late quote release', async () => {
+  const client = createCoordinatorClient(env);
+  const roundId = `round-closure-${crypto.randomUUID()}`;
+  const creatorId = `player-close-creator-${crypto.randomUUID()}`;
+  const matcherId = `player-close-matcher-${crypto.randomUUID()}`;
+  await client.createPlayer({ idempotencyKey: `${creatorId}-opening`, playerId: creatorId, lineUserId: `${creatorId}-line`, displayName: 'A', openingBalanceHundredths: 10_000 });
+  await client.createPlayer({ idempotencyKey: `${matcherId}-opening`, playerId: matcherId, lineUserId: `${matcherId}-line`, displayName: 'B', openingBalanceHundredths: 10_000 });
+  await client.openRound({ idempotencyKey: `${roundId}-open`, roundId, name: 'Closure Round' });
+  const held = await client.createOrder({
+    idempotencyKey: `${roundId}-held`,
+    roundId,
+    creatorId,
+    side: 'low',
+    stakeHundredths: 1_000,
+    betType: 'pre_quote',
+    rangeMin: 1,
+    rangeMax: 9,
+    creatorName: 'A',
+    groupId: 'group-close-1',
+  });
+  const custom = await client.createOrder({
+    idempotencyKey: `${roundId}-custom`,
+    roundId,
+    creatorId: matcherId,
+    side: 'high',
+    stakeHundredths: 1_000,
+    betType: 'custom_range',
+    rangeMin: 40,
+    rangeMax: 49,
+    creatorName: 'B',
+    groupId: 'group-close-1',
+  });
+
+  const closed = await client.closeRound({ idempotencyKey: `${roundId}-close`, roundId });
+  expect(closed.cancelledOrderNumbers).toEqual(expect.arrayContaining([held.orderNumber, custom.orderNumber]));
+
+  await expect(client.releaseQuote({
+    idempotencyKey: `${roundId}-late-quote`,
+    roundId,
+    targetMin: 10,
+    targetMax: 20,
+  })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+
+  const voidRoundId = `round-void-${crypto.randomUUID()}`;
+  await client.openRound({ idempotencyKey: `${voidRoundId}-open`, roundId: voidRoundId, name: 'Void Round' });
+  const voidOrder = await client.createOrder({
+    idempotencyKey: `${voidRoundId}-order`,
+    roundId: voidRoundId,
+    creatorId,
+    side: 'high',
+    stakeHundredths: 1_000,
+    betType: 'pre_quote',
+    rangeMin: 10,
+    rangeMax: 20,
+    creatorName: 'A',
+    groupId: 'group-void-1',
+  });
+  const voidResult = await client.voidRound({ idempotencyKey: `${voidRoundId}-void`, roundId: voidRoundId });
+  expect(voidResult.refundedOrderNumbers).toContain(voidOrder.orderNumber);
+  expect((await client.getAccount(creatorId))?.balanceHundredths).toBeGreaterThanOrEqual(9_000);
 });

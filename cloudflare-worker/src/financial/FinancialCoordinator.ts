@@ -1,20 +1,36 @@
 import type { Env } from '../types';
+import { calculateWinPayout } from './payout';
 import {
   CoordinatorError,
   validateIdentifier,
   validatePointHundredths,
+  validateStakeHundredths,
   validateText,
   type AccountKind,
+  type AdjustBalanceInput,
+  type CancelOrderInput,
+  type CloseRoundInput,
+  type CreateOrderInput,
   type CreatePlayerInput,
   type DashboardSnapshot,
   type DeactivatePlayerInput,
-  type AdjustBalanceInput,
   type FinancialTransaction,
   type LedgerAccount,
   type LedgerEntry,
   type LedgerEventType,
+  type LedgerOrder,
+  type MatchOrderInput,
+  type OpenRoundInput,
+  type ReleaseQuoteInput,
   type RequestWithdrawalInput,
+  type ResolveRoundInput,
   type ReviewTransactionInput,
+  type RocketRound,
+  type RoundCloseResult,
+  type RoundReleaseResult,
+  type RoundSettlementResult,
+  type RoundVoidResult,
+  type VoidRoundInput,
 } from './types';
 
 const HOUSE_ACCOUNT_ID = '__house__';
@@ -32,6 +48,31 @@ interface AccountRow {
   balance_hundredths: number;
   active: number;
   kind: AccountKind;
+  created_at: number;
+  updated_at: number;
+}
+
+interface RoundRow {
+  [key: string]: string | number | null;
+  round_id: string;
+  name: string;
+  status: 'active' | 'closed' | 'void';
+  quote_released: number;
+  target_min: number | null;
+  target_max: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+interface OrderRow {
+  [key: string]: string | number | null;
+  order_number: string;
+  round_id: string;
+  creator_id: string;
+  matcher_id: string | null;
+  stake_hundredths: number;
+  status: string;
+  order_json: string;
   created_at: number;
   updated_at: number;
 }
@@ -84,7 +125,10 @@ function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
   if (value !== null && typeof value === 'object') {
     const record = value as Record<string, unknown>;
-    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(',')}}`;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(',')}}`;
   }
   return JSON.stringify(value);
 }
@@ -149,7 +193,7 @@ export class FinancialCoordinator {
     }
 
     try {
-      const body = asRecord(await request.json() as RpcRequest);
+      const body = asRecord((await request.json()) as RpcRequest);
       const operation = validateIdentifier(body.operation, 'operation', 64);
       const result = this.dispatch(operation, body.input);
       return Response.json({ result });
@@ -191,6 +235,22 @@ export class FinancialCoordinator {
         return this.requestWithdrawal(asRecord(rawInput) as unknown as RequestWithdrawalInput);
       case 'reviewTransaction':
         return this.reviewTransaction(asRecord(rawInput) as unknown as ReviewTransactionInput);
+      case 'openRound':
+        return this.openRound(asRecord(rawInput) as unknown as OpenRoundInput);
+      case 'createOrder':
+        return this.createOrder(asRecord(rawInput) as unknown as CreateOrderInput);
+      case 'matchOrder':
+        return this.matchOrder(asRecord(rawInput) as unknown as MatchOrderInput);
+      case 'cancelOrder':
+        return this.cancelOrder(asRecord(rawInput) as unknown as CancelOrderInput);
+      case 'releaseQuote':
+        return this.releaseQuote(asRecord(rawInput) as unknown as ReleaseQuoteInput);
+      case 'closeRound':
+        return this.closeRound(asRecord(rawInput) as unknown as CloseRoundInput);
+      case 'voidRound':
+        return this.voidRound(asRecord(rawInput) as unknown as VoidRoundInput);
+      case 'resolveRound':
+        return this.resolveRound(asRecord(rawInput) as unknown as ResolveRoundInput);
       default:
         throw new CoordinatorError('INVALID_INPUT', `Unsupported coordinator operation: ${operation}`);
     }
@@ -323,6 +383,18 @@ export class FinancialCoordinator {
       .toArray()[0];
   }
 
+  private roundRow(roundId: string): RoundRow | undefined {
+    return this.state.storage.sql
+      .exec<RoundRow>('SELECT * FROM rounds WHERE round_id = ?', roundId)
+      .toArray()[0];
+  }
+
+  private orderRow(orderNumber: string): OrderRow | undefined {
+    return this.state.storage.sql
+      .exec<OrderRow>('SELECT * FROM orders WHERE order_number = ?', orderNumber)
+      .toArray()[0];
+  }
+
   private getAccount(playerId: string): LedgerAccount | null {
     const row = this.accountRow(playerId);
     return row ? mapAccount(row) : null;
@@ -440,6 +512,58 @@ export class FinancialCoordinator {
   ): T & { idempotencyKey: string } {
     input.idempotencyKey = validateIdentifier(input.idempotencyKey, 'idempotencyKey');
     return input;
+  }
+
+  private mapRound(row: RoundRow): RocketRound {
+    return {
+      roundId: row.round_id,
+      name: row.name,
+      status: row.status,
+      quoteReleased: row.quote_released === 1,
+      targetMin: row.target_min,
+      targetMax: row.target_max,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private mapOrder(row: OrderRow): LedgerOrder {
+    const payload = JSON.parse(row.order_json) as Record<string, unknown>;
+    return {
+      orderNumber: row.order_number,
+      roundId: row.round_id,
+      creatorId: row.creator_id,
+      creatorName: String(payload.creatorName ?? ''),
+      matcherId: typeof row.matcher_id === 'string' ? row.matcher_id : null,
+      matcherName: typeof payload.matcherName === 'string' ? payload.matcherName : null,
+      side: (payload.side as 'low' | 'high') ?? 'low',
+      stakeHundredths: Number(row.stake_hundredths),
+      betType: (payload.betType as 'range' | 'custom_range' | 'pre_quote') ?? 'range',
+      rangeMin: Number(payload.rangeMin ?? 0),
+      rangeMax: Number(payload.rangeMax ?? 0),
+      status: row.status as LedgerOrder['status'],
+      groupId: String(payload.groupId ?? ''),
+      createdAt: Number(row.created_at),
+      matchedAt: typeof payload.matchedAt === 'number' ? payload.matchedAt : null,
+      winnerSide: typeof payload.winnerSide === 'string' ? (payload.winnerSide as 'low' | 'high' | 'draw') : null,
+      finalSeconds: typeof payload.finalSeconds === 'number' ? payload.finalSeconds : null,
+      settledAt: typeof payload.settledAt === 'number' ? payload.settledAt : null,
+    };
+  }
+
+  private ensureRoundOpen(roundId: string): RoundRow {
+    const row = this.roundRow(roundId);
+    if (!row) throw new CoordinatorError('NOT_FOUND', 'Round not found');
+    if (row.status !== 'active') throw new CoordinatorError('INVALID_STATE', 'Round is not active');
+    return row;
+  }
+
+  private generateOrderNumber(): string {
+    let candidate = '';
+    while (!candidate || this.orderRow(candidate)) {
+      candidate = String(Math.floor(1000 + Math.random() * 9000));
+    }
+    return candidate;
   }
 
   private createPlayer(rawInput: CreatePlayerInput): LedgerAccount {
@@ -697,6 +821,521 @@ export class FinancialCoordinator {
       const updated = this.transactionRow(input.transactionId);
       if (!updated) throw new CoordinatorError('INTERNAL', 'Reviewed transaction could not be loaded');
       return mapTransaction(updated);
+    });
+  }
+
+  private openRound(rawInput: OpenRoundInput): RocketRound {
+    const input = this.validateIdempotentInput({ ...rawInput });
+    input.roundId = validateIdentifier(input.roundId, 'roundId');
+    input.name = validateText(input.name, 'name', 120);
+
+    return this.replayOrBegin('openRound', input.idempotencyKey, input, () => {
+      const existing = this.roundRow(input.roundId);
+      if (existing) {
+        if (existing.status === 'active') return this.mapRound(existing);
+        throw new CoordinatorError('DUPLICATE_ID', 'Round ID already exists');
+      }
+      const now = Date.now();
+      this.state.storage.sql.exec(
+        `INSERT INTO rounds (round_id, name, status, quote_released, target_min, target_max, created_at, updated_at)
+         VALUES (?, ?, 'active', 0, NULL, NULL, ?, ?)`,
+        input.roundId,
+        input.name,
+        now,
+        now,
+      );
+      const row = this.roundRow(input.roundId);
+      if (!row) throw new CoordinatorError('INTERNAL', 'Round could not be loaded');
+      return this.mapRound(row);
+    });
+  }
+
+  private createOrder(rawInput: CreateOrderInput): LedgerOrder {
+    const input = this.validateIdempotentInput({ ...rawInput });
+    input.roundId = validateIdentifier(input.roundId, 'roundId');
+    input.creatorId = validateIdentifier(input.creatorId, 'creatorId');
+    input.side = input.side === 'low' ? 'low' : 'high';
+    input.stakeHundredths = validateStakeHundredths(input.stakeHundredths);
+    input.betType = input.betType === 'custom_range' ? 'custom_range' : input.betType === 'pre_quote' ? 'pre_quote' : 'range';
+    input.rangeMin = Number(input.rangeMin);
+    input.rangeMax = Number(input.rangeMax);
+    if (!Number.isFinite(input.rangeMin) || !Number.isFinite(input.rangeMax)) {
+      throw new CoordinatorError('INVALID_INPUT', 'rangeMin and rangeMax must be finite numbers');
+    }
+    if (input.rangeMin > input.rangeMax) {
+      throw new CoordinatorError('INVALID_INPUT', 'rangeMin must be less than or equal to rangeMax');
+    }
+    input.creatorName = validateText(input.creatorName, 'creatorName', 120);
+    input.groupId = validateIdentifier(input.groupId, 'groupId');
+
+    return this.replayOrBegin('createOrder', input.idempotencyKey, input, () => {
+      const round = this.ensureRoundOpen(input.roundId);
+      const creator = this.requireActivePlayer(input.creatorId);
+      const nextBalance = creator.account.balanceHundredths - input.stakeHundredths;
+      if (nextBalance < 0) {
+        throw new CoordinatorError('INSUFFICIENT_FUNDS', 'Insufficient balance for order stake');
+      }
+
+      const orderNumber = this.generateOrderNumber();
+      const orderStatus: LedgerOrder['status'] = input.betType === 'custom_range' || round.quote_released
+        ? 'pending_match'
+        : 'pending_hold';
+      const payload = {
+        creatorId: input.creatorId,
+        creatorName: input.creatorName,
+        matcherId: null,
+        matcherName: null,
+        side: input.side,
+        stakeHundredths: input.stakeHundredths,
+        betType: input.betType,
+        rangeMin: input.rangeMin,
+        rangeMax: input.rangeMax,
+        groupId: input.groupId,
+        matchedAt: null,
+        winnerSide: null,
+        finalSeconds: null,
+        settledAt: null,
+      };
+      const now = Date.now();
+      this.state.storage.sql.exec(
+        'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
+        nextBalance,
+        now,
+        input.creatorId,
+      );
+      this.addLedgerEntry({
+        accountId: input.creatorId,
+        idempotencyKey: `createOrder:${input.idempotencyKey}`,
+        deltaHundredths: -input.stakeHundredths,
+        balanceAfterHundredths: nextBalance,
+        eventType: 'order_hold',
+        referenceId: orderNumber,
+        actorId: input.creatorId,
+        reason: 'Order stake reserved',
+      });
+      this.state.storage.sql.exec(
+        `INSERT INTO orders
+          (order_number, round_id, creator_id, matcher_id, stake_hundredths, status, order_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        orderNumber,
+        input.roundId,
+        input.creatorId,
+        null,
+        input.stakeHundredths,
+        orderStatus,
+        JSON.stringify(payload),
+        now,
+        now,
+      );
+      const row = this.orderRow(orderNumber);
+      if (!row) throw new CoordinatorError('INTERNAL', 'Created order could not be loaded');
+      return this.mapOrder(row);
+    });
+  }
+
+  private matchOrder(rawInput: MatchOrderInput): LedgerOrder {
+    const input = this.validateIdempotentInput({ ...rawInput });
+    input.orderNumber = validateIdentifier(input.orderNumber, 'orderNumber');
+    input.matcherId = validateIdentifier(input.matcherId, 'matcherId');
+    input.stakeHundredths = validateStakeHundredths(input.stakeHundredths);
+    input.matcherName = validateText(input.matcherName, 'matcherName', 120);
+
+    return this.replayOrBegin('matchOrder', input.idempotencyKey, input, () => {
+      const row = this.orderRow(input.orderNumber);
+      if (!row) throw new CoordinatorError('NOT_FOUND', 'Order not found');
+      const order = this.mapOrder(row);
+      if (order.status !== 'pending_match') {
+        throw new CoordinatorError('INVALID_STATE', 'Order is not currently open for matching');
+      }
+      if (order.creatorId === input.matcherId) {
+        throw new CoordinatorError('INVALID_STATE', 'The creator cannot match their own order');
+      }
+      if (order.matcherId !== null) {
+        throw new CoordinatorError('INVALID_STATE', 'Order has already been matched');
+      }
+      if (input.stakeHundredths !== order.stakeHundredths) {
+        throw new CoordinatorError('STAKE_MISMATCH', 'Matcher stake does not match the order stake');
+      }
+
+      const matcher = this.requireActivePlayer(input.matcherId);
+      const nextBalance = matcher.account.balanceHundredths - input.stakeHundredths;
+      if (nextBalance < 0) {
+        throw new CoordinatorError('INSUFFICIENT_FUNDS', 'Matcher does not have enough balance');
+      }
+      const now = Date.now();
+      this.state.storage.sql.exec(
+        'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
+        nextBalance,
+        now,
+        input.matcherId,
+      );
+      this.addLedgerEntry({
+        accountId: input.matcherId,
+        idempotencyKey: `matchOrder:${input.idempotencyKey}`,
+        deltaHundredths: -input.stakeHundredths,
+        balanceAfterHundredths: nextBalance,
+        eventType: 'order_matched',
+        referenceId: input.orderNumber,
+        actorId: input.matcherId,
+        reason: 'Order matched',
+      });
+
+      const payload = JSON.parse(row.order_json) as Record<string, unknown>;
+      payload.matcherId = input.matcherId;
+      payload.matcherName = input.matcherName;
+      payload.matchedAt = now;
+      this.state.storage.sql.exec(
+        `UPDATE orders
+         SET matcher_id = ?, status = 'matched', order_json = ?, updated_at = ?
+         WHERE order_number = ?`,
+        input.matcherId,
+        JSON.stringify(payload),
+        now,
+        input.orderNumber,
+      );
+      const updated = this.orderRow(input.orderNumber);
+      if (!updated) throw new CoordinatorError('INTERNAL', 'Matched order could not be loaded');
+      return this.mapOrder(updated);
+    });
+  }
+
+  private cancelOrder(rawInput: CancelOrderInput): LedgerOrder {
+    const input = this.validateIdempotentInput({ ...rawInput });
+    input.orderNumber = validateIdentifier(input.orderNumber, 'orderNumber');
+    input.actorId = validateIdentifier(input.actorId, 'actorId');
+
+    return this.replayOrBegin('cancelOrder', input.idempotencyKey, input, () => {
+      const row = this.orderRow(input.orderNumber);
+      if (!row) throw new CoordinatorError('NOT_FOUND', 'Order not found');
+      const order = this.mapOrder(row);
+      if (order.status !== 'pending_hold' && order.status !== 'pending_match') {
+        throw new CoordinatorError('INVALID_STATE', 'Only pending orders can be cancelled');
+      }
+      if (order.creatorId !== input.actorId && order.matcherId !== input.actorId) {
+        throw new CoordinatorError('UNAUTHORIZED', 'Only the order creator or matcher can cancel');
+      }
+      const creator = this.accountRow(order.creatorId);
+      if (!creator) throw new CoordinatorError('NOT_FOUND', 'Order creator account not found');
+      const nextBalance = creator.balance_hundredths + order.stakeHundredths;
+      const now = Date.now();
+      this.state.storage.sql.exec(
+        'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
+        nextBalance,
+        now,
+        order.creatorId,
+      );
+      this.addLedgerEntry({
+        accountId: order.creatorId,
+        idempotencyKey: `cancelOrder:${input.idempotencyKey}`,
+        deltaHundredths: order.stakeHundredths,
+        balanceAfterHundredths: nextBalance,
+        eventType: 'order_cancelled',
+        referenceId: input.orderNumber,
+        actorId: input.actorId,
+        reason: 'Order cancelled',
+      });
+
+      const payload = JSON.parse(row.order_json) as Record<string, unknown>;
+      payload.winnerSide = null;
+      payload.finalSeconds = null;
+      payload.settledAt = null;
+      this.state.storage.sql.exec(
+        `UPDATE orders SET status = 'cancelled', order_json = ?, updated_at = ? WHERE order_number = ?`,
+        JSON.stringify(payload),
+        now,
+        input.orderNumber,
+      );
+      const updated = this.orderRow(input.orderNumber);
+      if (!updated) throw new CoordinatorError('INTERNAL', 'Cancelled order could not be loaded');
+      return this.mapOrder(updated);
+    });
+  }
+
+  private releaseQuote(rawInput: ReleaseQuoteInput): RoundReleaseResult {
+    const input = this.validateIdempotentInput({ ...rawInput });
+    input.roundId = validateIdentifier(input.roundId, 'roundId');
+    if (!Number.isFinite(input.targetMin) || !Number.isFinite(input.targetMax)) {
+      throw new CoordinatorError('INVALID_INPUT', 'targetMin and targetMax must be finite numbers');
+    }
+
+    return this.replayOrBegin('releaseQuote', input.idempotencyKey, input, () => {
+      const round = this.roundRow(input.roundId);
+      if (!round) throw new CoordinatorError('NOT_FOUND', 'Round not found');
+      if (round.status !== 'active') throw new CoordinatorError('INVALID_STATE', 'Round is not active');
+      if (round.quote_released === 1) throw new CoordinatorError('INVALID_STATE', 'Quote has already been released');
+
+      const now = Date.now();
+      this.state.storage.sql.exec(
+        `UPDATE rounds SET quote_released = 1, target_min = ?, target_max = ?, updated_at = ? WHERE round_id = ?`,
+        input.targetMin,
+        input.targetMax,
+        now,
+        input.roundId,
+      );
+
+      const releasedOrderNumbers: string[] = [];
+      const rows = this.state.storage.sql
+        .exec<OrderRow>(`SELECT * FROM orders WHERE round_id = ? AND status = 'pending_hold'`, input.roundId)
+        .toArray();
+      for (const row of rows) {
+        const payload = JSON.parse(row.order_json) as Record<string, unknown>;
+        if (payload.betType !== 'pre_quote') continue;
+        payload.betType = 'range';
+        this.state.storage.sql.exec(
+          `UPDATE orders SET status = 'pending_match', order_json = ?, updated_at = ? WHERE order_number = ?`,
+          JSON.stringify(payload),
+          now,
+          row.order_number,
+        );
+        releasedOrderNumbers.push(row.order_number);
+      }
+
+      const updatedRound = this.roundRow(input.roundId);
+      if (!updatedRound) throw new CoordinatorError('INTERNAL', 'Updated round could not be loaded');
+      return { round: this.mapRound(updatedRound), releasedOrderNumbers };
+    });
+  }
+
+  private closeRound(rawInput: CloseRoundInput): RoundCloseResult {
+    const input = this.validateIdempotentInput({ ...rawInput });
+    input.roundId = validateIdentifier(input.roundId, 'roundId');
+
+    return this.replayOrBegin('closeRound', input.idempotencyKey, input, () => {
+      const round = this.roundRow(input.roundId);
+      if (!round) throw new CoordinatorError('NOT_FOUND', 'Round not found');
+      if (round.status !== 'active') throw new CoordinatorError('INVALID_STATE', 'Round is not active');
+
+      const now = Date.now();
+      const cancelled: string[] = [];
+      const rows = this.state.storage.sql
+        .exec<OrderRow>('SELECT * FROM orders WHERE round_id = ? ORDER BY created_at', input.roundId)
+        .toArray();
+
+      for (const row of rows) {
+        const order = this.mapOrder(row);
+        if (order.status === 'matched' && order.betType === 'custom_range') continue;
+        if (order.status !== 'pending_hold' && order.status !== 'pending_match') continue;
+
+        const creator = this.accountRow(order.creatorId);
+        if (!creator) continue;
+        const nextBalance = creator.balance_hundredths + order.stakeHundredths;
+        this.state.storage.sql.exec(
+          'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
+          nextBalance,
+          now,
+          order.creatorId,
+        );
+        this.addLedgerEntry({
+          accountId: order.creatorId,
+          idempotencyKey: `closeRound:${input.idempotencyKey}:${order.orderNumber}`,
+          deltaHundredths: order.stakeHundredths,
+          balanceAfterHundredths: nextBalance,
+          eventType: 'order_cancelled',
+          referenceId: order.orderNumber,
+          actorId: order.creatorId,
+          reason: 'Round closed',
+        });
+
+        const payload = JSON.parse(row.order_json) as Record<string, unknown>;
+        payload.winnerSide = null;
+        payload.finalSeconds = null;
+        payload.settledAt = null;
+        this.state.storage.sql.exec(
+          `UPDATE orders SET status = 'cancelled', order_json = ?, updated_at = ? WHERE order_number = ?`,
+          JSON.stringify(payload),
+          now,
+          order.orderNumber,
+        );
+        cancelled.push(order.orderNumber);
+      }
+
+      this.state.storage.sql.exec(
+        `UPDATE rounds SET status = 'closed', updated_at = ? WHERE round_id = ?`,
+        now,
+        input.roundId,
+      );
+      const updatedRound = this.roundRow(input.roundId);
+      if (!updatedRound) throw new CoordinatorError('INTERNAL', 'Updated round could not be loaded');
+      return { round: this.mapRound(updatedRound), cancelledOrderNumbers: cancelled };
+    });
+  }
+
+  private voidRound(rawInput: VoidRoundInput): RoundVoidResult {
+    const input = this.validateIdempotentInput({ ...rawInput });
+    input.roundId = validateIdentifier(input.roundId, 'roundId');
+
+    return this.replayOrBegin('voidRound', input.idempotencyKey, input, () => {
+      const round = this.roundRow(input.roundId);
+      if (!round) throw new CoordinatorError('NOT_FOUND', 'Round not found');
+      if (round.status !== 'active' && round.status !== 'closed') {
+        throw new CoordinatorError('INVALID_STATE', 'Round cannot be voided');
+      }
+
+      const now = Date.now();
+      const refunded: string[] = [];
+      const rows = this.state.storage.sql
+        .exec<OrderRow>('SELECT * FROM orders WHERE round_id = ? ORDER BY created_at', input.roundId)
+        .toArray();
+      for (const row of rows) {
+        const order = this.mapOrder(row);
+        if (order.status !== 'pending_hold' && order.status !== 'pending_match') continue;
+        const creator = this.accountRow(order.creatorId);
+        if (!creator) continue;
+        const nextBalance = creator.balance_hundredths + order.stakeHundredths;
+        this.state.storage.sql.exec(
+          'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
+          nextBalance,
+          now,
+          order.creatorId,
+        );
+        this.addLedgerEntry({
+          accountId: order.creatorId,
+          idempotencyKey: `voidRound:${input.idempotencyKey}:${order.orderNumber}`,
+          deltaHundredths: order.stakeHundredths,
+          balanceAfterHundredths: nextBalance,
+          eventType: 'order_cancelled',
+          referenceId: order.orderNumber,
+          actorId: order.creatorId,
+          reason: 'Round voided',
+        });
+
+        const payload = JSON.parse(row.order_json) as Record<string, unknown>;
+        payload.winnerSide = null;
+        payload.finalSeconds = null;
+        payload.settledAt = null;
+        this.state.storage.sql.exec(
+          `UPDATE orders SET status = 'cancelled', order_json = ?, updated_at = ? WHERE order_number = ?`,
+          JSON.stringify(payload),
+          now,
+          order.orderNumber,
+        );
+        refunded.push(order.orderNumber);
+      }
+
+      this.state.storage.sql.exec(
+        `UPDATE rounds SET status = 'void', updated_at = ? WHERE round_id = ?`,
+        now,
+        input.roundId,
+      );
+      const updatedRound = this.roundRow(input.roundId);
+      if (!updatedRound) throw new CoordinatorError('INTERNAL', 'Updated round could not be loaded');
+      return { round: this.mapRound(updatedRound), refundedOrderNumbers: refunded };
+    });
+  }
+
+  private resolveRound(rawInput: ResolveRoundInput): RoundSettlementResult {
+    const input = this.validateIdempotentInput({ ...rawInput });
+    input.roundId = validateIdentifier(input.roundId, 'roundId');
+    if (!Number.isFinite(input.finalSeconds)) {
+      throw new CoordinatorError('INVALID_INPUT', 'finalSeconds must be a finite number');
+    }
+
+    return this.replayOrBegin('resolveRound', input.idempotencyKey, input, () => {
+      const round = this.roundRow(input.roundId);
+      if (!round) throw new CoordinatorError('NOT_FOUND', 'Round not found');
+      if (round.status !== 'active' && round.status !== 'closed') {
+        throw new CoordinatorError('INVALID_STATE', 'Round is not settleable');
+      }
+
+      const rows = this.state.storage.sql
+        .exec<OrderRow>(`SELECT * FROM orders WHERE round_id = ? AND status = 'matched'`, input.roundId)
+        .toArray();
+      const results: RoundSettlementResult['orders'] = [];
+      const now = Date.now();
+
+      for (const row of rows) {
+        const order = this.mapOrder(row);
+        const decisiveValue = input.finalSeconds < order.rangeMin
+          ? 'low'
+          : input.finalSeconds > order.rangeMax
+            ? 'high'
+            : 'draw';
+        const settlement = decisiveValue === 'draw'
+          ? { winnerCreditHundredths: order.stakeHundredths, houseFeeHundredths: 0 }
+          : order.side === decisiveValue
+            ? calculateWinPayout(order.stakeHundredths)
+            : { winnerCreditHundredths: 0, houseFeeHundredths: 0 };
+
+        const payload = JSON.parse(row.order_json) as Record<string, unknown>;
+        payload.winnerSide = decisiveValue;
+        payload.finalSeconds = input.finalSeconds;
+        payload.settledAt = now;
+        if (settlement.winnerCreditHundredths > 0) {
+          const creator = this.accountRow(order.creatorId);
+          if (!creator) throw new CoordinatorError('NOT_FOUND', 'Settled order creator account not found');
+          const nextBalance = creator.balance_hundredths + settlement.winnerCreditHundredths;
+          this.state.storage.sql.exec(
+            'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
+            nextBalance,
+            now,
+            order.creatorId,
+          );
+          this.addLedgerEntry({
+            accountId: order.creatorId,
+            idempotencyKey: `resolveRound:${input.idempotencyKey}:${order.orderNumber}`,
+            deltaHundredths: settlement.winnerCreditHundredths,
+            balanceAfterHundredths: nextBalance,
+            eventType: 'order_settled',
+            referenceId: order.orderNumber,
+            actorId: order.creatorId,
+            reason: 'Order settled',
+          });
+        }
+        if (settlement.houseFeeHundredths > 0) {
+          const house = this.accountRow(HOUSE_ACCOUNT_ID);
+          if (!house) throw new CoordinatorError('NOT_FOUND', 'House account not found');
+          const nextHouseBalance = house.balance_hundredths + settlement.houseFeeHundredths;
+          this.state.storage.sql.exec(
+            'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
+            nextHouseBalance,
+            now,
+            HOUSE_ACCOUNT_ID,
+          );
+          this.addLedgerEntry({
+            accountId: HOUSE_ACCOUNT_ID,
+            idempotencyKey: `resolveRound:house:${input.idempotencyKey}:${order.orderNumber}`,
+            deltaHundredths: settlement.houseFeeHundredths,
+            balanceAfterHundredths: nextHouseBalance,
+            eventType: 'house_fee',
+            referenceId: order.orderNumber,
+            actorId: HOUSE_ACCOUNT_ID,
+            reason: 'House fee',
+          });
+        }
+
+        this.state.storage.sql.exec(
+          `UPDATE orders SET status = 'settled', order_json = ?, updated_at = ? WHERE order_number = ?`,
+          JSON.stringify(payload),
+          now,
+          order.orderNumber,
+        );
+
+        const balances: Record<string, number> = {};
+        const creatorAfter = this.accountRow(order.creatorId);
+        if (creatorAfter) balances[order.creatorId] = creatorAfter.balance_hundredths;
+        if (order.matcherId) {
+          const matcherAfter = this.accountRow(order.matcherId);
+          if (matcherAfter) balances[order.matcherId] = matcherAfter.balance_hundredths;
+        }
+        const houseAfter = this.accountRow(HOUSE_ACCOUNT_ID);
+        if (houseAfter) balances[HOUSE_ACCOUNT_ID] = houseAfter.balance_hundredths;
+
+        results.push({
+          orderNumber: order.orderNumber,
+          winnerCreditHundredths: settlement.winnerCreditHundredths,
+          houseFeeHundredths: settlement.houseFeeHundredths,
+          balances,
+        });
+      }
+
+      this.state.storage.sql.exec(
+        `UPDATE rounds SET status = 'closed', updated_at = ? WHERE round_id = ?`,
+        now,
+        input.roundId,
+      );
+      const updatedRound = this.roundRow(input.roundId);
+      if (!updatedRound) throw new CoordinatorError('INTERNAL', 'Round could not be loaded after settlement');
+      return { round: this.mapRound(updatedRound), orders: results };
     });
   }
 }
