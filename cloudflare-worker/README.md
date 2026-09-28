@@ -118,6 +118,67 @@ Once deployed, Wrangler will output your live URL:
 
 ---
 
+## Financial ledger local verification and operator-managed setup
+
+The financial coordinator is authoritative for balances, transactions, orders, and
+round state. Google Sheets is a projection only. GAS no longer accepts LINE
+webhooks or direct financial writes; its dashboard RPC proxy requires a Worker
+login and forwards the resulting bearer token. Do not restore GAS as a second
+financial executor.
+
+Run the policy and coordinator checks locally from the repository root:
+
+```bash
+npm run test:gas-policy
+cd cloudflare-worker
+npm test -- test/financial-worker.test.ts test/financial-coordinator.test.ts
+npm run build
+```
+
+These checks use local test credentials and mocked services. They do not deploy
+Workers, call live GAS/Sheets endpoints, change Script Properties, or rotate
+secrets.
+
+### Required configuration names
+
+Set values only through operator-managed secret/configuration stores; this
+repository intentionally documents names, not values.
+
+| Runtime | Property / binding | Purpose |
+| --- | --- | --- |
+| GAS Script Properties | `WORKER_API_URL` | HTTPS Worker `/api/run` endpoint used by the dashboard proxy |
+| GAS Script Properties | `PROJECTION_API_KEY` | Dedicated credential for authenticated Worker-to-GAS projection delivery |
+| Worker secret | `PROJECTION_API_KEY` | Must match the GAS projection property; never reuse an admin, browser, or LINE credential |
+| Worker variable | `GAS_PROJECTION_URL` | GAS projection endpoint used by the durable outbox |
+| Worker secrets | `ADMIN_API_KEY`, `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN` | Worker authentication and LINE webhook/messaging operations |
+| Worker secret | `SLIP_API_KEY` | Slip-provider integration, if that feature is enabled |
+| GAS Script Properties | `LINE_CHANNEL_ACCESS_TOKEN`, `SLIP_API_KEY` | Legacy GAS helpers only; not used to authorize Worker RPCs or projection delivery |
+
+Missing required GAS Script Properties fail explicitly. The Worker rejects
+administrative login when its required admin credential is not configured.
+Never add credential values, local exports, or generated deployment settings to
+source control.
+
+### Operator-controlled rotation, import, and activation
+
+This task does not configure live resources or perform credential rotation,
+ledger import, or authority activation. An authorized operator must schedule
+those actions separately:
+
+1. Manage credentials outside the repository. For projection-key rotation,
+   update the Worker secret and GAS Script Property to the same newly generated
+   value. The outbox retries transient mismatches with bounded backoff; confirm
+   pending projections drain before closing the change.
+2. Rotate admin, LINE, and slip-provider credentials through their owning
+   consoles and update only the corresponding runtime secret stores. Do not
+   reuse the projection key.
+3. Before any ledger import or authority activation, run the separately
+   approved dry-run and reconciliation procedure, resolve discrepancies, and
+   record operator approval. Import/activation is not performed by these local
+   tests or by this change.
+
+---
+
 ### Step 6: Update LINE Developers Console
 1. Log in to [LINE Developers Console](https://developers.line.biz/).
 2. Select your Provider and Channel (`@rocketscience`).

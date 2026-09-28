@@ -195,9 +195,20 @@ export default {
         const body = (await request.json()) as any;
         const { functionName, args = [] } = body;
 
-        const authHeader = request.headers.get('x-admin-key') || request.headers.get('x-admin-api-key') || body?.adminKey || body?.apiKey;
-        const isReadOnly = functionName === 'getDashboardData' || functionName === 'verifyMockSlipFromClient' || functionName === 'adminLogin';
-        if (env.ADMIN_API_KEY && !isReadOnly && authHeader !== env.ADMIN_API_KEY) {
+        const bearerToken = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+        const authHeader = request.headers.get('x-admin-key')
+          || request.headers.get('x-admin-api-key')
+          || bearerToken
+          || body?.adminKey
+          || body?.apiKey;
+        const isReadOnly = functionName === 'getDashboardData' || functionName === 'adminLogin';
+        if (functionName !== 'getDashboardData' && !env.ADMIN_API_KEY) {
+          return new Response(JSON.stringify({ error: 'Admin authentication is not configured' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+        if (!isReadOnly && authHeader !== env.ADMIN_API_KEY) {
           return new Response(JSON.stringify({ error: 'Unauthorized' }), {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -318,7 +329,12 @@ export default {
           const username = args[0] || '';
           const password = args[1] || '';
           if ((username.toLowerCase() === 'admin') && (password === env.ADMIN_API_KEY)) {
-            result = { success: true, adminKey: env.ADMIN_API_KEY, username: 'Admin' };
+            result = {
+              success: true,
+              adminKey: env.ADMIN_API_KEY,
+              sessionToken: env.ADMIN_API_KEY,
+              username: 'Admin',
+            };
           } else {
             result = { success: false, error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
           }
@@ -370,6 +386,34 @@ export default {
             ctx?.waitUntil(pushToLine(rawLine, message, env).catch((error) => console.error('[Worker] Transaction rejection notification failed:', error)));
           }
           result = { success: true, txId };
+        } else if (functionName === 'adminRequestCancelBet') {
+          const orderNumber = String(args[0] || '').trim().replace(/#/g, '');
+          if (!orderNumber) throw new CoordinatorError('INVALID_INPUT', 'order number is required');
+          const coordinator = createCoordinatorClient(env);
+          const cancelled = await coordinator.cancelOrder({
+            idempotencyKey: `admin-cancel:${orderNumber}`,
+            orderNumber,
+            actorId: 'admin',
+          });
+          await env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(await mapCoordinatorOrder(cancelled, env)));
+          result = { success: true, orderNumber };
+        } else if (functionName === 'adminVoidRound') {
+          const activeRoundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
+          if (!activeRoundStr) throw new CoordinatorError('INVALID_STATE', 'There is no active round to void');
+          const activeRound = JSON.parse(activeRoundStr);
+          if (!activeRound.roundId) throw new CoordinatorError('INVALID_STATE', 'Active round has no coordinator ID');
+          const coordinator = createCoordinatorClient(env);
+          const voided = await coordinator.voidRound({
+            idempotencyKey: `admin-void:${activeRound.roundId}`,
+            roundId: activeRound.roundId,
+          });
+          await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify({
+            ...activeRound,
+            status: 'VOID',
+            quoteReleased: voided.round.quoteReleased,
+            updatedAt: voided.round.updatedAt,
+          }));
+          result = { success: true, refundedOrderNumbers: voided.refundedOrderNumbers };
         } else if (functionName === 'adminSetPlayerBalance') {
           const userId = String(args[0] || '');
           const newBal = Number(args[1]);
@@ -536,102 +580,17 @@ export default {
           const res = await clearAllPendingOrders(env);
           result = { success: true, message: 'Cleared pending orders and board cache', cleared: res.cleared };
         } else if (functionName === 'resetGoogleSheetsDatabase') {
-          // 1. Clear atomic order state in KV
-          await clearAllPendingOrders(env);
-          // 2. Clear players, transactions, and logs in KV
-          await env.KV_CACHE.delete('PLAYERS_LIST');
-          await env.KV_CACHE.delete('TRANSACTIONS_LIST');
-          await env.KV_CACHE.delete('CHAT_LOGS');
-          // 3. Clear all cached player profiles and raw LINE mappings
-          try {
-            const userScan = await env.KV_CACHE.list({ prefix: 'USER_' });
-            if (userScan.keys && userScan.keys.length > 0) {
-              await Promise.all(userScan.keys.map((k) => env.KV_CACHE.delete(k.name)));
-            }
-            const rawScan = await env.KV_CACHE.list({ prefix: 'RAW_LINE_' });
-            if (rawScan.keys && rawScan.keys.length > 0) {
-              await Promise.all(rawScan.keys.map((k) => env.KV_CACHE.delete(k.name)));
-            }
-          } catch (_) {}
-
-          // 4. Forward database reset to Google Apps Script / Google Sheets
-          let sheetsResetResult: any = null;
-          if (env.GAS_FALLBACK_URL) {
-            try {
-              const res = await fetch(env.GAS_FALLBACK_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({
-                  functionName: 'resetGoogleSheetsDatabase',
-                  args: [],
-                  apiKey: env.ADMIN_API_KEY,
-                }),
-              });
-              const json: any = await res.json();
-              sheetsResetResult = json?.data || json;
-            } catch (err) {
-              console.warn('[Worker] GAS reset database error:', err);
-            }
-          }
-
-          result = sheetsResetResult || {
-            players: [],
-            transactions: [],
-            bets: [],
-            chatLogs: [],
-            activeGroupId: (await env.KV_CACHE.get('ACTIVE_GROUP_ID')) || '',
-            roundStatus: 'ACTIVE',
-          };
+          throw new CoordinatorError('INVALID_STATE', 'Financial authority cannot be reset through the legacy dashboard action');
         } else if (functionName === 'syncWithSheets') {
-          // ── Merge-Safe Force Sync ──
-          // Previously this REPLACED the dashboard payload with the raw GAS sheet
-          // response — an empty/stale sheet blanked out live KV players, chats and
-          // transactions in the admin view. Now: KV stays authoritative; sheet rows
-          // are merged in only when non-empty (never overwrite, only enrich).
-          let sheetsData: any = null;
-          if (env.GAS_FALLBACK_URL) {
-            try {
-              const res = await fetch(`${env.GAS_FALLBACK_URL}?action=getDashboardData&_t=${Date.now()}`);
-              const json: any = await res.json();
-              sheetsData = json?.data || json;
-            } catch (e) {
-              console.warn('[Worker] syncWithSheets fetch error:', e);
-            }
-          }
           const kvPlayers = await getPlayersList(env);
           const kvTx = await getTransactionsList(env);
           const kvBets = await getPendingOrdersList(env);
-          if (sheetsData && Array.isArray(sheetsData.players) && sheetsData.players.length > 0) {
-            const merged = [...kvPlayers];
-            for (const sp of sheetsData.players) {
-              const kvMatch = merged.find(
-                (kp: any) => kp && sp && (kp.lineUserId === sp.lineUserId || kp.shortId === sp.id || kp.lineUserId === sp.id)
-              );
-              if (!kvMatch) {
-                merged.push({
-                  shortId: sp.id || sp.shortId,
-                  lineUserId: sp.lineUserId || sp.id,
-                  displayName: sp.name || sp.displayName || 'ผู้เล่น',
-                  balance: Number(sp.balance) || 0,
-                });
-              }
-            }
-            result = {
-              players: merged,
-              transactions: Array.isArray(sheetsData.transactions) && sheetsData.transactions.length > 0
-                ? [...kvTx, ...sheetsData.transactions].slice(0, 100)
-                : kvTx,
-              bets: kvBets,
-              activeGroupId: (await env.KV_CACHE.get('ACTIVE_GROUP_ID')) || '',
-            };
-          } else {
-            result = {
-              players: kvPlayers,
-              transactions: kvTx,
-              bets: kvBets,
-              activeGroupId: (await env.KV_CACHE.get('ACTIVE_GROUP_ID')) || '',
-            };
-          }
+          result = {
+            players: kvPlayers,
+            transactions: kvTx,
+            bets: kvBets,
+            activeGroupId: (await env.KV_CACHE.get('ACTIVE_GROUP_ID')) || '',
+          };
         } else if (functionName === 'sendAdminMessageToLine') {
           const target = args[0];
           const messageText = args[1];

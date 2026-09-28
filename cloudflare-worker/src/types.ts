@@ -10,11 +10,13 @@ export interface Env {
   LINE_CHANNEL_ACCESS_TOKEN: string;
   ADMIN_API_KEY: string;
   GOOGLE_SERVICE_ACCOUNT_JSON?: string;
+  PROJECTION_API_KEY?: string;
 
   // Configuration vars
   ENVIRONMENT?: string;
   SPREADSHEET_ID?: string;
   GAS_FALLBACK_URL?: string;
+  GAS_PROJECTION_URL?: string;
   SLIP_API_KEY?: string;
   SLIP_API_URL?: string;
 }

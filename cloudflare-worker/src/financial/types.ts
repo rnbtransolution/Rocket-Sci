@@ -186,6 +186,12 @@ export interface DashboardSnapshot {
   readonly totalBalanceHundredths: PointHundredths;
 }
 
+export interface ProjectionDrainResult {
+  readonly delivered: number;
+  readonly failed: number;
+  readonly pending: number;
+}
+
 export interface OrdersByStatusInput {
   statuses: LedgerOrderStatus[];
 }
@@ -373,6 +379,7 @@ export interface CoordinatorClient {
   getSnapshot(): Promise<DashboardSnapshot>;
   getOrder(orderNumber: string): Promise<LedgerOrder | null>;
   getOrdersByStatus(statuses: LedgerOrderStatus[]): Promise<LedgerOrder[]>;
+  drainProjections(): Promise<ProjectionDrainResult>;
   createPlayer(input: CreatePlayerInput): Promise<LedgerAccount>;
   adjustBalance(input: AdjustBalanceInput): Promise<LedgerAccount>;
   deactivatePlayer(input: DeactivatePlayerInput): Promise<LedgerAccount>;

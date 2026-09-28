@@ -1,5 +1,10 @@
 import type { Env } from '../types';
-import { CoordinatorError, type CoordinatorClient, type CoordinatorErrorCode } from './types';
+import {
+  CoordinatorError,
+  type CoordinatorClient,
+  type CoordinatorErrorCode,
+  type ProjectionDrainResult,
+} from './types';
 
 interface CoordinatorResponse<T> {
   result?: T;
@@ -58,6 +63,7 @@ export function createCoordinatorClient(env: Env): CoordinatorClient {
     getSnapshot: () => send('getSnapshot'),
     getOrder: (orderNumber) => send('getOrder', { orderNumber }),
     getOrdersByStatus: (statuses) => send('getOrdersByStatus', { statuses }),
+    drainProjections: () => send<ProjectionDrainResult>('drainProjections'),
     createPlayer: (input) => send('createPlayer', input),
     adjustBalance: (input) => send('adjustBalance', input),
     deactivatePlayer: (input) => send('deactivatePlayer', input),

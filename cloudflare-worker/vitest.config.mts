@@ -11,6 +11,8 @@ export default defineWorkersConfig({
             LINE_CHANNEL_ACCESS_TOKEN: 'local-test-token',
             ADMIN_API_KEY: 'local-test-admin-key',
             GAS_FALLBACK_URL: '',
+            GAS_PROJECTION_URL: 'https://gas-projection.test/exec',
+            PROJECTION_API_KEY: 'local-projection-key',
           },
         },
       },

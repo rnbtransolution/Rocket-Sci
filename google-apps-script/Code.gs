@@ -4,20 +4,14 @@
 // =========================================================================
 
 // Secrets live in Script Properties (Project Settings → Script properties).
-// Required keys: LINE_CHANNEL_ACCESS_TOKEN, SLIP_API_KEY, ADMIN_API_KEY
-// Optional: LINE_CHANNEL_SECRET, ALLOW_LINE_WEBHOOK (=true only if GAS is the LINE webhook)
+// Required Script Properties: WORKER_API_URL, PROJECTION_API_KEY.
+// Legacy LINE and slip helpers require LINE_CHANNEL_ACCESS_TOKEN and SLIP_API_KEY if explicitly used.
 function getScriptSecret_(key) {
-  var props = PropertiesService.getScriptProperties();
-  var val = (props.getProperty(key) || '').toString();
-  if (val && val !== '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=') return val;
-  if (key === 'LINE_CHANNEL_ACCESS_TOKEN') {
-    var newToken = 'PpuZyApV5ZnAbv30gq3h5F7+gwidiQyhUWiyyZWIFLVMXbWg7gAylFzy+2WYPsYWsx9IAhC2YCf3Y+0QLpr50IVoLEyTO8iljM6OmidmF1A/3p3BaXk2A6rphlobN7ipKJdZMBQrGEvwvjHTgmhE8wdB04t89/1O/w1cDnyilFU=';
-    try { props.setProperty('LINE_CHANNEL_ACCESS_TOKEN', newToken); } catch (_) {}
-    return newToken;
+  var val = PropertiesService.getScriptProperties().getProperty(key);
+  if (!val || !String(val).trim()) {
+    throw new Error('Required Script Property is missing: ' + key);
   }
-  if (key === 'SLIP_API_KEY') return 'WNsIQaS1CqRpyHwPHb0SA5wcdh55sQYZT6cSNLSSssY=';
-  if (key === 'ADMIN_API_KEY') return 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
-  return '';
+  return String(val).trim();
 }
 
 function getLineToken_() {
@@ -26,10 +20,6 @@ function getLineToken_() {
 
 function getSlipApiKey_() {
   return getScriptSecret_('SLIP_API_KEY');
-}
-
-function getAdminApiKey_() {
-  return getScriptSecret_('ADMIN_API_KEY');
 }
 
 const SLIP_API_URL = 'https://connect.slip2go.com/api/verify-slip/qr-base64/info';
@@ -41,17 +31,6 @@ try {
   }
 } catch (err) {
   console.warn("Using default SPREADSHEET_ID: " + SHEET_ID);
-}
-
-/** One-time helper: run from GAS editor after clasp push to load secrets into Script Properties */
-function bootstrapScriptSecrets(lineToken, slipKey, adminKey, lineSecret) {
-  var props = PropertiesService.getScriptProperties();
-  if (lineToken) props.setProperty('LINE_CHANNEL_ACCESS_TOKEN', String(lineToken));
-  if (slipKey) props.setProperty('SLIP_API_KEY', String(slipKey));
-  if (adminKey) props.setProperty('ADMIN_API_KEY', String(adminKey));
-  if (lineSecret) props.setProperty('LINE_CHANNEL_SECRET', String(lineSecret));
-  props.setProperty('ALLOW_LINE_WEBHOOK', 'false'); // Node is the single LINE writer
-  return { ok: true, keys: Object.keys(props.getProperties()) };
 }
 
 function pruneDeadLineGroupsFromProperties() {
@@ -75,15 +54,6 @@ function pruneDeadLineGroupsFromProperties() {
   return { success: true, activeGroupId: 'C61efb2aa1ad6fc26fefdc41fb710b431', lineGroups: cleaned };
 }
 
-function assertAdminApiKey_(provided) {
-  var expected = getAdminApiKey_();
-  if (!expected) {
-    throw new Error('ADMIN_API_KEY Script Property is not configured');
-  }
-  if (String(provided || '') !== expected) {
-    throw new Error('Unauthorized');
-  }
-}
 
 var _memGroupNameCache = {};
 var _memChatLogSheet = null;
@@ -414,6 +384,7 @@ function getLineGroups() {
 }
 
 function adminOpenRound(name) {
+  return migrationRequired_('adminOpenRound');
   var ss = SpreadsheetApp.openById(SHEET_ID);
   var rSheet = ss.getSheetByName('Rockets');
   var activeRound = getActiveRocketRound();
@@ -445,22 +416,11 @@ function adminOpenRound(name) {
  * HTTP GET: Serves the bundled React Admin & Simulator UI, or JSON API for external clients.
  */
 function doGet(e) {
-  // Read-only JSON API for external clients (mutations must use authenticated POST / google.script.run)
-  if (e && e.parameter && (e.parameter.action === 'getDashboardData' || e.parameter.api === '1')) {
-    var data = getDashboardData();
-    return ContentService.createTextOutput(JSON.stringify({ success: true, data: data }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  if (e && e.parameter && e.parameter.action === 'getLineQuota') {
-    var quota = adminGetLineQuota();
-    return ContentService.createTextOutput(JSON.stringify({ success: true, data: quota }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  if (e && e.parameter && e.parameter.action) {
-    // Block unauthenticated mutating GET actions (legacy dual-writer path)
+  if (e && e.parameter && (e.parameter.action || e.parameter.api)) {
     return ContentService.createTextOutput(JSON.stringify({
       success: false,
-      error: 'Mutating GET actions are disabled. Use the Node backend or authenticated google.script.run.'
+      error: 'MIGRATION_REQUIRED',
+      message: 'Use the authenticated Worker RPC for application data.'
     })).setMimeType(ContentService.MimeType.JSON);
   }
 
@@ -482,11 +442,198 @@ function invalidateDashboardCache() {
   } catch(_) {}
 }
 
+var WORKER_PROXY_ACTIONS_ = {
+  adminLogin: true,
+  getDashboardData: true,
+  getP2PResults: true,
+  getHeldPreQuoteOrders: true,
+  adminGetLineQuota: true,
+  adminApproveTransaction: true,
+  adminRejectTransaction: true,
+  adminSetPlayerBalance: true,
+  adminCreatePlayer: true,
+  adminUpdatePlayerName: true,
+  adminDeletePlayer: true,
+  adminSetActiveGroupId: true,
+  adminOpenRound: true,
+  clearPendingBets: true,
+  adminClearOrders: true,
+  resetOrders: true,
+  clearCache: true,
+  resetGoogleSheetsDatabase: true,
+  syncWithSheets: true,
+  sendAdminMessageToLine: true,
+  adminBroadcastRocketLaunched: true,
+  adminBroadcastQuote: true,
+  adminBroadcastFinalCall: true,
+  adminBroadcastVoidRound: true,
+  adminBroadcastRuleGuide: true,
+  adminBroadcastScamWarning: true,
+  adminTestPushGroupMessage: true,
+  adminSetPlayerBank: true,
+  adminResolveBets: true,
+  adminRequestCancelBet: true,
+  saveOpenBet: true,
+  adminVoidRound: true
+};
+
+var LEGACY_FINANCIAL_ACTIONS_ = {
+  adjustPlayerBalance: true,
+  matchExistingOpenBet: true,
+  verifyMockSlipFromClient: true,
+  adminSetLineToken: true,
+  cancelHeldPreQuoteBets: true,
+  autoMatchPendingBets: true
+};
+
+function migrationRequired_(action) {
+  return {
+    success: false,
+    error: 'MIGRATION_REQUIRED',
+    action: action || '',
+    message: 'Financial writes must be handled by the Cloudflare Worker.'
+  };
+}
+
+function getWorkerApiUrl_() {
+  var value = PropertiesService.getScriptProperties().getProperty('WORKER_API_URL');
+  if (!value || !String(value).trim()) {
+    throw new Error('Required Script Property is missing: WORKER_API_URL');
+  }
+  var url = String(value).trim();
+  if (!/^https:\/\/[^/?#]+\/api\/run(?:[?#].*)?$/i.test(url)) {
+    throw new Error('WORKER_API_URL must be an HTTPS Worker /api/run URL');
+  }
+  return url;
+}
+
+function proxyAdminAction_(functionName, args, sessionToken) {
+  if (!WORKER_PROXY_ACTIONS_[functionName]) return migrationRequired_(functionName);
+  if (functionName !== 'adminLogin' && (!sessionToken || !String(sessionToken).trim())) {
+    return { success: false, error: 'UNAUTHORIZED', message: 'Worker session token required' };
+  }
+
+  var options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({ functionName: functionName, args: args || [] }),
+    muteHttpExceptions: true
+  };
+  var requestId = args && (args.requestId || args.idempotencyKey);
+  if (requestId) {
+    options.payload = JSON.stringify({
+      functionName: functionName,
+      args: args || [],
+      requestId: String(requestId)
+    });
+  }
+  if (functionName !== 'adminLogin') {
+    options.headers = { Authorization: 'Bearer ' + String(sessionToken).trim() };
+  }
+
+  var response = UrlFetchApp.fetch(getWorkerApiUrl_(), options);
+  var status = response.getResponseCode();
+  var result;
+  try {
+    result = JSON.parse(response.getContentText());
+  } catch (_) {
+    throw new Error('Worker returned an invalid response');
+  }
+  if (status < 200 || status >= 300) {
+    return {
+      success: false,
+      error: result.error || 'WORKER_REQUEST_FAILED',
+      message: result.message || 'Worker request failed'
+    };
+  }
+  return result.result !== undefined ? result.result : (result.data !== undefined ? result.data : result);
+}
+
+function applyProjectionEvent_(event) {
+  if (!event || !event.eventId || !event.ledgerEntry || event.ledgerEntry.entryId !== event.eventId ||
+      !event.snapshot || !Array.isArray(event.snapshot.accounts)) {
+    throw new Error('Invalid coordinator projection event');
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var audit = ss.getSheetByName('LedgerProjection');
+    if (!audit) audit = ss.insertSheet('LedgerProjection');
+    if (audit.getLastRow() === 0) {
+      audit.appendRow(['eventId', 'accountId', 'deltaHundredths', 'balanceAfterHundredths', 'eventType', 'referenceId', 'createdAt']);
+    }
+    var auditRows = audit.getDataRange().getValues();
+    for (var i = 1; i < auditRows.length; i++) {
+      if (String(auditRows[i][0] || '') === String(event.eventId)) {
+        return { success: true, duplicate: true, eventId: event.eventId };
+      }
+    }
+
+    var players = ss.getSheetByName('Players');
+    if (!players) players = ss.insertSheet('Players');
+    if (players.getLastRow() === 0) {
+      players.appendRow(['id', 'name', 'balance', 'createdAt', '', '', '', 'lineUserId']);
+    }
+    var playerRows = players.getDataRange().getValues();
+    event.snapshot.accounts.forEach(function(account) {
+      if (!account || account.kind !== 'player') return;
+      var rowIndex = -1;
+      for (var row = 1; row < playerRows.length; row++) {
+        var rowId = String(playerRows[row][0] || '').trim();
+        var lineUserId = String(playerRows[row][7] || '').trim();
+        if (rowId === String(account.playerId) ||
+            (account.lineUserId && lineUserId === String(account.lineUserId))) {
+          rowIndex = row;
+          break;
+        }
+      }
+      var balance = Number(account.balanceHundredths) / 100;
+      if (!Number.isFinite(balance)) throw new Error('Invalid coordinator balance snapshot');
+      if (rowIndex >= 0) {
+        players.getRange(rowIndex + 1, 3).setValue(balance);
+      } else {
+        players.appendRow([
+          account.playerId,
+          account.displayName || 'ผู้เล่น',
+          balance,
+          new Date(account.createdAt || Date.now()),
+          '',
+          '',
+          '',
+          account.lineUserId || ''
+        ]);
+        playerRows.push([account.playerId, account.displayName || 'ผู้เล่น', balance, new Date(), '', '', '', account.lineUserId || '']);
+      }
+    });
+
+    var ledger = event.ledgerEntry;
+    audit.appendRow([
+      event.eventId,
+      ledger.accountId,
+      ledger.deltaHundredths,
+      ledger.balanceAfterHundredths,
+      ledger.eventType,
+      ledger.referenceId || '',
+      new Date(ledger.createdAt || Date.now())
+    ]);
+    return { success: true, duplicate: false, eventId: event.eventId };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /**
  * Universal Action Dispatcher for Admin RPC functions.
  */
-function executeAdminAction(functionName, args) {
+function executeAdminAction(functionName, args, sessionToken) {
   args = args || [];
+  if (WORKER_PROXY_ACTIONS_[functionName]) {
+    invalidateDashboardCache();
+    return proxyAdminAction_(functionName, args, sessionToken);
+  }
+  if (LEGACY_FINANCIAL_ACTIONS_[functionName]) return migrationRequired_(functionName);
   var result;
   switch (functionName) {
     case 'getDashboardData': return getDashboardData(args[0]);
@@ -547,16 +694,9 @@ function executeAdminAction(functionName, args) {
       return getDashboardData(true);
     case 'adminGetLineQuota':
       return adminGetLineQuota();
-    case 'adminSetLineToken':
-      if (args[0]) {
-        PropertiesService.getScriptProperties().setProperty('LINE_CHANNEL_ACCESS_TOKEN', String(args[0]).trim());
-        return { success: true, message: 'LINE token updated' };
-      }
-      return { success: false, error: 'No token provided' };
-    case 'adminLogin':
-      return adminLogin(args[0], args[1]);
     case 'pruneDeadLineGroupsFromProperties': return pruneDeadLineGroupsFromProperties();
-    default: return { error: 'Unknown function: ' + functionName };
+    default:
+      return migrationRequired_(functionName);
   }
 }
 
@@ -565,65 +705,28 @@ function executeAdminAction(functionName, args) {
  */
 function doPost(e) {
   try {
-    const postData = JSON.parse(e.postData.contents);
-    
-    // External / Pages API — require ADMIN_API_KEY (Node is preferred single writer)
-    if (postData.functionName || postData.action) {
-      try {
-        assertAdminApiKey_(postData.apiKey || (e.parameter && e.parameter.apiKey));
-      } catch (authErr) {
-        return ContentService.createTextOutput(JSON.stringify({ success: false, error: authErr.message }))
-          .setMimeType(ContentService.MimeType.JSON);
-      }
-      const fn = postData.functionName || postData.action;
-      const args = postData.args || [];
-      const res = executeAdminAction(fn, args);
-      return ContentService.createTextOutput(JSON.stringify({ success: true, data: res }))
-        .setMimeType(ContentService.MimeType.JSON);
+    var postData = JSON.parse(e.postData.contents);
+    if (postData.action !== 'projection') {
+      return projectionResponse_({
+        success: false,
+        error: 'MIGRATION_REQUIRED',
+        message: 'GAS no longer accepts admin RPCs or LINE webhook events.'
+      });
     }
-
-    // Process LINE Messaging API webhook events
-    const events = postData.events || [];
-    for (let i = 0; i < events.length; i++) {
-      const event = events[i];
-      const replyToken = event.replyToken;
-      const userId = event.source.userId;
-      
-      // Get Player profile display name from DB first (cached), fallback to API only if new player
-      let displayName = getPlayerNameFromDb(userId);
-      if (!displayName) {
-        const profile = getLineUserProfile(userId);
-        displayName = profile ? profile.displayName : "ผู้เล่นนิรนาม";
-      }
-      
-      if (event.type === 'message') {
-        const message = event.message;
-        const groupId = event.source.groupId || event.source.roomId || null;
-        if (groupId) {
-          recordGroupActivity(groupId, null, userId, displayName, message.text || '');
-        }
-        if (message.type === 'text') {
-          handleTextMessage(message.text, userId, displayName, replyToken, groupId, message.id);
-          // High-Speed: Deferred logging executed AFTER reply was dispatched to ensure sub-second response in LINE
-          logLineChatMessage(userId, displayName, 'player', message.text, 'text');
-        } else if (message.type === 'image') {
-          handleImageSlipMessage(message.id, userId, displayName, replyToken, groupId);
-        }
-      } else if (event.type === 'unsend') {
-        const unsendMessageId = event.unsend ? event.unsend.messageId : null;
-        const groupId = event.source.groupId || event.source.roomId || null;
-        handleUnsendMessage(unsendMessageId, userId, displayName, groupId);
-      } else if (event.type === 'messageEdited') {
-        const editMessageId = event.message ? event.message.id : null;
-        const newText = event.message ? event.message.text : '';
-        const groupId = event.source.groupId || event.source.roomId || null;
-        handleMessageEdited(editMessageId, newText, userId, displayName, groupId, replyToken);
-      }
+    var expected = getScriptSecret_('PROJECTION_API_KEY');
+    if (!postData.projectionKey || String(postData.projectionKey) !== expected) {
+      return projectionResponse_({ success: false, error: 'UNAUTHORIZED' });
     }
+    var result = applyProjectionEvent_(postData.event);
+    return projectionResponse_(result);
   } catch (err) {
-    console.error("Webhook POST Error: " + err.toString());
+    return projectionResponse_({ success: false, error: String(err && err.message || err) });
   }
-  return ContentService.createTextOutput(JSON.stringify({ status: 'ok' })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function projectionResponse_(payload) {
+  return ContentService.createTextOutput(JSON.stringify(payload))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 /**
@@ -917,6 +1020,7 @@ function getPendingBetsList() {
  * Helper to request bet cancellation or direct cancel.
  */
 function handleCancelBetRequest(userId, orderNo, displayName) {
+  return migrationRequired_('handleCancelBetRequest');
   var searchId = cleanUserId(userId);
   if (!searchId) return "🚫 ไม่สามารถทำรายการยกเลิกได้ครับ";
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Bets');
@@ -1982,6 +2086,7 @@ function getPlayerBalance(userId, displayName) {
 }
 
 function adjustPlayerBalance(userId, delta, displayName) {
+  return migrationRequired_('adjustPlayerBalance');
   const shortUserId = getOrCreateShortUserId(userId, displayName);
   var searchId = cleanUserId(shortUserId);
   if (!searchId) return false;
@@ -2034,6 +2139,7 @@ function adjustPlayerBalance(userId, delta, displayName) {
  * @param {boolean} [isPreQuote] - Whether this is a pre-quote bet
  */
 function saveOpenBet(orderNo, userId, displayName, side, amount, type, rMin, rMax, targetGroupId, userTypedCmd, isPreQuote, messageId) {
+  return migrationRequired_('saveOpenBet');
   var searchId = cleanUserId(userId);
   var betAmount = Number(amount) || 0;
   
@@ -2082,6 +2188,7 @@ function saveOpenBet(orderNo, userId, displayName, side, amount, type, rMin, rMa
  * @returns {Object} Match result or error descriptor
  */
 function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmount) {
+  return migrationRequired_('matchExistingOpenBet');
   var lock = LockService.getScriptLock();
   try {
     lock.waitLock(15000);
@@ -2559,6 +2666,7 @@ function getActiveRocketName() {
  * Called from the admin dashboard; not accessible to players via LINE.
  */
 function adminSetPlayerBank(userId, bankName, accountNumber, accountName) {
+  return migrationRequired_('adminSetPlayerBank');
   var searchId = cleanUserId(userId);
   if (!searchId) return { ok: false, error: 'Missing userId' };
   updatePlayerBank(searchId, bankName.trim(), accountNumber.replace(/[\-\.\s]/g, ''), accountName.trim());
@@ -2578,6 +2686,7 @@ function adminSetPlayerBank(userId, bankName, accountNumber, accountName) {
  * Admin: Create a brand-new player record manually.
  */
 function adminCreatePlayer(lineId, displayName, initialBalance) {
+  return migrationRequired_('adminCreatePlayer');
   var searchId = cleanUserId(lineId);
   if (!searchId || !displayName) return { ok: false, error: 'Missing lineId or displayName' };
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Players');
@@ -2600,6 +2709,7 @@ function adminCreatePlayer(lineId, displayName, initialBalance) {
  * Admin: Rename a player's display name.
  */
 function adminUpdatePlayerName(userId, newName) {
+  return migrationRequired_('adminUpdatePlayerName');
   var searchId = cleanUserId(userId);
   if (!searchId || !newName) return { ok: false, error: 'Missing parameters' };
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Players');
@@ -2617,6 +2727,7 @@ function adminUpdatePlayerName(userId, newName) {
  * Admin: Set a player's credit balance directly (absolute value, not delta).
  */
 function adminSetPlayerBalance(userId, newBalance, displayName, suppressPush) {
+  return migrationRequired_('adminSetPlayerBalance');
   var searchId = cleanUserId(userId);
   if (!searchId) return { ok: false, error: 'Missing userId' };
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Players');
@@ -2660,6 +2771,7 @@ function adminSetPlayerBalance(userId, newBalance, displayName, suppressPush) {
  * Admin: Delete a player record permanently.
  */
 function adminDeletePlayer(userId) {
+  return migrationRequired_('adminDeletePlayer');
   if (!userId) return { ok: false, error: 'Missing userId' };
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Players');
   const data = sheet.getDataRange().getValues();
@@ -2857,6 +2969,7 @@ function getDashboardData(forceFresh) {
  * Approve transaction manually from dashboard
  */
 function adminApproveTransaction(txId) {
+  return migrationRequired_('adminApproveTransaction');
   if (txId === null || txId === undefined) return false;
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const tSheet = ss.getSheetByName('Transactions');
@@ -2914,6 +3027,7 @@ function adminApproveTransaction(txId) {
 }
 
 function adminRejectTransaction(txId, reason) {
+  return migrationRequired_('adminRejectTransaction');
   if (txId === null || txId === undefined) return false;
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const tSheet = ss.getSheetByName('Transactions');
@@ -2956,6 +3070,7 @@ function adminRejectTransaction(txId, reason) {
  * Resolve matched bets in spreadsheet database based on final rocket time
  */
 function adminResolveBets(finalTime, targetMin, targetMax) {
+  return migrationRequired_('adminResolveBets');
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const bSheet = ss.getSheetByName('Bets');
   if (!bSheet) return getDashboardData();
@@ -3148,6 +3263,7 @@ function adminResolveBets(finalTime, targetMin, targetMax) {
 }
 
 function adminVoidRound() {
+  return migrationRequired_('adminVoidRound');
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const bSheet = ss.getSheetByName('Bets');
   const bData = bSheet.getDataRange().getValues();
@@ -3184,6 +3300,7 @@ function adminVoidRound() {
  * Automatically match pending bets in Sheets database
  */
 function autoMatchPendingBets(ss, bSheet) {
+  return migrationRequired_('autoMatchPendingBets');
   const bData = bSheet.getDataRange().getValues();
   
   // System bots to match against if no opposite real players
@@ -3280,6 +3397,7 @@ function autoMatchPendingBets(ss, bSheet) {
  * Request Cancel Bet
  */
 function adminRequestCancelBet(betId) {
+  return migrationRequired_('adminRequestCancelBet');
   const orderNo = betId.replace('bet_', '');
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const bSheet = ss.getSheetByName('Bets');
@@ -3297,6 +3415,7 @@ function adminRequestCancelBet(betId) {
  * Handle verification of client simulation mock slips
  */
 function verifyMockSlipFromClient(depositAmt, realAmt, ref, isQRValid, isDupe) {
+  return migrationRequired_('verifyMockSlipFromClient');
   let status = 'success';
   let reason = '';
   if (!isQRValid) {
@@ -3328,6 +3447,7 @@ function simulateTextMessageFromDashboard(text, userId, displayName, targetGroup
  * Delete spreadsheet database values
  */
 function resetGoogleSheetsDatabase() {
+  return migrationRequired_('resetGoogleSheetsDatabase');
   const ss = SpreadsheetApp.openById(SHEET_ID);
   
   // Reset Players
@@ -5665,6 +5785,7 @@ function adminDiscoverGroupIds() {
 }
 
 function adminBroadcastQuote(targetId, name, minVal, maxVal, isChotoy) {
+  return migrationRequired_('adminBroadcastQuote');
   var numMin = Number(minVal) || 330;
   var numMax = Number(maxVal) || 380;
   var roundName = (name && name.trim()) ? name.trim() : 'ช่างบั้งไฟสด';
@@ -5716,6 +5837,7 @@ function adminBroadcastQuote(targetId, name, minVal, maxVal, isChotoy) {
  * @returns {{released: number, matched: number}}
  */
 function releasePreQuoteBets(bandMin, bandMax) {
+  return migrationRequired_('releasePreQuoteBets');
   const bandMinN = Number(bandMin) || 330;
   const bandMaxN = Number(bandMax) || 380;
   const ss = SpreadsheetApp.openById(SHEET_ID);
@@ -5781,6 +5903,7 @@ function releasePreQuoteBets(bandMin, bandMax) {
  * @returns {{cancelled: number}}
  */
 function cancelHeldPreQuoteBets() {
+  return migrationRequired_('cancelHeldPreQuoteBets');
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const bSheet = ss.getSheetByName('Bets');
   const bData = bSheet.getDataRange().getValues();
@@ -6492,6 +6615,7 @@ function constructSecurityWarningFlex() {
  * @param {'ACTIVE'|'CLOSED'} status
  */
 function setRocketRoundStatus(status) {
+  return migrationRequired_('setRocketRoundStatus');
   PropertiesService.getScriptProperties().setProperty('ROUND_STATUS', status);
   Logger.log('[ROUND] Status set to: ' + status);
 }
@@ -6511,6 +6635,7 @@ function getQuoteReleased() {
  * @param {boolean|string} flag
  */
 function setQuoteReleased(flag) {
+  return migrationRequired_('setQuoteReleased');
   PropertiesService.getScriptProperties().setProperty('QUOTE_RELEASED', (flag === true || flag === 'true') ? 'true' : 'false');
   Logger.log('[ROUND] quoteReleased set to: ' + (flag === true || flag === 'true' ? 'true' : 'false'));
 }
@@ -6561,6 +6686,7 @@ function getActiveRocketRound() {
  * Overwrites any legacy keys (like ACTIVE_MIN/ACTIVE_MAX) so old centisecond 800/880 values can never persist.
  */
 function setActiveRocketRound(name, minVal, maxVal, isChotoy) {
+  return migrationRequired_('setActiveRocketRound');
   var props = PropertiesService.getScriptProperties();
   var roundName = (name && name.trim()) ? name.trim() : 'ช่างบั้งไฟสด';
   var numMin = Number(minVal) || 330;
@@ -6596,6 +6722,7 @@ function setActiveRocketRound(name, minVal, maxVal, isChotoy) {
  * Set the active target min/max range in script properties.
  */
 function setTargetMinMax(minVal, maxVal) {
+  return migrationRequired_('setTargetMinMax');
   var cur = getActiveRocketRound();
   return setActiveRocketRound(cur.name, minVal, maxVal, cur.isChotoy);
 }
@@ -6629,10 +6756,5 @@ function adminGetLineQuota() {
  * Validate admin portal authentication credentials.
  */
 function adminLogin(username, password) {
-  var u = String(username || '').trim().toLowerCase();
-  var p = String(password || '').trim();
-  if (u === 'admin' && (p === 'P@ssW0rd2026' || p === 'rocket-admin' || p === getAdminApiKey_())) {
-    return { success: true, message: 'Authentication successful', username: 'Admin' };
-  }
-  return { success: false, error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
+  return proxyAdminAction_('adminLogin', [username, password]);
 }

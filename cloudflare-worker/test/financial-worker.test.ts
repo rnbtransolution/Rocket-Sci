@@ -22,6 +22,45 @@ async function adminRun(functionName: string, args: unknown[], requestId?: strin
   });
 }
 
+it('accepts the authenticated proxy bearer token for protected Worker RPCs', async () => {
+  const login = await adminRun('adminLogin', ['admin', adminKey]);
+  expect(login.status).toBe(200);
+  const loginBody = await login.json() as { data: { sessionToken: string } };
+  const sessionToken = loginBody.data.sessionToken;
+  expect(typeof sessionToken).toBe('string');
+  expect(sessionToken.length).toBeGreaterThan(0);
+
+  const response = await SELF.fetch('https://worker.test/api/run', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      Authorization: `Bearer ${sessionToken}`,
+    },
+    body: JSON.stringify({
+      functionName: 'adminOpenRound',
+      args: ['Authenticated Proxy Round'],
+      requestId: `proxy-round-${crypto.randomUUID()}`,
+    }),
+  });
+
+  expect(response.status).toBe(200);
+});
+
+it('fails admin login explicitly when the Worker credential is missing', async () => {
+  const response = await worker.fetch(
+    new Request('https://worker.test/api/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ functionName: 'adminLogin', args: ['admin', ''] }),
+    }),
+    { ADMIN_API_KEY: '' } as never,
+    {} as never,
+  );
+
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ error: 'Admin authentication is not configured' });
+});
+
 it('returns an explicit dashboard failure when the player snapshot fails', async () => {
   let snapshotCalls = 0;
   const coordinatorStub = {
@@ -85,6 +124,7 @@ it('keeps the active Worker round when replacement is blocked by an unsettled ma
       displayName: 'Round Lock Participant',
       openingBalanceHundredths: 10_000,
     });
+
   }
   const order = await client.createOrder({
     idempotencyKey: `${creatorId}-order`,
@@ -335,4 +375,65 @@ it('routes LINE order, match, and retry flows through the coordinator', async ()
   )).status).toBe(200);
   expect(await client.getOrder(heldOrder!.orderNumber)).toMatchObject({ status: 'cancelled' });
   expect((await client.getAccount(creatorId))?.balanceHundredths).toBe(50_000);
+});
+
+it('cancels a dashboard order through the coordinator and refunds it idempotently', async () => {
+  const client = createCoordinatorClient(env);
+  const playerId = `player-admin-cancel-${crypto.randomUUID()}`;
+  await adminRun('adminOpenRound', [`Cancel Round ${playerId}`], `${playerId}-round`);
+  const round = JSON.parse((await env.KV_CACHE.get('ACTIVE_ROUND'))!);
+  await client.createPlayer({
+    idempotencyKey: `${playerId}-opening`,
+    playerId,
+    lineUserId: `${playerId}-line`,
+    displayName: 'Admin Cancel Player',
+    openingBalanceHundredths: 10_000,
+  });
+  const order = await client.createOrder({
+    idempotencyKey: `${playerId}-order`,
+    roundId: round.roundId,
+    creatorId: playerId,
+    side: 'low',
+    stakeHundredths: 2_000,
+    betType: 'custom_range',
+    rangeMin: 30,
+    rangeMax: 40,
+    creatorName: 'Admin Cancel Player',
+    groupId: 'admin-cancel-test',
+  });
+
+  const cancelResponse = await adminRun('adminRequestCancelBet', [order.orderNumber]);
+  expect(cancelResponse.status, JSON.stringify(await cancelResponse.clone().json())).toBe(200);
+  expect((await adminRun('adminRequestCancelBet', [order.orderNumber])).status).toBe(200);
+  expect(await client.getAccount(playerId)).toMatchObject({ balanceHundredths: 10_000 });
+  expect(await client.getLedgerEntries(playerId)).toHaveLength(3);
+});
+
+it('voids the active dashboard round through the coordinator', async () => {
+  const client = createCoordinatorClient(env);
+  const playerId = `player-admin-void-${crypto.randomUUID()}`;
+  await adminRun('adminOpenRound', [`Void Round ${playerId}`], `${playerId}-round`);
+  const round = JSON.parse((await env.KV_CACHE.get('ACTIVE_ROUND'))!);
+  await client.createPlayer({
+    idempotencyKey: `${playerId}-opening`,
+    playerId,
+    lineUserId: `${playerId}-line`,
+    displayName: 'Admin Void Player',
+    openingBalanceHundredths: 10_000,
+  });
+  await client.createOrder({
+    idempotencyKey: `${playerId}-order`,
+    roundId: round.roundId,
+    creatorId: playerId,
+    side: 'high',
+    stakeHundredths: 2_000,
+    betType: 'custom_range',
+    rangeMin: 30,
+    rangeMax: 40,
+    creatorName: 'Admin Void Player',
+    groupId: 'admin-void-test',
+  });
+
+  expect((await adminRun('adminVoidRound', [])).status).toBe(200);
+  expect(await client.getAccount(playerId)).toMatchObject({ balanceHundredths: 10_000 });
 });

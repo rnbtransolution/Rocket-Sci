@@ -23,6 +23,7 @@ import {
   type LedgerOrderStatus,
   type MatchOrderInput,
   type OpenRoundInput,
+  type ProjectionDrainResult,
   type ReleaseQuoteInput,
   type RequestDepositInput,
   type RequestWithdrawalInput,
@@ -117,6 +118,17 @@ interface IdempotencyRow {
   result_json: string;
 }
 
+interface ProjectionOutboxRow {
+  [key: string]: string | number | null;
+  outbox_id: string;
+  event_type: string;
+  payload_json: string;
+  created_at: number;
+  delivered_at: number | null;
+  attempt_count: number;
+  next_attempt_at: number;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new CoordinatorError('INVALID_INPUT', 'Command input must be an object');
@@ -184,9 +196,11 @@ function mapTransaction(row: TransactionRow): FinancialTransaction {
 
 export class FinancialCoordinator {
   private readonly state: DurableObjectState;
+  private readonly env: Env;
 
-  constructor(state: DurableObjectState, _env: Env) {
+  constructor(state: DurableObjectState, env: Env) {
     this.state = state;
+    this.env = env;
     this.initializeSchema();
   }
 
@@ -198,7 +212,10 @@ export class FinancialCoordinator {
     try {
       const body = asRecord((await request.json()) as RpcRequest);
       const operation = validateIdentifier(body.operation, 'operation', 64);
-      const result = this.dispatch(operation, body.input);
+      const result = operation === 'drainProjections'
+        ? await this.drainProjectionOutbox()
+        : this.dispatch(operation, body.input);
+      if (operation !== 'drainProjections') await this.scheduleProjectionAlarm();
       return Response.json({ result });
     } catch (error) {
       if (error instanceof CoordinatorError) return this.errorResponse(error);
@@ -207,6 +224,10 @@ export class FinancialCoordinator {
       }
       return this.errorResponse(new CoordinatorError('INTERNAL', 'Coordinator operation failed'));
     }
+  }
+
+  async alarm(): Promise<void> {
+    await this.drainProjectionOutbox();
   }
 
   private errorResponse(error: CoordinatorError): Response {
@@ -433,9 +454,21 @@ export class FinancialCoordinator {
         event_type TEXT NOT NULL,
         payload_json TEXT NOT NULL,
         created_at INTEGER NOT NULL,
-        delivered_at INTEGER
+        delivered_at INTEGER,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at INTEGER NOT NULL DEFAULT 0
       )
     `);
+    const projectionColumns = sql
+      .exec<{ name: string }>('PRAGMA table_info(projection_outbox)')
+      .toArray()
+      .map((column) => column.name);
+    if (!projectionColumns.includes('attempt_count')) {
+      sql.exec('ALTER TABLE projection_outbox ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!projectionColumns.includes('next_attempt_at')) {
+      sql.exec('ALTER TABLE projection_outbox ADD COLUMN next_attempt_at INTEGER NOT NULL DEFAULT 0');
+    }
     sql.exec(`
       CREATE TRIGGER IF NOT EXISTS ledger_entries_no_update
       BEFORE UPDATE ON ledger BEGIN
@@ -566,12 +599,14 @@ export class FinancialCoordinator {
     actorId?: string | null;
     reason?: string | null;
   }): void {
+    const entryId = crypto.randomUUID();
+    const createdAt = Date.now();
     this.state.storage.sql.exec(
       `INSERT INTO ledger
         (entry_id, account_id, idempotency_key, delta_hundredths, balance_after_hundredths,
          event_type, reference_id, actor_id, reason, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      crypto.randomUUID(),
+      entryId,
       input.accountId,
       input.idempotencyKey,
       input.deltaHundredths,
@@ -580,8 +615,112 @@ export class FinancialCoordinator {
       input.referenceId ?? null,
       input.actorId ?? null,
       input.reason ?? null,
-      Date.now(),
+      createdAt,
     );
+    this.state.storage.sql.exec(
+      `INSERT INTO projection_outbox
+        (outbox_id, event_type, payload_json, created_at, delivered_at)
+       VALUES (?, ?, ?, ?, NULL)`,
+      entryId,
+      'ledger.entry',
+      JSON.stringify({
+        entryId,
+        accountId: input.accountId,
+        idempotencyKey: input.idempotencyKey,
+        deltaHundredths: input.deltaHundredths,
+        balanceAfterHundredths: input.balanceAfterHundredths,
+        eventType: input.eventType,
+        referenceId: input.referenceId ?? null,
+        actorId: input.actorId ?? null,
+        reason: input.reason ?? null,
+        createdAt,
+      }),
+      createdAt,
+    );
+  }
+
+  private async scheduleProjectionAlarm(): Promise<void> {
+    const pending = this.state.storage.sql
+      .exec<{ next_attempt_at: number }>(
+        `SELECT next_attempt_at FROM projection_outbox
+         WHERE delivered_at IS NULL ORDER BY next_attempt_at, created_at LIMIT 1`,
+      )
+      .toArray()[0];
+    if (!pending) {
+      await this.state.storage.deleteAlarm();
+      return;
+    }
+    await this.state.storage.setAlarm(Math.max(Date.now() + 1000, pending.next_attempt_at));
+  }
+
+  private async drainProjectionOutbox(): Promise<ProjectionDrainResult> {
+    const now = Date.now();
+    const pending = this.state.storage.sql
+      .exec<ProjectionOutboxRow>(
+        `SELECT outbox_id, event_type, payload_json, created_at, delivered_at,
+                attempt_count, next_attempt_at
+         FROM projection_outbox
+         WHERE delivered_at IS NULL AND next_attempt_at <= ?
+         ORDER BY created_at, outbox_id LIMIT 50`,
+        now,
+      )
+      .toArray();
+    let delivered = 0;
+    let failed = 0;
+    const projectionUrl = this.env.GAS_PROJECTION_URL;
+    const projectionKey = this.env.PROJECTION_API_KEY;
+
+    for (const row of pending) {
+      try {
+        if (!projectionUrl || !projectionKey) {
+          throw new Error('GAS projection delivery is not configured');
+        }
+        const response = await fetch(projectionUrl, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            action: 'projection',
+            projectionKey,
+            event: {
+              eventId: row.outbox_id,
+              ledgerEntry: JSON.parse(row.payload_json),
+              snapshot: this.getSnapshot(),
+            },
+          }),
+        });
+        const acknowledgement = (await response.json()) as { success?: boolean; eventId?: string };
+        if (!response.ok || acknowledgement.success !== true || acknowledgement.eventId !== row.outbox_id) {
+          throw new Error('GAS projection delivery was not acknowledged');
+        }
+        this.state.storage.sql.exec(
+          'UPDATE projection_outbox SET delivered_at = ? WHERE outbox_id = ? AND delivered_at IS NULL',
+          Date.now(),
+          row.outbox_id,
+        );
+        delivered += 1;
+      } catch (error) {
+        const attempts = row.attempt_count + 1;
+        const retryDelay = Math.min(1000 * (2 ** Math.min(attempts - 1, 12)), 3_600_000);
+        this.state.storage.sql.exec(
+          `UPDATE projection_outbox
+           SET attempt_count = ?, next_attempt_at = ?
+           WHERE outbox_id = ? AND delivered_at IS NULL`,
+          attempts,
+          Date.now() + retryDelay,
+          row.outbox_id,
+        );
+        failed += 1;
+        console.warn('[FinancialCoordinator] Projection delivery failed:', error);
+      }
+    }
+
+    const remaining = this.state.storage.sql
+      .exec<{ count: number }>(
+        'SELECT COUNT(*) AS count FROM projection_outbox WHERE delivered_at IS NULL',
+      )
+      .toArray()[0]?.count ?? 0;
+    await this.scheduleProjectionAlarm();
+    return { delivered, failed, pending: remaining };
   }
 
   private requireActivePlayer(playerId: string): { row: AccountRow; account: LedgerAccount } {
@@ -1310,7 +1449,7 @@ export class FinancialCoordinator {
       if (order.status !== 'pending_hold' && order.status !== 'pending_match') {
         throw new CoordinatorError('INVALID_STATE', 'Only pending orders can be cancelled');
       }
-      if (order.creatorId !== input.actorId && order.matcherId !== input.actorId) {
+      if (input.actorId !== 'admin' && order.creatorId !== input.actorId && order.matcherId !== input.actorId) {
         throw new CoordinatorError('UNAUTHORIZED', 'Only the order creator or matcher can cancel');
       }
       const creator = this.accountRow(order.creatorId);
