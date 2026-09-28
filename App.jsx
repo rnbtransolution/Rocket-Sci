@@ -1,4 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  clearStoredAdminSession,
+  getStoredAdminSession,
+  isValidLoginSession,
+  requireAdminToken,
+} from './frontendAuth.js';
 import { 
   MessageSquare, 
   User, 
@@ -158,6 +164,7 @@ export default function App() {
 
   const runBackendFunction = useCallback(async (functionName, args = []) => {
     const token = typeof window !== 'undefined' ? sessionStorage.getItem('rocket_admin_token') : null;
+    requireAdminToken(token, functionName);
     if (isGAS) {
       let gasRun = (typeof window !== 'undefined' && window.google?.script?.run) ? window.google.script.run : null;
       if (!gasRun && isGASHost) {
@@ -220,12 +227,7 @@ export default function App() {
   const [playerUserId, setPlayerUserId] = useState(null);
   const [adminAuthenticated, setAdminAuthenticated] = useState(() => {
     if (typeof window !== 'undefined') {
-      const token = sessionStorage.getItem('rocket_admin_token');
-      const expiresAt = Number(sessionStorage.getItem('rocket_admin_expires_at'));
-      if (token && Number.isFinite(expiresAt) && expiresAt > Date.now()) return true;
-      sessionStorage.removeItem('rocket_admin_auth');
-      sessionStorage.removeItem('rocket_admin_token');
-      sessionStorage.removeItem('rocket_admin_expires_at');
+      if (getStoredAdminSession(sessionStorage)) return true;
     }
     return false;
   });
@@ -244,17 +246,11 @@ export default function App() {
     const delay = expiresAt - Date.now();
     if (!Number.isFinite(delay) || delay <= 0) {
       setAdminAuthenticated(false);
-      sessionStorage.removeItem('rocket_admin_auth');
-      sessionStorage.removeItem('rocket_admin_user');
-      sessionStorage.removeItem('rocket_admin_token');
-      sessionStorage.removeItem('rocket_admin_expires_at');
+      clearStoredAdminSession(sessionStorage);
       return undefined;
     }
     const timer = window.setTimeout(() => {
-      sessionStorage.removeItem('rocket_admin_auth');
-      sessionStorage.removeItem('rocket_admin_user');
-      sessionStorage.removeItem('rocket_admin_token');
-      sessionStorage.removeItem('rocket_admin_expires_at');
+      clearStoredAdminSession(sessionStorage);
       setAdminAuthenticated(false);
       setLoginError('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
     }, delay);
@@ -264,10 +260,7 @@ export default function App() {
   const handleAdminLogout = () => {
     if (window.confirm('🔒 คุณต้องการออกจากระบบแอดมินใช่หรือไม่?')) {
       if (typeof window !== 'undefined') {
-        sessionStorage.removeItem('rocket_admin_auth');
-        sessionStorage.removeItem('rocket_admin_user');
-        sessionStorage.removeItem('rocket_admin_token');
-        sessionStorage.removeItem('rocket_admin_expires_at');
+        clearStoredAdminSession(sessionStorage);
       }
       setAdminAuthenticated(false);
       setPasswordInput('');
@@ -593,50 +586,20 @@ export default function App() {
       if (typeof window !== 'undefined') {
         localStorage.removeItem('rocket_sci_dashboard_cache');
       }
-      if (isGAS) {
-        const gas = window.google?.script?.run;
-        if (gas) {
-          const handler = (d) => {
-            if (d) {
-              setPlayers(Array.isArray(d.players) ? d.players : []);
-              setTransactions(Array.isArray(d.transactions) ? d.transactions : []);
-              setBets(Array.isArray(d.bets) ? d.bets : []);
-              setChatLogs(Array.isArray(d.chatLogs) ? d.chatLogs : []);
-              if (d.activeGroupId !== undefined) setActiveGroupId(d.activeGroupId);
-              if (d.lineGroups) setLineGroups(d.lineGroups);
-              addToast('✅ อัปเดตข้อมูลสดสำเร็จ', 'success');
-            }
-          };
-          if (typeof gas.getDashboardData === 'function') {
-            gas.withSuccessHandler(handler).getDashboardData();
-          } else if (typeof gas.executeAdminAction === 'function') {
-            gas.withSuccessHandler(handler).executeAdminAction('getDashboardData', []);
-          }
+      const d = await runBackendFunction('syncWithSheets', []);
+      if (d && (d.players || d.bets || d.transactions)) {
+        setPlayers(Array.isArray(d.players) ? d.players : []);
+        setTransactions(Array.isArray(d.transactions) ? d.transactions : []);
+        setBets(Array.isArray(d.bets) ? d.bets : []);
+        setChatLogs(Array.isArray(d.chatLogs) ? d.chatLogs : []);
+        if (d.activeGroupId !== undefined) setActiveGroupId(d.activeGroupId);
+        if (d.lineGroups) setLineGroups(d.lineGroups);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('rocket_sci_dashboard_cache', JSON.stringify(d));
         }
+        addToast('✅ ดึงข้อมูลสดจากฐานข้อมูลสำเร็จ', 'success');
       } else {
-        let synced = false;
-        try {
-          const d = await runBackendFunction('syncWithSheets', []);
-          if (d && (d.players || d.bets || d.transactions)) {
-            setPlayers(Array.isArray(d.players) ? d.players : []);
-            setTransactions(Array.isArray(d.transactions) ? d.transactions : []);
-            setBets(Array.isArray(d.bets) ? d.bets : []);
-            setChatLogs(Array.isArray(d.chatLogs) ? d.chatLogs : []);
-            if (d.activeGroupId !== undefined) setActiveGroupId(d.activeGroupId);
-            if (d.lineGroups) setLineGroups(d.lineGroups);
-            if (typeof window !== 'undefined') {
-              localStorage.setItem('rocket_sci_dashboard_cache', JSON.stringify(d));
-            }
-            addToast('✅ ดึงข้อมูลสดจากฐานข้อมูลสำเร็จ', 'success');
-            synced = true;
-          }
-        } catch (backendErr) {
-          console.warn('[Sync Backend Error]:', backendErr);
-        }
-
-        if (!synced) {
-          addToast('⚠️ ไม่สามารถดึงข้อมูลสดจากเวอร์กเกอร์ได้', 'error');
-        }
+        addToast('⚠️ ไม่สามารถดึงข้อมูลสดจากเวอร์กเกอร์ได้', 'error');
       }
     } catch (e) {
       console.error('[Force Sync Error]:', e);
@@ -877,7 +840,7 @@ export default function App() {
         setTransactions(prev => [newTx, ...prev]);
 
         // Send to Google Sheets if running inside GAS
-        if (isGAS) {
+        if (isGAS && adminAuthenticated) {
           runBackendFunction('logTransaction', ['user', 'คุณ (You)', withdrawAmt, 0, 'PENDING_WITHDRAW', 'escalated', `Withdrawal request to ${userPlayer.bankName} ${userPlayer.bankAccount} ${userPlayer.accountName}`])
             .then(() => addToast('ส่งคำขอถอนเงินสำเร็จ! รอแอดมินดำเนินการโอนเงิน', 'info'))
             .catch((error) => console.error('[Withdrawal RPC Error]:', error));
@@ -1884,10 +1847,6 @@ export default function App() {
         chatLogs={playerChatLogs}
         playerUserId={playerUserId}
         players={players}
-        isGAS={isGAS}
-        runBackendFunction={runBackendFunction}
-        setToasts={setToasts}
-        addToast={addToast}
         setChatLogs={setChatLogs}
       />
     );
@@ -4019,7 +3978,7 @@ export default function App() {
 // -------------------------------------------------------------
 // SECURE PLAYER STATEMENT CONSOLE
 // -------------------------------------------------------------
-function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, players, isGAS, runBackendFunction, setToasts, addToast, setChatLogs }) {
+function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, players, setChatLogs }) {
   const [activeTab, setActiveTab] = useState('statement'); // 'statement' | 'bets' | 'chat'
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef(null);
@@ -4049,12 +4008,8 @@ function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, p
     // Add locally for instant UI update
     setChatLogs(prev => [...prev, newLog]);
 
-    if (isGAS) {
-      runBackendFunction('simulateTextMessageFromDashboard', [text, playerUserId, player.name])
-        .catch((error) => console.error('[Chat RPC Error]:', error));
-    } else {
-      // Sandbox Simulator Reply Simulation
-      setTimeout(() => {
+    // Player URL mode is local/demo-only; never send backend RPCs from this view.
+    setTimeout(() => {
         const clean = text.replace(/\s+/g, '').toLowerCase();
         let botText = `[ระบบบอท] ได้รับข้อความ "${text}" เรียบร้อยแล้วครับ เจ้าหน้าที่จะรีบตรวจสอบโดยเร็วที่สุด`;
         
@@ -4075,8 +4030,7 @@ function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, p
           type: 'text'
         };
         setChatLogs(prev => [...prev, botReply]);
-      }, 1200);
-    }
+    }, 1200);
   };
 
   return (
@@ -4321,7 +4275,7 @@ function AdminLockScreen({
 
     setIsSubmitting(false);
 
-    if (session?.success && session.token && Number.isFinite(Number(session.expiresAt))) {
+    if (isValidLoginSession(session)) {
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('rocket_admin_user', session.username || userClean);
         sessionStorage.setItem('rocket_admin_token', session.token);

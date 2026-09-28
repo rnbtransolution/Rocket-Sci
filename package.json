@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build && python3 bundle_gas.py",
     "lint": "eslint .",
+    "test:frontend-auth": "node --test frontend-auth.test.mjs",
     "test:gas-policy": "node --test google-apps-script/test/secret-policy.test.mjs",
     "preview": "vite preview"
   },
