@@ -1,23 +1,22 @@
 import { Env, LineWebhookPayload, QueueMessage, LineEvent } from './types.js';
 import { verifyLineSignature } from './signature.js';
+import { createCoordinatorClient } from './financial/client.js';
+import { CoordinatorError, type LedgerOrder } from './financial/types.js';
 import {
   processLineEvent,
   clearAllPendingOrders,
-  cancelHeldPreQuoteOrders,
   releaseHeldPreQuoteOrders,
-  autoMatchPendingPairs,
   voidAllRoundOrders,
   getPendingOrdersList,
   getPlayersList,
   savePlayerProfile,
   getTransactionsList,
-  addTransaction,
   pushToLine,
   logUserMessage,
   getMatchedOrdersList,
   getSettledOrdersList,
-  addToSettledOrdersList,
-  removeFromMatchedOrdersList,
+  mapCoordinatorOrder,
+  mapCoordinatorOrders,
 } from './queueHandler.js';
 import {
   generateRuleGuideFlex,
@@ -150,14 +149,6 @@ export default {
 
       // ── High-Speed Interactive Execution (< 150ms) ──
       if (events.length > 0) {
-        // Inject a per-event UUID so the inline path and the queue consumer can
-        // dedup against each other. Previously BOTH paths executed the full
-        // processLineEvent(), double-charging replies/pushes and double-writing
-        // ledger entries for every single user message.
-        for (const event of events) {
-          event.webhookEventId = event.webhookEventId || crypto.randomUUID();
-        }
-
         // Replay-probe isolation: LINE Console "Verify" button sends a synthetic
         // event with a fake replyToken (no real user behind it). Reply/push calls
         // on it fail noisily and pollute logs — acknowledge without processing.
@@ -165,22 +156,14 @@ export default {
           (e) => e.replyToken && /^0000[0-9a-f]{26,}$/.test(e.replyToken)
         );
 
-        const interactiveProcessing = Promise.all(
-          events.map(async (event) => {
-            try {
-              if (!isVerifyProbe) {
-                await processLineEvent(event, env, ctx);
-              }
-            } catch (err) {
-              console.error('[Worker] Event processing error:', err);
-            }
-          })
+        const interactiveProcessing = await Promise.allSettled(
+          events.map((event) => isVerifyProbe ? Promise.resolve() : processLineEvent(event, env, ctx))
         );
 
         if (env.LINE_EVENTS_QUEUE) {
           const queueBatch = events.map((event) => ({
             body: {
-              id: event.webhookEventId!,
+              id: event.webhookEventId || event.message?.id || crypto.randomUUID(),
               receivedAt: Date.now(),
               event,
             } as QueueMessage,
@@ -188,7 +171,16 @@ export default {
           ctx.waitUntil(env.LINE_EVENTS_QUEUE.sendBatch(queueBatch));
         }
 
-        await interactiveProcessing;
+        const processingFailure = interactiveProcessing.find(
+          (entry): entry is PromiseRejectedResult => entry.status === 'rejected',
+        );
+        if (processingFailure) {
+          console.error('[Worker] Event processing failed; requesting webhook retry:', processingFailure.reason);
+          return new Response(JSON.stringify({ error: 'Event processing failed' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
       }
 
       return new Response(JSON.stringify({ status: 'ok' }), {
@@ -325,174 +317,141 @@ export default {
         } else if (functionName === 'adminLogin') {
           const username = args[0] || '';
           const password = args[1] || '';
-          if ((username.toLowerCase() === 'admin') && (password === 'P@ssW0rd2026' || password === 'rocket-admin' || password === env.ADMIN_API_KEY)) {
+          if ((username.toLowerCase() === 'admin') && (password === env.ADMIN_API_KEY)) {
             result = { success: true, adminKey: env.ADMIN_API_KEY, username: 'Admin' };
           } else {
             result = { success: false, error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
           }
         } else if (functionName === 'adminApproveTransaction') {
-          const txId = args[0];
-          const txs = await getTransactionsList(env);
-          const targetTx = txs.find(t => t.id === txId);
-          if (targetTx) {
-            targetTx.status = 'success';
-            targetTx.actualAmount = targetTx.requestedAmount;
-            await env.KV_CACHE.put('TRANSACTIONS_LIST', JSON.stringify(txs));
-
-            const isWithdrawal = String(txId).startsWith('WD') || targetTx.type === 'withdraw';
-            const players = await getPlayersList(env);
-            const player = players.find(p => p.id === targetTx.playerId || p.lineUserId === targetTx.playerId);
-            if (player) {
-              const rawLine = player.lineUserId || await env.KV_CACHE.get(`RAW_LINE_${player.id}`) || player.id;
-              if (isWithdrawal) {
-                // Withdrawal: balance was already deducted upon request. Notify player of success.
-                if (rawLine) {
-                  ctx?.waitUntil(pushToLine(rawLine, `💸 [ถอนเงินสำเร็จ]: ยอด ${targetTx.requestedAmount.toLocaleString()} บาท แอดมินได้โอนเข้าบัญชีของคุณเรียบร้อยแล้วครับ 🚀`, env).catch(e => console.error(e)));
-                }
-              } else {
-                // Deposit: credit player balance
-                player.balance = (Number(player.balance) || 0) + targetTx.requestedAmount;
-                await savePlayerProfile({
-                  shortId: player.id,
-                  lineUserId: rawLine,
-                  displayName: player.name,
-                  balance: player.balance,
-                  bankName: player.bankName,
-                  accountNumber: player.bankAccount,
-                  accountName: player.accountName,
-                  registeredAt: Date.now(),
-                  updatedAt: Date.now(),
-                }, env, ctx);
-
-                // Push notice to player
-                if (rawLine) {
-                  ctx?.waitUntil(pushToLine(rawLine, `✅ อนุมัติยอดเงินฝาก ${targetTx.requestedAmount.toLocaleString()} บาท เรียบร้อยแล้วครับ!\nแต้มคงเหลือปัจจุบัน: ${player.balance.toLocaleString()} pt 🚀`, env).catch(e => console.error(e)));
-                }
-              }
-            }
+          const txId = String(args[0] || '');
+          const coordinator = createCoordinatorClient(env);
+          const snapshot = await coordinator.getSnapshot();
+          const targetTx = snapshot.transactions.find((transaction) => transaction.transactionId === txId);
+          if (!targetTx) throw new CoordinatorError('NOT_FOUND', 'Transaction not found');
+          const reviewed = await coordinator.reviewTransaction({
+            idempotencyKey: `admin-review:${txId}:approve`,
+            transactionId: txId,
+            decision: 'approve',
+            actualAmountHundredths: targetTx.requestedAmountHundredths,
+            actorId: 'admin',
+            reason: 'Approved by admin',
+          });
+          const account = snapshot.accounts.find((item) => item.playerId === targetTx.playerId);
+          const rawLine = account?.lineUserId || '';
+          const balance = (await coordinator.getAccount(targetTx.playerId))?.balanceHundredths || 0;
+          if (rawLine) {
+            const message = reviewed.type === 'withdrawal'
+              ? `💸 [ถอนเงินสำเร็จ]: ยอด ${(reviewed.requestedAmountHundredths / 100).toLocaleString()} บาท แอดมินได้โอนเข้าบัญชีของคุณเรียบร้อยแล้วครับ 🚀`
+              : `✅ อนุมัติยอดเงินฝาก ${(reviewed.actualAmountHundredths! / 100).toLocaleString()} บาท เรียบร้อยแล้วครับ!\nแต้มคงเหลือปัจจุบัน: ${(balance / 100).toLocaleString()} pt 🚀`;
+            ctx?.waitUntil(pushToLine(rawLine, message, env).catch((error) => console.error('[Worker] Transaction approval notification failed:', error)));
           }
           result = { success: true, txId };
         } else if (functionName === 'adminRejectTransaction') {
-          const txId = args[0];
-          const reason = args[1] || 'ไม่พบยอดเงินเข้าบัญชี';
-          const txs = await getTransactionsList(env);
-          const targetTx = txs.find(t => t.id === txId);
-          if (targetTx) {
-            targetTx.status = 'rejected';
-            targetTx.reviewReason = reason;
-            await env.KV_CACHE.put('TRANSACTIONS_LIST', JSON.stringify(txs));
-
-            const isWithdrawal = String(txId).startsWith('WD') || targetTx.type === 'withdraw';
-            const players = await getPlayersList(env);
-            const player = players.find(p => p.id === targetTx.playerId || p.lineUserId === targetTx.playerId);
-            if (player) {
-              const rawLine = player.lineUserId || await env.KV_CACHE.get(`RAW_LINE_${player.id}`) || player.id;
-              if (isWithdrawal) {
-                // Refund locked withdrawal points back to player profile
-                player.balance = (Number(player.balance) || 0) + targetTx.requestedAmount;
-                await savePlayerProfile({
-                  shortId: player.id,
-                  lineUserId: rawLine,
-                  displayName: player.name,
-                  balance: player.balance,
-                  bankName: player.bankName,
-                  accountNumber: player.bankAccount,
-                  accountName: player.accountName,
-                  registeredAt: Date.now(),
-                  updatedAt: Date.now(),
-                }, env, ctx);
-
-                if (rawLine) {
-                  ctx?.waitUntil(pushToLine(rawLine, `❌ [ปฏิเสธการถอนเงิน]: ยอด ${targetTx.requestedAmount.toLocaleString()} pt (สาเหตุ: ${reason})\nระบบได้คืนแต้มเข้ากระเป๋าเรียบร้อย แต้มคงเหลือ: ${player.balance.toLocaleString()} pt 🚀`, env).catch(e => console.error(e)));
-                }
-              } else {
-                if (rawLine) {
-                  ctx?.waitUntil(pushToLine(rawLine, `❌ [ปฏิเสธการฝากเงิน]: ยอด ${targetTx.requestedAmount.toLocaleString()} บาท (สาเหตุ: ${reason})`, env).catch(e => console.error(e)));
-                }
-              }
-            }
+          const txId = String(args[0] || '');
+          const reason = String(args[1] || 'ไม่พบยอดเงินเข้าบัญชี');
+          const coordinator = createCoordinatorClient(env);
+          const snapshot = await coordinator.getSnapshot();
+          const targetTx = snapshot.transactions.find((transaction) => transaction.transactionId === txId);
+          if (!targetTx) throw new CoordinatorError('NOT_FOUND', 'Transaction not found');
+          const reviewed = await coordinator.reviewTransaction({
+            idempotencyKey: `admin-review:${txId}:reject`,
+            transactionId: txId,
+            decision: 'reject',
+            actualAmountHundredths: 0,
+            actorId: 'admin',
+            reason,
+          });
+          const rawLine = snapshot.accounts.find((item) => item.playerId === targetTx.playerId)?.lineUserId || '';
+          const balance = (await coordinator.getAccount(targetTx.playerId))?.balanceHundredths || 0;
+          if (rawLine) {
+            const message = reviewed.type === 'withdrawal'
+              ? `❌ [ปฏิเสธการถอนเงิน]: ยอด ${(reviewed.requestedAmountHundredths / 100).toLocaleString()} pt (สาเหตุ: ${reason})\nระบบได้คืนแต้มเข้ากระเป๋าเรียบร้อย แต้มคงเหลือ: ${(balance / 100).toLocaleString()} pt 🚀`
+              : `❌ [ปฏิเสธการฝากเงิน]: ยอด ${(reviewed.requestedAmountHundredths / 100).toLocaleString()} บาท (สาเหตุ: ${reason})`;
+            ctx?.waitUntil(pushToLine(rawLine, message, env).catch((error) => console.error('[Worker] Transaction rejection notification failed:', error)));
           }
           result = { success: true, txId };
         } else if (functionName === 'adminSetPlayerBalance') {
-          const userId = args[0];
-          const newBal = Number(args[1]) || 0;
+          const userId = String(args[0] || '');
+          const newBal = Number(args[1]);
           const passedName = args[2] ? String(args[2]).trim() : '';
-
-          const players = await getPlayersList(env);
-          const player = players.find(p => p.id === userId || p.lineUserId === userId || (p.shortId && p.shortId === userId));
-          const targetLineUserId = player?.lineUserId || (await env.KV_CACHE.get(`RAW_LINE_${userId}`)) || userId;
-          const displayName = player?.name || player?.displayName || passedName || 'ผู้เล่น';
-          let oldBal = player ? (Number(player.balance) || 0) : 0;
-
-          const profileRaw = await env.KV_CACHE.get(`USER_${targetLineUserId}`);
-          if (profileRaw) {
-            const p = JSON.parse(profileRaw);
-            if (p.balance !== undefined) oldBal = Number(p.balance) || 0;
-            p.balance = newBal;
-            if (passedName) p.displayName = passedName;
-
-            // Ledger-First: Record admin adjustment before updating profile
-            await addTransaction({
-              id: `ADJ${Date.now().toString().slice(-6)}`,
-              playerId: p.shortId,
-              playerName: p.displayName,
-              requestedAmount: newBal - oldBal,
-              actualAmount: newBal - oldBal,
-              slipRef: 'ADMIN_ADJUST',
-              status: 'success',
-              reviewReason: `Admin set balance: ${oldBal} → ${newBal}`,
-              timestamp: formatTime(),
-              type: 'deposit',
-              createdAt: Date.now(),
-            }, env, ctx);
-
-            await savePlayerProfile(p, env, ctx);
-          } else {
-            await savePlayerProfile({
-              shortId: userId.startsWith('PL') ? userId : `PL${userId.slice(-6).toUpperCase()}`,
-              lineUserId: targetLineUserId,
-              displayName: displayName,
-              balance: newBal,
-              registeredAt: Date.now(),
-              updatedAt: Date.now(),
-            }, env, ctx);
+          const requestId = String(body.requestId || '');
+          if (!requestId) throw new CoordinatorError('INVALID_INPUT', 'requestId is required for balance adjustment');
+          if (!Number.isSafeInteger(newBal) || newBal < 0) {
+            throw new CoordinatorError('INVALID_INPUT', 'Balance must be a nonnegative whole-point amount');
           }
-
-          // Push DM to LINE user so they are immediately aware of their updated credit amount
-          if (targetLineUserId && targetLineUserId.startsWith('U')) {
-            try {
-              const adjustFlex = generateCreditAdjustmentFlex(displayName, oldBal, newBal);
-              ctx?.waitUntil(Promise.all([
-                pushToLine(targetLineUserId, adjustFlex, env).catch(e => console.error(e)),
-                appendChatLog(env, {
-                  timestamp: formatTime(),
-                  userId: targetLineUserId,
-                  displayName: 'แอดมิน',
-                  sender: 'admin',
-                  text: `💰 แจ้งเตือนปรับยอดเครดิต: ${oldBal.toLocaleString()} pt → ${newBal.toLocaleString()} pt`,
-                  type: 'flex',
-                }).catch(e => console.error(e))
-              ]));
-            } catch (pushErr) {
-              console.error('[Worker] Error pushing credit adjustment to DM:', pushErr);
+          const coordinator = createCoordinatorClient(env);
+          const snapshot = await coordinator.getSnapshot();
+          const account = snapshot.accounts.find((item) =>
+            item.playerId === userId || item.lineUserId === userId
+          );
+          if (!account) throw new CoordinatorError('NOT_FOUND', 'Player account not found');
+          const targetBalanceHundredths = newBal * 100;
+          if (!Number.isSafeInteger(targetBalanceHundredths)) {
+            throw new CoordinatorError('INVALID_INPUT', 'Balance exceeds the supported range');
+          }
+          const oldBal = account.balanceHundredths / 100;
+          const displayName = passedName || account.displayName;
+          const updated = await coordinator.adjustBalance({
+            idempotencyKey: `admin-adjust:${requestId}`,
+            playerId: account.playerId,
+            targetBalanceHundredths,
+            actorId: 'admin',
+            reason: `Admin set balance to ${newBal}`,
+          });
+          if (passedName && account.lineUserId) {
+            const raw = await env.KV_CACHE.get(`USER_${account.lineUserId}`);
+            if (raw) {
+              const profile = JSON.parse(raw);
+              profile.displayName = passedName;
+              profile.balance = updated.balanceHundredths / 100;
+              await env.KV_CACHE.put(`USER_${account.lineUserId}`, JSON.stringify(profile));
             }
           }
+          const targetLineUserId = account.lineUserId || '';
+          if (targetLineUserId.startsWith('U')) {
+            const adjustFlex = generateCreditAdjustmentFlex(displayName, oldBal, newBal);
+            ctx?.waitUntil(Promise.all([
+              pushToLine(targetLineUserId, adjustFlex, env).catch(error => console.error('[Worker] Credit adjustment notification failed:', error)),
+              appendChatLog(env, {
+                timestamp: formatTime(),
+                userId: targetLineUserId,
+                displayName: 'แอดมิน',
+                sender: 'admin',
+                text: `💰 แจ้งเตือนปรับยอดเครดิต: ${oldBal.toLocaleString()} pt → ${newBal.toLocaleString()} pt`,
+                type: 'flex',
+              }).catch(error => console.error('[Worker] Credit adjustment chat log failed:', error))
+            ]));
+          }
 
-          result = { success: true, balance: newBal };
+          result = { success: true, balance: updated.balanceHundredths / 100 };
         } else if (functionName === 'adminCreatePlayer') {
-          const lineId = args[0];
-          const name = args[1];
+          const lineId = String(args[0] || '');
+          const name = String(args[1] || 'ผู้เล่นใหม่');
           const bal = Number(args[2]) || 0;
+          const requestId = String(body.requestId || '');
+          if (!requestId) throw new CoordinatorError('INVALID_INPUT', 'requestId is required to create a player');
+          if (!lineId) throw new CoordinatorError('INVALID_INPUT', 'LINE user ID is required');
+          if (!Number.isSafeInteger(bal) || bal < 0) {
+            throw new CoordinatorError('INVALID_INPUT', 'Opening balance must be a nonnegative whole-point amount');
+          }
           const shortId = lineId && lineId.length <= 8 ? lineId.toUpperCase() : `PL${lineId.slice(-6).toUpperCase()}`;
+          const account = await createCoordinatorClient(env).createPlayer({
+            idempotencyKey: `admin-create-player:${requestId}`,
+            playerId: shortId,
+            lineUserId: lineId,
+            displayName: name,
+            openingBalanceHundredths: bal * 100,
+          });
           const newP = {
             shortId,
             lineUserId: lineId,
-            displayName: name || 'ผู้เล่นใหม่',
-            balance: bal,
-            registeredAt: Date.now(),
-            updatedAt: Date.now(),
+            displayName: account.displayName,
+            balance: account.balanceHundredths / 100,
+            registeredAt: account.createdAt,
+            updatedAt: account.updatedAt,
           };
-          await savePlayerProfile(newP, env, ctx);
+          await env.KV_CACHE.put(`USER_${lineId}`, JSON.stringify(newP));
+          await env.KV_CACHE.put(`RAW_LINE_${shortId}`, lineId);
 
           if (bal > 0 && lineId && lineId.startsWith('U')) {
             try {
@@ -526,16 +485,19 @@ export default {
           }
           result = { success: true };
         } else if (functionName === 'adminDeletePlayer') {
-          const userId = args[0];
-          const rawLine = await env.KV_CACHE.get(`RAW_LINE_${userId}`) || userId;
-          await env.KV_CACHE.delete(`USER_${rawLine}`);
-          await env.KV_CACHE.delete(`RAW_LINE_${userId}`);
-          const listRaw = await env.KV_CACHE.get('PLAYERS_LIST');
-          if (listRaw) {
-            const list = JSON.parse(listRaw);
-            const filtered = list.filter((p: any) => p.shortId !== userId && p.lineUserId !== rawLine);
-            await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(filtered));
-          }
+          const userId = String(args[0] || '');
+          const requestId = String(body.requestId || '');
+          if (!requestId) throw new CoordinatorError('INVALID_INPUT', 'requestId is required to deactivate a player');
+          const snapshot = await createCoordinatorClient(env).getSnapshot();
+          const account = snapshot.accounts.find((item) =>
+            item.playerId === userId || item.lineUserId === userId
+          );
+          if (!account) throw new CoordinatorError('NOT_FOUND', 'Player account not found');
+          await createCoordinatorClient(env).deactivatePlayer({
+            idempotencyKey: `admin-deactivate-player:${requestId}`,
+            playerId: account.playerId,
+            actorId: 'admin',
+          });
           result = { success: true };
         } else if (functionName === 'adminSetActiveGroupId') {
           const gid = args[0];
@@ -543,7 +505,19 @@ export default {
           result = { success: true, activeGroupId: gid };
         } else if (functionName === 'adminOpenRound') {
           const roundName = args[0] || 'บั้งไฟสด';
+          const requestId = String(body.requestId || '');
+          if (!requestId) throw new CoordinatorError('INVALID_INPUT', 'requestId is required to open a round');
+          const round = await createCoordinatorClient(env).openRound({
+            idempotencyKey: `admin-open-round:${requestId}`,
+            roundId: `round-${requestId}`,
+            name: String(roundName),
+          });
+          await Promise.all([
+            getPendingOrdersList(env),
+            getMatchedOrdersList(env),
+          ]);
           await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify({
+            roundId: round.roundId,
             name: roundName,
             targetMin: 330,
             targetMax: 380,
@@ -772,8 +746,23 @@ export default {
           const min = Number(args[2]) || 330;
           const max = Number(args[3]) || 380;
           const isChotoy = Boolean(args[4]);
+          const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
+          if (!roundStr) throw new CoordinatorError('INVALID_STATE', 'There is no active round to quote');
+          const currentRound = JSON.parse(roundStr);
+          if (!currentRound.roundId) throw new CoordinatorError('INVALID_STATE', 'Active round has no coordinator ID');
+          const requestId = String(body.requestId || '');
+          if (!requestId) throw new CoordinatorError('INVALID_INPUT', 'requestId is required to release a quote');
+          const quoteResult = await releaseHeldPreQuoteOrders(
+            currentRound.roundId,
+            `admin-release-quote:${requestId}`,
+            min,
+            max,
+            env,
+            ctx,
+          );
 
           const roundData = {
+            roundId: currentRound.roundId,
             name,
             targetMin: min,
             targetMax: max,
@@ -783,8 +772,6 @@ export default {
             updatedAt: Date.now(),
           };
           await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(roundData));
-
-          await releaseHeldPreQuoteOrders(min, max, env, ctx);
 
           const quoteFlex = {
             type: 'flex',
@@ -835,6 +822,7 @@ export default {
               success: allSuccess,
               targets,
               round: roundData,
+              releasedOrders: quoteResult.converted,
               error: allSuccess ? undefined : (quotaError?.error || 'ส่งข้อความเข้าบางกลุ่มไม่สำเร็จ'),
               code: quotaError ? 429 : (allSuccess ? 200 : 400),
               isQuotaExhausted: !!quotaError,
@@ -844,14 +832,26 @@ export default {
         } else if (functionName === 'adminBroadcastFinalCall') {
           const target = args[0];
           const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
-          const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
+          if (!roundStr) throw new CoordinatorError('INVALID_STATE', 'There is no active round to close');
+          const round = JSON.parse(roundStr);
+          if (!round.roundId) throw new CoordinatorError('INVALID_STATE', 'Active round has no coordinator ID');
+          const requestId = String(body.requestId || '');
+          if (!requestId) throw new CoordinatorError('INVALID_INPUT', 'requestId is required to close a round');
+          const closeResult = await createCoordinatorClient(env).closeRound({
+            idempotencyKey: `admin-close-round:${requestId}`,
+            roundId: round.roundId,
+          });
           round.status = 'CLOSED';
           round.updatedAt = Date.now();
           await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round));
-
-          if (round.quoteReleased !== true) {
-            await cancelHeldPreQuoteOrders(env, ctx);
-          }
+          await getPendingOrdersList(env);
+          const coordinator = createCoordinatorClient(env);
+          await Promise.all(closeResult.cancelledOrderNumbers.map(async (orderNo) => {
+            const cancelled = await coordinator.getOrder(orderNo);
+            if (cancelled) {
+              await env.KV_ORDERS.put(`ORDER_${orderNo}`, JSON.stringify(await mapCoordinatorOrder(cancelled, env)));
+            }
+          }));
 
           const finalFlex = {
             type: 'flex',
@@ -881,8 +881,6 @@ export default {
             },
           };
 
-          await clearAllPendingOrders(env);
-
           const targets = await resolveTargetGroupIds(target, env);
           if (targets.length === 0) {
             result = { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ' };
@@ -903,6 +901,7 @@ export default {
             result = {
               success: allSuccess,
               targets,
+              cancelledOrders: closeResult.cancelledOrderNumbers.length,
               error: allSuccess ? undefined : (quotaError?.error || 'ส่งเข้าบางกลุ่มไม่สำเร็จ'),
               code: quotaError ? 429 : (allSuccess ? 200 : 400),
               isQuotaExhausted: !!quotaError,
@@ -912,7 +911,10 @@ export default {
         } else if (functionName === 'adminBroadcastVoidRound') {
           const target = args[0];
           const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
-          const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
+          if (!roundStr) throw new CoordinatorError('INVALID_STATE', 'There is no active round to void');
+          const round = JSON.parse(roundStr);
+          if (!round.roundId) throw new CoordinatorError('INVALID_STATE', 'Active round has no coordinator ID');
+          await voidAllRoundOrders(env, ctx);
           round.status = 'VOID';
           round.updatedAt = Date.now();
           await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round));
@@ -943,8 +945,6 @@ export default {
               },
             },
           };
-
-          await voidAllRoundOrders(env, ctx);
 
           const targets = await resolveTargetGroupIds(target, env);
           if (targets.length === 0) {
@@ -1128,86 +1128,75 @@ export default {
           }
           result = { success: true };
         } else if (functionName === 'adminResolveBets') {
-          const finalSeconds = Number(args[0]) || 0;
-          const tMin = Number(args[1]) || 330;
-          const tMax = Number(args[2]) || 380;
-
-          const matchedOrders = await getMatchedOrdersList(env);
-          const resolvedOrders: any[] = [];
-          const activeRoundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
-          const activeRound = activeRoundStr ? JSON.parse(activeRoundStr) : { name: 'บั้งไฟสด' };
-
-          // Any orders still held as pre_quote (price never released this round) must be
-          // auto-cancelled + refunded before settlement.
-          await cancelHeldPreQuoteOrders(env, ctx);
-
-          for (const order of matchedOrders) {
-            const amt = Number(order.amount) || 0;
-                let winnerSide: 'low' | 'high' | 'draw' = 'draw';
-                if (finalSeconds < tMin) {
-                  winnerSide = 'low';
-                } else if (finalSeconds > tMax) {
-                  winnerSide = 'high';
-                } else {
-                  winnerSide = 'draw';
-                }
-
-                let winnerName = '-';
-                let winnerLineId = '';
-                if (winnerSide === 'low') {
-                  winnerName = (order.side === 'low' ? order.creatorName : order.matcherName) || '-';
-                  winnerLineId = order.side === 'low' ? order.creatorId : (order.matcherId || '');
-                } else if (winnerSide === 'high') {
-                  winnerName = (order.side === 'high' ? order.creatorName : order.matcherName) || '-';
-                  winnerLineId = order.side === 'high' ? order.creatorId : (order.matcherId || '');
-                }
-
-                order.status = 'settled';
-                order.finalTime = finalSeconds;
-                order.winnerSide = winnerSide;
-                order.winnerName = winnerName;
-                order.settledAt = Date.now();
-                await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-                await addToSettledOrdersList(order, env);
-                await removeFromMatchedOrdersList(order.orderNumber, env);
-                resolvedOrders.push(order);
-
-                if (winnerLineId && winnerSide !== 'draw') {
-                  const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${winnerLineId}`)) || (winnerLineId === order.creatorId ? order.creatorLineUserId : null) || winnerLineId;
-                  const winProfRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
-                  if (winProfRaw) {
-                    const wp = JSON.parse(winProfRaw);
-                    wp.balance = (Number(wp.balance) || 0) + (amt * 2);
-                    await savePlayerProfile(wp, env, ctx);
-                  }
-                } else if (winnerSide === 'draw') {
-                  if (order.creatorId) {
-                    const cRawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
-                    const cpRaw = await env.KV_CACHE.get(`USER_${cRawLine}`);
-                    if (cpRaw) {
-                      const cp = JSON.parse(cpRaw);
-                      cp.balance = (Number(cp.balance) || 0) + amt;
-                      await savePlayerProfile(cp, env, ctx);
-                    }
-                  }
-                  if (order.matcherId) {
-                    const mRawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.matcherId}`)) || order.matcherId;
-                    const mpRaw = await env.KV_CACHE.get(`USER_${mRawLine}`);
-                    if (mpRaw) {
-                      const mp = JSON.parse(mpRaw);
-                      mp.balance = (Number(mp.balance) || 0) + amt;
-                      await savePlayerProfile(mp, env, ctx);
-                    }
-                  }
-                }
+          const finalSeconds = Number(args[0]);
+          if (!Number.isFinite(finalSeconds) || finalSeconds < 0) {
+            throw new CoordinatorError('INVALID_INPUT', 'Final time must be a nonnegative number');
           }
-
-
+          const activeRoundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
+          if (!activeRoundStr) throw new CoordinatorError('INVALID_STATE', 'There is no active round to settle');
+          const activeRound = JSON.parse(activeRoundStr);
+          if (!activeRound.roundId) throw new CoordinatorError('INVALID_STATE', 'Active round has no coordinator ID');
+          const requestId = String(body.requestId || '');
+          if (!requestId) throw new CoordinatorError('INVALID_INPUT', 'requestId is required to settle a round');
+          const coordinator = createCoordinatorClient(env);
+          if (String(activeRound.status).toLowerCase() === 'active') {
+            const closed = await coordinator.closeRound({
+              idempotencyKey: `admin-resolve-close:${requestId}`,
+              roundId: activeRound.roundId,
+            });
+            await getPendingOrdersList(env);
+            for (const orderNo of closed.cancelledOrderNumbers) {
+              const cancelled = await coordinator.getOrder(orderNo);
+              if (cancelled) {
+                await env.KV_ORDERS.put(`ORDER_${orderNo}`, JSON.stringify(await mapCoordinatorOrder(cancelled, env)));
+              }
+            }
+          }
+          const settlement = await coordinator.resolveRound({
+            idempotencyKey: `admin-resolve:${requestId}`,
+            roundId: activeRound.roundId,
+            finalSeconds,
+          });
+          const committedOrders = await Promise.all(settlement.orders.map((settled) =>
+            coordinator.getOrder(settled.orderNumber)
+          ));
+          if (committedOrders.some((order) => order === null)) {
+            throw new CoordinatorError('INTERNAL', 'Settled order projection is missing');
+          }
+          const mappedOrders = await mapCoordinatorOrders(
+            committedOrders.filter((order): order is LedgerOrder => order !== null),
+            env,
+          );
+          const resolvedOrders: any[] = await Promise.all(settlement.orders.map(async (settled, index) => {
+            const order = mappedOrders[index];
+            const winnerName = settled.winnerSide === 'draw'
+              ? '-'
+              : settled.winnerSide === order.side
+                ? order.creatorName
+                : order.matcherName || '-';
+            const resolved = {
+              ...order,
+              status: 'settled',
+              finalTime: finalSeconds,
+              winnerSide: settled.winnerSide,
+              winnerName,
+              settledAt: Date.now(),
+              winnerCredit: settled.winnerCreditHundredths / 100,
+              houseFee: settled.houseFeeHundredths / 100,
+            };
+            await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(resolved));
+            return resolved;
+          }));
+          await Promise.all([
+            getSettledOrdersList(env),
+            getMatchedOrdersList(env),
+          ]);
           activeRound.status = 'CLOSED';
           activeRound.finalTime = finalSeconds;
           activeRound.updatedAt = Date.now();
           await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(activeRound));
-
+          const tMin = Number(activeRound.targetMin) || 330;
+          const tMax = Number(activeRound.targetMax) || 380;
           const targets = await resolveTargetGroupIds('ALL', env);
           if (targets.length > 0) {
             const settleFlex = {
@@ -1264,7 +1253,7 @@ export default {
             if (pairBodies.length > 0) {
               const p2pFlex = {
                 type: 'flex',
-                altText: `🤝 ผลดวลตัวต่อตัว ${pairBodies.length} แผล (ผู้ชนะครบ 2x)`,
+                altText: `🤝 ผลดวลตัวต่อตัว ${pairBodies.length} แผล (รับยอดสุทธิ 1.9 เท่าหลังหักค่าธรรมเนียม 10%)`,
                 contents: {
                   type: 'bubble',
                   size: 'giga',
@@ -1315,33 +1304,48 @@ export default {
           await processLineEvent(mockEvent, env, ctx);
           result = { success: true, simulatedText: text };
         } else if (functionName === 'saveOpenBet') {
-          const orderNo = args[0];
-          const creatorId = args[1];
-          const creatorName = args[2];
+          const creatorId = String(args[1] || '');
+          const creatorName = String(args[2] || '');
           const side = args[3] === 'low' || args[3] === 'high' ? args[3] : 'low';
-          const amount = Number(args[4]) || 100;
-          const targetMin = Number(args[5]) || 330;
-          const targetMax = Number(args[6]) || 380;
-          const isChotoy = Boolean(args[7]);
-          const rocketName = args[8] || 'บั้งไฟสด';
-
+          const amount = Number(args[4]);
+          const targetMin = Number(args[5]);
+          const targetMax = Number(args[6]);
+          const requestId = String(body.requestId || '');
+          if (!requestId) throw new CoordinatorError('INVALID_INPUT', 'requestId is required to create an order');
+          if (!Number.isSafeInteger(amount) || amount <= 0 || !Number.isSafeInteger(amount * 100)) {
+            throw new CoordinatorError('INVALID_INPUT', 'Order stake must be a positive whole-point amount');
+          }
+          const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
+          if (!roundStr) throw new CoordinatorError('INVALID_STATE', 'There is no active round');
+          const round = JSON.parse(roundStr);
+          if (!round.roundId) throw new CoordinatorError('INVALID_STATE', 'Active round has no coordinator ID');
           const activeGroupId = await env.KV_CACHE.get('ACTIVE_GROUP_ID');
-          const newOrder = {
-            orderNumber: String(orderNo),
+          const order = await createCoordinatorClient(env).createOrder({
+            idempotencyKey: `dashboard-create-order:${requestId}`,
+            roundId: round.roundId,
             creatorId,
             creatorName,
             side,
-            amount,
-            status: 'open',
-            groupId: activeGroupId || '',
-            targetMin,
-            targetMax,
-            isChotoy,
-            rocketName,
-            createdAt: Date.now(),
+            stakeHundredths: amount * 100,
+            betType: round.quoteReleased ? 'range' : 'pre_quote',
+            rangeMin: Number.isFinite(targetMin) ? targetMin : 330,
+            rangeMax: Number.isFinite(targetMax) ? targetMax : 380,
+            groupId: activeGroupId || 'dashboard',
+          });
+          const newOrder = {
+            orderNumber: order.orderNumber,
+            creatorId: order.creatorId,
+            creatorName: order.creatorName,
+            side: order.side,
+            amount: order.stakeHundredths / 100,
+            betType: order.betType,
+            rangeMin: order.rangeMin,
+            rangeMax: order.rangeMax,
+            status: order.status,
+            groupId: order.groupId,
+            createdAt: order.createdAt,
           };
-
-          await env.KV_ORDERS.put(`ORDER_${orderNo}`, JSON.stringify(newOrder));
+          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(newOrder));
           const orderFlex = generateOrderFlex(newOrder as any);
           if (activeGroupId) {
             await pushToLine(activeGroupId, orderFlex, env);
@@ -1354,8 +1358,12 @@ export default {
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
       } catch (err: any) {
-        return new Response(JSON.stringify({ error: err?.message || 'Server error' }), {
-          status: 500,
+        const status = err instanceof CoordinatorError ? err.status : 500;
+        const body = err instanceof CoordinatorError
+          ? { error: { code: err.code, message: err.message } }
+          : { error: err?.message || 'Server error' };
+        return new Response(JSON.stringify(body), {
+          status,
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
       }

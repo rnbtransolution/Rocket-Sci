@@ -4,6 +4,7 @@ export type TransactionStatus = 'pending' | 'approved' | 'rejected';
 export type LedgerEventType =
   | 'opening_balance'
   | 'admin_adjustment'
+  | 'deposit_approved'
   | 'withdrawal_requested'
   | 'withdrawal_rejected'
   | 'order_hold'
@@ -132,7 +133,7 @@ export interface LedgerEntry {
 export interface FinancialTransaction {
   readonly transactionId: string;
   readonly playerId: string;
-  readonly type: 'withdrawal';
+  readonly type: 'deposit' | 'withdrawal';
   readonly requestedAmountHundredths: PointHundredths;
   readonly actualAmountHundredths: PointHundredths | null;
   readonly status: TransactionStatus;
@@ -168,6 +169,7 @@ export interface LedgerOrder {
   readonly betType: 'range' | 'custom_range' | 'pre_quote';
   readonly rangeMin: number;
   readonly rangeMax: number;
+  readonly rangeOffset: number;
   readonly status: 'pending_hold' | 'pending_match' | 'matched' | 'cancelled' | 'resolved' | 'settled' | 'void';
   readonly groupId: string;
   readonly createdAt: number;
@@ -176,11 +178,16 @@ export interface LedgerOrder {
   readonly finalSeconds: number | null;
   readonly settledAt: number | null;
 }
+export type LedgerOrderStatus = LedgerOrder['status'];
 
 export interface DashboardSnapshot {
   readonly accounts: LedgerAccount[];
   readonly transactions: FinancialTransaction[];
   readonly totalBalanceHundredths: PointHundredths;
+}
+
+export interface OrdersByStatusInput {
+  statuses: LedgerOrderStatus[];
 }
 
 export interface CreatePlayerInput {
@@ -215,6 +222,13 @@ export interface RequestWithdrawalInput {
   accountName: string;
 }
 
+export interface RequestDepositInput {
+  idempotencyKey: string;
+  transactionId: string;
+  playerId: string;
+  amountHundredths: PointHundredths;
+}
+
 export interface ReviewTransactionInput {
   idempotencyKey: string;
   transactionId: string;
@@ -239,6 +253,7 @@ export interface CreateOrderInput {
   betType: 'range' | 'custom_range' | 'pre_quote';
   rangeMin: number;
   rangeMax: number;
+  rangeOffset?: number;
   creatorName: string;
   groupId: string;
 }
@@ -249,6 +264,12 @@ export interface MatchOrderInput {
   matcherId: string;
   stakeHundredths: PointHundredths;
   matcherName: string;
+}
+
+export interface AutoMatchOrdersInput {
+  idempotencyKey: string;
+  orderNumber: string;
+  counterpartOrderNumber: string;
 }
 
 export interface CancelOrderInput {
@@ -346,16 +367,22 @@ export interface ActivateAuthorityInput {
 
 export interface CoordinatorClient {
   getAccount(playerId: string): Promise<LedgerAccount | null>;
+  getAccountByLineUserId(lineUserId: string): Promise<LedgerAccount | null>;
+  getAccounts(playerIds: string[]): Promise<LedgerAccount[]>;
   getLedgerEntries(playerId: string): Promise<LedgerEntry[]>;
   getSnapshot(): Promise<DashboardSnapshot>;
+  getOrder(orderNumber: string): Promise<LedgerOrder | null>;
+  getOrdersByStatus(statuses: LedgerOrderStatus[]): Promise<LedgerOrder[]>;
   createPlayer(input: CreatePlayerInput): Promise<LedgerAccount>;
   adjustBalance(input: AdjustBalanceInput): Promise<LedgerAccount>;
   deactivatePlayer(input: DeactivatePlayerInput): Promise<LedgerAccount>;
   requestWithdrawal(input: RequestWithdrawalInput): Promise<FinancialTransaction>;
+  requestDeposit(input: RequestDepositInput): Promise<FinancialTransaction>;
   reviewTransaction(input: ReviewTransactionInput): Promise<FinancialTransaction>;
   openRound(input: OpenRoundInput): Promise<RocketRound>;
   createOrder(input: CreateOrderInput): Promise<LedgerOrder>;
   matchOrder(input: MatchOrderInput): Promise<LedgerOrder>;
+  autoMatchOrders(input: AutoMatchOrdersInput): Promise<LedgerOrder>;
   cancelOrder(input: CancelOrderInput): Promise<LedgerOrder>;
   releaseQuote(input: ReleaseQuoteInput): Promise<RoundReleaseResult>;
   closeRound(input: CloseRoundInput): Promise<RoundCloseResult>;

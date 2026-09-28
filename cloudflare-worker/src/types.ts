@@ -45,7 +45,7 @@ export interface LineEvent {
   timestamp: number;
   source: LineSource;
   replyToken?: string;
-  /** UUID injected by the webhook for end-to-end dedup between inline + queue paths */
+  /** Stable LINE webhook event identifier when supplied by the platform */
   webhookEventId?: string;
   message?: LineMessage;
   postback?: LinePostback;
@@ -78,7 +78,7 @@ export interface Order {
   betType: 'range' | 'custom_range' | 'pre_quote';
   rangeMin: number;
   rangeMax: number;
-  status: 'pending_match' | 'pending_hold' | 'matched' | 'cancelled' | 'resolved' | 'settled' | 'void' | 'PRE_CHARGE' | 'refunding';
+  status: 'pending_match' | 'pending_hold' | 'matched' | 'cancelled' | 'resolved' | 'settled' | 'void';
   groupId?: string | null;
   userTypedCmd?: string | null;
   rocketName?: string | null;
@@ -118,10 +118,11 @@ export interface Transaction {
 }
 
 export interface RocketRound {
+  roundId: string;
   name: string;
   targetMin: number;
   targetMax: number;
-  status: 'ACTIVE' | 'CLOSED';
+  status: 'ACTIVE' | 'CLOSED' | 'VOID';
   isChotoy: boolean;
   quoteReleased: boolean;
   updatedAt: number;

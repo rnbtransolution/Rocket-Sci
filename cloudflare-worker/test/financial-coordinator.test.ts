@@ -238,6 +238,48 @@ it('does not debit a reserved withdrawal a second time when approved', async () 
   expect(await client.getLedgerEntries(playerId)).toHaveLength(2);
 });
 
+it('records a pending deposit and credits it only once after approval', async () => {
+  const client = createCoordinatorClient(env);
+  const playerId = `player-deposit-${crypto.randomUUID()}`;
+  const transactionId = `${playerId}-transaction`;
+  await client.createPlayer({
+    idempotencyKey: `${playerId}-opening`,
+    playerId,
+    lineUserId: `${playerId}-line`,
+    displayName: 'Deposit Player',
+    openingBalanceHundredths: 0,
+  });
+
+  const request = {
+    idempotencyKey: `${playerId}-deposit`,
+    transactionId,
+    playerId,
+    amountHundredths: 10_000,
+  };
+  const pending = await client.requestDeposit(request);
+  expect(pending).toMatchObject({
+    transactionId,
+    type: 'deposit',
+    requestedAmountHundredths: 10_000,
+    status: 'pending',
+  });
+  expect(await client.getAccount(playerId)).toMatchObject({ balanceHundredths: 0 });
+
+  const review = {
+    idempotencyKey: `${playerId}-approve`,
+    transactionId,
+    decision: 'approve' as const,
+    actualAmountHundredths: 10_000,
+    actorId: 'admin-test',
+    reason: 'verified deposit',
+  };
+  await client.reviewTransaction(review);
+  await client.reviewTransaction(review);
+
+  expect(await client.getAccount(playerId)).toMatchObject({ balanceHundredths: 10_000 });
+  expect((await client.getLedgerEntries(playerId)).filter((entry) => entry.eventType === 'deposit_approved')).toHaveLength(1);
+});
+
 it('deactivates a zero-balance account without deleting its ledger', async () => {
   const client = createCoordinatorClient(env);
   const playerId = `player-tombstone-${crypto.randomUUID()}`;
@@ -556,6 +598,7 @@ it('persists the official quote on held and later standard orders', async () => 
     betType: 'pre_quote',
     rangeMin: 1,
     rangeMax: 2,
+    rangeOffset: 5,
     creatorName: 'Quote Player',
     groupId: `${roundId}-group`,
   });
@@ -577,6 +620,12 @@ it('persists the official quote on held and later standard orders', async () => 
 
   expect(later).toMatchObject({ status: 'pending_match', rangeMin: 10, rangeMax: 20 });
   expect(released.releasedOrderNumbers).toContain(held.orderNumber);
+  expect(await client.getOrder(held.orderNumber)).toMatchObject({
+    status: 'pending_match',
+    rangeMin: 15,
+    rangeMax: 25,
+    rangeOffset: 5,
+  });
   for (const orderNumber of [held.orderNumber, later.orderNumber]) {
     await client.matchOrder({
       idempotencyKey: `${orderNumber}-match`,
@@ -595,6 +644,73 @@ it('persists the official quote on held and later standard orders', async () => 
   expect(settled.orders.every((entry) => entry.winnerSide === 'low')).toBe(true);
   expect(await client.getAccount(creatorId)).toMatchObject({ balanceHundredths: 11_800 });
   expect(await client.getAccount(matcherId)).toMatchObject({ balanceHundredths: 8_000 });
+});
+
+it('pairs two already-held orders atomically without charging either player twice', async () => {
+  const client = createCoordinatorClient(env);
+  const roundId = `round-auto-match-${crypto.randomUUID()}`;
+  const lowId = `player-auto-low-${crypto.randomUUID()}`;
+  const highId = `player-auto-high-${crypto.randomUUID()}`;
+  await client.createPlayer({
+    idempotencyKey: `${lowId}-opening`,
+    playerId: lowId,
+    lineUserId: `${lowId}-line`,
+    displayName: 'Auto Low',
+    openingBalanceHundredths: 10_000,
+  });
+  await client.createPlayer({
+    idempotencyKey: `${highId}-opening`,
+    playerId: highId,
+    lineUserId: `${highId}-line`,
+    displayName: 'Auto High',
+    openingBalanceHundredths: 10_000,
+  });
+  await client.openRound({ idempotencyKey: `${roundId}-open`, roundId, name: 'Auto Match' });
+  await client.releaseQuote({
+    idempotencyKey: `${roundId}-quote`,
+    roundId,
+    targetMin: 10,
+    targetMax: 20,
+  });
+  const lowOrder = await client.createOrder({
+    idempotencyKey: `${roundId}-low`,
+    roundId,
+    creatorId: lowId,
+    creatorName: 'Auto Low',
+    side: 'low',
+    stakeHundredths: 1_000,
+    betType: 'range',
+    rangeMin: 10,
+    rangeMax: 20,
+    groupId: `${roundId}-group`,
+  });
+  const highOrder = await client.createOrder({
+    idempotencyKey: `${roundId}-high`,
+    roundId,
+    creatorId: highId,
+    creatorName: 'Auto High',
+    side: 'high',
+    stakeHundredths: 1_000,
+    betType: 'range',
+    rangeMin: 10,
+    rangeMax: 20,
+    groupId: `${roundId}-group`,
+  });
+  const command = {
+    idempotencyKey: `${roundId}-pair`,
+    orderNumber: lowOrder.orderNumber,
+    counterpartOrderNumber: highOrder.orderNumber,
+  };
+  const matched = await client.autoMatchOrders(command);
+  expect(await client.autoMatchOrders(command)).toEqual(matched);
+  expect(matched).toMatchObject({ status: 'matched', matcherId: highId });
+  expect(await client.getOrder(highOrder.orderNumber)).toMatchObject({ status: 'cancelled' });
+  expect(await client.getAccount(lowId)).toMatchObject({ balanceHundredths: 9_000 });
+  expect(await client.getAccount(highId)).toMatchObject({ balanceHundredths: 9_000 });
+  expect((await client.getLedgerEntries(highId)).filter((entry) => entry.eventType === 'order_matched')).toHaveLength(1);
+  await client.voidRound({ idempotencyKey: `${roundId}-void`, roundId });
+  expect(await client.getAccount(lowId)).toMatchObject({ balanceHundredths: 10_000 });
+  expect(await client.getAccount(highId)).toMatchObject({ balanceHundredths: 10_000 });
 });
 
 it('settles creator wins, matcher wins, and draws with balanced account credits', async () => {

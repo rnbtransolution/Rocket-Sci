@@ -8,6 +8,7 @@ import {
   validateText,
   type AccountKind,
   type AdjustBalanceInput,
+  type AutoMatchOrdersInput,
   type CancelOrderInput,
   type CloseRoundInput,
   type CreateOrderInput,
@@ -19,9 +20,11 @@ import {
   type LedgerEntry,
   type LedgerEventType,
   type LedgerOrder,
+  type LedgerOrderStatus,
   type MatchOrderInput,
   type OpenRoundInput,
   type ReleaseQuoteInput,
+  type RequestDepositInput,
   type RequestWithdrawalInput,
   type ResolveRoundInput,
   type ReviewTransactionInput,
@@ -95,7 +98,7 @@ interface TransactionRow {
   [key: string]: string | number | null;
   transaction_id: string;
   player_id: string;
-  type: 'withdrawal';
+  type: 'deposit' | 'withdrawal';
   requested_amount_hundredths: number;
   actual_amount_hundredths: number | null;
   status: 'pending' | 'approved' | 'rejected';
@@ -219,12 +222,63 @@ export class FinancialCoordinator {
         const input = asRecord(rawInput);
         return this.getAccount(validateIdentifier(input.playerId, 'playerId'));
       }
+      case 'getAccountByLineUserId': {
+        const input = asRecord(rawInput);
+        const lineUserId = validateIdentifier(input.lineUserId, 'lineUserId');
+        const row = this.state.storage.sql
+          .exec<AccountRow>('SELECT * FROM accounts WHERE line_user_id = ?', lineUserId)
+          .toArray()[0];
+        return row ? mapAccount(row) : null;
+      }
+      case 'getAccounts': {
+        const input = asRecord(rawInput);
+        if (!Array.isArray(input.playerIds) || input.playerIds.length === 0 || input.playerIds.length > 500) {
+          throw new CoordinatorError('INVALID_INPUT', 'playerIds must contain between 1 and 500 IDs');
+        }
+        const playerIds = input.playerIds.map((playerId) => validateIdentifier(playerId, 'playerId'));
+        const placeholders = playerIds.map(() => '?').join(', ');
+        return this.state.storage.sql
+          .exec<AccountRow>(`SELECT * FROM accounts WHERE player_id IN (${placeholders})`, ...playerIds)
+          .toArray()
+          .map(mapAccount);
+      }
       case 'getLedgerEntries': {
         const input = asRecord(rawInput);
         return this.getLedgerEntries(validateIdentifier(input.playerId, 'playerId'));
       }
       case 'getSnapshot':
         return this.getSnapshot();
+      case 'getOrder': {
+        const input = asRecord(rawInput);
+        const row = this.orderRow(validateIdentifier(input.orderNumber, 'orderNumber'));
+        return row ? this.mapOrder(row) : null;
+      }
+      case 'getOrdersByStatus': {
+        const input = asRecord(rawInput);
+        if (!Array.isArray(input.statuses) || input.statuses.length === 0) {
+          throw new CoordinatorError('INVALID_INPUT', 'statuses must be a non-empty array');
+        }
+        const validStatuses: LedgerOrderStatus[] = [
+          'pending_hold',
+          'pending_match',
+          'matched',
+          'cancelled',
+          'resolved',
+          'settled',
+          'void',
+        ];
+        const statuses = input.statuses.map((status) => {
+          if (typeof status !== 'string' || !validStatuses.includes(status as LedgerOrderStatus)) {
+            throw new CoordinatorError('INVALID_INPUT', 'Order status is invalid');
+          }
+          return status;
+        });
+        const placeholders = statuses.map(() => '?').join(', ');
+        return this.state.storage.sql
+          .exec<OrderRow>(`SELECT * FROM orders WHERE status IN (${placeholders}) ORDER BY created_at DESC`, ...statuses)
+          .toArray()
+          .map((row) => this.mapOrder(row));
+      }
       case 'createPlayer':
         return this.createPlayer(asRecord(rawInput) as unknown as CreatePlayerInput);
       case 'adjustBalance':
@@ -233,6 +287,8 @@ export class FinancialCoordinator {
         return this.deactivatePlayer(asRecord(rawInput) as unknown as DeactivatePlayerInput);
       case 'requestWithdrawal':
         return this.requestWithdrawal(asRecord(rawInput) as unknown as RequestWithdrawalInput);
+      case 'requestDeposit':
+        return this.requestDeposit(asRecord(rawInput) as unknown as RequestDepositInput);
       case 'reviewTransaction':
         return this.reviewTransaction(asRecord(rawInput) as unknown as ReviewTransactionInput);
       case 'openRound':
@@ -241,6 +297,8 @@ export class FinancialCoordinator {
         return this.createOrder(asRecord(rawInput) as unknown as CreateOrderInput);
       case 'matchOrder':
         return this.matchOrder(asRecord(rawInput) as unknown as MatchOrderInput);
+      case 'autoMatchOrders':
+        return this.autoMatchOrders(asRecord(rawInput) as unknown as AutoMatchOrdersInput);
       case 'cancelOrder':
         return this.cancelOrder(asRecord(rawInput) as unknown as CancelOrderInput);
       case 'releaseQuote':
@@ -290,7 +348,7 @@ export class FinancialCoordinator {
       CREATE TABLE IF NOT EXISTS transactions (
         transaction_id TEXT PRIMARY KEY,
         player_id TEXT NOT NULL REFERENCES accounts(player_id),
-        type TEXT NOT NULL CHECK (type IN ('withdrawal')),
+        type TEXT NOT NULL CHECK (type IN ('deposit', 'withdrawal')),
         requested_amount_hundredths INTEGER NOT NULL CHECK (requested_amount_hundredths > 0),
         actual_amount_hundredths INTEGER CHECK (actual_amount_hundredths >= 0),
         status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected')),
@@ -315,6 +373,37 @@ export class FinancialCoordinator {
         updated_at INTEGER NOT NULL
       )
     `);
+    const transactionSchema = sql
+      .exec<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'transactions'")
+      .toArray()[0]?.sql ?? '';
+    if (transactionSchema.includes("type IN ('withdrawal')")) {
+      sql.exec(`
+        CREATE TABLE transactions_replacement (
+          transaction_id TEXT PRIMARY KEY,
+          player_id TEXT NOT NULL REFERENCES accounts(player_id),
+          type TEXT NOT NULL CHECK (type IN ('deposit', 'withdrawal')),
+          requested_amount_hundredths INTEGER NOT NULL CHECK (requested_amount_hundredths > 0),
+          actual_amount_hundredths INTEGER CHECK (actual_amount_hundredths >= 0),
+          status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected')),
+          bank_name TEXT NOT NULL,
+          account_number TEXT NOT NULL,
+          account_name TEXT NOT NULL,
+          actor_id TEXT,
+          reason TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      sql.exec(`
+        INSERT INTO transactions_replacement
+        SELECT transaction_id, player_id, type, requested_amount_hundredths,
+               actual_amount_hundredths, status, bank_name, account_number,
+               account_name, actor_id, reason, created_at, updated_at
+        FROM transactions
+      `);
+      sql.exec('DROP TABLE transactions');
+      sql.exec('ALTER TABLE transactions_replacement RENAME TO transactions');
+    }
     sql.exec(`
       CREATE TABLE IF NOT EXISTS orders (
         order_number TEXT PRIMARY KEY,
@@ -541,6 +630,7 @@ export class FinancialCoordinator {
       betType: (payload.betType as 'range' | 'custom_range' | 'pre_quote') ?? 'range',
       rangeMin: Number(payload.rangeMin ?? 0),
       rangeMax: Number(payload.rangeMax ?? 0),
+      rangeOffset: Number(payload.rangeOffset ?? 0),
       status: row.status as LedgerOrder['status'],
       groupId: String(payload.groupId ?? ''),
       createdAt: Number(row.created_at),
@@ -667,7 +757,7 @@ export class FinancialCoordinator {
         .exec<{ count: number }>(
           `SELECT COUNT(*) AS count FROM orders
            WHERE (creator_id = ? OR matcher_id = ?)
-             AND status IN ('pending_hold', 'pending_match', 'matched', 'refunding')`,
+             AND status IN ('pending_hold', 'pending_match', 'matched')`,
           input.playerId,
           input.playerId,
         )
@@ -713,6 +803,7 @@ export class FinancialCoordinator {
       if (this.transactionRow(input.transactionId)) {
         throw new CoordinatorError('DUPLICATE_ID', 'Transaction ID already exists');
       }
+
       const { row, account } = this.requireActivePlayer(input.playerId);
       if (account.balanceHundredths < input.amountHundredths) {
         throw new CoordinatorError('INSUFFICIENT_FUNDS', 'Insufficient balance for withdrawal');
@@ -755,6 +846,36 @@ export class FinancialCoordinator {
     });
   }
 
+  private requestDeposit(rawInput: RequestDepositInput): FinancialTransaction {
+    const input = this.validateIdempotentInput({ ...rawInput });
+    input.transactionId = validateIdentifier(input.transactionId, 'transactionId');
+    input.playerId = validateIdentifier(input.playerId, 'playerId');
+    input.amountHundredths = validatePointHundredths(input.amountHundredths, 'amountHundredths', false);
+
+    return this.replayOrBegin('requestDeposit', input.idempotencyKey, input, () => {
+      if (this.transactionRow(input.transactionId)) {
+        throw new CoordinatorError('DUPLICATE_ID', 'Transaction ID already exists');
+      }
+      this.requireActivePlayer(input.playerId);
+      const now = Date.now();
+      this.state.storage.sql.exec(
+        `INSERT INTO transactions
+          (transaction_id, player_id, type, requested_amount_hundredths,
+           actual_amount_hundredths, status, bank_name, account_number,
+           account_name, actor_id, reason, created_at, updated_at)
+         VALUES (?, ?, 'deposit', ?, NULL, 'pending', '', '', '', NULL, NULL, ?, ?)`,
+        input.transactionId,
+        input.playerId,
+        input.amountHundredths,
+        now,
+        now,
+      );
+      const transaction = this.transactionRow(input.transactionId);
+      if (!transaction) throw new CoordinatorError('INTERNAL', 'Created deposit request could not be loaded');
+      return mapTransaction(transaction);
+    });
+  }
+
   private reviewTransaction(rawInput: ReviewTransactionInput): FinancialTransaction {
     const input = this.validateIdempotentInput({ ...rawInput });
     input.transactionId = validateIdentifier(input.transactionId, 'transactionId');
@@ -774,15 +895,36 @@ export class FinancialCoordinator {
       if (transaction.status !== 'pending') {
         throw new CoordinatorError('INVALID_STATE', 'Transaction has already been reviewed');
       }
-      if (
-        input.decision === 'approve' &&
-        input.actualAmountHundredths !== transaction.requested_amount_hundredths
-      ) {
-        throw new CoordinatorError('INVALID_INPUT', 'Approved withdrawal amount must match its reservation');
+      if (input.decision === 'approve' && input.actualAmountHundredths !== transaction.requested_amount_hundredths) {
+        throw new CoordinatorError('INVALID_INPUT', 'Approved amount must match the requested amount');
       }
 
       const now = Date.now();
-      if (input.decision === 'reject') {
+      if (input.decision === 'approve' && transaction.type === 'deposit') {
+        const account = this.accountRow(transaction.player_id);
+        if (!account) throw new CoordinatorError('NOT_FOUND', 'Player account not found');
+        if (account.active !== 1) throw new CoordinatorError('INVALID_STATE', 'Player account is not active');
+        const nextBalance = account.balance_hundredths + transaction.requested_amount_hundredths;
+        if (!Number.isSafeInteger(nextBalance)) {
+          throw new CoordinatorError('INTERNAL', 'Deposit credit exceeds the supported balance range');
+        }
+        this.state.storage.sql.exec(
+          'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
+          nextBalance,
+          now,
+          transaction.player_id,
+        );
+        this.addLedgerEntry({
+          accountId: transaction.player_id,
+          idempotencyKey: `reviewTransaction:${input.idempotencyKey}`,
+          deltaHundredths: transaction.requested_amount_hundredths,
+          balanceAfterHundredths: nextBalance,
+          eventType: 'deposit_approved',
+          referenceId: input.transactionId,
+          actorId: input.actorId,
+          reason: input.reason,
+        });
+      } else if (input.decision === 'reject' && transaction.type === 'withdrawal') {
         const account = this.accountRow(transaction.player_id);
         if (!account) throw new CoordinatorError('NOT_FOUND', 'Player account not found');
         const nextBalance = account.balance_hundredths + transaction.requested_amount_hundredths;
@@ -907,16 +1049,30 @@ export class FinancialCoordinator {
     const input = this.validateIdempotentInput({ ...rawInput });
     input.roundId = validateIdentifier(input.roundId, 'roundId');
     input.creatorId = validateIdentifier(input.creatorId, 'creatorId');
-    input.side = input.side === 'low' ? 'low' : 'high';
+    if (input.side !== 'low' && input.side !== 'high') {
+      throw new CoordinatorError('INVALID_INPUT', 'side must be low or high');
+    }
     input.stakeHundredths = validateStakeHundredths(input.stakeHundredths);
-    input.betType = input.betType === 'custom_range' ? 'custom_range' : input.betType === 'pre_quote' ? 'pre_quote' : 'range';
+    if (!['range', 'custom_range', 'pre_quote'].includes(input.betType)) {
+      throw new CoordinatorError('INVALID_INPUT', 'betType is invalid');
+    }
     input.rangeMin = Number(input.rangeMin);
     input.rangeMax = Number(input.rangeMax);
+    input.rangeOffset = input.rangeOffset === undefined ? 0 : Number(input.rangeOffset);
     if (!Number.isFinite(input.rangeMin) || !Number.isFinite(input.rangeMax)) {
       throw new CoordinatorError('INVALID_INPUT', 'rangeMin and rangeMax must be finite numbers');
     }
     if (input.rangeMin > input.rangeMax) {
-      throw new CoordinatorError('INVALID_INPUT', 'rangeMin must be less than or equal to rangeMax');
+      throw new CoordinatorError('INVALID_INPUT', 'rangeMin cannot exceed rangeMax');
+    }
+    if (![0, 5, -5, 10, -10].includes(input.rangeOffset)) {
+      throw new CoordinatorError('INVALID_INPUT', 'rangeOffset must be 0, +/-5, or +/-10');
+    }
+    if (input.betType !== 'pre_quote' && input.rangeMin >= input.rangeMax) {
+      throw new CoordinatorError('INVALID_INPUT', 'rangeMin must be less than rangeMax');
+    }
+    if (input.betType === 'custom_range' && input.rangeMax - input.rangeMin > 50) {
+      throw new CoordinatorError('INVALID_INPUT', 'Custom order range cannot exceed 50 seconds');
     }
     input.creatorName = validateText(input.creatorName, 'creatorName', 120);
     input.groupId = validateIdentifier(input.groupId, 'groupId');
@@ -950,6 +1106,7 @@ export class FinancialCoordinator {
         betType: resolvedBetType,
         rangeMin: resolvedRangeMin,
         rangeMax: resolvedRangeMax,
+        rangeOffset: input.rangeOffset,
         groupId: input.groupId,
         matchedAt: null,
         winnerSide: null,
@@ -1059,6 +1216,79 @@ export class FinancialCoordinator {
     });
   }
 
+  private autoMatchOrders(rawInput: AutoMatchOrdersInput): LedgerOrder {
+    const input = this.validateIdempotentInput({ ...rawInput });
+    input.orderNumber = validateIdentifier(input.orderNumber, 'orderNumber');
+    input.counterpartOrderNumber = validateIdentifier(input.counterpartOrderNumber, 'counterpartOrderNumber');
+    if (input.orderNumber === input.counterpartOrderNumber) {
+      throw new CoordinatorError('INVALID_INPUT', 'An order cannot be paired with itself');
+    }
+
+    return this.replayOrBegin('autoMatchOrders', input.idempotencyKey, input, () => {
+      const primaryRow = this.orderRow(input.orderNumber);
+      const counterpartRow = this.orderRow(input.counterpartOrderNumber);
+      if (!primaryRow || !counterpartRow) throw new CoordinatorError('NOT_FOUND', 'Order pair not found');
+      const primary = this.mapOrder(primaryRow);
+      const counterpart = this.mapOrder(counterpartRow);
+      if (primary.status !== 'pending_match' || counterpart.status !== 'pending_match') {
+        throw new CoordinatorError('INVALID_STATE', 'Both orders must be open for matching');
+      }
+      if (primary.roundId !== counterpart.roundId) {
+        throw new CoordinatorError('INVALID_STATE', 'Orders from different rounds cannot be paired');
+      }
+      if (primary.side === counterpart.side) {
+        throw new CoordinatorError('INVALID_STATE', 'Orders must have opposite sides');
+      }
+      if (primary.stakeHundredths !== counterpart.stakeHundredths) {
+        throw new CoordinatorError('STAKE_MISMATCH', 'Order stakes must be equal');
+      }
+      if (primary.creatorId === counterpart.creatorId) {
+        throw new CoordinatorError('INVALID_STATE', 'The same player cannot be paired with themselves');
+      }
+      const round = this.roundRow(primary.roundId);
+      if (!round || round.status !== 'active') {
+        throw new CoordinatorError('INVALID_STATE', 'Order round is not active');
+      }
+      const matcher = this.requireActivePlayer(counterpart.creatorId).account;
+      const now = Date.now();
+      const primaryPayload = JSON.parse(primaryRow.order_json) as Record<string, unknown>;
+      primaryPayload.matcherId = counterpart.creatorId;
+      primaryPayload.matcherName = counterpart.creatorName;
+      primaryPayload.matchedAt = now;
+      this.state.storage.sql.exec(
+        `UPDATE orders
+         SET matcher_id = ?, status = 'matched', order_json = ?, updated_at = ?
+         WHERE order_number = ?`,
+        counterpart.creatorId,
+        JSON.stringify(primaryPayload),
+        now,
+        primary.orderNumber,
+      );
+
+      const counterpartPayload = JSON.parse(counterpartRow.order_json) as Record<string, unknown>;
+      counterpartPayload.matchedIntoOrder = primary.orderNumber;
+      this.state.storage.sql.exec(
+        `UPDATE orders SET status = 'cancelled', order_json = ?, updated_at = ? WHERE order_number = ?`,
+        JSON.stringify(counterpartPayload),
+        now,
+        counterpart.orderNumber,
+      );
+      this.addLedgerEntry({
+        accountId: counterpart.creatorId,
+        idempotencyKey: `autoMatchOrders:${input.idempotencyKey}`,
+        deltaHundredths: 0,
+        balanceAfterHundredths: matcher.balanceHundredths,
+        eventType: 'order_matched',
+        referenceId: primary.orderNumber,
+        actorId: counterpart.creatorId,
+        reason: 'Existing held stake assigned to paired order',
+      });
+      const updated = this.orderRow(primary.orderNumber);
+      if (!updated) throw new CoordinatorError('INTERNAL', 'Auto-matched order could not be loaded');
+      return this.mapOrder(updated);
+    });
+  }
+
   private cancelOrder(rawInput: CancelOrderInput): LedgerOrder {
     const input = this.validateIdempotentInput({ ...rawInput });
     input.orderNumber = validateIdentifier(input.orderNumber, 'orderNumber');
@@ -1114,8 +1344,13 @@ export class FinancialCoordinator {
   private releaseQuote(rawInput: ReleaseQuoteInput): RoundReleaseResult {
     const input = this.validateIdempotentInput({ ...rawInput });
     input.roundId = validateIdentifier(input.roundId, 'roundId');
-    if (!Number.isFinite(input.targetMin) || !Number.isFinite(input.targetMax)) {
-      throw new CoordinatorError('INVALID_INPUT', 'targetMin and targetMax must be finite numbers');
+    if (
+      !Number.isSafeInteger(input.targetMin) ||
+      !Number.isSafeInteger(input.targetMax) ||
+      input.targetMin < 0 ||
+      input.targetMin >= input.targetMax
+    ) {
+      throw new CoordinatorError('INVALID_INPUT', 'Quote bounds must be increasing nonnegative whole seconds');
     }
 
     return this.replayOrBegin('releaseQuote', input.idempotencyKey, input, () => {
@@ -1140,9 +1375,10 @@ export class FinancialCoordinator {
       for (const row of rows) {
         const payload = JSON.parse(row.order_json) as Record<string, unknown>;
         if (payload.betType !== 'pre_quote') continue;
+        const order = this.mapOrder(row);
         payload.betType = 'range';
-        payload.rangeMin = input.targetMin;
-        payload.rangeMax = input.targetMax;
+        payload.rangeMin = input.targetMin + order.rangeOffset;
+        payload.rangeMax = input.targetMax + order.rangeOffset;
         this.state.storage.sql.exec(
           `UPDATE orders SET status = 'pending_match', order_json = ?, updated_at = ? WHERE order_number = ?`,
           JSON.stringify(payload),
@@ -1312,8 +1548,8 @@ export class FinancialCoordinator {
   private resolveRound(rawInput: ResolveRoundInput): RoundSettlementResult {
     const input = this.validateIdempotentInput({ ...rawInput });
     input.roundId = validateIdentifier(input.roundId, 'roundId');
-    if (!Number.isFinite(input.finalSeconds)) {
-      throw new CoordinatorError('INVALID_INPUT', 'finalSeconds must be a finite number');
+    if (!Number.isSafeInteger(input.finalSeconds) || input.finalSeconds < 0) {
+      throw new CoordinatorError('INVALID_INPUT', 'finalSeconds must be a nonnegative whole-second value');
     }
 
     return this.replayOrBegin('resolveRound', input.idempotencyKey, input, () => {

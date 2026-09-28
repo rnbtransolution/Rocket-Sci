@@ -1,4 +1,11 @@
 import { Env, LineEvent, Order, PlayerProfile, RocketRound, Transaction } from './types.js';
+import { createCoordinatorClient } from './financial/client.js';
+import {
+  CoordinatorError,
+  wholePointsToHundredths,
+  type LedgerAccount,
+  type LedgerOrder,
+} from './financial/types.js';
 import {
   generateOrderFlex,
   generateMatchNotificationFlex,
@@ -15,6 +22,14 @@ import {
   generateWithdrawalFlex,
   generateBankRegistrationFlex,
 } from './flexTemplates.js';
+
+function lineEventIdempotencyKey(event: LineEvent, operation: string): string {
+  const sourceId = event.source?.userId || event.source?.groupId || event.source?.roomId || 'unknown';
+  const eventId = event.webhookEventId
+    || event.message?.id
+    || `${sourceId}:${event.timestamp}:${event.type}:${event.postback?.data || ''}`;
+  return `line:${operation}:${eventId}`;
+}
 
 export const RULE_GUIDE_TEXT = `📖 [กติกาการเล่น]
 
@@ -53,19 +68,24 @@ export const RULE_GUIDE_TEXT = `📖 [กติกาการเล่น]
  * Executes all order validation, atomic balance locking, and LINE API calls with sub-second latency.
  */
 export async function processLineEvent(event: LineEvent, env: Env, ctx?: ExecutionContext): Promise<void> {
-  // ── Cross-Path Dedup Guard ──
-  // Every webhook event is processed inline (sub-100ms reply path) AND mirrored
-  // to the Queue for the background consumer. Without this guard both paths
-  // executed the full handler: double replies, double balance writes, double
-  // order records. First executor wins (inline normally); the queue copy acks.
   if (event.webhookEventId) {
-    const dedupKey = `EVT_${event.webhookEventId}`;
     try {
-      if (await env.KV_CACHE.get(dedupKey)) return;
-      await env.KV_CACHE.put(dedupKey, '1', { expirationTtl: 120 });
-    } catch (_) { /* fail-open: prefer processing over dropping */ }
+      if (await env.KV_CACHE.get(`EVT_${event.webhookEventId}`)) return;
+    } catch (error) {
+      console.warn('[Worker] Webhook dedup lookup failed; coordinator idempotency remains active', error);
+    }
   }
+  await processLineEventBody(event, env, ctx);
+  if (event.webhookEventId) {
+    try {
+      await env.KV_CACHE.put(`EVT_${event.webhookEventId}`, '1', { expirationTtl: 120 });
+    } catch (error) {
+      console.warn('[Worker] Webhook dedup marker write failed', error);
+    }
+  }
+}
 
+async function processLineEventBody(event: LineEvent, env: Env, ctx?: ExecutionContext): Promise<void> {
   const source = event.source || {};
   const userId = source.userId;
   const groupId = source.groupId || source.roomId || null;
@@ -179,22 +199,14 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         await deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ยอดฝากขั้นต่ำ 100 บาท สูงสุด 50,000 บาทครับ', env);
         return;
       }
-      const txId = `TX${Math.floor(100000 + Math.random() * 900000)}`;
-      const nowStr = new Date().toLocaleTimeString('th-TH', { hour12: false });
-      const newTx: Transaction = {
-        id: txId,
+      const idempotencyKey = lineEventIdempotencyKey(event, 'request-deposit');
+      const txId = `TX-${idempotencyKey}`;
+      await createCoordinatorClient(env).requestDeposit({
+        idempotencyKey,
+        transactionId: txId,
         playerId: profile.shortId,
-        playerName: profile.displayName,
-        requestedAmount: depositAmt,
-        actualAmount: 0,
-        slipRef: '',
-        status: 'escalated',
-        reviewReason: 'รอผู้ใช้แนบสลิปโอนเงิน',
-        timestamp: nowStr,
-        type: 'deposit',
-        createdAt: Date.now(),
-      };
-      await addTransaction(newTx, env, ctx);
+        amountHundredths: wholePointsToHundredths(depositAmt, 'deposit amount'),
+      });
       const invoiceFlex = generateDepositInvoiceFlex(depositAmt);
       await deliverPrivateNotice(userId, replyToken, groupId, invoiceFlex, env);
       return;
@@ -245,10 +257,6 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         await deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ยอดถอนขั้นต่ำ 100 pt ครับ', env);
         return;
       }
-      if (profile.balance < withdrawAmt) {
-        await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ แต้มคงเหลือไม่พอครับ (มี ${profile.balance} pt ต้องการถอน ${withdrawAmt} pt)`, env);
-        return;
-      }
       if (!profile.bankName || !profile.accountNumber) {
         await deliverPrivateNotice(
           userId,
@@ -260,25 +268,30 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         return;
       }
 
-      profile.balance -= withdrawAmt;
-      await savePlayerProfile(profile, env, ctx);
-
-      const txId = `WD${Math.floor(100000 + Math.random() * 900000)}`;
-      const nowStr = new Date().toLocaleTimeString('th-TH', { hour12: false });
-      const newTx: Transaction = {
-        id: txId,
-        playerId: profile.shortId,
-        playerName: profile.displayName,
-        requestedAmount: withdrawAmt,
-        actualAmount: withdrawAmt,
-        slipRef: '',
-        status: 'escalated',
-        reviewReason: `แจ้งถอนเข้า ${profile.bankName} ${profile.accountNumber} (${profile.accountName || profile.displayName})`,
-        timestamp: nowStr,
-        type: 'withdraw',
-        createdAt: Date.now(),
-      };
-      await addTransaction(newTx, env, ctx);
+      const idempotencyKey = lineEventIdempotencyKey(event, 'request-withdrawal');
+      const txId = `WD-${idempotencyKey}`;
+      const coordinator = createCoordinatorClient(env);
+      try {
+        await coordinator.requestWithdrawal({
+          idempotencyKey,
+          transactionId: txId,
+          playerId: profile.shortId,
+          amountHundredths: wholePointsToHundredths(withdrawAmt, 'withdrawal amount'),
+          bankName: profile.bankName,
+          accountNumber: profile.accountNumber,
+          accountName: profile.accountName || profile.displayName,
+        });
+      } catch (error) {
+        if (!(error instanceof CoordinatorError)) throw error;
+        const currentBalance = (await coordinator.getAccount(profile.shortId))?.balanceHundredths || 0;
+        const message = error.code === 'INSUFFICIENT_FUNDS'
+          ? `⚠️ แต้มคงเหลือไม่พอครับ (มี ${currentBalance / 100} pt ต้องการถอน ${withdrawAmt} pt)`
+          : error.message;
+        await deliverPrivateNotice(userId, replyToken, groupId, message, env);
+        return;
+      }
+      const updatedAccount = await coordinator.getAccount(profile.shortId);
+      profile.balance = (updatedAccount?.balanceHundredths || 0) / 100;
 
       await deliverPrivateNotice(
         userId,
@@ -346,7 +359,12 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         }
       }
 
-      const cancelRes = await cancelOrder(targetNo, profile, env, ctx);
+      const cancelRes = await cancelOrder(
+        targetNo,
+        profile,
+        lineEventIdempotencyKey(event, 'cancel-order'),
+        env,
+      );
       await deliverPrivateNotice(userId, replyToken, groupId, cancelRes.message, env);
       return;
     }
@@ -390,7 +408,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
           matchAmt = undefined;
         } else {
           // Check if exists as order
-          const exists = await env.KV_ORDERS.get(`ORDER_${numStr}`);
+          const exists = await createCoordinatorClient(env).getOrder(numStr);
           if (exists) {
             targetOrderNo = numStr;
             matchAmt = undefined;
@@ -409,7 +427,17 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         matchAmt = undefined;
       }
 
-      await handleMatchOrder(targetOrderNo, matchAmt, profile, userId, groupId, replyToken, env, ctx);
+      await handleMatchOrder(
+        targetOrderNo,
+        matchAmt,
+        profile,
+        userId,
+        groupId,
+        replyToken,
+        lineEventIdempotencyKey(event, 'match-order'),
+        env,
+        ctx,
+      );
       return;
     }
 
@@ -429,7 +457,17 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         return;
       }
 
-      await handleCreateOrder(text, betRegex, rangeBetRegex, profile, userId, groupId, replyToken, env, ctx);
+      await handleCreateOrder(
+        text,
+        betRegex,
+        rangeBetRegex,
+        profile,
+        userId,
+        groupId,
+        replyToken,
+        lineEventIdempotencyKey(event, 'create-order'),
+        env,
+      );
       return;
     }
 
@@ -438,7 +476,18 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     if (openRoundRegex.test(text)) {
       const match = text.match(openRoundRegex);
       const roundName = match ? match[2].trim() : 'รอบดวลสด';
+      const idempotencyKey = lineEventIdempotencyKey(event, 'open-round');
+      const openedRound = await createCoordinatorClient(env).openRound({
+        idempotencyKey,
+        roundId: `round-${idempotencyKey}`,
+        name: roundName,
+      });
+      await Promise.all([
+        getPendingOrdersList(env),
+        getMatchedOrdersList(env),
+      ]);
       await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify({
+        roundId: openedRound.roundId,
         name: roundName,
         targetMin: 330,
         targetMax: 380,
@@ -458,12 +507,16 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       let roundName = 'รอบดวลสด';
       if (roundStr) {
         const round = JSON.parse(roundStr) as RocketRound;
+        if (!round.roundId) throw new Error('Active round is missing its coordinator ID');
+        await createCoordinatorClient(env).closeRound({
+          idempotencyKey: lineEventIdempotencyKey(event, 'close-round'),
+          roundId: round.roundId,
+        });
         round.status = 'CLOSED';
         roundName = round.name;
         await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round));
       }
-      // Also clear pending unmatched orders so board resets cleanly for next round
-      await clearAllPendingOrders(env);
+      await getPendingOrdersList(env);
       if (replyToken) {
         await replyToLine(replyToken, `⛔ ปิดรับดวลรอบ ${roundName} เรียบร้อยแล้วครับ! (ล้างกระดานรอคู่เรียบร้อย 0 แผล)`, env, !isGroup);
       } else {
@@ -492,22 +545,15 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
   if (event.type === 'message' && event.message?.type === 'image' && userId) {
     const profile = await getOrCreatePlayerProfile(userId, env, ctx);
     const replyToken = event.replyToken;
-    const txId = `TX${Math.floor(100000 + Math.random() * 900000)}`;
-    const nowStr = new Date().toLocaleTimeString('th-TH', { hour12: false });
-    const newTx: Transaction = {
-      id: txId,
+    const idempotencyKey = lineEventIdempotencyKey(event, 'request-deposit-slip');
+    const txId = `TX-${idempotencyKey}`;
+    await createCoordinatorClient(env).requestDeposit({
+      idempotencyKey,
+      transactionId: txId,
       playerId: profile.shortId,
-      playerName: profile.displayName,
-      requestedAmount: 1000,
-      actualAmount: 0,
-      slipRef: event.message.id,
-      status: 'escalated',
-      reviewReason: 'แนบรูปสลิปโอนเงิน - รอแอดมินตรวจสอบยอด',
-      timestamp: nowStr,
-      type: 'deposit',
-      createdAt: Date.now(),
-    };
-    await addTransaction(newTx, env, ctx);
+      amountHundredths: wholePointsToHundredths(1000, 'deposit amount'),
+    });
+    await env.KV_CACHE.put(`TX_META_${txId}`, JSON.stringify({ slipRef: event.message.id }));
     const msg = `✅ ได้รับรูปสลิปโอนเงินเรียบร้อยแล้วครับ! (รหัสรายการ: #${txId})\nระบบได้ส่งให้แอดมินตรวจสอบยอดเงินเข้าบัญชีเรียบร้อย เมื่อตรวจสอบสำเร็จแต้มจะเข้าทันทีครับ 🙏`;
     await deliverPrivateNotice(userId, replyToken, groupId, msg, env);
     return;
@@ -521,7 +567,17 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       const orderNo = params.get('order_id') || '';
       const amount = parseInt(params.get('amount') || '0', 10);
       const profile = await getOrCreatePlayerProfile(userId, env, ctx);
-      await handleMatchOrder(orderNo, amount || undefined, profile, userId, groupId, event.replyToken, env, ctx);
+      await handleMatchOrder(
+        orderNo,
+        amount || undefined,
+        profile,
+        userId,
+        groupId,
+        event.replyToken,
+        lineEventIdempotencyKey(event, 'match-order'),
+        env,
+        ctx,
+      );
     }
   }
 }
@@ -536,8 +592,8 @@ async function handleCreateOrder(
   userId: string,
   groupId: string,
   replyToken: string | undefined,
+  idempotencyKey: string,
   env: Env,
-  ctx?: ExecutionContext
 ): Promise<void> {
   let side: 'low' | 'high' = 'low';
   let amount = 500;
@@ -549,7 +605,7 @@ async function handleCreateOrder(
   // Check if round is closed
   const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
   const round = roundStr ? (JSON.parse(roundStr) as RocketRound) : null;
-  if (round && round.status === 'CLOSED') {
+  if (round && round.status !== 'ACTIVE') {
     await deliverPrivateNotice(userId, replyToken, groupId, '⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ', env);
     return;
   }
@@ -594,6 +650,10 @@ async function handleCreateOrder(
     }
   }
 
+  const coordinator = createCoordinatorClient(env);
+  const account = await coordinator.getAccount(profile.shortId);
+  if (!account) throw new Error(`Financial account ${profile.shortId} is missing`);
+  profile.balance = account.balanceHundredths / 100;
   if (profile.balance < amount) {
     const needed = amount - profile.balance;
     const msg = `⚠️ แต้มไม่พอครับ (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt)\n💡 พิมพ์ "ฝากเงิน" ในแชตนี้เพื่อเติมเครดิตได้เลยครับ 🚀`;
@@ -601,42 +661,45 @@ async function handleCreateOrder(
     return;
   }
 
-  // 1. Determine if this is a pre-quote order
+  if (!round?.roundId) {
+    await deliverPrivateNotice(userId, replyToken, groupId, '⛔ ยังไม่มีรอบดวลที่เปิดรับคำสั่งครับ กรุณารอแอดมินเปิดรอบใหม่', env);
+    return;
+  }
+
   const quoteReleased = !!(round && round.quoteReleased === true);
   const isPreQuote = !isCustom && !quoteReleased;
-  const orderNumber = Math.floor(1000 + Math.random() * 9000).toString();
-
-  // 2. Create Order in PRE_CHARGE state first to prevent "ghost charges"
+  let orderRecord: LedgerOrder;
+  try {
+    orderRecord = await coordinator.createOrder({
+      idempotencyKey,
+      roundId: round.roundId,
+      creatorId: profile.shortId,
+      creatorName: profile.displayName,
+      side,
+      stakeHundredths: wholePointsToHundredths(amount, 'stake'),
+      betType: isPreQuote ? 'pre_quote' : isCustom ? 'custom_range' : 'range',
+      rangeMin: isPreQuote ? offsetDelta : isCustom ? rangeMin : (round.targetMin + offsetDelta),
+      rangeMax: isPreQuote ? offsetDelta : isCustom ? rangeMax : (round.targetMax + offsetDelta),
+      rangeOffset: isPreQuote ? offsetDelta : 0,
+      groupId,
+    });
+  } catch (error) {
+    if (!(error instanceof CoordinatorError)) throw error;
+    const currentBalance = (await coordinator.getAccount(profile.shortId))?.balanceHundredths || 0;
+    const message = error.code === 'INSUFFICIENT_FUNDS'
+      ? `⚠️ แต้มไม่พอครับ (มี ${(currentBalance / 100).toLocaleString()} pt | ต้องการ ${amount.toLocaleString()} pt)`
+      : error.message;
+    await deliverPrivateNotice(userId, replyToken, groupId, message, env);
+    return;
+  }
   const newOrder: Order = {
-    orderNumber,
-    creatorId: profile.shortId,
-    creatorName: profile.displayName,
+    ...await mapCoordinatorOrder(orderRecord, env),
     creatorLineUserId: profile.lineUserId,
-    side,
-    amount,
-    betType: isPreQuote ? 'pre_quote' : (isCustom ? 'custom_range' : 'range'),
-    rangeMin: isPreQuote ? offsetDelta : (isCustom ? rangeMin : ((round?.targetMin || 330) + offsetDelta)),
-    rangeMax: isPreQuote ? offsetDelta : (isCustom ? rangeMax : ((round?.targetMax || 380) + offsetDelta)),
-    status: 'PRE_CHARGE',
-    groupId,
     userTypedCmd: text,
-    rocketName: round?.name || null,
+    rocketName: round.name,
     offset: isPreQuote ? offsetDelta : undefined,
-    createdAt: Date.now(),
   };
-
-  // Persist PRE_CHARGE order immediately
-  await env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder));
-
-  // 3. Deduct balance
-  profile.balance -= amount;
-  await savePlayerProfile(profile, env, ctx);
-
-  // 4. Finalize Order status
-  newOrder.status = isPreQuote ? 'pending_hold' : 'pending_match';
-  await env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder));
-
-  // 5. Update index (tracks both pending_match and pending_hold pre-quote orders)
+  await env.KV_ORDERS.put(`ORDER_${newOrder.orderNumber}`, JSON.stringify(newOrder));
   await addToPendingOrdersList(newOrder, env);
 
   // 6. Send Order Flex to Group Chat
@@ -650,7 +713,7 @@ async function handleCreateOrder(
   }
 
   if (isPreQuote) {
-    await deliverPrivateNotice(userId, replyToken, groupId, `⏳ Order #${orderNumber} ถูกถืออยู่รอราคาช่างครับ (จำนวน ${amount.toLocaleString()} pt)\nเมื่อแอดมินเปิดราคาช่างอย่างเป็นทางการ ระบบจะจับคู่ดวลให้อัตโนมัติครับ 🚀`, env);
+    await deliverPrivateNotice(userId, replyToken, groupId, `⏳ Order #${newOrder.orderNumber} ถูกถืออยู่รอราคาช่างครับ (จำนวน ${amount.toLocaleString()} pt)\nเมื่อแอดมินเปิดราคาช่างอย่างเป็นทางการ ระบบจะจับคู่ดวลให้อัตโนมัติครับ 🚀`, env);
   }
 }
 
@@ -661,8 +724,9 @@ async function handleMatchOrder(
   userId: string,
   groupId: string | null,
   replyToken: string | undefined,
+  idempotencyKey: string,
   env: Env,
-  ctx?: ExecutionContext
+  ctx?: ExecutionContext,
 ): Promise<void> {
   const resolvedNo = await resolveOrderNumber(orderNo, profile.shortId, env);
   if (!resolvedNo) {
@@ -673,13 +737,14 @@ async function handleMatchOrder(
     return;
   }
 
-  const orderRaw = await env.KV_ORDERS.get(`ORDER_${resolvedNo}`);
-  if (!orderRaw) {
+  const coordinator = createCoordinatorClient(env);
+  const orderRecord = await coordinator.getOrder(resolvedNo);
+  if (!orderRecord) {
     await deliverPrivateNotice(userId, replyToken, groupId, generateMatchMismatchFlex(resolvedNo, `ไม่พบแผล Order #${resolvedNo} ในระบบครับ`, 'พิมพ์ "ต <เลข order>" เพื่อลองรับแผลอื่นครับ'), env);
     return;
   }
 
-  const order = JSON.parse(orderRaw) as Order;
+  const order = await mapCoordinatorOrder(orderRecord, env);
   if (order.status !== 'pending_match') {
     const reason = order.status === 'matched' ? 'แผลนี้มีคู่ดวลแล้วครับ' : 'แผลนี้ถูกยกเลิกไปแล้วครับ';
     await deliverPrivateNotice(userId, replyToken, groupId, generateMatchMismatchFlex(resolvedNo, reason, 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ'), env);
@@ -691,67 +756,64 @@ async function handleMatchOrder(
     return;
   }
 
-  const effectiveAmt = matchAmt || order.amount;
-  if (profile.balance < effectiveAmt) {
-    const needed = effectiveAmt - profile.balance;
-    const msg = `แต้มไม่พอรับแผลครับ (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt)`;
-    await deliverPrivateNotice(userId, replyToken, groupId, generateMatchMismatchFlex(resolvedNo, msg, 'พิมพ์ "ฝากเงิน" ในแชตนี้เพื่อเติมเครดิตครับ 🚀'), env);
+  const effectiveAmt = matchAmt ?? order.amount;
+  let committedOrder: LedgerOrder;
+  try {
+    committedOrder = await coordinator.matchOrder({
+      idempotencyKey,
+      orderNumber: resolvedNo,
+      matcherId: profile.shortId,
+      matcherName: profile.displayName,
+      stakeHundredths: wholePointsToHundredths(effectiveAmt, 'stake'),
+    });
+  } catch (error) {
+    if (!(error instanceof CoordinatorError)) throw error;
+    const message = error.code === 'INSUFFICIENT_FUNDS'
+      ? `แต้มไม่พอรับแผลครับ (ยอดคงเหลือปัจจุบัน ${((await coordinator.getAccount(profile.shortId))?.balanceHundredths || 0) / 100} pt)`
+      : error.code === 'STAKE_MISMATCH'
+        ? `ยอดรับแผลต้องเท่ากับ ${order.amount.toLocaleString()} pt ครับ`
+        : error.message;
+    await deliverPrivateNotice(
+      userId,
+      replyToken,
+      groupId,
+      generateMatchMismatchFlex(resolvedNo, message, 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ'),
+      env,
+    );
     return;
   }
-
-  // Deduct matcher balance BEFORE saving
-  profile.balance -= effectiveAmt;
-
-  // Update order status in KV
-  order.status = 'matched';
-  order.matcherId = profile.shortId;
-  order.matcherName = profile.displayName;
-  order.matchedAt = Date.now();
-
-  const updatePersistence = Promise.all([
-    env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(order)),
-    removeFromPendingOrdersList(resolvedNo, env),
-    addToMatchedOrdersList(order, env),
-    savePlayerProfile(profile, env, ctx),
-  ]);
+  const committed = await mapCoordinatorOrder(committedOrder, env);
+  await env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(committed));
+  await removeFromPendingOrdersList(resolvedNo, env);
+  await addToMatchedOrdersList(committed, env);
 
   // Generate match card
-  const matchFlex = generateMatchNotificationFlex(order);
+  const matchFlex = generateMatchNotificationFlex(committed);
 
   // Match notification: reply to group if requested via group, and push to DM of both players
-  const creatorLineId = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId;
-  const matchPromises: Promise<any>[] = [updatePersistence];
-  
-  if (replyToken) {
-    matchPromises.push(replyToLine(replyToken, matchFlex, env, !groupId));
-  } else {
-    matchPromises.push(pushToLine(userId, matchFlex, env));
-  }
-
-  if (creatorLineId && creatorLineId !== userId) {
-    matchPromises.push(pushToLine(creatorLineId, matchFlex, env));
-  }
-
-  if (ctx) {
-    ctx.waitUntil(Promise.all(matchPromises));
-  } else {
-    await Promise.all(matchPromises);
-  }
+  const creatorLineId = committed.creatorLineUserId
+    || (await env.KV_CACHE.get(`RAW_LINE_${committed.creatorId}`));
+  const notifyPromises: Promise<unknown>[] = [
+    pushToLine(userId, matchFlex, env),
+  ];
+  if (creatorLineId && creatorLineId !== userId) notifyPromises.push(pushToLine(creatorLineId, matchFlex, env));
+  if (ctx) ctx.waitUntil(Promise.all(notifyPromises));
+  else await Promise.all(notifyPromises);
 }
 
 async function cancelOrder(
   orderNo: string,
   profile: PlayerProfile,
+  idempotencyKey: string,
   env: Env,
-  ctx?: ExecutionContext
 ): Promise<{ success: boolean; message: string }> {
   const resolvedNo = await resolveOrderNumber(orderNo, null, env);
   if (!resolvedNo) return { success: false, message: `🚫 ไม่พบแผล Order #${orderNo}` };
 
-  const raw = await env.KV_ORDERS.get(`ORDER_${resolvedNo}`);
-  if (!raw) return { success: false, message: `🚫 ไม่พบแผล Order #${resolvedNo}` };
-
-  const order = JSON.parse(raw) as Order;
+  const coordinator = createCoordinatorClient(env);
+  const orderRecord = await coordinator.getOrder(resolvedNo);
+  if (!orderRecord) return { success: false, message: `🚫 ไม่พบแผล Order #${resolvedNo}` };
+  const order = await mapCoordinatorOrder(orderRecord, env);
   if (order.creatorId !== profile.shortId) {
     return { success: false, message: '⚠️ คุณไม่ใช่เจ้าของแผลนี้ครับ' };
   }
@@ -759,20 +821,26 @@ async function cancelOrder(
     return { success: false, message: `⚠️ แผล Order #${resolvedNo} อยู่ในสถานะ ${order.status} ไม่สามารถยกเลิกได้ครับ` };
   }
 
-  // 1. Mark order cancelled in KV_ORDERS & remove from pending list
-  order.status = 'cancelled';
-  await Promise.all([
-    env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(order)),
-    removeFromPendingOrdersList(resolvedNo, env),
-  ]);
-
-  // 2. Refund balance directly to the creator's profile
-  profile.balance += order.amount;
-  await savePlayerProfile(profile, env, ctx);
+  let cancelled: LedgerOrder;
+  try {
+    cancelled = await coordinator.cancelOrder({
+      idempotencyKey,
+      orderNumber: resolvedNo,
+      actorId: profile.shortId,
+    });
+  } catch (error) {
+    if (!(error instanceof CoordinatorError)) throw error;
+    return { success: false, message: `⚠️ ยกเลิก Order #${resolvedNo} ไม่สำเร็จ: ${error.message}` };
+  }
+  const updated = await mapCoordinatorOrder(cancelled, env);
+  await env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(updated));
+  await removeFromPendingOrdersList(resolvedNo, env);
+  const account = await coordinator.getAccount(profile.shortId);
+  const balance = (account?.balanceHundredths || 0) / 100;
 
   return {
     success: true,
-    message: `✅ ยกเลิก Order #${resolvedNo} เรียบร้อยแล้วครับ!\n💰 คืนแต้ม: +${order.amount.toLocaleString()} pt\n💎 แต้มคงเหลือปัจจุบัน: ${profile.balance.toLocaleString()} pt 🚀`,
+    message: `✅ ยกเลิก Order #${resolvedNo} เรียบร้อยแล้วครับ!\n💰 คืนแต้ม: +${order.amount.toLocaleString()} pt\n💎 แต้มคงเหลือปัจจุบัน: ${balance.toLocaleString()} pt 🚀`,
   };
 }
 
@@ -783,368 +851,287 @@ async function cancelOrder(
  * Preserves matched orders waiting for flight time settlement.
  */
 export async function clearAllPendingOrders(env: Env, ctx?: ExecutionContext): Promise<{ cleared: number }> {
+  const coordinator = createCoordinatorClient(env);
+  const pending = await coordinator.getOrdersByStatus(['pending_match', 'pending_hold']);
   let clearedCount = 0;
-  try {
-    const pendingOrders = await getPendingOrdersList(env);
-
-    // 1. Immediately reset PENDING_ORDERS_LIST with empty array in KV_CACHE
-    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 });
-
-    // 2. Cancel and refund ONLY pending_match + pending_hold (pre_quote) orders
-    for (const item of pendingOrders) {
-      if (!item || !item.orderNumber) continue;
-      const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
-      if (!raw) continue;
-      try {
-        const order = JSON.parse(raw) as Order;
-        if (order.status === 'pending_match' || order.status === 'pending_hold' || order.status === 'refunding') {
-          const isRecovering = order.status === 'refunding';
-          order.status = 'refunding';
-          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-
-          // Refund creator
-          if (order.creatorId && Number(order.amount) > 0) {
-            const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
-            const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
-            if (profileRaw) {
-              const p = JSON.parse(profileRaw) as PlayerProfile;
-              p.balance = (Number(p.balance) || 0) + Number(order.amount);
-              await savePlayerProfile(p, env, ctx);
-            }
-          }
-
-          order.status = 'cancelled';
-          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-          if (!isRecovering) clearedCount++;
-        }
-      } catch (_) {}
+  const cancelledOrders: LedgerOrder[] = [];
+  for (const order of pending) {
+    try {
+      await coordinator.cancelOrder({
+        idempotencyKey: `clear-pending:${order.orderNumber}`,
+        orderNumber: order.orderNumber,
+        actorId: order.creatorId,
+      });
+      const cancelled = await coordinator.getOrder(order.orderNumber);
+      if (cancelled) cancelledOrders.push(cancelled);
+      clearedCount++;
+    } catch (error) {
+      if (!(error instanceof CoordinatorError) || error.code !== 'INVALID_STATE') throw error;
     }
-
-    console.log(`[Worker] clearAllPendingOrders: Cancelled and refunded ${clearedCount} pending unmatched + held pre-quote orders.`);
-  } catch (err) {
-    console.error('[Worker] clearAllPendingOrders error:', err);
   }
+  const mappedCancelledOrders = await mapCoordinatorOrders(cancelledOrders, env);
+  await Promise.all(mappedCancelledOrders.map((order) =>
+    env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order))
+  ));
+  await getPendingOrdersList(env);
   return { cleared: clearedCount };
 }
 
 /**
- * Cancels ONLY held pre-quote orders (pending_hold) created while ราคาช่าง was unreleased.
- * Refunds creators and notifies them via DM. Used when a round ends without an official quote.
+ * Persists the official quote in the coordinator before updating projections and notifying players.
  */
-export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext): Promise<{ cancelled: number }> {
-  let cancelledCount = 0;
-  try {
-    const pendingList = await getPendingOrdersList(env);
-    const heldOrders = pendingList.filter((o) => o && o.status === 'pending_hold' && o.betType === 'pre_quote');
-    const remainingOrders = pendingList.filter((o) => !(o && o.status === 'pending_hold' && o.betType === 'pre_quote'));
-
-    for (const item of heldOrders) {
-      if (!item || !item.orderNumber) continue;
-      const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
-      if (!raw) continue;
-      try {
-        const order = JSON.parse(raw) as Order;
-        if (order.status === 'pending_hold' && order.betType === 'pre_quote') {
-          order.status = 'cancelled';
-          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-          cancelledCount++;
-          const amt = Number(order.amount) || 0;
-          const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
-          const notifyPromise = deliverPrivateNotice(
-            rawLine,
-            undefined,
-            order.groupId || null,
-            `🚫 Order #${order.orderNumber} ถูกยกเลิกอัตโนมัติ เนื่องจากจบรอบดวลโดยไม่มีการประกาศราคาช่างอย่างเป็นทางการ ✅ (คืนแต้ม ${amt.toLocaleString()} pt)`,
-            env,
-            order.creatorName
-          );
-          if (rawLine && amt > 0) {
-            const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
-            if (profileRaw) {
-              const p = JSON.parse(profileRaw) as PlayerProfile;
-              p.balance = (Number(p.balance) || 0) + amt;
-              await savePlayerProfile(p, env, ctx);
-            }
-          }
-          await notifyPromise;
-        }
-      } catch (_) {}
-    }
-
-    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(remainingOrders), { expirationTtl: 1800 });
-    console.log(`[Worker] cancelHeldPreQuoteOrders: Cancelled + refunded ${cancelledCount} held pre-quote orders.`);
-  } catch (err) {
-    console.error('[Worker] cancelHeldPreQuoteOrders error:', err);
-  }
-  return { cancelled: cancelledCount };
-}
-
-/**
- * Applies the officially released ราคาช่าง band (minVal-maxVal) to all held pre-quote orders:
- *  - Converts pending_hold pre_quote orders to real band ± offset, status -> pending_match
- *  - Re-adds them to the pending board
- *  - Auto-matches same-amount opposite-side pairs, notifying both players via DM.
- * Called from adminBroadcastQuote whenever a price tier is officially released.
- */
-export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, env: Env, ctx?: ExecutionContext): Promise<{ converted: number; matched: number }> {
-  const bandMin = Number(minVal) || 330;
-  const bandMax = Number(maxVal) || 380;
-  const pending = await getPendingOrdersList(env);
-  const held = pending.filter((o) => o && o.status === 'pending_hold' && o.betType === 'pre_quote');
-  const nonHeld = pending.filter((o) => !(o && o.status === 'pending_hold' && o.betType === 'pre_quote'));
-
-  let converted = 0;
-  const convertedOrders: Order[] = [];
-
-  for (const item of held) {
-    const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
-    if (!raw) continue;
-    try {
-      const order = JSON.parse(raw) as Order;
-      if (order.status === 'pending_hold' && order.betType === 'pre_quote') {
-        const offset = Number(order.offset) || 0;
-        order.betType = 'range';
-        order.rangeMin = bandMin + offset;
-        order.rangeMax = bandMax + offset;
-        order.status = 'pending_match';
-        await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-        convertedOrders.push(order);
-        converted++;
-      }
-    } catch (_) {}
-  }
-
-  // Update PENDING_ORDERS_LIST with newly converted pending_match orders
-  const updatedPending = [...convertedOrders, ...nonHeld].slice(0, 300);
-  await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updatedPending), { expirationTtl: 1800 });
-
-  // Auto-match same-amount opposite-side pairs
+export async function releaseHeldPreQuoteOrders(
+  roundId: string,
+  idempotencyKey: string,
+  minVal: number,
+  maxVal: number,
+  env: Env,
+  ctx?: ExecutionContext,
+): Promise<{ converted: number; matched: number }> {
+  const released = await createCoordinatorClient(env).releaseQuote({
+    idempotencyKey,
+    roundId,
+    targetMin: minVal,
+    targetMax: maxVal,
+  });
   const matched = await autoMatchPendingPairs(env, ctx);
-
-  // Notify each converted player that their pre-quote order is now active
-  const notifyPromises = convertedOrders.map(async (o) => {
-    const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${o.creatorId}`)) || o.creatorLineUserId || o.creatorId;
+  await getPendingOrdersList(env);
+  await getMatchedOrdersList(env);
+  const releasedOrders = await Promise.all(released.releasedOrderNumbers.map(async (orderNo) => {
+    const ledgerOrder = await createCoordinatorClient(env).getOrder(orderNo);
+    if (!ledgerOrder) throw new Error(`Released order ${orderNo} is missing from the coordinator`);
+    return ledgerOrder;
+  }));
+  const convertedOrders = await mapCoordinatorOrders(releasedOrders, env);
+  await Promise.all(convertedOrders.map((order) =>
+    env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order))
+  ));
+  const notifications = convertedOrders.map(async (order) => {
+    const rawLine = order.creatorLineUserId
+      || (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`))
+      || order.creatorId;
     return deliverPrivateNotice(
       rawLine,
       undefined,
-      o.groupId || null,
-      `✅ ราคาช่างอย่างเป็นทางการแล้ว: ${bandMin}-${bandMax} วิ\n🧾 Order #${o.orderNumber} (${o.amount.toLocaleString()} pt ${o.side === 'low' ? 'ชถ/ต่ำ' : 'ชล/สูง'}) เปิดรอคู่แล้ว พร้อมจับคู่ครับ 🚀`,
+      order.groupId || null,
+      order.status === 'matched'
+        ? `✅ ราคาช่างอย่างเป็นทางการแล้ว: ${order.rangeMin}-${order.rangeMax} วิ\n🧾 Order #${order.orderNumber} มีคู่ดวลแล้วครับ 🚀`
+        : `✅ ราคาช่างอย่างเป็นทางการแล้ว: ${order.rangeMin}-${order.rangeMax} วิ\n🧾 Order #${order.orderNumber} (${order.amount.toLocaleString()} pt ${order.side === 'low' ? 'ชถ/ต่ำ' : 'ชล/สูง'}) เปิดรอคู่แล้ว พร้อมจับคู่ครับ 🚀`,
       env,
-      o.creatorName
+      order.creatorName,
     );
   });
-  await Promise.all(notifyPromises);
-
-  console.log(`[Worker] releaseHeldPreQuoteOrders: released ${converted} held pre-quote orders, auto-matched ${matched} pairs.`);
-  return { converted, matched };
+  if (ctx) ctx.waitUntil(Promise.all(notifications));
+  else await Promise.all(notifications);
+  return { converted: released.releasedOrderNumbers.length, matched };
 }
 
-/**
- * Pairs up pending_match orders of the same amount on opposite sides (low vs high),
- * marks both as matched to each other, refund-agnostic (balances already held),
- * and notifies both players via DM with the match flex.
- */
 export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): Promise<number> {
-  try {
-    const pending = await getPendingOrdersList(env);
-    if (pending.length < 2) return 0;
-
-    // Group by amount
-    const byAmount = new Map<number, Order[]>();
-    for (const o of pending) {
-      const key = Number(o.amount);
-      if (!byAmount.has(key)) byAmount.set(key, []);
-      byAmount.get(key)!.push(o);
-    }
-
-    let paired = 0;
-    for (const [amount, group] of byAmount) {
-      const lows = group.filter((o) => o.side === 'low').sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-      const highs = group.filter((o) => o.side === 'high').sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-      const pairCount = Math.min(lows.length, highs.length);
-      if (pairCount === 0) continue;
-
-      for (let i = 0; i < pairCount; i++) {
-        const low = lows[i];
-        const high = highs[i];
-        const matchFlex = generateMatchNotificationFlex(low);
-        const lowNotify = (await env.KV_CACHE.get(`RAW_LINE_${low.creatorId}`)) || low.creatorLineUserId || low.creatorId;
-        const highNotify = (await env.KV_CACHE.get(`RAW_LINE_${high.creatorId}`)) || high.creatorLineUserId || high.creatorId;
-
-        // Mark low as the primary matched order, high is the matcher
-        low.status = 'matched';
-        low.matcherId = high.creatorId;
-        low.matcherName = high.creatorName;
-        low.matchedAt = Date.now();
-
-        // High mirrors as matched for settlement bookkeeping (keeping both records)
-        high.status = 'matched';
-        high.matcherId = low.creatorId;
-        high.matcherName = low.creatorName;
-        high.matchedAt = Date.now();
-
-        await Promise.all([
-          env.KV_ORDERS.put(`ORDER_${low.orderNumber}`, JSON.stringify(low)),
-          env.KV_ORDERS.put(`ORDER_${high.orderNumber}`, JSON.stringify(high)),
-          removeFromPendingOrdersList(low.orderNumber, env),
-          removeFromPendingOrdersList(high.orderNumber, env),
-          addToMatchedOrdersList(low, env),
-          addToMatchedOrdersList(high, env),
-          pushToLine(lowNotify, matchFlex, env),
-          pushToLine(highNotify, matchFlex, env),
-        ]);
-        if (ctx) ctx.waitUntil(Promise.resolve());
-        paired++;
-      }
-    }
-    console.log(`[Worker] autoMatchPendingPairs: auto-matched ${paired} pairs.`);
-    return paired;
-  } catch (err) {
-    console.error('[Worker] autoMatchPendingPairs error:', err);
-    return 0;
+  const coordinator = createCoordinatorClient(env);
+  const pending = await coordinator.getOrdersByStatus(['pending_match']);
+  const groups = new Map<string, LedgerOrder[]>();
+  for (const order of pending) {
+    const key = `${order.roundId}:${order.stakeHundredths}`;
+    const group = groups.get(key) || [];
+    group.push(order);
+    groups.set(key, group);
   }
+
+  let matchedCount = 0;
+  for (const group of groups.values()) {
+    const lows = group.filter((order) => order.side === 'low').sort((a, b) => a.createdAt - b.createdAt);
+    const availableHighs = group
+      .filter((order) => order.side === 'high')
+      .sort((a, b) => a.createdAt - b.createdAt);
+    for (const low of lows) {
+      const highIndex = availableHighs.findIndex((order) => order.creatorId !== low.creatorId);
+      if (highIndex < 0) continue;
+      const [high] = availableHighs.splice(highIndex, 1);
+      let primary: LedgerOrder;
+      try {
+        primary = await coordinator.autoMatchOrders({
+          idempotencyKey: `auto-match:${low.orderNumber}:${high.orderNumber}`,
+          orderNumber: low.orderNumber,
+          counterpartOrderNumber: high.orderNumber,
+        });
+      } catch (error) {
+        if (
+          error instanceof CoordinatorError &&
+          (error.code === 'INVALID_STATE' || error.code === 'STAKE_MISMATCH')
+        ) continue;
+        throw error;
+      }
+      const counterpart = await coordinator.getOrder(high.orderNumber);
+      if (!counterpart) throw new Error(`Auto-matched counterpart ${high.orderNumber} is missing`);
+      const [primaryOrder, counterpartOrder] = await mapCoordinatorOrders([primary, counterpart], env);
+      await Promise.all([
+        env.KV_ORDERS.put(`ORDER_${low.orderNumber}`, JSON.stringify(primaryOrder)),
+        env.KV_ORDERS.put(`ORDER_${high.orderNumber}`, JSON.stringify(counterpartOrder)),
+      ]);
+      const flex = generateMatchNotificationFlex(primaryOrder);
+      const lowLine = primaryOrder.creatorLineUserId || low.creatorId;
+      const highLine = counterpartOrder.creatorLineUserId || high.creatorId;
+      const notifications = [
+        pushToLine(lowLine, flex, env),
+        pushToLine(highLine, flex, env),
+      ];
+      if (ctx) ctx.waitUntil(Promise.all(notifications));
+      else await Promise.all(notifications);
+      matchedCount++;
+    }
+  }
+  await Promise.all([getPendingOrdersList(env), getMatchedOrdersList(env)]);
+  return matchedCount;
 }
 
 /**
- * Voids the entire round: cancels BOTH pending_match and matched orders,
- * refunding 100% of points to both creator and matcher.
+ * Voids the active round through the coordinator and refreshes order projections.
  */
 export async function voidAllRoundOrders(env: Env, ctx?: ExecutionContext): Promise<{ voided: number }> {
-  let voidedCount = 0;
-  try {
-    const [pendingList, matchedList] = await Promise.all([
-      getPendingOrdersList(env),
-      getMatchedOrdersList(env),
-    ]);
-
-    await Promise.all([
-      env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 }),
-      env.KV_CACHE.put('MATCHED_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 }),
-    ]);
-
-    const allRoundOrders = [...pendingList, ...matchedList];
-    const seen = new Set<string>();
-
-    for (const item of allRoundOrders) {
-      if (!item || !item.orderNumber || seen.has(item.orderNumber)) continue;
-      seen.add(item.orderNumber);
-
-      const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
-      if (!raw) continue;
-      try {
-        const order = JSON.parse(raw) as Order;
-        if (order.status === 'pending_match' || order.status === 'matched' || order.status === 'pending_hold' || order.status === 'refunding') {
-          const wasMatched = order.status === 'matched' || (order.matcherId && order.status === 'refunding');
-          const isRecovering = order.status === 'refunding';
-
-          order.status = 'refunding';
-          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-
-          const amt = Number(order.amount) || 0;
-
-          // Refund creator
-          if (order.creatorId && amt > 0) {
-            const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
-            const cpRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
-            if (cpRaw) {
-              const cp = JSON.parse(cpRaw) as PlayerProfile;
-              cp.balance = (Number(cp.balance) || 0) + amt;
-              await savePlayerProfile(cp, env, ctx);
-            }
-          }
-
-          // Refund matcher if matched
-          if (wasMatched && order.matcherId && amt > 0) {
-            const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.matcherId}`)) || order.matcherId;
-            const mpRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
-            if (mpRaw) {
-              const mp = JSON.parse(mpRaw) as PlayerProfile;
-              mp.balance = (Number(mp.balance) || 0) + amt;
-              await savePlayerProfile(mp, env, ctx);
-            }
-          }
-
-          order.status = 'cancelled';
-          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-          if (!isRecovering) voidedCount++;
-        }
-      } catch (_) {}
-    }
-
-    console.log(`[Worker] voidAllRoundOrders: Voided and refunded ${voidedCount} orders 100%.`);
-  } catch (err) {
-    console.error('[Worker] voidAllRoundOrders error:', err);
-  }
-  return { voided: voidedCount };
+  const rawRound = await env.KV_CACHE.get('ACTIVE_ROUND');
+  if (!rawRound) return { voided: 0 };
+  const round = JSON.parse(rawRound) as RocketRound;
+  if (!round.roundId) throw new Error('Active round is missing its coordinator ID');
+  const before = await createCoordinatorClient(env).getOrdersByStatus([
+    'pending_hold',
+    'pending_match',
+    'matched',
+  ]);
+  const roundOrders = before.filter((order) => order.roundId === round.roundId);
+  const result = await createCoordinatorClient(env).voidRound({
+    idempotencyKey: `void-round:${round.roundId}`,
+    roundId: round.roundId,
+  });
+  round.status = 'CLOSED';
+  round.updatedAt = Date.now();
+  await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round));
+  const refundedOrders = await Promise.all(result.refundedOrderNumbers.map(async (orderNo) => {
+    const order = await createCoordinatorClient(env).getOrder(orderNo);
+    return order;
+  }));
+  const mappedRefundedOrders = await mapCoordinatorOrders(
+    refundedOrders.filter((order): order is LedgerOrder => order !== null),
+    env,
+  );
+  await Promise.all(mappedRefundedOrders.map((order) =>
+    env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order))
+  ));
+  await Promise.all([
+    getPendingOrdersList(env),
+    getMatchedOrdersList(env),
+  ]);
+  return { voided: Math.min(roundOrders.length, refundedOrders.length) };
 }
 
 export async function getPendingOrdersList(env: Env): Promise<Order[]> {
-  try {
-    const cached = await env.KV_CACHE.get('PENDING_ORDERS_LIST');
-    const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
-    if (cached !== null) {
-      const list = JSON.parse(cached) as Order[];
-      return list.filter((o) => o && (o.status === 'pending_match' || o.status === 'pending_hold') && (o.createdAt || 0) > twoHoursAgo);
-    }
-    // Fallback removed: KV_ORDERS.list is too slow for the hot path.
-    // PENDING_ORDERS_LIST is the primary index.
-    return [];
-  } catch (err) {
-    console.error('[Worker] getPendingOrdersList error:', err);
-    return [];
-  }
+  const client = createCoordinatorClient(env);
+  const orders = await client.getOrdersByStatus(['pending_match', 'pending_hold']);
+  const mapped = await mapCoordinatorOrders(orders, env);
+  await writeOrderProjection(env, 'PENDING_ORDERS_LIST', orders);
+  return mapped;
 }
 
 export async function addToPendingOrdersList(order: Order, env: Env): Promise<void> {
-  try {
-    const list = await getPendingOrdersList(env);
-    const updated = [order, ...list.filter((o) => o.orderNumber !== order.orderNumber)].slice(0, 300);
-    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
-  } catch (err) {
-    console.error('[Worker] addToPendingOrdersList error:', err);
-  }
+  await refreshOrderProjection(env, 'PENDING_ORDERS_LIST', ['pending_match', 'pending_hold']);
 }
 
 async function removeFromPendingOrdersList(orderNo: string, env: Env): Promise<void> {
-  try {
-    const cleanNo = orderNo.trim().replace(/^#/, '');
-    const list = await getPendingOrdersList(env);
-    const updated = list.filter((o) => o.orderNumber !== cleanNo);
-    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
-  } catch (err) {
-    console.error('[Worker] removeFromPendingOrdersList error:', err);
-  }
+  const cleanNo = orderNo.trim().replace(/^#/, '');
+  const client = createCoordinatorClient(env);
+  const orders = await client.getOrdersByStatus(['pending_match', 'pending_hold']);
+  await writeOrderProjection(env, 'PENDING_ORDERS_LIST', orders.filter((order) => order.orderNumber !== cleanNo));
 }
 
 export async function addToMatchedOrdersList(order: Order, env: Env): Promise<void> {
-  try {
-    const list = await getMatchedOrdersList(env);
-    const updated = [order, ...list.filter((o) => o.orderNumber !== order.orderNumber)].slice(0, 300);
-    await env.KV_CACHE.put('MATCHED_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
-  } catch (err) {
-    console.error('[Worker] addToMatchedOrdersList error:', err);
-  }
+  await refreshOrderProjection(env, 'MATCHED_ORDERS_LIST', ['matched']);
 }
 
 export async function removeFromMatchedOrdersList(orderNo: string, env: Env): Promise<void> {
-  try {
-    const cleanNo = orderNo.trim().replace(/^#/, '');
-    const list = await getMatchedOrdersList(env);
-    const updated = list.filter((o) => o.orderNumber !== cleanNo);
-    await env.KV_CACHE.put('MATCHED_ORDERS_LIST', JSON.stringify(updated));
-  } catch (err) {
-    console.error('[Worker] removeFromMatchedOrdersList error:', err);
-  }
+  const cleanNo = orderNo.trim().replace(/^#/, '');
+  const client = createCoordinatorClient(env);
+  const orders = await client.getOrdersByStatus(['matched']);
+  await writeOrderProjection(env, 'MATCHED_ORDERS_LIST', orders.filter((order) => order.orderNumber !== cleanNo));
 }
 
 export async function getMatchedOrdersList(env: Env): Promise<Order[]> {
+  const client = createCoordinatorClient(env);
+  const orders = await client.getOrdersByStatus(['matched']);
+  const mapped = await mapCoordinatorOrders(orders, env);
+  await writeOrderProjection(env, 'MATCHED_ORDERS_LIST', orders);
+  return mapped;
+}
+
+async function getSettledCoordinatorOrders(env: Env): Promise<LedgerOrder[]> {
+  return createCoordinatorClient(env).getOrdersByStatus(['settled']);
+}
+
+async function refreshOrderProjection(
+  env: Env,
+  key: 'PENDING_ORDERS_LIST' | 'MATCHED_ORDERS_LIST' | 'SETTLED_ORDERS_LIST',
+  statuses: LedgerOrder['status'][],
+): Promise<void> {
+  const orders = await createCoordinatorClient(env).getOrdersByStatus(statuses);
+  await writeOrderProjection(env, key, orders);
+}
+
+async function writeOrderProjection(
+  env: Env,
+  key: 'PENDING_ORDERS_LIST' | 'MATCHED_ORDERS_LIST' | 'SETTLED_ORDERS_LIST',
+  orders: LedgerOrder[],
+): Promise<void> {
   try {
-    const cached = await env.KV_CACHE.get('MATCHED_ORDERS_LIST');
-    return cached ? JSON.parse(cached) : [];
-  } catch (err) {
-    console.error('[Worker] getMatchedOrdersList error:', err);
-    return [];
+    await env.KV_CACHE.put(key, JSON.stringify(orders.slice(0, 250).map((order) => order.orderNumber)), {
+      expirationTtl: 30 * 24 * 60 * 60,
+    });
+  } catch (error) {
+    console.error(`[Worker] Failed to update ${key} projection after coordinator commit`, error);
   }
+}
+
+export async function mapCoordinatorOrder(order: LedgerOrder, env: Env): Promise<Order> {
+  return (await mapCoordinatorOrders([order], env))[0];
+}
+
+export async function mapCoordinatorOrders(orders: LedgerOrder[], env: Env): Promise<Order[]> {
+  if (orders.length === 0) return [];
+  const playerIds = [...new Set(orders.flatMap((order) =>
+    order.matcherId ? [order.creatorId, order.matcherId] : [order.creatorId]
+  ))];
+  const coordinator = createCoordinatorClient(env);
+  const accountPages = await Promise.all(
+    Array.from({ length: Math.ceil(playerIds.length / 500) }, (_, page) =>
+      coordinator.getAccounts(playerIds.slice(page * 500, (page + 1) * 500))
+    ),
+  );
+  const accounts = new Map(accountPages.flat().map((account) => [account.playerId, account]));
+  return orders.map((order) => {
+    const creator = accounts.get(order.creatorId);
+    const winnerName = order.winnerSide === 'draw' || !order.winnerSide
+      ? '-'
+      : (order.winnerSide === order.side ? order.creatorName : order.matcherName) || '-';
+    return {
+      orderNumber: order.orderNumber,
+      creatorId: order.creatorId,
+      creatorName: order.creatorName,
+      creatorLineUserId: creator?.lineUserId ?? undefined,
+      matcherId: order.matcherId,
+      matcherName: order.matcherName,
+      side: order.side,
+      amount: order.stakeHundredths / 100,
+      betType: order.betType,
+      rangeMin: order.rangeMin,
+      rangeMax: order.rangeMax,
+      offset: order.rangeOffset,
+      status: order.status,
+      groupId: order.groupId,
+      createdAt: order.createdAt,
+      matchedAt: order.matchedAt,
+      winnerSide: order.winnerSide ?? undefined,
+      winnerName,
+      finalTime: order.finalSeconds,
+      settledAt: order.settledAt ?? undefined,
+    };
+  });
 }
 
 async function resolveOrderNumber(
@@ -1152,65 +1139,44 @@ async function resolveOrderNumber(
   excludeCreatorId: string | null,
   env: Env
 ): Promise<string | null> {
-  // If no specific order number passed, find the latest pending open bet
+  const client = createCoordinatorClient(env);
   if (!inputNo || inputNo.trim() === '') {
-    const pendingList = await getPendingOrdersList(env);
-    if (!pendingList || pendingList.length === 0) return null;
+    const pendingList = await client.getOrdersByStatus(['pending_match']);
+    if (pendingList.length === 0) return null;
     const candidate = pendingList.find((o) => !excludeCreatorId || o.creatorId !== excludeCreatorId);
-    return candidate ? candidate.orderNumber : pendingList[0].orderNumber;
+    return (candidate || pendingList[0]).orderNumber;
   }
 
   const cleanNo = inputNo.trim().replace(/^#/, '');
-
-  // 1. Direct KV lookup
-  const direct = await env.KV_ORDERS.get(`ORDER_${cleanNo}`);
-  if (direct) return cleanNo;
-
-  // 2. Pending list exact match
-  const pendingList = await getPendingOrdersList(env);
-  const foundPending = pendingList.find((o) => o.orderNumber === cleanNo);
-  if (foundPending) return foundPending.orderNumber;
-
-    // 3. Fallback: Scan KV_ORDERS prefix removed for performance.
-    return null;
-
-  return null;
+  return await client.getOrder(cleanNo) ? cleanNo : null;
 }
 
 // ── User Profile, Transactions & Group Helpers ──
 
 export async function getPlayersList(env: Env): Promise<any[]> {
   try {
-    const cached = await env.KV_CACHE.get('PLAYERS_LIST');
-    let list: PlayerProfile[] = [];
-    if (cached) {
-      try { list = JSON.parse(cached); } catch (_) {}
-    }
-
-    if (!list || list.length === 0) {
-      const scanRes = await env.KV_CACHE.list({ prefix: 'USER_' });
-      if (scanRes.keys && scanRes.keys.length > 0) {
-        const promises = scanRes.keys.map(k => env.KV_CACHE.get(k.name));
-        const raws = await Promise.all(promises);
-        list = raws.filter(Boolean).map(r => JSON.parse(r!) as PlayerProfile);
-        if (list.length > 0) {
-          await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(list));
-        }
-      }
-    }
-
+    const snapshot = await createCoordinatorClient(env).getSnapshot();
     const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
-    return list.map((p, idx) => ({
-      id: p.shortId || p.lineUserId,
-      name: p.displayName || 'ผู้เล่น',
-      balance: Number(p.balance) || 0,
-      joinDate: p.registeredAt ? new Date(p.registeredAt).toLocaleDateString('th-TH') : '-',
-      bankName: p.bankName || '',
-      bankAccount: p.accountNumber || '',
-      accountName: p.accountName || p.displayName || '',
-      isUser: false,
-      avatar: avatars[idx % avatars.length],
-      lineUserId: p.lineUserId || '',
+    const players = snapshot.accounts.filter((account) => account.kind === 'player' && account.active);
+    return await Promise.all(players.map(async (account, idx) => {
+      const cached = account.lineUserId
+        ? await env.KV_CACHE.get(`USER_${account.lineUserId}`)
+        : null;
+      const profile = cached ? JSON.parse(cached) as PlayerProfile : null;
+      return {
+        id: account.playerId,
+        name: profile?.displayName || account.displayName || 'ผู้เล่น',
+        balance: account.balanceHundredths / 100,
+        joinDate: profile?.registeredAt
+          ? new Date(profile.registeredAt).toLocaleDateString('th-TH')
+          : '-',
+        bankName: profile?.bankName || '',
+        bankAccount: profile?.accountNumber || '',
+        accountName: profile?.accountName || profile?.displayName || account.displayName,
+        isUser: false,
+        avatar: avatars[idx % avatars.length],
+        lineUserId: account.lineUserId || '',
+      };
     }));
   } catch (err) {
     console.error('[Worker] getPlayersList error:', err);
@@ -1219,84 +1185,48 @@ export async function getPlayersList(env: Env): Promise<any[]> {
 }
 
 export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: ExecutionContext): Promise<void> {
-  try {
-    profile.updatedAt = Date.now();
-    const cacheKey = `USER_${profile.lineUserId}`;
-    await env.KV_CACHE.put(cacheKey, JSON.stringify(profile));
-    if (profile.shortId) {
-      await env.KV_CACHE.put(`RAW_LINE_${profile.shortId}`, profile.lineUserId);
-    }
-
-    let list: PlayerProfile[] = [];
-    const cached = await env.KV_CACHE.get('PLAYERS_LIST');
-    if (cached) {
-      try { list = JSON.parse(cached); } catch (_) {}
-    }
-    const idx = list.findIndex(p => p.lineUserId === profile.lineUserId || (profile.shortId && p.shortId === profile.shortId));
-    if (idx >= 0) {
-      list[idx] = { ...list[idx], ...profile };
-    } else {
-      list.push(profile);
-    }
-    // Cap the list document to keep the KV value well under the 25MB limit
-    await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(list.slice(-500)));
-
-    // Offload sync to Google Sheets in background — throttled to 1 write/min/user
-    // so bet-storm balance writes never pile up on slow GAS execution.
-    if (env.GAS_FALLBACK_URL && !(await isGasSyncThrottled('SAVE', profile.lineUserId, env))) {
-      const syncPromise = fetch(env.GAS_FALLBACK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          functionName: 'adminSetPlayerBalance',
-          args: [profile.lineUserId, profile.balance, profile.displayName, true],
-          apiKey: env.ADMIN_API_KEY,
-        }),
-      }).catch((e) => console.warn('[Worker] Sheets player balance sync error:', e));
-      if (ctx) ctx.waitUntil(syncPromise);
-    }
-  } catch (err) {
-    console.error('[Worker] savePlayerProfile error:', err);
+  const account = await createCoordinatorClient(env).getAccount(profile.shortId);
+  if (!account) {
+    throw new Error(`Cannot save metadata for unknown financial account ${profile.shortId}`);
   }
-}
-
-/**
- * Per-user GAS sync throttle (60s window). Google Sheets is a reporting mirror,
- * not the live ledger — during bet storms this keeps the hot path completely off
- * slow (1-6s) GAS round-trips, capping Sheets load at 1 call/user/minute.
- * Fail-open by design: if the throttle check itself errors, prefer syncing.
- */
-async function isGasSyncThrottled(scope: string, userId: string, env: Env): Promise<boolean> {
-  try {
-    const key = `GAS_SYNC_${scope}_${userId}`;
-    if (await env.KV_CACHE.get(key)) return true;
-    await env.KV_CACHE.put(key, '1', { expirationTtl: 60 });
-    return false;
-  } catch (_) {
-    return false;
+  const metadata: PlayerProfile = {
+    ...profile,
+    balance: account.balanceHundredths / 100,
+    updatedAt: Date.now(),
+  };
+  await env.KV_CACHE.put(`USER_${profile.lineUserId}`, JSON.stringify(metadata));
+  if (profile.shortId) {
+    await env.KV_CACHE.put(`RAW_LINE_${profile.shortId}`, profile.lineUserId);
   }
 }
 
 export async function getTransactionsList(env: Env): Promise<Transaction[]> {
-  try {
-    const cached = await env.KV_CACHE.get('TRANSACTIONS_LIST');
-    if (cached) {
-      return JSON.parse(cached);
-    }
-    return [];
-  } catch (err) {
-    console.error('[Worker] getTransactionsList error:', err);
-    return [];
-  }
+  const snapshot = await createCoordinatorClient(env).getSnapshot();
+  const transactions = await Promise.all(snapshot.transactions.map(async (transaction): Promise<Transaction> => {
+    const metadata = await env.KV_CACHE.get(`TX_META_${transaction.transactionId}`);
+    const profile = metadata ? JSON.parse(metadata) as { slipRef?: string } : null;
+    return {
+      id: transaction.transactionId,
+      playerId: transaction.playerId,
+      playerName: snapshot.accounts.find((account) => account.playerId === transaction.playerId)?.displayName || '',
+      requestedAmount: transaction.requestedAmountHundredths / 100,
+      actualAmount: (transaction.actualAmountHundredths ?? 0) / 100,
+      slipRef: profile?.slipRef || '',
+      status: transaction.status === 'pending'
+        ? 'escalated'
+        : transaction.status === 'approved'
+          ? 'success'
+          : 'rejected',
+      reviewReason: transaction.reason || undefined,
+      timestamp: new Date(transaction.createdAt).toLocaleTimeString('th-TH', { hour12: false }),
+      type: transaction.type === 'withdrawal' ? 'withdraw' : 'deposit',
+      createdAt: transaction.createdAt,
+    };
+  }));
+  return transactions.sort((left, right) => right.createdAt - left.createdAt);
 }
 
-/**
- * Record an inbound user message into the CHAT_LOGS dashboard feed.
- * Previously the ONLY chat-log writer was the admin-send path in index.ts —
- * inbound LINE user messages were never logged anywhere, leaving the admin
- * conversation monitor permanently blind under the queue architecture.
- * Mirrors appendChatLog() in index.ts (admin sender) with sender: 'user'.
- */
+/** Record an inbound user message into the dashboard chat feed. */
 export async function logUserMessage(
   env: Env,
   log: { timestamp: string; userId: string; displayName: string; sender: string; text: string; type: string }
@@ -1311,46 +1241,32 @@ export async function logUserMessage(
   }
 }
 
-export async function addTransaction(tx: Transaction, env: Env, ctx?: ExecutionContext): Promise<void> {
-  try {
-    const list = await getTransactionsList(env);
-    const updated = [tx, ...list.filter(t => t.id !== tx.id)].slice(0, 100);
-    await env.KV_CACHE.put('TRANSACTIONS_LIST', JSON.stringify(updated));
-
-    if (env.GAS_FALLBACK_URL) {
-      const syncPromise = fetch(env.GAS_FALLBACK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          functionName: 'logTransaction',
-          args: [
-            tx.playerId,
-            tx.playerName,
-            tx.requestedAmount,
-            tx.actualAmount,
-            tx.id,
-            tx.status,
-            tx.reviewReason,
-          ],
-          apiKey: env.ADMIN_API_KEY,
-        }),
-      }).catch((e) => console.warn('[Worker] Sheets tx sync error:', e));
-      if (ctx) ctx.waitUntil(syncPromise);
-    }
-  } catch (err) {
-    console.error('[Worker] addTransaction error:', err);
-  }
-}
-
 export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: ExecutionContext): Promise<PlayerProfile> {
   const cacheKey = `USER_${userId}`;
+  const coordinator = createCoordinatorClient(env);
   const cached = await env.KV_CACHE.get(cacheKey);
-  if (cached) {
-    return JSON.parse(cached) as PlayerProfile;
+  const cachedProfile = cached ? JSON.parse(cached) as PlayerProfile : null;
+  const proposedShortId = cachedProfile?.shortId || `PL${userId.slice(-6).toUpperCase()}`;
+  const existingAccount = await coordinator.getAccount(proposedShortId)
+    || await coordinator.getAccountByLineUserId(userId);
+  const shortId = existingAccount?.playerId || proposedShortId;
+  if (existingAccount) {
+    const profile: PlayerProfile = {
+      ...(cachedProfile || {}),
+      shortId,
+      lineUserId: userId,
+      displayName: cachedProfile?.displayName || existingAccount.displayName,
+      balance: existingAccount.balanceHundredths / 100,
+      registeredAt: cachedProfile?.registeredAt || existingAccount.createdAt,
+      updatedAt: existingAccount.updatedAt,
+    };
+    await env.KV_CACHE.put(cacheKey, JSON.stringify(profile));
+    await env.KV_CACHE.put(`RAW_LINE_${shortId}`, userId);
+    return profile;
   }
 
   // Fetch LINE user display name via Messaging API
-  let displayName = 'ผู้เล่น';
+  let displayName = cachedProfile?.displayName || 'ผู้เล่น';
   try {
     const res = await fetch(`https://api.line.me/v2/bot/profile/${userId}`, {
       headers: { Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}` },
@@ -1361,7 +1277,6 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
     }
   } catch (_) {}
 
-  const shortId = `PL${userId.slice(-6).toUpperCase()}`;
   const newProfile: PlayerProfile = {
     shortId,
     lineUserId: userId,
@@ -1371,7 +1286,16 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
     updatedAt: Date.now(),
   };
 
-  await savePlayerProfile(newProfile, env, ctx);
+  const account = await coordinator.createPlayer({
+    idempotencyKey: `line-register:${userId}`,
+    playerId: shortId,
+    lineUserId: userId,
+    displayName,
+    openingBalanceHundredths: 0,
+  });
+  newProfile.balance = account.balanceHundredths / 100;
+  await env.KV_CACHE.put(cacheKey, JSON.stringify(newProfile));
+  await env.KV_CACHE.put(`RAW_LINE_${shortId}`, userId);
   return newProfile;
 }
 
@@ -1638,21 +1562,11 @@ async function deliverPrivateNotice(
 }
 
 export async function addToSettledOrdersList(order: Order, env: Env): Promise<void> {
-  try {
-    const list = await getSettledOrdersList(env);
-    const updated = [order, ...list.filter((o) => o.orderNumber !== order.orderNumber)].slice(0, 100);
-    await env.KV_CACHE.put('SETTLED_ORDERS_LIST', JSON.stringify(updated));
-  } catch (err) {
-    console.error('[Worker] addToSettledOrdersList error:', err);
-  }
+  await refreshOrderProjection(env, 'SETTLED_ORDERS_LIST', ['settled']);
 }
 
 export async function getSettledOrdersList(env: Env): Promise<Order[]> {
-  try {
-    const cached = await env.KV_CACHE.get('SETTLED_ORDERS_LIST');
-    return cached ? JSON.parse(cached) : [];
-  } catch (err) {
-    console.error('[Worker] getSettledOrdersList error:', err);
-    return [];
-  }
+  const orders = await getSettledCoordinatorOrders(env);
+  await writeOrderProjection(env, 'SETTLED_ORDERS_LIST', orders);
+  return mapCoordinatorOrders(orders, env);
 }
