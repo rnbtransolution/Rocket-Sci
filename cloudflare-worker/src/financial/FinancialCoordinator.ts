@@ -836,6 +836,59 @@ export class FinancialCoordinator {
         throw new CoordinatorError('DUPLICATE_ID', 'Round ID already exists');
       }
       const now = Date.now();
+      const activeRounds = this.state.storage.sql
+        .exec<RoundRow>(`SELECT * FROM rounds WHERE status = 'active' ORDER BY created_at`)
+        .toArray();
+      for (const activeRound of activeRounds) {
+        const pendingOrders = this.state.storage.sql
+          .exec<OrderRow>(
+            `SELECT * FROM orders
+             WHERE round_id = ? AND status IN ('pending_hold', 'pending_match')
+             ORDER BY created_at`,
+            activeRound.round_id,
+          )
+          .toArray();
+        for (const orderRow of pendingOrders) {
+          const order = this.mapOrder(orderRow);
+          const account = this.accountRow(order.creatorId);
+          if (!account) throw new CoordinatorError('NOT_FOUND', 'Order creator account not found');
+          const nextBalance = account.balance_hundredths + order.stakeHundredths;
+          if (!Number.isSafeInteger(nextBalance)) {
+            throw new CoordinatorError('INTERNAL', 'Round replacement refund exceeds the supported balance range');
+          }
+          this.state.storage.sql.exec(
+            'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
+            nextBalance,
+            now,
+            order.creatorId,
+          );
+          this.addLedgerEntry({
+            accountId: order.creatorId,
+            idempotencyKey: `openRound:${input.idempotencyKey}:${activeRound.round_id}:${order.orderNumber}`,
+            deltaHundredths: order.stakeHundredths,
+            balanceAfterHundredths: nextBalance,
+            eventType: 'order_cancelled',
+            referenceId: order.orderNumber,
+            actorId: order.creatorId,
+            reason: 'Replaced by a new round',
+          });
+          const payload = JSON.parse(orderRow.order_json) as Record<string, unknown>;
+          payload.winnerSide = null;
+          payload.finalSeconds = null;
+          payload.settledAt = null;
+          this.state.storage.sql.exec(
+            `UPDATE orders SET status = 'cancelled', order_json = ?, updated_at = ? WHERE order_number = ?`,
+            JSON.stringify(payload),
+            now,
+            order.orderNumber,
+          );
+        }
+        this.state.storage.sql.exec(
+          `UPDATE rounds SET status = 'closed', updated_at = ? WHERE round_id = ?`,
+          now,
+          activeRound.round_id,
+        );
+      }
       this.state.storage.sql.exec(
         `INSERT INTO rounds (round_id, name, status, quote_released, target_min, target_max, created_at, updated_at)
          VALUES (?, ?, 'active', 0, NULL, NULL, ?, ?)`,
@@ -877,7 +930,14 @@ export class FinancialCoordinator {
       }
 
       const orderNumber = this.generateOrderNumber();
-      const orderStatus: LedgerOrder['status'] = input.betType === 'custom_range' || round.quote_released
+      const resolvedBetType = input.betType === 'pre_quote' && round.quote_released ? 'range' : input.betType;
+      const resolvedRangeMin = resolvedBetType === 'range' && input.betType === 'pre_quote' && round.quote_released
+        ? (round.target_min ?? input.rangeMin)
+        : input.rangeMin;
+      const resolvedRangeMax = resolvedBetType === 'range' && input.betType === 'pre_quote' && round.quote_released
+        ? (round.target_max ?? input.rangeMax)
+        : input.rangeMax;
+      const orderStatus: LedgerOrder['status'] = resolvedBetType === 'custom_range' || round.quote_released
         ? 'pending_match'
         : 'pending_hold';
       const payload = {
@@ -887,9 +947,9 @@ export class FinancialCoordinator {
         matcherName: null,
         side: input.side,
         stakeHundredths: input.stakeHundredths,
-        betType: input.betType,
-        rangeMin: input.rangeMin,
-        rangeMax: input.rangeMax,
+        betType: resolvedBetType,
+        rangeMin: resolvedRangeMin,
+        rangeMax: resolvedRangeMax,
         groupId: input.groupId,
         matchedAt: null,
         winnerSide: null,
@@ -897,6 +957,20 @@ export class FinancialCoordinator {
         settledAt: null,
       };
       const now = Date.now();
+      this.state.storage.sql.exec(
+        `INSERT INTO orders
+          (order_number, round_id, creator_id, matcher_id, stake_hundredths, status, order_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        orderNumber,
+        input.roundId,
+        input.creatorId,
+        null,
+        input.stakeHundredths,
+        orderStatus,
+        JSON.stringify(payload),
+        now,
+        now,
+      );
       this.state.storage.sql.exec(
         'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
         nextBalance,
@@ -913,20 +987,6 @@ export class FinancialCoordinator {
         actorId: input.creatorId,
         reason: 'Order stake reserved',
       });
-      this.state.storage.sql.exec(
-        `INSERT INTO orders
-          (order_number, round_id, creator_id, matcher_id, stake_hundredths, status, order_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        orderNumber,
-        input.roundId,
-        input.creatorId,
-        null,
-        input.stakeHundredths,
-        orderStatus,
-        JSON.stringify(payload),
-        now,
-        now,
-      );
       const row = this.orderRow(orderNumber);
       if (!row) throw new CoordinatorError('INTERNAL', 'Created order could not be loaded');
       return this.mapOrder(row);
@@ -1081,6 +1141,8 @@ export class FinancialCoordinator {
         const payload = JSON.parse(row.order_json) as Record<string, unknown>;
         if (payload.betType !== 'pre_quote') continue;
         payload.betType = 'range';
+        payload.rangeMin = input.targetMin;
+        payload.rangeMax = input.targetMax;
         this.state.storage.sql.exec(
           `UPDATE orders SET status = 'pending_match', order_json = ?, updated_at = ? WHERE order_number = ?`,
           JSON.stringify(payload),
@@ -1167,8 +1229,17 @@ export class FinancialCoordinator {
     return this.replayOrBegin('voidRound', input.idempotencyKey, input, () => {
       const round = this.roundRow(input.roundId);
       if (!round) throw new CoordinatorError('NOT_FOUND', 'Round not found');
-      if (round.status !== 'active' && round.status !== 'closed') {
+      if (round.status === 'void') {
         throw new CoordinatorError('INVALID_STATE', 'Round cannot be voided');
+      }
+      const settledOrders = this.state.storage.sql
+        .exec<{ count: number }>(
+          `SELECT COUNT(*) AS count FROM orders WHERE round_id = ? AND status = 'settled'`,
+          input.roundId,
+        )
+        .toArray()[0]?.count ?? 0;
+      if (settledOrders > 0) {
+        throw new CoordinatorError('INVALID_STATE', 'A settled round cannot be voided');
       }
 
       const now = Date.now();
@@ -1178,31 +1249,46 @@ export class FinancialCoordinator {
         .toArray();
       for (const row of rows) {
         const order = this.mapOrder(row);
-        if (order.status !== 'pending_hold' && order.status !== 'pending_match') continue;
-        const creator = this.accountRow(order.creatorId);
-        if (!creator) continue;
-        const nextBalance = creator.balance_hundredths + order.stakeHundredths;
-        this.state.storage.sql.exec(
-          'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
-          nextBalance,
-          now,
-          order.creatorId,
-        );
-        this.addLedgerEntry({
-          accountId: order.creatorId,
-          idempotencyKey: `voidRound:${input.idempotencyKey}:${order.orderNumber}`,
-          deltaHundredths: order.stakeHundredths,
-          balanceAfterHundredths: nextBalance,
-          eventType: 'order_cancelled',
-          referenceId: order.orderNumber,
-          actorId: order.creatorId,
-          reason: 'Round voided',
-        });
+        if (order.status !== 'pending_hold' && order.status !== 'pending_match' && order.status !== 'matched') continue;
 
         const payload = JSON.parse(row.order_json) as Record<string, unknown>;
         payload.winnerSide = null;
         payload.finalSeconds = null;
         payload.settledAt = null;
+
+        let refundTargets = [order.creatorId];
+        if (order.status === 'matched') {
+          if (!order.matcherId) {
+            throw new CoordinatorError('INVALID_STATE', 'Matched order is missing its matcher');
+          }
+          refundTargets = [order.creatorId, order.matcherId];
+        }
+
+        for (const accountId of refundTargets) {
+          const account = this.accountRow(accountId);
+          if (!account) throw new CoordinatorError('NOT_FOUND', 'Voided order participant account not found');
+          const nextBalance = account.balance_hundredths + order.stakeHundredths;
+          if (!Number.isSafeInteger(nextBalance)) {
+            throw new CoordinatorError('INTERNAL', 'Void refund exceeds the supported balance range');
+          }
+          this.state.storage.sql.exec(
+            'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
+            nextBalance,
+            now,
+            accountId,
+          );
+          this.addLedgerEntry({
+            accountId,
+            idempotencyKey: `voidRound:${input.idempotencyKey}:${order.orderNumber}:${accountId}`,
+            deltaHundredths: order.stakeHundredths,
+            balanceAfterHundredths: nextBalance,
+            eventType: 'order_cancelled',
+            referenceId: order.orderNumber,
+            actorId: accountId,
+            reason: 'Round voided',
+          });
+        }
+
         this.state.storage.sql.exec(
           `UPDATE orders SET status = 'cancelled', order_json = ?, updated_at = ? WHERE order_number = ?`,
           JSON.stringify(payload),
@@ -1250,57 +1336,82 @@ export class FinancialCoordinator {
           : input.finalSeconds > order.rangeMax
             ? 'high'
             : 'draw';
-        const settlement = decisiveValue === 'draw'
-          ? { winnerCreditHundredths: order.stakeHundredths, houseFeeHundredths: 0 }
-          : order.side === decisiveValue
-            ? calculateWinPayout(order.stakeHundredths)
-            : { winnerCreditHundredths: 0, houseFeeHundredths: 0 };
+        const payout = decisiveValue === 'draw'
+          ? { winnerCreditHundredths: 0, houseFeeHundredths: 0 }
+          : calculateWinPayout(order.stakeHundredths);
+        const winnerSide = decisiveValue === 'draw' ? 'draw' : order.side === decisiveValue ? 'creator' : 'matcher';
 
         const payload = JSON.parse(row.order_json) as Record<string, unknown>;
         payload.winnerSide = decisiveValue;
         payload.finalSeconds = input.finalSeconds;
         payload.settledAt = now;
-        if (settlement.winnerCreditHundredths > 0) {
-          const creator = this.accountRow(order.creatorId);
-          if (!creator) throw new CoordinatorError('NOT_FOUND', 'Settled order creator account not found');
-          const nextBalance = creator.balance_hundredths + settlement.winnerCreditHundredths;
+
+        if (decisiveValue === 'draw') {
+          const refundTargets = [order.creatorId, order.matcherId].filter((value): value is string => !!value);
+          for (const accountId of refundTargets) {
+            const account = this.accountRow(accountId);
+            if (!account) throw new CoordinatorError('NOT_FOUND', 'Settled order participant account not found');
+            const nextBalance = account.balance_hundredths + order.stakeHundredths;
+            this.state.storage.sql.exec(
+              'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
+              nextBalance,
+              now,
+              accountId,
+            );
+            this.addLedgerEntry({
+              accountId,
+              idempotencyKey: `resolveRound:draw:${input.idempotencyKey}:${order.orderNumber}:${accountId}`,
+              deltaHundredths: order.stakeHundredths,
+              balanceAfterHundredths: nextBalance,
+              eventType: 'order_settled',
+              referenceId: order.orderNumber,
+              actorId: accountId,
+              reason: 'Draw refund',
+            });
+          }
+        } else {
+          const winnerAccountId = winnerSide === 'creator' ? order.creatorId : order.matcherId;
+          if (!winnerAccountId) throw new CoordinatorError('INVALID_STATE', 'Matched order missing a winner account');
+          const winnerAccount = this.accountRow(winnerAccountId);
+          if (!winnerAccount) throw new CoordinatorError('NOT_FOUND', 'Matched order winner account not found');
+          const nextWinnerBalance = winnerAccount.balance_hundredths + payout.winnerCreditHundredths;
           this.state.storage.sql.exec(
             'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
-            nextBalance,
+            nextWinnerBalance,
             now,
-            order.creatorId,
+            winnerAccountId,
           );
           this.addLedgerEntry({
-            accountId: order.creatorId,
-            idempotencyKey: `resolveRound:${input.idempotencyKey}:${order.orderNumber}`,
-            deltaHundredths: settlement.winnerCreditHundredths,
-            balanceAfterHundredths: nextBalance,
+            accountId: winnerAccountId,
+            idempotencyKey: `resolveRound:${input.idempotencyKey}:${order.orderNumber}:${winnerAccountId}`,
+            deltaHundredths: payout.winnerCreditHundredths,
+            balanceAfterHundredths: nextWinnerBalance,
             eventType: 'order_settled',
             referenceId: order.orderNumber,
-            actorId: order.creatorId,
+            actorId: winnerAccountId,
             reason: 'Order settled',
           });
-        }
-        if (settlement.houseFeeHundredths > 0) {
-          const house = this.accountRow(HOUSE_ACCOUNT_ID);
-          if (!house) throw new CoordinatorError('NOT_FOUND', 'House account not found');
-          const nextHouseBalance = house.balance_hundredths + settlement.houseFeeHundredths;
-          this.state.storage.sql.exec(
-            'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
-            nextHouseBalance,
-            now,
-            HOUSE_ACCOUNT_ID,
-          );
-          this.addLedgerEntry({
-            accountId: HOUSE_ACCOUNT_ID,
-            idempotencyKey: `resolveRound:house:${input.idempotencyKey}:${order.orderNumber}`,
-            deltaHundredths: settlement.houseFeeHundredths,
-            balanceAfterHundredths: nextHouseBalance,
-            eventType: 'house_fee',
-            referenceId: order.orderNumber,
-            actorId: HOUSE_ACCOUNT_ID,
-            reason: 'House fee',
-          });
+          if (payout.houseFeeHundredths > 0) {
+            const house = this.accountRow(HOUSE_ACCOUNT_ID);
+            if (!house) throw new CoordinatorError('NOT_FOUND', 'House account not found');
+            const nextHouseBalance = house.balance_hundredths + payout.houseFeeHundredths;
+            this.state.storage.sql.exec(
+              'UPDATE accounts SET balance_hundredths = ?, updated_at = ? WHERE player_id = ?',
+              nextHouseBalance,
+              now,
+              HOUSE_ACCOUNT_ID,
+            );
+            this.addLedgerEntry({
+              accountId: HOUSE_ACCOUNT_ID,
+              idempotencyKey: `resolveRound:house:${input.idempotencyKey}:${order.orderNumber}`,
+              deltaHundredths: payout.houseFeeHundredths,
+              balanceAfterHundredths: nextHouseBalance,
+              eventType: 'house_fee',
+              referenceId: order.orderNumber,
+              actorId: HOUSE_ACCOUNT_ID,
+              reason: 'House fee',
+            });
+          }
         }
 
         this.state.storage.sql.exec(
@@ -1322,8 +1433,10 @@ export class FinancialCoordinator {
 
         results.push({
           orderNumber: order.orderNumber,
-          winnerCreditHundredths: settlement.winnerCreditHundredths,
-          houseFeeHundredths: settlement.houseFeeHundredths,
+          status: 'settled',
+          winnerSide: decisiveValue,
+          winnerCreditHundredths: decisiveValue === 'draw' ? 0 : payout.winnerCreditHundredths,
+          houseFeeHundredths: decisiveValue === 'draw' ? 0 : payout.houseFeeHundredths,
           balances,
         });
       }

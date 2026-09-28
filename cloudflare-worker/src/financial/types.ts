@@ -297,6 +297,8 @@ export interface RoundVoidResult {
 
 export interface SettledOrderResult {
   readonly orderNumber: string;
+  readonly status: LedgerOrder['status'];
+  readonly winnerSide: 'low' | 'high' | 'draw' | null;
   readonly winnerCreditHundredths: PointHundredths;
   readonly houseFeeHundredths: PointHundredths;
   readonly balances: Record<string, PointHundredths>;
