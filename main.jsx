@@ -8,7 +8,6 @@ const isGASHost = typeof window !== 'undefined' && (
   window.location.hostname.includes('script.google.com')
 );
 
-const isGitHubPages = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
 const CF_WORKER_BASE_URL = 'https://rocket-science-cf-worker.rnbtransolution.workers.dev';
 
 const getApiBaseUrl = () => {
@@ -29,9 +28,6 @@ const getApiBaseUrl = () => {
 };
 
 const API_BASE_URL = getApiBaseUrl();
-const ADMIN_API_KEY =
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_API_KEY) || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
-
 // Helper to create a chainable Google Apps Script run Proxy
 function createAppsScriptRunner(successHandler = null, failureHandler = null) {
   return new Proxy({}, {
@@ -46,15 +42,15 @@ function createAppsScriptRunner(successHandler = null, failureHandler = null) {
       // Return a function representing the remote server-side function
       return function(...args) {
         const headers = { 'Content-Type': 'application/json' };
-        if (ADMIN_API_KEY) {
-          headers['x-admin-key'] = ADMIN_API_KEY;
-          headers['x-admin-api-key'] = ADMIN_API_KEY;
-        }
+        const token = typeof window !== 'undefined'
+          ? sessionStorage.getItem('rocket_admin_token')
+          : null;
+        if (token) headers.Authorization = `Bearer ${token}`;
 
         fetch(`${API_BASE_URL}/api/run`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ functionName: prop, args, adminKey: ADMIN_API_KEY, apiKey: ADMIN_API_KEY })
+          body: JSON.stringify({ functionName: prop, args })
         })
         .then(async res => {
           const contentType = res.headers.get('content-type');

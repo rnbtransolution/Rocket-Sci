@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   MessageSquare, 
   User, 
@@ -116,10 +116,6 @@ const SLIP_PRESETS = [
   }
 ];
 
-const ADMIN_USERNAME = import.meta.env.VITE_ADMIN_USERNAME || 'Admin';
-const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN_PASSCODE || 'P@ssW0rd2026';
-const ADMIN_PASSCODE = import.meta.env.VITE_ADMIN_PASSCODE || 'P@ssW0rd2026';
-
 export default function App() {
   const isGASHost = typeof window !== 'undefined' && (
     window.location.hostname.includes('googleusercontent.com') ||
@@ -159,9 +155,9 @@ export default function App() {
     return import.meta.env.VITE_API_BASE_URL || '';
   };
   const API_BASE_URL = getApiBaseUrl();
-  const ADMIN_API_KEY = import.meta.env.VITE_ADMIN_API_KEY || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
 
-  const runBackendFunction = async (functionName, args = []) => {
+  const runBackendFunction = useCallback(async (functionName, args = []) => {
+    const token = typeof window !== 'undefined' ? sessionStorage.getItem('rocket_admin_token') : null;
     if (isGAS) {
       let gasRun = (typeof window !== 'undefined' && window.google?.script?.run) ? window.google.script.run : null;
       if (!gasRun && isGASHost) {
@@ -182,12 +178,10 @@ export default function App() {
                 reject(new Error(errMsg));
               });
 
-            if (typeof runner[functionName] === 'function') {
-              runner[functionName](...args);
-            } else if (typeof runner.executeAdminAction === 'function') {
-              runner.executeAdminAction(functionName, args);
+            if (typeof runner.executeAdminAction === 'function') {
+              runner.executeAdminAction(functionName, args, token);
             } else {
-              reject(new Error(`ไม่พบฟังก์ชัน ${functionName}`));
+              reject(new Error('ไม่พบฟังก์ชัน executeAdminAction'));
             }
           } catch (callErr) {
             console.error(`[GAS Call Exception in ${functionName}]:`, callErr);
@@ -198,17 +192,14 @@ export default function App() {
     }
 
     const headers = { 'Content-Type': 'application/json' };
-    if (ADMIN_API_KEY) {
-      headers['x-admin-key'] = ADMIN_API_KEY;
-      headers['x-admin-api-key'] = ADMIN_API_KEY;
-    }
+    if (token) headers.Authorization = `Bearer ${token}`;
 
     try {
       const targetUrl = `${API_BASE_URL}/api/run`;
       const res = await fetch(targetUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ functionName, args, adminKey: ADMIN_API_KEY, apiKey: ADMIN_API_KEY }),
+        body: JSON.stringify({ functionName, args }),
       });
 
       const contentType = res.headers.get('content-type') || '';
@@ -223,13 +214,18 @@ export default function App() {
       console.error(`[API Call Error in ${functionName}]:`, fetchErr);
       throw fetchErr;
     }
-  };
+  }, [API_BASE_URL, isGAS, isGASHost]);
 
   // Security and Mode States
   const [playerUserId, setPlayerUserId] = useState(null);
   const [adminAuthenticated, setAdminAuthenticated] = useState(() => {
     if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('rocket_admin_auth') === 'true';
+      const token = sessionStorage.getItem('rocket_admin_token');
+      const expiresAt = Number(sessionStorage.getItem('rocket_admin_expires_at'));
+      if (token && Number.isFinite(expiresAt) && expiresAt > Date.now()) return true;
+      sessionStorage.removeItem('rocket_admin_auth');
+      sessionStorage.removeItem('rocket_admin_token');
+      sessionStorage.removeItem('rocket_admin_expires_at');
     }
     return false;
   });
@@ -242,11 +238,36 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
 
+  useEffect(() => {
+    if (!adminAuthenticated || typeof window === 'undefined') return undefined;
+    const expiresAt = Number(sessionStorage.getItem('rocket_admin_expires_at'));
+    const delay = expiresAt - Date.now();
+    if (!Number.isFinite(delay) || delay <= 0) {
+      setAdminAuthenticated(false);
+      sessionStorage.removeItem('rocket_admin_auth');
+      sessionStorage.removeItem('rocket_admin_user');
+      sessionStorage.removeItem('rocket_admin_token');
+      sessionStorage.removeItem('rocket_admin_expires_at');
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      sessionStorage.removeItem('rocket_admin_auth');
+      sessionStorage.removeItem('rocket_admin_user');
+      sessionStorage.removeItem('rocket_admin_token');
+      sessionStorage.removeItem('rocket_admin_expires_at');
+      setAdminAuthenticated(false);
+      setLoginError('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [adminAuthenticated]);
+
   const handleAdminLogout = () => {
     if (window.confirm('🔒 คุณต้องการออกจากระบบแอดมินใช่หรือไม่?')) {
       if (typeof window !== 'undefined') {
         sessionStorage.removeItem('rocket_admin_auth');
         sessionStorage.removeItem('rocket_admin_user');
+        sessionStorage.removeItem('rocket_admin_token');
+        sessionStorage.removeItem('rocket_admin_expires_at');
       }
       setAdminAuthenticated(false);
       setPasswordInput('');
@@ -436,8 +457,6 @@ export default function App() {
   }, []);
 
   // Detect live Node.js Express backend (localhost, Render, Vercel, Railway, or custom host)
-  const isLiveBackend = typeof window !== 'undefined' && !isGAS;
-
   // Unified live-data: GAS uses polling RPC; GitHub Pages polls GAS directly; Node.js uses SSE
   useEffect(() => {
     const applyData = (data) => {
@@ -467,126 +486,23 @@ export default function App() {
       } catch (_) {}
     };
 
-    if (isGAS) {
-      // GAS-hosted: use google.script.run RPC (SSE not available in GAS)
-      const fetchGAS = () => {
-        const gas = window.google?.script?.run;
-        if (!gas) return;
-        if (typeof gas.getDashboardData === 'function') {
-          gas.withSuccessHandler(applyData).getDashboardData();
-        } else if (typeof gas.executeAdminAction === 'function') {
-          gas.withSuccessHandler(applyData).executeAdminAction('getDashboardData', []);
-        }
-      };
-      fetchGAS();
-      const interval = setInterval(fetchGAS, 3000);
-      return () => clearInterval(interval);
-
-    } else if (API_BASE_URL) {
-      // Live Cloudflare Worker or Node.js Backend: direct high-speed sync
-      const fetchFromBackend = async () => {
-        try {
-          const res = await fetch(`${API_BASE_URL}/api/run`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(ADMIN_API_KEY ? { 'x-admin-key': ADMIN_API_KEY, 'x-admin-api-key': ADMIN_API_KEY } : {}),
-            },
-            body: JSON.stringify({ functionName: 'getDashboardData', adminKey: ADMIN_API_KEY, apiKey: ADMIN_API_KEY }),
-          });
-          if (res.ok) {
-            const json = await res.json();
-            const payload = json?.data || json?.result || json;
-            if (payload && (payload.players || payload.activeRound)) {
-              applyData(payload);
-            }
-          }
-        } catch (e) {
-          console.warn('[Dashboard API Polling Note]:', e?.message || e);
-        }
-      };
-
-      fetchFromBackend();
-      const interval = setInterval(fetchFromBackend, 2000);
-
-      // Attempt SSE if stream endpoint is active
-      let es;
+    if (!adminAuthenticated) return undefined;
+    let cancelled = false;
+    const fetchDashboard = async () => {
       try {
-        const sseQs = ADMIN_API_KEY ? `?apiKey=${encodeURIComponent(ADMIN_API_KEY)}` : '';
-        es = new EventSource(`${API_BASE_URL}/api/events${sseQs}`);
-        es.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            applyData(data);
-          } catch (_) {}
-        };
-        es.onerror = () => {
-          if (es) es.close();
-        };
-      } catch (_) {}
-
-      return () => {
-        clearInterval(interval);
-        if (es) es.close();
-      };
-
-    } else if (isGitHubPages) {
-      // GitHub Pages hosted: poll the Cloudflare Worker (LINE webhook authority) via RPC
-      // ── Zero-Delay Continuous Polling (timeout = 0) ──
-      // Re-fetches immediately after each cycle completes. The awaited
-      // while-loop guarantees no request stacking (unlike setInterval(fn, 0)).
-      let cancelled = false;
-      const continuousPoll = async () => {
-        while (!cancelled) {
-          try {
-            const data = await runBackendFunction('getDashboardData', []);
-            if (data) {
-              applyData(data);
-            }
-          } catch (e) {
-            console.warn('[GitHub Pages Worker Polling Note]:', e?.message || e);
-          }
-          await new Promise((r) => setTimeout(r, 0));
-        }
-      };
-
-      continuousPoll();
-
-      return () => {
-        cancelled = true;
-      };
-
-    } else if (isLiveBackend) {
-      // Node.js server (Render / Local): SSE from single writer backend
-      let es;
-      let reconnectTimer;
-      const sseQs = ADMIN_API_KEY ? `?apiKey=${encodeURIComponent(ADMIN_API_KEY)}` : '';
-
-      const connect = () => {
-        if (!API_BASE_URL && window.location.port !== '3001') return;
-        es = new EventSource(`${API_BASE_URL}/api/events${sseQs}`);
-
-        es.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            applyData(data);
-          } catch (_) {}
-        };
-
-        es.onerror = () => {
-          es.close();
-          reconnectTimer = setTimeout(connect, 3000);
-        };
-      };
-
-      connect();
-
-      return () => {
-        if (es) es.close();
-        if (reconnectTimer) clearTimeout(reconnectTimer);
-      };
-    }
-  }, [isGAS, isLiveBackend, isGitHubPages]);
+        const data = await runBackendFunction('getDashboardData', []);
+        if (!cancelled) applyData(data);
+      } catch (e) {
+        console.warn('[Dashboard API Polling Note]:', e?.message || e);
+      }
+    };
+    fetchDashboard();
+    const interval = setInterval(fetchDashboard, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [adminAuthenticated, runBackendFunction]);
 
   // Auto scroll chats inside container without moving the browser viewport
   useEffect(() => {
@@ -962,11 +878,9 @@ export default function App() {
 
         // Send to Google Sheets if running inside GAS
         if (isGAS) {
-          window.google.script.run
-            .withSuccessHandler(() => {
-              addToast('ส่งคำขอถอนเงินสำเร็จ! รอแอดมินดำเนินการโอนเงิน', 'info');
-            })
-            .logTransaction('user', 'คุณ (You)', withdrawAmt, 0, 'PENDING_WITHDRAW', 'escalated', `Withdrawal request to ${userPlayer.bankName} ${userPlayer.bankAccount} ${userPlayer.accountName}`);
+          runBackendFunction('logTransaction', ['user', 'คุณ (You)', withdrawAmt, 0, 'PENDING_WITHDRAW', 'escalated', `Withdrawal request to ${userPlayer.bankName} ${userPlayer.bankAccount} ${userPlayer.accountName}`])
+            .then(() => addToast('ส่งคำขอถอนเงินสำเร็จ! รอแอดมินดำเนินการโอนเงิน', 'info'))
+            .catch((error) => console.error('[Withdrawal RPC Error]:', error));
         }
 
         setPrivateMessages(prev => [...prev, {
@@ -1025,11 +939,9 @@ export default function App() {
 
         // Send to Google Sheets if running inside GAS
         if (isGAS) {
-          window.google.script.run
-            .withSuccessHandler(() => {
-              addToast('ส่งคำสั่งฝากเงินสำเร็จ! กรุณาโอนเงินและส่งสลิป', 'info');
-            })
-            .logTransaction('user', 'คุณ (You)', depositAmt, 0, 'PENDING_SLIP', 'escalated', 'Waiting for user to upload pay slip');
+          runBackendFunction('logTransaction', ['user', 'คุณ (You)', depositAmt, 0, 'PENDING_SLIP', 'escalated', 'Waiting for user to upload pay slip'])
+            .then(() => addToast('ส่งคำสั่งฝากเงินสำเร็จ! กรุณาโอนเงินและส่งสลิป', 'info'))
+            .catch((error) => console.error('[Deposit RPC Error]:', error));
         }
 
         // Send the invoice card
@@ -1208,11 +1120,9 @@ export default function App() {
 
     // Send to Google Sheets if running inside GAS
     if (isGAS) {
-      window.google.script.run
-        .withSuccessHandler(() => {
-          addToast('ส่งคำสั่งฝากเงินสำเร็จ! กรุณาโอนเงินและส่งสลิป', 'info');
-        })
-        .logTransaction('user', 'คุณ (You)', amt, 0, 'PENDING_SLIP', 'escalated', 'Waiting for user to upload pay slip');
+      runBackendFunction('logTransaction', ['user', 'คุณ (You)', amt, 0, 'PENDING_SLIP', 'escalated', 'Waiting for user to upload pay slip'])
+        .then(() => addToast('ส่งคำสั่งฝากเงินสำเร็จ! กรุณาโอนเงินและส่งสลิป', 'info'))
+        .catch((error) => console.error('[Deposit RPC Error]:', error));
     }
 
     // Append user selection and invoice card to private chat
@@ -1277,8 +1187,8 @@ export default function App() {
 
           // GAS Integration call
           if (isGAS) {
-            window.google.script.run
-              .withSuccessHandler((res) => {
+            runBackendFunction('verifyMockSlipFromClient', [depositAmount, realAmt, ref, isQRValid, isDupe])
+              .then((res) => {
                 if (res && res.status === 'success') {
                   setBillingResult({ status: 'success', amount: realAmt });
                   setTransactions(prev => prev.map(t => t.id === activeTxId ? { ...t, status: 'success', actualAmount: realAmt, slipRef: ref, reviewReason: 'Auto verified via slip API 1:1' } : t));
@@ -1321,7 +1231,11 @@ export default function App() {
                 }
                 setBillingStep('completed');
               })
-              .verifyMockSlipFromClient(depositAmount, realAmt, ref, isQRValid, isDupe);
+              .catch((error) => {
+                setBillingResult({ status: 'escalate', reason: error?.message || 'ไม่สามารถตรวจสอบสลิปได้' });
+                setBillingStep('completed');
+                addToast('ไม่สามารถตรวจสอบสลิปได้ ส่งเรื่องให้แอดมินตรวจสอบ', 'warning');
+              });
           } else {
             // Sandbox logic
             if (!isQRValid) {
@@ -1675,11 +1589,9 @@ export default function App() {
   // Cancel Bet Request
   const handleRequestCancelBet = (betId) => {
     if (isGAS) {
-      window.google.script.run
-        .withSuccessHandler(() => {
-          addToast('ขอยกเลิกแผลสดในฐานข้อมูลสำเร็จ รอคู่ตอบรับ...', 'info');
-        })
-        .adminRequestCancelBet(betId);
+      runBackendFunction('adminRequestCancelBet', [betId])
+        .then(() => addToast('ขอยกเลิกแผลสดในฐานข้อมูลสำเร็จ รอคู่ตอบรับ...', 'info'))
+        .catch((error) => addToast(error?.message || 'ยกเลิกไม่สำเร็จ', 'danger'));
     } else {
       // Sandbox cancel
       const bet = bets.find(b => b.id === betId);
@@ -1720,14 +1632,12 @@ export default function App() {
 
     // Run backend in background
     if (isGAS) {
-      window.google.script.run
-        .withFailureHandler((err) => {
+      runBackendFunction('adminApproveTransaction', [txId]).catch((err) => {
           console.error('[GAS Approve Error]:', err);
           // Rollback on failure
           setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
           addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
-        })
-        .adminApproveTransaction(txId);
+        });
     } else {
       runBackendFunction('adminApproveTransaction', [txId]).catch(err => {
         console.error('[Background Approve Error]:', err);
@@ -1759,14 +1669,12 @@ export default function App() {
 
     // Run backend in background
     if (isGAS) {
-      window.google.script.run
-        .withFailureHandler((err) => {
+      runBackendFunction('adminRejectTransaction', [txId, reason]).catch((err) => {
           console.error('[GAS Reject Error]:', err);
           // Rollback on failure
           setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
           addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
-        })
-        .adminRejectTransaction(txId, reason);
+        });
     } else {
       runBackendFunction('adminRejectTransaction', [txId, reason]).catch(err => {
         console.error('[Background Reject Error]:', err);
@@ -1977,6 +1885,7 @@ export default function App() {
         playerUserId={playerUserId}
         players={players}
         isGAS={isGAS}
+        runBackendFunction={runBackendFunction}
         setToasts={setToasts}
         addToast={addToast}
         setChatLogs={setChatLogs}
@@ -1994,9 +1903,6 @@ export default function App() {
         loginError={loginError}
         setLoginError={setLoginError}
         setAdminAuthenticated={setAdminAuthenticated}
-        adminUsername={ADMIN_USERNAME}
-        adminPassword={ADMIN_PASSWORD}
-        adminPasscode={ADMIN_PASSCODE}
         runBackendFunction={runBackendFunction}
       />
     );
@@ -4113,7 +4019,7 @@ export default function App() {
 // -------------------------------------------------------------
 // SECURE PLAYER STATEMENT CONSOLE
 // -------------------------------------------------------------
-function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, players, isGAS, setToasts, addToast, setChatLogs }) {
+function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, players, isGAS, runBackendFunction, setToasts, addToast, setChatLogs }) {
   const [activeTab, setActiveTab] = useState('statement'); // 'statement' | 'bets' | 'chat'
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef(null);
@@ -4144,11 +4050,8 @@ function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, p
     setChatLogs(prev => [...prev, newLog]);
 
     if (isGAS) {
-      window.google.script.run
-        .withSuccessHandler(() => {
-          // Message processed successfully
-        })
-        .simulateTextMessageFromDashboard(text, playerUserId, player.name);
+      runBackendFunction('simulateTextMessageFromDashboard', [text, playerUserId, player.name])
+        .catch((error) => console.error('[Chat RPC Error]:', error));
     } else {
       // Sandbox Simulator Reply Simulation
       setTimeout(() => {
@@ -4385,9 +4288,6 @@ function AdminLockScreen({
   loginError, 
   setLoginError, 
   setAdminAuthenticated, 
-  adminUsername, 
-  adminPassword, 
-  adminPasscode,
   runBackendFunction 
 }) {
   const [showPassword, setShowPassword] = useState(false);
@@ -4411,32 +4311,26 @@ function AdminLockScreen({
 
     setIsSubmitting(true);
 
-    const isUserMatch = userClean.toLowerCase() === (adminUsername || 'Admin').toLowerCase();
-    const isPassMatch = passClean === (adminPassword || 'P@ssW0rd2026') || passClean === (adminPasscode || 'P@ssW0rd2026') || passClean === 'P@ssW0rd2026';
-
-    let loginSuccess = isUserMatch && isPassMatch;
-
-    // 2. If client comparison doesn't match directly, try backend RPC
-    if (!loginSuccess && typeof runBackendFunction === 'function') {
-      try {
-        const res = await runBackendFunction('adminLogin', [userClean, passClean]);
-        if (res && res.success) {
-          loginSuccess = true;
-        }
-      } catch (_) {}
+    let session = null;
+    let loginFailure = '';
+    try {
+      session = await runBackendFunction('adminLogin', [userClean, passClean]);
+    } catch (error) {
+      loginFailure = error?.message || 'ไม่สามารถเข้าสู่ระบบได้ กรุณาลองใหม่อีกครั้ง';
     }
 
     setIsSubmitting(false);
 
-    if (loginSuccess) {
+    if (session?.success && session.token && Number.isFinite(Number(session.expiresAt))) {
       if (typeof window !== 'undefined') {
-        sessionStorage.setItem('rocket_admin_auth', 'true');
-        sessionStorage.setItem('rocket_admin_user', userClean);
+        sessionStorage.setItem('rocket_admin_user', session.username || userClean);
+        sessionStorage.setItem('rocket_admin_token', session.token);
+        sessionStorage.setItem('rocket_admin_expires_at', String(session.expiresAt));
       }
       setAdminAuthenticated(true);
       setLoginError('');
     } else {
-      setLoginError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
+      setLoginError(loginFailure || 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
       setPasswordInput('');
     }
   };
