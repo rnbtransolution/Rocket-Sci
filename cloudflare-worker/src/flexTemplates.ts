@@ -5,6 +5,21 @@ import { Order } from './types.js';
  * Avoids recursive object re-allocations and heavy serialization overhead.
  */
 
+export function formatSettlementPayoutText(order: {
+  amount: number;
+  winnerSide?: 'low' | 'high' | 'draw' | null;
+  winnerCredit?: number;
+  houseFee?: number;
+}): string {
+  const stake = Number(order.amount) || 0;
+  if (order.winnerSide === 'draw') {
+    return `เสมอ: คืนเดิมพัน ${stake.toFixed(2)} แต้มเต็มจำนวน ไม่มีค่าธรรมเนียม`;
+  }
+  const winnerCredit = Number(order.winnerCredit) || 0;
+  const houseFee = Number(order.houseFee) || 0;
+  return `คืนเงินเดิมพันตัวเอง ${stake.toFixed(2)} + 90% จากคู่แข่ง ${(winnerCredit - stake).toFixed(2)} = รับรวม ${winnerCredit.toFixed(2)} แต้ม; บ้านรับ ${houseFee.toFixed(2)} แต้มจากผู้แพ้`;
+}
+
 export function generateRocketLaunchedFlex(): any {
   return {
     type: 'flex',
@@ -1648,4 +1663,3 @@ export function generateBankRegistrationFlex(): any {
     },
   };
 }
-

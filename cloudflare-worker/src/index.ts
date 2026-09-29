@@ -29,6 +29,7 @@ import {
   generateWithdrawalFlex,
   generateOrderFlex,
   generateRocketLaunchedFlex,
+  formatSettlementPayoutText,
 } from './flexTemplates.js';
 export { FinancialCoordinator } from './financial/FinancialCoordinator';
 
@@ -1170,6 +1171,7 @@ export default {
           const tMax = Number(activeRound.targetMax) || 380;
           const targets = await resolveTargetGroupIds('ALL', env);
           if (targets.length > 0) {
+            const formatPoints = (points: number): string => points.toFixed(2);
             const settleFlex = {
               type: 'flex',
               altText: `🏁 สรุปผลเวลาบิน [${activeRound.name || 'บั้งไฟสด'}] เวลา ${finalSeconds} วินาที`,
@@ -1194,6 +1196,8 @@ export default {
                   contents: [
                     { type: 'text', text: `ช่วงราคาเป้าหมาย: ${tMin}-${tMax} วิ`, size: 'xs', color: '#64748B', align: 'center' },
                     { type: 'text', text: `ชำระผลตัดสินเรียบร้อย ${resolvedOrders.length} แผลดวล 🚀`, size: 'sm', color: '#059669', weight: 'bold', align: 'center' },
+                    { type: 'text', text: 'กติกาจ่าย: คืนเงินเดิมพันตัวเอง 100 + 90% จากคู่แข่ง 90 = รับรวม 190 แต้ม; บ้านรับ 10 แต้มจากผู้แพ้', size: 'xs', color: '#334155', align: 'center', wrap: true },
+                    { type: 'text', text: 'ถ้าเสมอ: คืนเงินเดิมพันของทั้งสองฝ่ายเต็มจำนวน ไม่มีค่าธรรมเนียม', size: 'xs', color: '#334155', align: 'center', wrap: true },
                   ],
                 },
               },
@@ -1202,29 +1206,32 @@ export default {
 
             // Task 3: P2P per-pair result breakdown broadcast to active groups
             const pairBodies: any[] = resolvedOrders
-              .filter((o) => o.winnerSide && o.winnerSide !== 'draw')
               .slice(0, 20)
               .map((o) => {
-                const winName = o.winnerName || '-';
-                const loseName = o.winnerSide === 'low'
-                  ? (o.side === 'high' ? o.matcherName || o.creatorName : o.creatorName)
-                  : (o.side === 'high' ? o.matcherName || o.creatorName : o.creatorName);
+                const winnerCredit = Number(o.winnerCredit) || 0;
                 return {
                   type: 'box',
-                  layout: 'horizontal',
-                  spacing: 'sm',
+                  layout: 'vertical',
+                  spacing: 'xs',
                   contents: [
-                    { type: 'text', text: `#${o.orderNumber}`, size: 'xs', color: '#64748B', flex: 2, wrap: true },
-                    { type: 'text', text: `💰 ${Number(o.amount).toLocaleString()}`, size: 'xs', color: '#0F172A', weight: 'bold', flex: 2, align: 'end' },
-                    { type: 'text', text: `👑 ${String(winName).slice(0, 14)}`, size: 'xs', color: '#059669', weight: 'bold', flex: 4, wrap: true },
-                    { type: 'text', text: `💥 ${String(loseName).slice(0, 14)}`, size: 'xs', color: '#DC2626', flex: 4, wrap: true },
+                    {
+                      type: 'box',
+                      layout: 'horizontal',
+                      spacing: 'sm',
+                      contents: [
+                        { type: 'text', text: `#${o.orderNumber}`, size: 'xs', color: '#64748B', flex: 2, wrap: true },
+                        { type: 'text', text: o.winnerSide === 'draw' ? '🤝 เสมอ' : `👑 ${String(o.winnerName || '-').slice(0, 14)}`, size: 'xs', color: o.winnerSide === 'draw' ? '#B45309' : '#059669', weight: 'bold', flex: 5, wrap: true },
+                        { type: 'text', text: o.winnerSide === 'draw' ? 'คืนเต็มจำนวน' : `รับ ${formatPoints(winnerCredit)}`, size: 'xs', color: '#0F172A', weight: 'bold', flex: 4, align: 'end', wrap: true },
+                      ],
+                    },
+                    { type: 'text', text: formatSettlementPayoutText(o), size: 'xxs', color: '#475569', wrap: true },
                   ],
                 };
               });
             if (pairBodies.length > 0) {
               const p2pFlex = {
                 type: 'flex',
-                altText: `🤝 ผลดวลตัวต่อตัว ${pairBodies.length} แผล (รับยอดสุทธิ 1.9 เท่าหลังหักค่าธรรมเนียม 10%)`,
+                altText: `🤝 ผลดวลตัวต่อตัว ${pairBodies.length} แผล (คืนเดิมพันตัวเอง + 90% จากคู่แข่ง; บ้านรับ 10% จากผู้แพ้)`,
                 contents: {
                   type: 'bubble',
                   size: 'giga',
@@ -1250,7 +1257,13 @@ export default {
             }
           }
 
-          result = { success: true, resolvedCount: resolvedOrders.length, finalTime: finalSeconds };
+          result = {
+            success: true,
+            resolvedCount: resolvedOrders.length,
+            finalTime: finalSeconds,
+            round: settlement.round,
+            resolvedOrders,
+          };
         } else if (functionName === 'simulateTextMessageFromDashboard') {
           const text = args[0];
           const userId = args[1] || 'user';

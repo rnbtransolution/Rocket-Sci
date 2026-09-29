@@ -821,6 +821,64 @@ it('settles creator wins, matcher wins, and draws with balanced account credits'
   }
 });
 
+it('settles a 51-point winner at 96.9 points and credits a 5.1-point house fee', async () => {
+  const client = createCoordinatorClient(env);
+  const roundId = `round-fractional-${crypto.randomUUID()}`;
+  const creatorId = `player-fractional-creator-${crypto.randomUUID()}`;
+  const matcherId = `player-fractional-matcher-${crypto.randomUUID()}`;
+  for (const [playerId, displayName] of [[creatorId, 'Fractional Creator'], [matcherId, 'Fractional Matcher']] as const) {
+    await client.createPlayer({
+      idempotencyKey: `${playerId}-opening`,
+      playerId,
+      lineUserId: `${playerId}-line`,
+      displayName,
+      openingBalanceHundredths: 10_000,
+    });
+  }
+  await client.openRound({ idempotencyKey: `${roundId}-open`, roundId, name: 'Fractional Settlement' });
+  await client.releaseQuote({
+    idempotencyKey: `${roundId}-quote`,
+    roundId,
+    targetMin: 10,
+    targetMax: 20,
+  });
+  const order = await client.createOrder({
+    idempotencyKey: `${roundId}-order`,
+    roundId,
+    creatorId,
+    side: 'low',
+    stakeHundredths: 5_100,
+    betType: 'pre_quote',
+    rangeMin: 1,
+    rangeMax: 2,
+    creatorName: 'Fractional Creator',
+    groupId: `${roundId}-group`,
+  });
+  await client.matchOrder({
+    idempotencyKey: `${roundId}-match`,
+    orderNumber: order.orderNumber,
+    matcherId,
+    stakeHundredths: 5_100,
+    matcherName: 'Fractional Matcher',
+  });
+
+  const settled = await client.resolveRound({
+    idempotencyKey: `${roundId}-resolve`,
+    roundId,
+    finalSeconds: 5,
+  });
+
+  expect(settled.orders[0]).toMatchObject({
+    winnerSide: 'low',
+    winnerCreditHundredths: 9_690,
+    houseFeeHundredths: 510,
+  });
+  expect(await client.getAccount(creatorId)).toMatchObject({ balanceHundredths: 14_590 });
+  expect(await client.getAccount(matcherId)).toMatchObject({ balanceHundredths: 4_900 });
+  expect((await client.getSnapshot()).accounts.find((account) => account.kind === 'house'))
+    .toMatchObject({ balanceHundredths: 510 });
+});
+
 it('voids a closed but unsettled round by refunding each matched stake once', async () => {
   const client = createCoordinatorClient(env);
   const roundId = `round-void-matched-${crypto.randomUUID()}`;

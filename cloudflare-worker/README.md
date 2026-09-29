@@ -139,6 +139,19 @@ These checks use local test credentials and mocked services. They do not deploy
 Workers, call live GAS/Sheets endpoints, change Script Properties, or rotate
 secrets.
 
+The final local coordinator load check runs 100 create-player finance operations
+in five batches of 20 (the required 20 operations/second target):
+
+```bash
+npm test -- test/coordinator-load.test.ts
+```
+
+The verified local test-pool result was 24.57 measured operations/second with a
+30 ms p95 operation latency. All 100 player accounts and 100 unique opening
+ledger entries were present; total account balance and total ledger delta both
+equalled 10,000 hundredths. This is a local performance check only and is not a
+production capacity guarantee.
+
 ### Required configuration names
 
 Set values only through operator-managed secret/configuration stores; this

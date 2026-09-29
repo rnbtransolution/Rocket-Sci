@@ -47,6 +47,7 @@ import {
 } from 'lucide-react';
 
 const INITIAL_PLAYERS = [];
+const formatPoints = (value) => Number(value || 0).toFixed(2);
 
 // Presets for the Slip Upload Simulator
 const SLIP_PRESETS = [
@@ -1041,13 +1042,19 @@ export default function App() {
       }
       
       // 5. Settle message
-      if (b.status === 'resolved') {
+      if (b.status === 'resolved' || b.status === 'settled') {
         const finalTimeVal = b.finalFlightTime || rocketFlightTime;
-        const isLowWinner = b.winnerName === b.playerLowName;
+        const isDraw = b.winnerSide === 'draw';
+        const stake = Number(b.amount) || 0;
+        const winnerCredit = Number(b.winnerCredit);
+        const houseFee = Number(b.houseFee);
+        const settlementText = isDraw
+          ? `🤝 เสมอ: คืนเงินเดิมพัน ${formatPoints(stake)} แต้มเต็มจำนวน ไม่มีค่าธรรมเนียม`
+          : `💰 คืนเงินเดิมพันตัวเอง ${formatPoints(stake)} + 90% จากคู่แข่ง ${formatPoints(winnerCredit - stake)} = รับรวม ${formatPoints(winnerCredit)} แต้ม; บ้านรับ ${formatPoints(houseFee)} แต้มจากผู้แพ้`;
         msgs.push({
           id: `bet_resolve_${b.orderNumber}`,
           sender: 'ระบบบอทดูด 🚀',
-          text: `🔔 สรุปผล Order #${b.orderNumber}\nเกณฑ์ออก: ${finalTimeVal} วินาที\nฝั่งชนะ: ${isLowWinner ? 'ต่ำ (Low)' : 'สูง (High)'} (${b.winnerName})\n💰 ยอดโอนเข้าบัญชี: +${Math.round(b.amount * 1.90)} แต้ม (หักค่าตง 10% เรียบร้อย)`,
+          text: `🔔 สรุปผล Order #${b.orderNumber}\nเกณฑ์ออก: ${finalTimeVal} วินาที\n${isDraw ? 'ผลตัดสิน: เสมอ' : `ผู้ชนะจาก coordinator: ${b.winnerName || '-'}`}\n${settlementText}`,
           time: t
         });
       }
@@ -1675,57 +1682,33 @@ export default function App() {
 
   // Settle bets and calculate payouts (instant, no animations)
   const resolveMatchedBets = async (finalTime) => {
-    const timeSec = Number(finalTime);
     const tMin = targetMin ? Number(targetMin) : 330;
     const tMax = targetMax ? Number(targetMax) : 380;
     const name = rocketName || 'ช่างบั้งไฟสด';
 
     setFlightLogs(prev => [`💥 Telemetry link settled. Final Air Time: ${finalTime}s.`, ...prev]);
 
-    // Calculate payouts details from currently matched bets for the popup modal
-    const previouslyMatched = bets.filter(b => b.status === 'matched');
-    const payouts = previouslyMatched.map(b => {
-      let isLowWinner = true;
-      const minSec = (b.type === 'range' && b.rangeMin !== null && b.rangeMax !== null) ? Number(b.rangeMin) : tMin;
-      const maxSec = (b.type === 'range' && b.rangeMin !== null && b.rangeMax !== null) ? Number(b.rangeMax) : tMax;
-
-      if (timeSec < minSec) {
-        isLowWinner = true;
-      } else if (timeSec > maxSec) {
-        isLowWinner = false;
-      } else {
-        const midPoint = (minSec + maxSec) / 2;
-        isLowWinner = timeSec <= midPoint;
-      }
-      const winnerName = isLowWinner ? b.playerLowName : b.playerHighName;
-      return {
-        orderNumber: b.orderNumber,
-        winnerName: winnerName,
-        amount: b.amount,
-        payout: Math.round(b.amount * 1.90)
-      };
-    });
-
-    setSettlementResult({
-      rocketName: name,
-      finalTime: finalTime,
-      targetMin: tMin,
-      targetMax: tMax,
-      outcome: timeSec < tMin ? 'LOW' : timeSec > tMax ? 'HIGH' : 'RANGE',
-      payouts: payouts
-    });
-
     try {
       const data = await runBackendFunction('adminResolveBets', [finalTime, tMin, tMax]);
-      if (data) {
-        if (data.bets) setBets(data.bets);
-        if (data.players) setPlayers(data.players);
-        if (data.transactions) setTransactions(data.transactions);
+      if (!data || !Array.isArray(data.resolvedOrders)) {
+        throw new Error('Coordinator settlement response is missing committed orders');
       }
+      setBets(data.resolvedOrders);
+      setSettlementResult({
+        rocketName: name,
+        finalTime: data.finalTime ?? finalTime,
+        targetMin: data.round?.targetMin ?? tMin,
+        targetMax: data.round?.targetMax ?? tMax,
+        payouts: data.resolvedOrders.map((order) => ({
+          ...order,
+          payout: order.winnerCredit,
+        })),
+      });
       addToast(`🚀 เคลียร์ผลรางวัลรอบ [${name}] เวลา ${finalTime}s (ช่วง ${tMin}-${tMax}s) และบรอดแคสต์ลงกลุ่มเรียบร้อย!`, 'success');
     } catch (e) {
       console.error('Settlement backend error:', e);
-      addToast(`เคลียร์ผลรางวัลแผลสดรอบ [${name}] ช่วง ${tMin}-${tMax}s เรียบร้อย! (Local Sandbox)`, 'info');
+      setRocketStatus('idle');
+      addToast('❌ ยังไม่ได้รับผลชำระเงินที่ยืนยันจาก coordinator กรุณาลองใหม่อีกครั้ง', 'danger');
     }
   };
 
@@ -3923,20 +3906,8 @@ export default function App() {
               </div>
             </div>
 
-            <div className={`p-3 rounded-xl border text-center font-bold text-sm ${
-              settlementResult.outcome === 'LOW' 
-                ? 'bg-sky-50 border-sky-200 text-sky-700' 
-                : settlementResult.outcome === 'HIGH'
-                ? 'bg-rose-50 border-rose-200 text-rose-700'
-                : 'bg-amber-50 border-amber-200 text-amber-700'
-            }`}>
-              ผลตัดสินฝั่งชนะ: {
-                settlementResult.outcome === 'LOW' 
-                  ? 'ต่ำ (LOW) 🔵' 
-                  : settlementResult.outcome === 'HIGH' 
-                  ? 'สูง (HIGH) 🔴' 
-                  : 'ในราคาช่าง (RANGE) 🎯'
-              }
+            <div className="p-3 rounded-xl border text-center font-bold text-sm bg-emerald-50 border-emerald-200 text-emerald-700">
+              ผลตัดสินและยอดรับแสดงตามผลยืนยันจาก coordinator
             </div>
 
             <div className="space-y-2">
@@ -3946,11 +3917,24 @@ export default function App() {
                   <p className="text-xs text-slate-400 italic text-center py-2">ไม่มีแผลจับคู่ในรอบนี้</p>
                 ) : (
                   settlementResult.payouts.map(p => (
-                    <div key={p.orderNumber} className="flex justify-between items-center text-xs p-2 bg-slate-50 border border-slate-100 rounded-lg">
-                      <span className="font-mono font-bold text-slate-700">Order #{p.orderNumber}</span>
-                      <span className="text-slate-600 font-bold">{p.winnerName ? p.winnerName.split(' ')[0] : 'ผู้ชนะ'} Win</span>
-                      <span className="font-mono font-bold text-emerald-600">+{p.payout} pt</span>
-                    </div>
+                    <React.Fragment key={p.orderNumber}>
+                      <div className="flex justify-between items-center text-xs p-2 bg-slate-50 border border-slate-100 rounded-lg">
+                       <span className="font-mono font-bold text-slate-700">Order #{p.orderNumber}</span>
+                       <span className="text-slate-600 font-bold">
+                         {p.winnerSide === 'draw' ? 'เสมอ' : `${p.winnerName ? p.winnerName.split(' ')[0] : 'ผู้ชนะ'} ชนะ`}
+                       </span>
+                       <span className="font-mono font-bold text-emerald-600">
+                         {p.winnerSide === 'draw'
+                           ? `คืน ${formatPoints(p.amount)} pt`
+                           : `+${formatPoints(p.winnerCredit)} pt`}
+                       </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 px-2">
+                       {p.winnerSide === 'draw'
+                         ? `คืนเงินเดิมพัน ${formatPoints(p.amount)} แต้มเต็มจำนวน ไม่มีค่าธรรมเนียม`
+                         : `คืนเงินเดิมพันตัวเอง ${formatPoints(p.amount)} + 90% จากคู่แข่ง ${formatPoints(p.winnerCredit - p.amount)} = รับรวม ${formatPoints(p.winnerCredit)} แต้ม; บ้านรับ ${formatPoints(p.houseFee)} แต้มจากผู้แพ้`}
+                      </p>
+                    </React.Fragment>
                   ))
                 )}
               </div>

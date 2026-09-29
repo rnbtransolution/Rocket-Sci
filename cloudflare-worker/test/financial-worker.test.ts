@@ -332,11 +332,28 @@ it('routes LINE order, match, and retry flows through the coordinator', async ()
   for (let attempt = 0; attempt < 2; attempt++) {
     const response = await adminRun('adminResolveBets', [400], 'worker-settle-round');
     expect(response.status).toBe(200);
-    if (attempt === 0) expect(await response.json()).toMatchObject({ data: { resolvedCount: 1 } });
+    if (attempt === 0) {
+      expect(await response.json()).toMatchObject({
+        data: {
+          resolvedCount: 1,
+          resolvedOrders: [{
+            orderNumber,
+            winnerSide: 'high',
+            winnerCredit: 190,
+            houseFee: 10,
+          }],
+        },
+      });
+    }
   }
   expect((await client.getAccount(matcherId))?.balanceHundredths).toBe(59_000);
   expect((await client.getSnapshot()).accounts.find((account) => account.kind === 'house')?.balanceHundredths).toBe(1_000);
   expect(await client.getOrder(orderNumber)).toMatchObject({ status: 'settled', winnerSide: 'high' });
+  expect(lineCalls.some((call) =>
+    call.path.endsWith('/message/push') &&
+    call.body.includes('คืนเงินเดิมพันตัวเอง 100 + 90% จากคู่แข่ง 90 = รับรวม 190 แต้ม') &&
+    call.body.includes('บ้านรับ 10 แต้มจากผู้แพ้')
+  )).toBe(true);
 
   const privateBalanceEvent = {
     type: 'message',
