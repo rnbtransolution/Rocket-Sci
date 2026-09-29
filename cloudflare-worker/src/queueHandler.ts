@@ -649,8 +649,15 @@ async function handleCreateOrder(
     await pushToLine(groupId, flexCard, env);
   }
 
+  // 7. Send Confirmation Message to Player
   if (isPreQuote) {
     await deliverPrivateNotice(userId, replyToken, groupId, `⏳ Order #${orderNumber} ถูกถืออยู่รอราคาช่างครับ (จำนวน ${amount.toLocaleString()} pt)\nเมื่อแอดมินเปิดราคาช่างอย่างเป็นทางการ ระบบจะจับคู่ดวลให้อัตโนมัติครับ 🚀`, env);
+  } else {
+    // Confirmation for custom_range and regular range orders
+    const confirmMsg = isCustom
+      ? `✅ Order #${orderNumber} เปิดดวลช่วง ${rangeMin}-${rangeMax}${rangeMin !== rangeMax ? ' วินาที' : ''} สำเร็จแล้วครับ 🚀\n(จำนวน ${amount.toLocaleString()} pt ใหม่ของคุณ: ${profile.balance - amount})`
+      : `✅ Order #${orderNumber} เปิดดวลสำเร็จแล้วครับ 🚀\n(จำนวน ${amount.toLocaleString()} pt | ใหม่ของคุณ: ${profile.balance - amount})`;
+    await deliverPrivateNotice(userId, replyToken, groupId, confirmMsg, env);
   }
 }
 
