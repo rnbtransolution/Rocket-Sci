@@ -650,14 +650,23 @@ async function handleCreateOrder(
   }
 
   // 7. Send Confirmation Message to Player
-  if (isPreQuote) {
-    await deliverPrivateNotice(userId, replyToken, groupId, `⏳ Order #${orderNumber} ถูกถืออยู่รอราคาช่างครับ (จำนวน ${amount.toLocaleString()} pt)\nเมื่อแอดมินเปิดราคาช่างอย่างเป็นทางการ ระบบจะจับคู่ดวลให้อัตโนมัติครับ 🚀`, env);
-  } else {
-    // Confirmation for custom_range and regular range orders
-    const confirmMsg = isCustom
-      ? `✅ Order #${orderNumber} เปิดดวลช่วง ${rangeMin}-${rangeMax}${rangeMin !== rangeMax ? ' วินาที' : ''} สำเร็จแล้วครับ 🚀\n(จำนวน ${amount.toLocaleString()} pt ใหม่ของคุณ: ${profile.balance - amount})`
-      : `✅ Order #${orderNumber} เปิดดวลสำเร็จแล้วครับ 🚀\n(จำนวน ${amount.toLocaleString()} pt | ใหม่ของคุณ: ${profile.balance - amount})`;
+  const confirmMsg = isPreQuote
+    ? `⏳ Order #${orderNumber} ถูกถืออยู่รอราคาช่างครับ (จำนวน ${amount.toLocaleString()} pt)\nเมื่อแอดมินเปิดราคาช่างอย่างเป็นทางการ ระบบจะจับคู่ดวลให้อัตโนมัติครับ 🚀`
+    : (isCustom
+      ? `✅ Order #${orderNumber} เปิดดวลช่วง ${rangeMin}-${rangeMax}${rangeMin !== rangeMax ? ' วินาที' : ''} สำเร็จแล้วครับ 🚀\n(จำนวน ${amount.toLocaleString()} pt | คงเหลือ: ${profile.balance.toLocaleString()} pt)`
+      : `✅ Order #${orderNumber} เปิดดวลสำเร็จแล้วครับ 🚀\n(จำนวน ${amount.toLocaleString()} pt | คงเหลือ: ${profile.balance.toLocaleString()} pt)`);
+
+  if (groupId) {
+    // If order was created in a group, replyToken was already used for the group order card.
+    // Push the private confirmation to the player's DM asynchronously so it never blocks the webhook.
+    if (userId && userId.startsWith('U')) {
+      ctx?.waitUntil(pushToLine(userId, confirmMsg, env).catch(e => console.error(e)));
+    }
+  } else if (!cardDispatched && replyToken) {
+    // In private DM where card wasn't dispatched by replyToken, send confirmation
     await deliverPrivateNotice(userId, replyToken, groupId, confirmMsg, env);
+  } else if (userId && userId.startsWith('U')) {
+    ctx?.waitUntil(pushToLine(userId, confirmMsg, env).catch(e => console.error(e)));
   }
 }
 
@@ -713,6 +722,7 @@ async function handleMatchOrder(
   order.status = 'matched';
   order.matcherId = profile.shortId;
   order.matcherName = profile.displayName;
+  order.matcherLineUserId = profile.lineUserId;
   order.matchedAt = Date.now();
 
   const updatePersistence = Promise.all([
@@ -809,15 +819,9 @@ export async function clearAllPendingOrders(env: Env, ctx?: ExecutionContext): P
           order.status = 'refunding';
           await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
 
-          // Refund creator
+          // Refund creator safely with fallback across all key stores
           if (order.creatorId && Number(order.amount) > 0) {
-            const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
-            const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
-            if (profileRaw) {
-              const p = JSON.parse(profileRaw) as PlayerProfile;
-              p.balance = (Number(p.balance) || 0) + Number(order.amount);
-              await savePlayerProfile(p, env, ctx);
-            }
+            await refundPlayerPoints(order.creatorId, order.creatorLineUserId, Number(order.amount), env, ctx);
           }
 
           order.status = 'cancelled';
@@ -832,6 +836,59 @@ export async function clearAllPendingOrders(env: Env, ctx?: ExecutionContext): P
     console.error('[Worker] clearAllPendingOrders error:', err);
   }
   return { cleared: clearedCount };
+}
+
+/**
+ * Safely credits/refunds points to a player profile across USER_${lineId}, USER_${shortId}, and PLAYERS_LIST.
+ */
+export async function refundPlayerPoints(
+  shortId: string,
+  lineUserId: string | undefined,
+  amount: number,
+  env: Env,
+  ctx?: ExecutionContext
+): Promise<boolean> {
+  if (amount <= 0) return true;
+  try {
+    const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${shortId}`)) || lineUserId || shortId;
+    let profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+    if (!profileRaw && lineUserId) {
+      profileRaw = await env.KV_CACHE.get(`USER_${lineUserId}`);
+    }
+    if (!profileRaw && shortId) {
+      profileRaw = await env.KV_CACHE.get(`USER_${shortId}`);
+    }
+    if (profileRaw) {
+      const p = JSON.parse(profileRaw) as PlayerProfile;
+      p.balance = (Number(p.balance) || 0) + amount;
+      await savePlayerProfile(p, env, ctx);
+      return true;
+    }
+
+    // Fallback: search in PLAYERS_LIST
+    const listRaw = await env.KV_CACHE.get('PLAYERS_LIST');
+    if (listRaw) {
+      const list = JSON.parse(listRaw) as any[];
+      const p = list.find((x: any) => x.id === shortId || x.shortId === shortId || (lineUserId && (x.lineUserId === lineUserId || x.id === lineUserId)));
+      if (p) {
+        p.balance = (Number(p.balance) || 0) + amount;
+        p.updatedAt = Date.now();
+        await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(list));
+        const effectiveLine = p.lineUserId || rawLine;
+        if (effectiveLine) {
+          await env.KV_CACHE.put(`USER_${effectiveLine}`, JSON.stringify(p));
+        }
+        if (shortId) {
+          await env.KV_CACHE.put(`USER_${shortId}`, JSON.stringify(p));
+        }
+        return true;
+      }
+    }
+    return false;
+  } catch (err) {
+    console.error('[Worker] refundPlayerPoints error:', err);
+    return false;
+  }
 }
 
 /**
@@ -865,13 +922,8 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
             env,
             order.creatorName
           );
-          if (rawLine && amt > 0) {
-            const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
-            if (profileRaw) {
-              const p = JSON.parse(profileRaw) as PlayerProfile;
-              p.balance = (Number(p.balance) || 0) + amt;
-              await savePlayerProfile(p, env, ctx);
-            }
+          if (amt > 0) {
+            await refundPlayerPoints(order.creatorId, order.creatorLineUserId, amt, env, ctx);
           }
           await notifyPromise;
         }
@@ -1232,18 +1284,33 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
     await env.KV_CACHE.put(cacheKey, JSON.stringify(profile));
     if (profile.shortId) {
       await env.KV_CACHE.put(`RAW_LINE_${profile.shortId}`, profile.lineUserId);
+      await env.KV_CACHE.put(`USER_${profile.shortId}`, JSON.stringify(profile));
     }
 
-    let list: PlayerProfile[] = [];
+    let list: any[] = [];
     const cached = await env.KV_CACHE.get('PLAYERS_LIST');
     if (cached) {
       try { list = JSON.parse(cached); } catch (_) {}
     }
-    const idx = list.findIndex(p => p.lineUserId === profile.lineUserId || (profile.shortId && p.shortId === profile.shortId));
+    const idx = list.findIndex(p => p.lineUserId === profile.lineUserId || (profile.shortId && (p.shortId === profile.shortId || p.id === profile.shortId)));
+    const entry = {
+      id: profile.shortId || profile.lineUserId,
+      name: profile.displayName || 'ผู้เล่น',
+      displayName: profile.displayName || 'ผู้เล่น',
+      shortId: profile.shortId,
+      lineUserId: profile.lineUserId,
+      balance: Number(profile.balance) || 0,
+      bankName: profile.bankName || '',
+      accountNumber: profile.accountNumber || '',
+      bankAccount: profile.accountNumber || '',
+      accountName: profile.accountName || profile.displayName || '',
+      registeredAt: profile.registeredAt || Date.now(),
+      updatedAt: profile.updatedAt,
+    };
     if (idx >= 0) {
-      list[idx] = { ...list[idx], ...profile };
+      list[idx] = { ...list[idx], ...entry };
     } else {
-      list.push(profile);
+      list.push(entry);
     }
     // Cap the list document to keep the KV value well under the 25MB limit
     await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(list.slice(-500)));
@@ -1351,12 +1418,66 @@ export async function addTransaction(tx: Transaction, env: Env, ctx?: ExecutionC
 
 export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: ExecutionContext): Promise<PlayerProfile> {
   const cacheKey = `USER_${userId}`;
+  const shortId = `PL${userId.slice(-6).toUpperCase()}`;
+
+  // 1. Check direct user key
   const cached = await env.KV_CACHE.get(cacheKey);
-  if (cached) {
-    return JSON.parse(cached) as PlayerProfile;
+  let profile = cached ? (JSON.parse(cached) as PlayerProfile) : null;
+
+  // 2. Check PLAYERS_LIST for existing player (admin top-up or earlier registration)
+  let playersListEntry: any = null;
+  try {
+    const listRaw = await env.KV_CACHE.get('PLAYERS_LIST');
+    if (listRaw) {
+      const list = JSON.parse(listRaw) as any[];
+      playersListEntry = list.find((p: any) => p.lineUserId === userId || p.shortId === shortId || p.id === shortId || p.id === userId) || null;
+    }
+  } catch (_) {}
+
+  // 3. Also check shortId key if direct profile not found
+  if (!profile) {
+    try {
+      const shortCached = await env.KV_CACHE.get(`USER_${shortId}`);
+      if (shortCached) {
+        profile = JSON.parse(shortCached) as PlayerProfile;
+      }
+    } catch (_) {}
   }
 
-  // Fetch LINE user display name via Messaging API
+  // If existing profile was found either directly, via shortId, or via PLAYERS_LIST:
+  if (profile || playersListEntry) {
+    const base = profile || (playersListEntry as PlayerProfile);
+    let effectiveBalance = Number(base.balance) || 0;
+    if (playersListEntry && playersListEntry.balance !== undefined) {
+      const listBal = Number(playersListEntry.balance) || 0;
+      const listUpdated = Number(playersListEntry.updatedAt) || 0;
+      const profUpdated = Number(profile?.updatedAt) || 0;
+      if (listUpdated >= profUpdated || listBal > effectiveBalance) {
+        effectiveBalance = listBal;
+      }
+    }
+
+    const mergedProfile: PlayerProfile = {
+      ...base,
+      shortId,
+      lineUserId: userId,
+      displayName: base.displayName || playersListEntry?.name || 'ผู้เล่น',
+      balance: effectiveBalance,
+      bankName: base.bankName || playersListEntry?.bankName || '',
+      accountNumber: base.accountNumber || playersListEntry?.bankAccount || playersListEntry?.accountNumber || '',
+      accountName: base.accountName || playersListEntry?.accountName || base.displayName || 'ผู้เล่น',
+      updatedAt: Date.now(),
+      registeredAt: base.registeredAt || playersListEntry?.registeredAt || Date.now(),
+    };
+
+    // Ensure links are active
+    await env.KV_CACHE.put(cacheKey, JSON.stringify(mergedProfile));
+    await env.KV_CACHE.put(`USER_${shortId}`, JSON.stringify(mergedProfile));
+    await env.KV_CACHE.put(`RAW_LINE_${shortId}`, userId);
+    return mergedProfile;
+  }
+
+  // 4. Truly new player: fetch LINE user display name via Messaging API
   let displayName = 'ผู้เล่น';
   try {
     const res = await fetch(`https://api.line.me/v2/bot/profile/${userId}`, {
@@ -1368,7 +1489,6 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
     }
   } catch (_) {}
 
-  const shortId = `PL${userId.slice(-6).toUpperCase()}`;
   const newProfile: PlayerProfile = {
     shortId,
     lineUserId: userId,

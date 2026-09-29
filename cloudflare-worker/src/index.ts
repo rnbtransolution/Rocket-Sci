@@ -1,4 +1,4 @@
-import { Env, LineWebhookPayload, QueueMessage, LineEvent } from './types.js';
+import { Env, LineWebhookPayload, QueueMessage, LineEvent, PlayerProfile } from './types.js';
 import { verifyLineSignature } from './signature.js';
 import {
   processLineEvent,
@@ -18,6 +18,7 @@ import {
   getSettledOrdersList,
   addToSettledOrdersList,
   removeFromMatchedOrdersList,
+  refundPlayerPoints,
 } from './queueHandler.js';
 import {
   generateRuleGuideFlex,
@@ -419,49 +420,72 @@ export default {
 
           const players = await getPlayersList(env);
           const player = players.find(p => p.id === userId || p.lineUserId === userId || (p.shortId && p.shortId === userId));
-          const targetLineUserId = player?.lineUserId || (await env.KV_CACHE.get(`RAW_LINE_${userId}`)) || userId;
+          const targetLineUserId = player?.lineUserId || (await env.KV_CACHE.get(`RAW_LINE_${userId}`)) || (userId.startsWith('U') ? userId : '');
+          const shortId = player?.shortId || (userId.startsWith('PL') ? userId : `PL${(targetLineUserId || userId).slice(-6).toUpperCase()}`);
           const displayName = player?.name || player?.displayName || passedName || 'ผู้เล่น';
           let oldBal = player ? (Number(player.balance) || 0) : 0;
 
-          const profileRaw = await env.KV_CACHE.get(`USER_${targetLineUserId}`);
-          if (profileRaw) {
-            const p = JSON.parse(profileRaw);
-            if (p.balance !== undefined) oldBal = Number(p.balance) || 0;
-            p.balance = newBal;
-            if (passedName) p.displayName = passedName;
-
-            // Ledger-First: Record admin adjustment before updating profile
-            await addTransaction({
-              id: `ADJ${Date.now().toString().slice(-6)}`,
-              playerId: p.shortId,
-              playerName: p.displayName,
-              requestedAmount: newBal - oldBal,
-              actualAmount: newBal - oldBal,
-              slipRef: 'ADMIN_ADJUST',
-              status: 'success',
-              reviewReason: `Admin set balance: ${oldBal} → ${newBal}`,
-              timestamp: formatTime(),
-              type: 'deposit',
-              createdAt: Date.now(),
-            }, env, ctx);
-
-            await savePlayerProfile(p, env, ctx);
-          } else {
-            await savePlayerProfile({
-              shortId: userId.startsWith('PL') ? userId : `PL${userId.slice(-6).toUpperCase()}`,
-              lineUserId: targetLineUserId,
-              displayName: displayName,
-              balance: newBal,
-              registeredAt: Date.now(),
-              updatedAt: Date.now(),
-            }, env, ctx);
+          // Check if direct profile exists under targetLineUserId or shortId
+          let existingProfile: PlayerProfile | null = null;
+          if (targetLineUserId) {
+            const raw = await env.KV_CACHE.get(`USER_${targetLineUserId}`);
+            if (raw) {
+              try { existingProfile = JSON.parse(raw); } catch (_) {}
+            }
           }
+          if (!existingProfile && shortId) {
+            const raw = await env.KV_CACHE.get(`USER_${shortId}`);
+            if (raw) {
+              try { existingProfile = JSON.parse(raw); } catch (_) {}
+            }
+          }
+          if (existingProfile && existingProfile.balance !== undefined) {
+            oldBal = Number(existingProfile.balance) || 0;
+          }
+
+          const updatedProfile: PlayerProfile = {
+            ...(existingProfile || {}),
+            shortId,
+            lineUserId: targetLineUserId || existingProfile?.lineUserId || shortId,
+            displayName: passedName || existingProfile?.displayName || displayName,
+            balance: newBal,
+            bankName: existingProfile?.bankName || player?.bankName || '',
+            accountNumber: existingProfile?.accountNumber || player?.bankAccount || player?.accountNumber || '',
+            accountName: existingProfile?.accountName || player?.accountName || displayName,
+            registeredAt: existingProfile?.registeredAt || player?.registeredAt || Date.now(),
+            updatedAt: Date.now(),
+          };
+
+          // Ledger-First: Record admin adjustment
+          await addTransaction({
+            id: `ADJ${Date.now().toString().slice(-6)}`,
+            playerId: shortId,
+            playerName: updatedProfile.displayName,
+            requestedAmount: newBal - oldBal,
+            actualAmount: newBal - oldBal,
+            slipRef: 'ADMIN_ADJUST',
+            status: 'success',
+            reviewReason: `Admin set balance: ${oldBal} → ${newBal}`,
+            timestamp: formatTime(),
+            type: 'deposit',
+            createdAt: Date.now(),
+          }, env, ctx);
+
+          // Save synchronously to both USER_${targetLineUserId} and USER_${shortId}
+          if (targetLineUserId && targetLineUserId.startsWith('U')) {
+            await env.KV_CACHE.put(`USER_${targetLineUserId}`, JSON.stringify(updatedProfile));
+            await env.KV_CACHE.put(`RAW_LINE_${shortId}`, targetLineUserId);
+          }
+          await env.KV_CACHE.put(`USER_${shortId}`, JSON.stringify(updatedProfile));
+
+          // Save to PLAYERS_LIST and Sheets
+          await savePlayerProfile(updatedProfile, env, ctx);
 
           // Push DM to LINE user so they are immediately aware of their updated credit amount
           if (targetLineUserId && targetLineUserId.startsWith('U')) {
             try {
               const adjustFlex = generateCreditAdjustmentFlex(displayName, oldBal, newBal);
-              ctx?.waitUntil(Promise.all([
+              const pushTask = Promise.all([
                 pushToLine(targetLineUserId, adjustFlex, env).catch(e => console.error(e)),
                 appendChatLog(env, {
                   timestamp: formatTime(),
@@ -471,7 +495,10 @@ export default {
                   text: `💰 แจ้งเตือนปรับยอดเครดิต: ${oldBal.toLocaleString()} pt → ${newBal.toLocaleString()} pt`,
                   type: 'flex',
                 }).catch(e => console.error(e))
-              ]));
+              ]);
+              if (typeof ctx?.waitUntil === 'function') {
+                ctx.waitUntil(pushTask);
+              }
             } catch (pushErr) {
               console.error('[Worker] Error pushing credit adjustment to DM:', pushErr);
             }
@@ -1172,31 +1199,14 @@ export default {
                 resolvedOrders.push(order);
 
                 if (winnerLineId && winnerSide !== 'draw') {
-                  const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${winnerLineId}`)) || (winnerLineId === order.creatorId ? order.creatorLineUserId : null) || winnerLineId;
-                  const winProfRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
-                  if (winProfRaw) {
-                    const wp = JSON.parse(winProfRaw);
-                    wp.balance = (Number(wp.balance) || 0) + (amt * 2);
-                    await savePlayerProfile(wp, env, ctx);
-                  }
+                  const winnerLineUserId = winnerLineId === order.creatorId ? order.creatorLineUserId : (order.matcherLineUserId || undefined);
+                  await refundPlayerPoints(winnerLineId, winnerLineUserId, amt * 2, env, ctx);
                 } else if (winnerSide === 'draw') {
                   if (order.creatorId) {
-                    const cRawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
-                    const cpRaw = await env.KV_CACHE.get(`USER_${cRawLine}`);
-                    if (cpRaw) {
-                      const cp = JSON.parse(cpRaw);
-                      cp.balance = (Number(cp.balance) || 0) + amt;
-                      await savePlayerProfile(cp, env, ctx);
-                    }
+                    await refundPlayerPoints(order.creatorId, order.creatorLineUserId, amt, env, ctx);
                   }
                   if (order.matcherId) {
-                    const mRawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.matcherId}`)) || order.matcherId;
-                    const mpRaw = await env.KV_CACHE.get(`USER_${mRawLine}`);
-                    if (mpRaw) {
-                      const mp = JSON.parse(mpRaw);
-                      mp.balance = (Number(mp.balance) || 0) + amt;
-                      await savePlayerProfile(mp, env, ctx);
-                    }
+                    await refundPlayerPoints(order.matcherId, order.matcherLineUserId || undefined, amt, env, ctx);
                   }
                 }
           }

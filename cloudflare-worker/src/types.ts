@@ -72,6 +72,7 @@ export interface Order {
   creatorLineUserId?: string;
   matcherId?: string | null;
   matcherName?: string | null;
+  matcherLineUserId?: string | null;
   side: 'low' | 'high'; // 'low' = ล/ถ/ต่ำ, 'high' = ชล/สูง
   amount: number;
   betType: 'range' | 'custom_range' | 'pre_quote';
