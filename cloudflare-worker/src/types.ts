@@ -121,7 +121,7 @@ export interface RocketRound {
   name: string;
   targetMin: number;
   targetMax: number;
-  status: 'ACTIVE' | 'CLOSED';
+  status: 'ACTIVE' | 'CLOSED' | 'RESOLVED' | 'VOID';
   isChotoy: boolean;
   quoteReleased: boolean;
   updatedAt: number;

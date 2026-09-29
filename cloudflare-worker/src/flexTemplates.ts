@@ -81,13 +81,16 @@ export function generateRocketLaunchedFlex(): any {
 
 // ── 1. Order Creation Card (Open for Matching in Group Chat) ──
 export function generateOrderFlex(order: Order): any {
-  const { orderNumber, amount, side, userTypedCmd, isChotoy, rocketName, rangeMin, rangeMax } = order as any;
-  const sideShort = side === 'low' ? 'ล' : 'ถ';
-  let cleanCmd = (userTypedCmd && typeof userTypedCmd === 'string') ? userTypedCmd.trim() : `${sideShort}${amount}`;
-  cleanCmd = cleanCmd.replace(/^\d+[-/]\d+/, '').replace(/pt$/i, '').trim() || `${sideShort}${amount}`;
-
-  const cardTitle = cleanCmd.includes(amount.toString()) ? cleanCmd : `${cleanCmd} ${amount}`;
+  const { orderNumber, amount, side, userTypedCmd, isChotoy, rocketName, rangeMin, rangeMax, creatorName, betType } = order as any;
+  const sideShort = side === 'high' ? 'ล' : 'ถ';
   const numAmount = Number(amount) || 100;
+
+  let cardTitle = `${sideShort}${numAmount}`;
+  if (betType === 'custom_range' && rangeMin !== undefined && rangeMax !== undefined) {
+    cardTitle = `${rangeMin}-${rangeMax} ${sideShort}${numAmount}`;
+  } else if (userTypedCmd && typeof userTypedCmd === 'string') {
+    cardTitle = userTypedCmd.trim();
+  }
 
   const amt20 = Math.max(1, Math.round(numAmount * 0.20));
   const amt40 = Math.max(1, Math.round(numAmount * 0.40));
@@ -96,7 +99,7 @@ export function generateOrderFlex(order: Order): any {
 
   return {
     type: 'flex',
-    altText: `🚀 เปิดดวล #${orderNumber} [${cardTitle}] ${numAmount}pt`,
+    altText: `🚀 เปิดดวล #${orderNumber} [${cardTitle}] ${numAmount.toLocaleString()}pt`,
     contents: {
       type: 'bubble',
       size: 'kilo',
@@ -132,6 +135,14 @@ export function generateOrderFlex(order: Order): any {
             align: 'center',
             wrap: true,
           },
+          ...(creatorName ? [{
+            type: 'text',
+            text: `👤 ผู้เปิด: ${creatorName}`,
+            color: '#64748B',
+            size: 'xxs',
+            align: 'center',
+            wrap: true,
+          }] : []),
           ...(rocketName ? [{
             type: 'text',
             text: `🚀 บั้งไฟ: ${rocketName}`,

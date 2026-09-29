@@ -171,22 +171,19 @@ export default {
               if (!isVerifyProbe) {
                 await processLineEvent(event, env, ctx);
               }
-            } catch (err) {
+            } catch (err: any) {
               console.error('[Worker] Event processing error:', err);
+              try {
+                await env.KV_CACHE.put('LAST_WEBHOOK_ERROR', JSON.stringify({
+                  error: err?.message || String(err),
+                  stack: err?.stack,
+                  event,
+                  time: new Date().toISOString()
+                }));
+              } catch (_) {}
             }
           })
         );
-
-        if (env.LINE_EVENTS_QUEUE) {
-          const queueBatch = events.map((event) => ({
-            body: {
-              id: event.webhookEventId!,
-              receivedAt: Date.now(),
-              event,
-            } as QueueMessage,
-          }));
-          ctx.waitUntil(env.LINE_EVENTS_QUEUE.sendBatch(queueBatch));
-        }
 
         await interactiveProcessing;
       }

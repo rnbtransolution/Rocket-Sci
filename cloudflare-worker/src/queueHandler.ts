@@ -53,19 +53,6 @@ export const RULE_GUIDE_TEXT = `📖 [กติกาการเล่น]
  * Executes all order validation, atomic balance locking, and LINE API calls with sub-second latency.
  */
 export async function processLineEvent(event: LineEvent, env: Env, ctx?: ExecutionContext): Promise<void> {
-  // ── Cross-Path Dedup Guard ──
-  // Every webhook event is processed inline (sub-100ms reply path) AND mirrored
-  // to the Queue for the background consumer. Without this guard both paths
-  // executed the full handler: double replies, double balance writes, double
-  // order records. First executor wins (inline normally); the queue copy acks.
-  if (event.webhookEventId) {
-    const dedupKey = `EVT_${event.webhookEventId}`;
-    try {
-      if (await env.KV_CACHE.get(dedupKey)) return;
-      await env.KV_CACHE.put(dedupKey, '1', { expirationTtl: 120 });
-    } catch (_) { /* fail-open: prefer processing over dropping */ }
-  }
-
   const source = event.source || {};
   const userId = source.userId;
   const groupId = source.groupId || source.roomId || null;
@@ -413,22 +400,11 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       return;
     }
 
-    // ── 4. Order Creation Formulas (e.g. "ล500", "ชล500", "ถ1000", "330-380ล500") ──
-    const betRegex = /^(?:([+-]?\d+)?\s*)?(ชล|ชถ|ชย|ชต|ย|ถ|ล|สูง|ต่ำ|ยั่ง|ถอย|ไล่)\s*(\d+)(?:\s*(?:pt|แต้ม))?$/i;
-    const rangeBetRegex = /^(\d+)[-/](\d+)(ชล|ชถ|ชย|ชต|ย|ถ|ล|สูง|ต่ำ)\s*(\d+)?$/i;
+    // ── 4. Order Creation Formulas (e.g. "ล500", "ล 500", "ชล500", "300-350ล100", "300-350 ล 100") ──
+    const betRegex = /^(?:([+-]?\d+)\s*)?(ชล|ชถ|ชย|ชต|ย|ถ|ล|สูง|ต่ำ|ยั่ง|ถอย|ไล่)\s*(\d+)?(?:\s*(?:pt|แต้ม))?$/i;
+    const rangeBetRegex = /^(\d+)\s*[-/]\s*(\d+)\s*(ชล|ชถ|ชย|ชต|ย|ถ|ล|สูง|ต่ำ)\s*(\d+)?(?:\s*(?:pt|แต้ม))?$/i;
 
     if (betRegex.test(text) || rangeBetRegex.test(text)) {
-      if (!isGroup) {
-        await deliverPrivateNotice(
-          userId,
-          replyToken,
-          null,
-          '⚠️ การเปิดแผลดวลสามารถทำได้เฉพาะในกลุ่ม LINE เท่านั้นครับ 🚀\n(กรุณาส่งคำสั่งเปิดแผลในกลุ่มดวลครับ)',
-          env
-        );
-        return;
-      }
-
       await handleCreateOrder(text, betRegex, rangeBetRegex, profile, userId, groupId, replyToken, env, ctx);
       return;
     }
@@ -534,7 +510,7 @@ async function handleCreateOrder(
   rangeBetRegex: RegExp,
   profile: PlayerProfile,
   userId: string,
-  groupId: string,
+  groupId: string | null,
   replyToken: string | undefined,
   env: Env,
   ctx?: ExecutionContext
@@ -546,11 +522,42 @@ async function handleCreateOrder(
   let isCustom = false;
   let offsetDelta = 0;
 
+  // Resolve target group for broadcasting order cards
+  const activeGroupId = await env.KV_CACHE.get('ACTIVE_GROUP_ID');
+  const targetGroupId = groupId || activeGroupId || null;
+
+  if (!targetGroupId) {
+    await deliverPrivateNotice(
+      userId,
+      replyToken,
+      null,
+      '⚠️ ยังไม่พบกลุ่ม LINE ที่เปิดใช้งาน กรุณาส่งคำสั่งนี้ในกลุ่มดวล LINE ครับ 🚀',
+      env
+    );
+    return;
+  }
+
   // Check if round is closed
   const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
-  const round = roundStr ? (JSON.parse(roundStr) as RocketRound) : null;
-  if (round && round.status === 'CLOSED') {
-    await deliverPrivateNotice(userId, replyToken, groupId, '⛔ ปิดรับออเดอร์แล้ว⛔️\nกรุณารอรอบถัดไปครับ', env);
+  let round = roundStr ? (JSON.parse(roundStr) as RocketRound) : null;
+
+  // Auto-initialize or reactivate round if null, VOID, or RESOLVED (previous round ended)
+  if (!round || round.status === 'VOID' || round.status === 'RESOLVED') {
+    round = {
+      name: round?.name || 'บั้งไฟสด',
+      targetMin: round?.targetMin || 330,
+      targetMax: round?.targetMax || 380,
+      status: 'ACTIVE',
+      isChotoy: false,
+      quoteReleased: false,
+      updatedAt: Date.now(),
+    };
+    await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round));
+  }
+
+  // Only reject order if round is actively CLOSED (in-flight countdown "3-2-go" / locked)
+  if (round.status === 'CLOSED') {
+    await deliverPrivateNotice(userId, replyToken, groupId, '⛔ ปิดรับออเดอร์รอบนี้แล้วครับ (ล็อครอบระหว่างการแข่งขัน) กรุณารอรอบถัดไปครับ 🙏', env, profile.displayName);
     return;
   }
 
@@ -566,9 +573,9 @@ async function handleCreateOrder(
     const match = text.match(betRegex)!;
     const cmd = match[2];
     side = ['ชล', 'ล', 'สูง', 'ไล่'].includes(cmd) ? 'high' : 'low';
-    amount = parseInt(match[3], 10) || 500;
+    amount = match[3] ? parseInt(match[3], 10) : 500;
     if (match && match[1]) {
-      const rawOffset = match[1].replace('+', '');
+      const rawOffset = match[1].replace('+', '').trim();
       offsetDelta = parseInt(rawOffset, 10) || 0;
       if (![5, -5, 10, -10].includes(offsetDelta)) {
         await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)`, env);
@@ -618,7 +625,7 @@ async function handleCreateOrder(
     rangeMin: isPreQuote ? offsetDelta : (isCustom ? rangeMin : ((round?.targetMin || 330) + offsetDelta)),
     rangeMax: isPreQuote ? offsetDelta : (isCustom ? rangeMax : ((round?.targetMax || 380) + offsetDelta)),
     status: 'PRE_CHARGE',
-    groupId,
+    groupId: targetGroupId,
     userTypedCmd: text,
     rocketName: round?.name || null,
     offset: isPreQuote ? offsetDelta : undefined,
@@ -642,19 +649,18 @@ async function handleCreateOrder(
   // 6. Send Order Flex to Group Chat
   const flexCard = generateOrderFlex(newOrder);
   let cardDispatched = false;
-  if (replyToken) {
+  if (groupId && replyToken) {
     cardDispatched = await replyToLine(replyToken, flexCard, env, false);
   }
-  if (!cardDispatched && groupId) {
-    await pushToLine(groupId, flexCard, env);
+  if (!cardDispatched && targetGroupId) {
+    const pushRes = await pushToLine(targetGroupId, flexCard, env);
+    cardDispatched = !!pushRes.success;
   }
 
   // 7. Send Confirmation Message to Player
   const confirmMsg = isPreQuote
-    ? `⏳ Order #${orderNumber} ถูกถืออยู่รอราคาช่างครับ (จำนวน ${amount.toLocaleString()} pt)\nเมื่อแอดมินเปิดราคาช่างอย่างเป็นทางการ ระบบจะจับคู่ดวลให้อัตโนมัติครับ 🚀`
-    : (isCustom
-      ? `✅ Order #${orderNumber} เปิดดวลช่วง ${rangeMin}-${rangeMax}${rangeMin !== rangeMax ? ' วินาที' : ''} สำเร็จแล้วครับ 🚀\n(จำนวน ${amount.toLocaleString()} pt | คงเหลือ: ${profile.balance.toLocaleString()} pt)`
-      : `✅ Order #${orderNumber} เปิดดวลสำเร็จแล้วครับ 🚀\n(จำนวน ${amount.toLocaleString()} pt | คงเหลือ: ${profile.balance.toLocaleString()} pt)`);
+    ? `⏳ Order #${orderNumber} ถูกถืออยู่รอราคาช่างครับ (จำนวน ${amount.toLocaleString()} pt)\nเมื่อแอดมินเปิดราคาช่างอย่างเป็นทางการ ระบบจะเปิดลงกระดานให้อัตโนมัติครับ 🚀`
+    : `✅ Order #${orderNumber} เปิดดวลสำเร็จแล้วครับ 🚀\nรายการ: ${newOrder.userTypedCmd || ''} (${amount.toLocaleString()} pt)\nแต้มคงเหลือ: ${profile.balance.toLocaleString()} pt`;
 
   if (groupId) {
     // If order was created in a group, replyToken was already used for the group order card.
@@ -662,11 +668,13 @@ async function handleCreateOrder(
     if (userId && userId.startsWith('U')) {
       ctx?.waitUntil(pushToLine(userId, confirmMsg, env).catch(e => console.error(e)));
     }
-  } else if (!cardDispatched && replyToken) {
-    // In private DM where card wasn't dispatched by replyToken, send confirmation
-    await deliverPrivateNotice(userId, replyToken, groupId, confirmMsg, env);
-  } else if (userId && userId.startsWith('U')) {
-    ctx?.waitUntil(pushToLine(userId, confirmMsg, env).catch(e => console.error(e)));
+  } else {
+    // In private DM where order was created, reply to user directly
+    if (replyToken) {
+      await replyToLine(replyToken, confirmMsg, env, true);
+    } else if (userId && userId.startsWith('U')) {
+      ctx?.waitUntil(pushToLine(userId, confirmMsg, env).catch(e => console.error(e)));
+    }
   }
 }
 
@@ -1744,23 +1752,33 @@ async function deliverPrivateNotice(
   }
 
   // 2. If interaction originated in a LINE Group:
-  // Attempt private delivery via DM for players who have friended the bot
+  // For balance check or financial cards: push detailed flex card to user's private DM
+  // For all interactions: ALWAYS reply with clear feedback in the group using replyToken so the bot is NEVER SILENT!
+  const isPersonalFinancial = typeof payload === 'object' && (payload.altText?.includes('ยอดคงเหลือ') || payload.altText?.includes('เติมเงิน') || payload.altText?.includes('ถอนเงิน'));
+
   let pushSuccess = false;
   if (targetLineId && targetLineId.startsWith('U')) {
-    // pushToLine for 'U...' will automatically attachMainMenuQuickReply in the private DM
     const res = await pushToLine(targetLineId, payload, env);
     pushSuccess = !!(res && res.success);
   }
 
-  // If DM push failed (e.g. user hasn't added the bot as friend) OR if replyToken is available:
-  // Provide an instant inline response in the group so the bot is never silent.
-  // CRITICAL: This response is delivered in the LINE GROUP, so quickReply MUST be stripped!
-  if (!pushSuccess && replyToken) {
+  if (replyToken) {
+    let summaryText: string;
+    if (isPersonalFinancial) {
+      summaryText = displayName ? `📢 @${displayName}\nส่งข้อมูลยอดคงเหลือให้ทางแชตส่วนตัวแล้วครับ 💬` : 'ส่งข้อมูลให้ทางแชตส่วนตัวแล้วครับ 💬';
+    } else {
+      summaryText = typeof payload === 'string' ? payload : (payload.altText || payload.text || '⚠️ ไม่สามารถทำรายการได้ครับ');
+      if (displayName) {
+        summaryText = `📢 @${displayName}\n${summaryText}`;
+      }
+    }
+    await replyToLine(replyToken, stripQuickReply(summaryText), env, false);
+  } else if (!pushSuccess && groupId) {
     let summaryText = typeof payload === 'string' ? payload : (payload.altText || payload.text || '⚠️ ไม่สามารถทำรายการได้ครับ');
     if (displayName) {
       summaryText = `📢 @${displayName}\n${summaryText}`;
     }
-    await replyToLine(replyToken, stripQuickReply(summaryText), env, false);
+    await pushToLine(groupId, stripQuickReply(summaryText), env);
   }
 }
 
