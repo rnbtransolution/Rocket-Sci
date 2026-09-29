@@ -241,7 +241,7 @@ async function signedWebhook(event: Record<string, unknown>) {
   });
 }
 
-it('routes LINE order, match, and retry flows through the coordinator', async () => {
+it('routes LINE order, match, retry, and stale-cache custom quote flows through the coordinator', async () => {
   const lineCalls: Array<{ path: string; body: string }> = [];
   fetchMock
     .get('https://api.line.me')
@@ -451,6 +451,61 @@ it('routes LINE order, match, and retry flows through the coordinator', async ()
   )).status).toBe(200);
   expect(await client.getOrder(heldOrder!.orderNumber)).toMatchObject({ status: 'cancelled' });
   expect((await client.getAccount(creatorId))?.balanceHundredths).toBe(50_000);
+
+  const quoteTag = crypto.randomUUID();
+  const balanceResponse = await adminRun(
+    'adminSetPlayerBalance',
+    [creatorId, 1_000, 'Creator'],
+    `worker-custom-quote-balance-${quoteTag}`,
+  );
+  expect(balanceResponse.status, JSON.stringify(await balanceResponse.clone().json())).toBe(200);
+
+  const staleProfileRaw = await env.KV_CACHE.get(`USER_${creatorLineId}`);
+  expect(staleProfileRaw).not.toBeNull();
+  const staleProfile = JSON.parse(staleProfileRaw!);
+  expect(staleProfile.balance).toBe(1_000);
+  await env.KV_CACHE.put(`USER_${creatorLineId}`, JSON.stringify({ ...staleProfile, balance: 0 }));
+
+  expect((await adminRun(
+    'adminOpenRound',
+    [`Custom Quote Round ${quoteTag}`],
+    `worker-custom-quote-round-${quoteTag}`,
+  )).status).toBe(200);
+  const customQuoteEvent = {
+    type: 'message',
+    timestamp: Date.now() + 8,
+    webhookEventId: `worker-custom-quote-event-${quoteTag}`,
+    replyToken: `worker-custom-quote-token-${quoteTag}`,
+    source: { type: 'group', groupId, userId: creatorLineId },
+    message: {
+      id: `worker-custom-quote-message-${quoteTag}`,
+      type: 'text',
+      text: '300-350ชล1000',
+    },
+  };
+  expect((await signedWebhook(customQuoteEvent)).status).toBe(200);
+  expect((await signedWebhook(customQuoteEvent)).status).toBe(200);
+
+  const customOrders = (await client.getOrdersByStatus(['pending_match'])).filter((order) =>
+    order.creatorId === creatorId && order.rangeMin === 300 && order.rangeMax === 350
+  );
+  expect(customOrders).toHaveLength(1);
+  expect(customOrders[0]).toMatchObject({
+    creatorId,
+    side: 'high',
+    stakeHundredths: 100_000,
+    betType: 'custom_range',
+    rangeMin: 300,
+    rangeMax: 350,
+  });
+  expect((await client.getAccount(creatorId))?.balanceHundredths).toBe(0);
+
+  const customQuoteFlexReplies = lineCalls.filter((call) =>
+    call.path.endsWith('/message/reply') &&
+    call.body.includes(customOrders[0].orderNumber) &&
+    call.body.includes('"type":"flex"')
+  );
+  expect(customQuoteFlexReplies).toHaveLength(1);
 });
 
 it('cancels a dashboard order through the coordinator and refunds it idempotently', async () => {
