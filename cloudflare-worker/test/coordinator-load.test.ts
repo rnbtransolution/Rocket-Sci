@@ -4,7 +4,7 @@ import { createCoordinatorClient } from '../src/financial/client';
 
 const TARGET_OPS_PER_SECOND = 20;
 const OPERATION_COUNT = 100;
-const BATCH_SIZE = TARGET_OPS_PER_SECOND;
+const OPERATION_INTERVAL_MS = 1_000 / TARGET_OPS_PER_SECOND;
 
 beforeAll(() => {
   fetchMock.activate();
@@ -60,29 +60,26 @@ it('sustains 20 finance operations per second without lost or duplicate ledger e
   });
 
   const durations: number[] = [];
-  const startedAt = performance.now();
-  for (let batchStart = 0; batchStart < OPERATION_COUNT; batchStart += BATCH_SIZE) {
-    const batch = Array.from({ length: BATCH_SIZE }, (_, offset) => {
-      const index = batchStart + offset;
-      const playerId = `load-player-${index}`;
-      return (async () => {
-        const operationStartedAt = performance.now();
-        await client.createPlayer({
-          idempotencyKey: `${playerId}-opening`,
-          playerId,
-          lineUserId: `${playerId}-line`,
-          displayName: `Load Player ${index}`,
-          openingBalanceHundredths: 100,
-        });
-        durations.push(performance.now() - operationStartedAt);
-      })();
+  const operationStartTimes: number[] = [];
+  const workloadStartedAt = performance.now();
+  await Promise.all(Array.from({ length: OPERATION_COUNT }, (_, index) => (async () => {
+    const targetStart = workloadStartedAt + index * OPERATION_INTERVAL_MS;
+    const delay = targetStart - performance.now();
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    const operationStartedAt = performance.now();
+    operationStartTimes[index] = operationStartedAt;
+    const playerId = `load-player-${index}`;
+    await client.createPlayer({
+      idempotencyKey: `${playerId}-opening`,
+      playerId,
+      lineUserId: `${playerId}-line`,
+      displayName: `Load Player ${index}`,
+      openingBalanceHundredths: 100,
     });
-    await Promise.all(batch);
-    if (batchStart + BATCH_SIZE < OPERATION_COUNT) {
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
-    }
-  }
-  const elapsedMs = performance.now() - startedAt;
+    durations.push(performance.now() - operationStartedAt);
+  })()));
+  const elapsedMs = operationStartTimes[OPERATION_COUNT - 1] - operationStartTimes[0];
+  const measuredOpsPerSecond = (OPERATION_COUNT - 1) / (elapsedMs / 1_000);
   const sortedDurations = [...durations].sort((a, b) => a - b);
   const p95Ms = sortedDurations[Math.ceil(sortedDurations.length * 0.95) - 1];
   const snapshotAfter = await client.getSnapshot();
@@ -102,7 +99,7 @@ it('sustains 20 finance operations per second without lost or duplicate ledger e
 
   console.log(JSON.stringify({
     targetOpsPerSecond: TARGET_OPS_PER_SECOND,
-    measuredOpsPerSecond: OPERATION_COUNT / (elapsedMs / 1_000),
+    measuredOpsPerSecond,
     p95Ms,
     accountCount: playerAccounts.length,
     ledgerEntryCount: ledgerEntries.length,
@@ -111,10 +108,31 @@ it('sustains 20 finance operations per second without lost or duplicate ledger e
     totalLedgerDelta,
   }));
 
+  expect(measuredOpsPerSecond).toBeGreaterThanOrEqual(TARGET_OPS_PER_SECOND * 0.9);
+  expect(measuredOpsPerSecond).toBeLessThanOrEqual(TARGET_OPS_PER_SECOND * 1.1);
   expect(p95Ms).toBeLessThan(1_000);
   expect(playerAccounts).toHaveLength(OPERATION_COUNT);
   expect(ledgerEntries).toHaveLength(OPERATION_COUNT);
   expect(uniqueEntryIds).toHaveLength(OPERATION_COUNT);
   expect(totalAccountBalance).toBe(OPERATION_COUNT * 100);
   expect(totalLedgerDelta).toBe(totalAccountBalance);
-});
+
+  for (let index = 0; index < OPERATION_COUNT; index += 1) {
+    const playerId = `load-player-${index}`;
+    const matchingAccounts = playerAccounts.filter((account) => account.playerId === playerId);
+    expect(matchingAccounts).toHaveLength(1);
+    expect(matchingAccounts[0]).toMatchObject({
+      playerId,
+      balanceHundredths: 100,
+    });
+    const accountEntries = ledgerEntries.filter((entry) => entry.accountId === playerId);
+    expect(accountEntries).toHaveLength(1);
+    expect(accountEntries[0]).toMatchObject({
+      accountId: playerId,
+      deltaHundredths: 100,
+      balanceAfterHundredths: 100,
+      eventType: 'opening_balance',
+      referenceId: playerId,
+    });
+  }
+}, 15_000);

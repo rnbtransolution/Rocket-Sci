@@ -48,6 +48,30 @@ import {
 
 const INITIAL_PLAYERS = [];
 const formatPoints = (value) => Number(value || 0).toFixed(2);
+const validateSettlementResponse = (data) => {
+  if (!data || !Array.isArray(data.resolvedOrders)) {
+    throw new Error('Coordinator settlement response is invalid: missing committed orders');
+  }
+  if (!data.dashboard ||
+      !Array.isArray(data.dashboard.players) ||
+      !Array.isArray(data.dashboard.transactions) ||
+      !Array.isArray(data.dashboard.bets)) {
+    throw new Error('Coordinator settlement response is invalid: missing committed dashboard snapshot');
+  }
+  if (!Number.isFinite(data.finalTime)) {
+    throw new Error('Coordinator settlement response is invalid: missing committed final time');
+  }
+  for (const order of data.resolvedOrders) {
+    if (!order ||
+        typeof order.orderNumber !== 'string' ||
+        !Number.isFinite(order.amount) ||
+        !Number.isFinite(order.winnerCredit) ||
+        !Number.isFinite(order.houseFee)) {
+      throw new Error('Coordinator settlement response is invalid: committed payout fields are malformed');
+    }
+  }
+  return data;
+};
 
 // Presets for the Slip Upload Simulator
 const SLIP_PRESETS = [
@@ -1690,16 +1714,16 @@ export default function App() {
 
     try {
       const data = await runBackendFunction('adminResolveBets', [finalTime, tMin, tMax]);
-      if (!data || !Array.isArray(data.resolvedOrders)) {
-        throw new Error('Coordinator settlement response is missing committed orders');
-      }
-      setBets(data.resolvedOrders);
+      const committed = validateSettlementResponse(data);
+      setPlayers(committed.dashboard.players);
+      setTransactions(committed.dashboard.transactions);
+      setBets(committed.dashboard.bets);
       setSettlementResult({
         rocketName: name,
-        finalTime: data.finalTime ?? finalTime,
-        targetMin: data.round?.targetMin ?? tMin,
-        targetMax: data.round?.targetMax ?? tMax,
-        payouts: data.resolvedOrders.map((order) => ({
+        finalTime: committed.finalTime,
+        targetMin: committed.round?.targetMin ?? tMin,
+        targetMax: committed.round?.targetMax ?? tMax,
+        payouts: committed.resolvedOrders.map((order) => ({
           ...order,
           payout: order.winnerCredit,
         })),
@@ -1708,6 +1732,7 @@ export default function App() {
     } catch (e) {
       console.error('Settlement backend error:', e);
       setRocketStatus('idle');
+      setSettlementResult(null);
       addToast('❌ ยังไม่ได้รับผลชำระเงินที่ยืนยันจาก coordinator กรุณาลองใหม่อีกครั้ง', 'danger');
     }
   };

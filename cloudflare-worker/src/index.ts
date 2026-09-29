@@ -1167,11 +1167,31 @@ export default {
           activeRound.finalTime = finalSeconds;
           activeRound.updatedAt = Date.now();
           await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(activeRound));
+          const committedSnapshot = await coordinator.getSnapshot();
+          const committedDashboardOrders = await mapCoordinatorOrders(committedSnapshot.orders, env);
+          const resolvedByOrderNumber = new Map(
+            resolvedOrders.map((order) => [order.orderNumber, order]),
+          );
+          const dashboardBets = committedDashboardOrders.map((order) => ({
+            ...order,
+            ...(resolvedByOrderNumber.get(order.orderNumber) || {}),
+          }));
+          const dashboard = {
+            players: await getPlayersList(env),
+            transactions: await getTransactionsList(env),
+            bets: dashboardBets,
+          };
           const tMin = Number(activeRound.targetMin) || 330;
           const tMax = Number(activeRound.targetMax) || 380;
           const targets = await resolveTargetGroupIds('ALL', env);
           if (targets.length > 0) {
             const formatPoints = (points: number): string => points.toFixed(2);
+            const payoutSummary = resolvedOrders.length === 0
+              ? 'ไม่มีรายการชำระผลในรอบนี้'
+              : resolvedOrders
+                .slice(0, 20)
+                .map((order) => formatSettlementPayoutText(order))
+                .join('\n');
             const settleFlex = {
               type: 'flex',
               altText: `🏁 สรุปผลเวลาบิน [${activeRound.name || 'บั้งไฟสด'}] เวลา ${finalSeconds} วินาที`,
@@ -1196,7 +1216,7 @@ export default {
                   contents: [
                     { type: 'text', text: `ช่วงราคาเป้าหมาย: ${tMin}-${tMax} วิ`, size: 'xs', color: '#64748B', align: 'center' },
                     { type: 'text', text: `ชำระผลตัดสินเรียบร้อย ${resolvedOrders.length} แผลดวล 🚀`, size: 'sm', color: '#059669', weight: 'bold', align: 'center' },
-                    { type: 'text', text: 'กติกาจ่าย: คืนเงินเดิมพันตัวเอง 100 + 90% จากคู่แข่ง 90 = รับรวม 190 แต้ม; บ้านรับ 10 แต้มจากผู้แพ้', size: 'xs', color: '#334155', align: 'center', wrap: true },
+                    { type: 'text', text: payoutSummary, size: 'xs', color: '#334155', align: 'center', wrap: true },
                     { type: 'text', text: 'ถ้าเสมอ: คืนเงินเดิมพันของทั้งสองฝ่ายเต็มจำนวน ไม่มีค่าธรรมเนียม', size: 'xs', color: '#334155', align: 'center', wrap: true },
                   ],
                 },
@@ -1263,6 +1283,8 @@ export default {
             finalTime: finalSeconds,
             round: settlement.round,
             resolvedOrders,
+            dashboard,
+            coordinatorSnapshot: committedSnapshot,
           };
         } else if (functionName === 'simulateTextMessageFromDashboard') {
           const text = args[0];

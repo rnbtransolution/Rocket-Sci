@@ -336,6 +336,11 @@ it('routes LINE order, match, and retry flows through the coordinator', async ()
       expect(await response.json()).toMatchObject({
         data: {
           resolvedCount: 1,
+          dashboard: {
+            players: expect.any(Array),
+            transactions: expect.any(Array),
+            bets: expect.any(Array),
+          },
           resolvedOrders: [{
             orderNumber,
             winnerSide: 'high',
@@ -351,8 +356,8 @@ it('routes LINE order, match, and retry flows through the coordinator', async ()
   expect(await client.getOrder(orderNumber)).toMatchObject({ status: 'settled', winnerSide: 'high' });
   expect(lineCalls.some((call) =>
     call.path.endsWith('/message/push') &&
-    call.body.includes('คืนเงินเดิมพันตัวเอง 100 + 90% จากคู่แข่ง 90 = รับรวม 190 แต้ม') &&
-    call.body.includes('บ้านรับ 10 แต้มจากผู้แพ้')
+    call.body.includes('คืนเงินเดิมพันตัวเอง 100.00 + 90% จากคู่แข่ง 90.00 = รับรวม 190.00 แต้ม') &&
+    call.body.includes('บ้านรับ 10.00 แต้มจากผู้แพ้')
   )).toBe(true);
 
   const privateBalanceEvent = {
