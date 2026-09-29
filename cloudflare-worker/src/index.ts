@@ -343,6 +343,13 @@ export default {
               headers: { 'Content-Type': 'application/json', ...corsHeaders },
             });
           }
+        } else if (functionName === 'previewImport') {
+          result = await createCoordinatorClient(env).previewImport(args[0]);
+        } else if (functionName === 'importSnapshot') {
+          result = await createCoordinatorClient(env).importSnapshot(args[0]);
+        } else if (functionName === 'activateAuthority') {
+          await createCoordinatorClient(env).activateAuthority(args[0]);
+          result = { activated: true };
         } else if (functionName === 'adminApproveTransaction') {
           const txId = String(args[0] || '');
           const coordinator = createCoordinatorClient(env);

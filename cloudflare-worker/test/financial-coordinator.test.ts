@@ -4,9 +4,40 @@ import { createCoordinatorClient } from '../src/financial/client';
 import { calculateWinPayout } from '../src/financial/payout';
 import { validateStakeHundredths, wholePointsToHundredths } from '../src/financial/types';
 
-beforeAll(() => {
+beforeAll(async () => {
   fetchMock.activate();
   fetchMock.disableNetConnect();
+  const client = createCoordinatorClient(env);
+  const snapshot = {
+    snapshotId: 'baseline-financial-authority',
+    schemaVersion: 'financial-ledger-v1' as const,
+    accounts: [],
+    transactions: [],
+    rounds: [],
+    orders: [],
+    reconciliation: {
+      accountCount: 0,
+      transactionCount: 0,
+      roundCount: 0,
+      orderCount: 0,
+      totalBalanceHundredths: 0,
+    },
+  };
+  await client.importSnapshot({
+    idempotencyKey: 'baseline-financial-authority-import',
+    snapshot,
+    provenance: 'local-test-fixture',
+  });
+  await client.activateAuthority({
+    idempotencyKey: 'baseline-financial-authority-activation',
+    operatorId: 'local-test',
+    snapshotId: snapshot.snapshotId,
+    accountCount: 0,
+    transactionCount: 0,
+    roundCount: 0,
+    orderCount: 0,
+    confirmation: 'ACTIVATE_FINANCIAL_AUTHORITY',
+  });
 });
 
 it('validates positive whole-point stakes and converts them safely to hundredths', () => {

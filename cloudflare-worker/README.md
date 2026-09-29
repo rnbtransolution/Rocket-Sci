@@ -172,10 +172,49 @@ those actions separately:
 2. Rotate admin, LINE, and slip-provider credentials through their owning
    consoles and update only the corresponding runtime secret stores. Do not
    reuse the projection key.
-3. Before any ledger import or authority activation, run the separately
-   approved dry-run and reconciliation procedure, resolve discrepancies, and
-   record operator approval. Import/activation is not performed by these local
-   tests or by this change.
+3. Before any ledger import or authority activation, pause financial writes and
+   reconcile the source export against the coordinator schema. The coordinator
+   remains fail-closed (`AUTHORITY_NOT_READY`) until an operator explicitly
+   activates a verified import.
+
+#### Local migration procedure
+
+The migration tool is local-first and defaults to a side-effect-free dry run.
+It never chooses a Worker URL implicitly:
+
+```bash
+cd cloudflare-worker
+node scripts/financial-migration.mjs ./path/to/snapshot.json --dry-run
+# `--dry-run` may be omitted; it is the default.
+```
+
+The snapshot must declare `schemaVersion: "financial-ledger-v1"`, a unique
+`snapshotId`, complete `accounts`, `transactions`, `rounds`, and `orders`
+arrays, and matching `reconciliation` counts and hundredths total. Decimal
+source balances are accepted only when exactly representable in hundredths;
+values with unsafe precision are reported as conflicts and are never
+truncated. The preview checks duplicate IDs, references, statuses, balances,
+and totals without changing SQLite rows.
+
+After the source reconciliation and dry-run report have been reviewed, an
+authorized operator may apply the snapshot only with all three explicit
+inputs:
+
+```bash
+export ROCKET_ADMIN_SESSION='<short-lived signed admin session>'
+node scripts/financial-migration.mjs ./path/to/snapshot.json \
+  --apply --url 'https://<explicit-worker-host>'
+```
+
+`--apply` first calls the authenticated Worker `/api/run` preview, then
+performs an idempotent import and requires explicit activation confirmation.
+Repeated imports of the same snapshot are safe and opening ledger entries
+retain the source provenance. Verify the reported account/order/transaction/
+round totals and that no conflicts remain before activation. Only after that
+verification should the operator activate authority and route traffic to the
+Worker. Never put session tokens or snapshot data in source control, and do
+not substitute a production URL, KV namespace, Durable Object, Sheets
+endpoint, or GAS endpoint for the local dry run.
 
 ---
 

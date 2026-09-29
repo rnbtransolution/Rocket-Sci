@@ -183,6 +183,8 @@ export type LedgerOrderStatus = LedgerOrder['status'];
 export interface DashboardSnapshot {
   readonly accounts: LedgerAccount[];
   readonly transactions: FinancialTransaction[];
+  readonly rounds: RocketRound[];
+  readonly orders: LedgerOrder[];
   readonly totalBalanceHundredths: PointHundredths;
 }
 
@@ -336,20 +338,38 @@ export interface RoundSettlementResult {
   readonly orders: SettledOrderResult[];
 }
 
+export interface FinancialSnapshotAccount extends Omit<LedgerAccount, 'balanceHundredths'> {
+  readonly balanceHundredths?: PointHundredths;
+  readonly balance?: number | string;
+}
+
+export interface SnapshotReconciliation {
+  readonly accountCount: number;
+  readonly transactionCount: number;
+  readonly roundCount: number;
+  readonly orderCount: number;
+  readonly totalBalanceHundredths: PointHundredths;
+}
+
 export interface FinancialSnapshot {
-  readonly accounts: LedgerAccount[];
+  readonly snapshotId: string;
+  readonly schemaVersion: 'financial-ledger-v1';
+  readonly accounts: FinancialSnapshotAccount[];
   readonly transactions: FinancialTransaction[];
   readonly rounds: RocketRound[];
   readonly orders: LedgerOrder[];
+  readonly reconciliation: SnapshotReconciliation;
 }
 
 export interface ImportPreview {
   readonly canImport: boolean;
   readonly conflicts: string[];
+  readonly snapshotId: string | null;
   readonly accountCount: number;
   readonly transactionCount: number;
   readonly roundCount: number;
   readonly orderCount: number;
+  readonly totalBalanceHundredths: PointHundredths;
 }
 
 export interface ImportFinancialSnapshotInput {
@@ -368,6 +388,11 @@ export interface ImportResult {
 export interface ActivateAuthorityInput {
   idempotencyKey: string;
   operatorId: string;
+  snapshotId: string;
+  accountCount: number;
+  transactionCount: number;
+  roundCount: number;
+  orderCount: number;
   confirmation: string;
 }
 

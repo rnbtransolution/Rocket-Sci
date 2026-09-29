@@ -14,9 +14,9 @@ interface CoordinatorResponse<T> {
   };
 }
 
-export function createCoordinatorClient(env: Env): CoordinatorClient {
+export function createCoordinatorClient(env: Env, coordinatorName = 'financial-coordinator'): CoordinatorClient {
   const stub = env.FINANCIAL_COORDINATOR.get(
-    env.FINANCIAL_COORDINATOR.idFromName('financial-coordinator'),
+    env.FINANCIAL_COORDINATOR.idFromName(coordinatorName),
   );
 
   async function send<T>(operation: string, input?: unknown): Promise<T> {

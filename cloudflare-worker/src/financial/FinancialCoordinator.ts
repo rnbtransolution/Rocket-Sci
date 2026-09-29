@@ -16,6 +16,13 @@ import {
   type DashboardSnapshot,
   type DeactivatePlayerInput,
   type FinancialTransaction,
+  type FinancialSnapshot,
+  type FinancialSnapshotAccount,
+  type ImportFinancialSnapshotInput,
+  type ImportPreview,
+  type ImportResult,
+  type ActivateAuthorityInput,
+  type SnapshotReconciliation,
   type LedgerAccount,
   type LedgerEntry,
   type LedgerEventType,
@@ -38,6 +45,25 @@ import {
 } from './types';
 
 const HOUSE_ACCOUNT_ID = '__house__';
+const IMPORT_SCHEMA_VERSION = 'financial-ledger-v1';
+const AUTHORITY_CONFIRMATION = 'ACTIVATE_FINANCIAL_AUTHORITY';
+const FINANCIAL_MUTATIONS = new Set([
+  'createPlayer',
+  'adjustBalance',
+  'deactivatePlayer',
+  'requestWithdrawal',
+  'requestDeposit',
+  'reviewTransaction',
+  'openRound',
+  'createOrder',
+  'matchOrder',
+  'autoMatchOrders',
+  'cancelOrder',
+  'releaseQuote',
+  'closeRound',
+  'voidRound',
+  'resolveRound',
+]);
 
 interface RpcRequest {
   operation?: string;
@@ -129,6 +155,46 @@ interface ProjectionOutboxRow {
   next_attempt_at: number;
 }
 
+interface AuthorityRow {
+  [key: string]: string | number | null;
+  authority_id: string;
+  active: number;
+  schema_version: string;
+  snapshot_id: string | null;
+  account_count: number;
+  transaction_count: number;
+  round_count: number;
+  order_count: number;
+  unresolved_conflicts: number;
+  updated_at: number;
+}
+
+interface ImportRow {
+  [key: string]: string | number | null;
+  snapshot_id: string;
+  schema_version: string;
+  provenance: string;
+  request_fingerprint: string;
+  result_json: string;
+  account_count: number;
+  transaction_count: number;
+  round_count: number;
+  order_count: number;
+  total_balance_hundredths: number;
+  unresolved_conflicts: number;
+  imported_at: number;
+}
+
+interface NormalizedImport {
+  snapshotId: string;
+  schemaVersion: 'financial-ledger-v1';
+  accounts: Array<LedgerAccount & { balanceHundredths: number }>;
+  transactions: FinancialTransaction[];
+  rounds: RocketRound[];
+  orders: LedgerOrder[];
+  reconciliation: SnapshotReconciliation;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new CoordinatorError('INVALID_INPUT', 'Command input must be an object');
@@ -146,6 +212,27 @@ function stableJson(value: unknown): string {
       .join(',')}}`;
   }
   return JSON.stringify(value);
+}
+
+function exactHundredths(value: unknown): number | null {
+  if (typeof value === 'number' && !Number.isFinite(value)) return null;
+  const text = typeof value === 'number' ? String(value) : value;
+  if (typeof text !== 'string' || !/^-?\d+(?:\.\d+)?$/.test(text)) return null;
+  const negative = text.startsWith('-');
+  const unsigned = negative ? text.slice(1) : text;
+  const [whole, fraction = ''] = unsigned.split('.');
+  if (fraction.length > 2) return null;
+  const cents = Number(`${whole}${fraction.padEnd(2, '0')}`);
+  if (!Number.isSafeInteger(cents)) return null;
+  return negative ? -cents : cents;
+}
+
+function sourceBalanceHundredths(account: FinancialSnapshotAccount): number | null {
+  if (account.balanceHundredths !== undefined && account.balance !== undefined) return null;
+  if (account.balanceHundredths !== undefined) {
+    return Number.isSafeInteger(account.balanceHundredths) ? account.balanceHundredths : null;
+  }
+  return exactHundredths(account.balance);
 }
 
 function mapAccount(row: AccountRow): LedgerAccount {
@@ -238,6 +325,7 @@ export class FinancialCoordinator {
   }
 
   private dispatch(operation: string, rawInput: unknown): unknown {
+    if (FINANCIAL_MUTATIONS.has(operation)) this.ensureAuthorityReady();
     switch (operation) {
       case 'getAccount': {
         const input = asRecord(rawInput);
@@ -269,6 +357,12 @@ export class FinancialCoordinator {
       }
       case 'getSnapshot':
         return this.getSnapshot();
+      case 'previewImport':
+        return this.previewImport(rawInput as FinancialSnapshot);
+      case 'importSnapshot':
+        return this.importSnapshot(asRecord(rawInput) as unknown as ImportFinancialSnapshotInput);
+      case 'activateAuthority':
+        return this.activateAuthority(asRecord(rawInput) as unknown as ActivateAuthorityInput);
       case 'getOrder': {
         const input = asRecord(rawInput);
         const row = this.orderRow(validateIdentifier(input.orderNumber, 'orderNumber'));
@@ -459,6 +553,36 @@ export class FinancialCoordinator {
         next_attempt_at INTEGER NOT NULL DEFAULT 0
       )
     `);
+    sql.exec(`
+      CREATE TABLE IF NOT EXISTS authority_state (
+        authority_id TEXT PRIMARY KEY,
+        active INTEGER NOT NULL CHECK (active IN (0, 1)),
+        schema_version TEXT NOT NULL,
+        snapshot_id TEXT,
+        account_count INTEGER NOT NULL DEFAULT 0,
+        transaction_count INTEGER NOT NULL DEFAULT 0,
+        round_count INTEGER NOT NULL DEFAULT 0,
+        order_count INTEGER NOT NULL DEFAULT 0,
+        unresolved_conflicts INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      )
+    `);
+    sql.exec(`
+      CREATE TABLE IF NOT EXISTS imported_snapshots (
+        snapshot_id TEXT PRIMARY KEY,
+        schema_version TEXT NOT NULL,
+        provenance TEXT NOT NULL,
+        request_fingerprint TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        account_count INTEGER NOT NULL,
+        transaction_count INTEGER NOT NULL,
+        round_count INTEGER NOT NULL,
+        order_count INTEGER NOT NULL,
+        total_balance_hundredths INTEGER NOT NULL,
+        unresolved_conflicts INTEGER NOT NULL DEFAULT 0,
+        imported_at INTEGER NOT NULL
+      )
+    `);
     const projectionColumns = sql
       .exec<{ name: string }>('PRAGMA table_info(projection_outbox)')
       .toArray()
@@ -489,6 +613,13 @@ export class FinancialCoordinator {
        VALUES (?, NULL, 'House Commission', 0, 1, 'house', ?, ?)`,
       HOUSE_ACCOUNT_ID,
       now,
+      now,
+    );
+    sql.exec(
+      `INSERT OR IGNORE INTO authority_state
+        (authority_id, active, schema_version, snapshot_id, updated_at)
+       VALUES ('financial', 0, ?, NULL, ?)`,
+      IMPORT_SCHEMA_VERSION,
       now,
     );
   }
@@ -541,6 +672,14 @@ export class FinancialCoordinator {
       .exec<TransactionRow>('SELECT * FROM transactions ORDER BY created_at, transaction_id')
       .toArray()
       .map(mapTransaction);
+    const rounds = this.state.storage.sql
+      .exec<RoundRow>('SELECT * FROM rounds ORDER BY created_at, round_id')
+      .toArray()
+      .map((row) => this.mapRound(row));
+    const orders = this.state.storage.sql
+      .exec<OrderRow>('SELECT * FROM orders ORDER BY created_at, order_number')
+      .toArray()
+      .map((row) => this.mapOrder(row));
     const totalBalanceHundredths = accounts.reduce(
       (total, account) => total + account.balanceHundredths,
       0,
@@ -548,7 +687,485 @@ export class FinancialCoordinator {
     if (!Number.isSafeInteger(totalBalanceHundredths)) {
       throw new CoordinatorError('INTERNAL', 'Account total exceeds the supported range');
     }
-    return { accounts, transactions, totalBalanceHundredths };
+    return { accounts, transactions, rounds, orders, totalBalanceHundredths };
+  }
+
+  private validateImportSnapshot(raw: unknown): {
+    normalized: NormalizedImport | null;
+    conflicts: string[];
+  } {
+    const conflicts: string[] = [];
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+      return { normalized: null, conflicts: ['snapshot must be an object'] };
+    }
+    const input = raw as Record<string, unknown>;
+    const snapshotId = typeof input.snapshotId === 'string' ? input.snapshotId : '';
+    if (!snapshotId.trim() || snapshotId.trim() !== snapshotId) {
+      conflicts.push('snapshot ID is invalid');
+    }
+    if (input.schemaVersion !== IMPORT_SCHEMA_VERSION) {
+      conflicts.push(`schema version must be ${IMPORT_SCHEMA_VERSION}`);
+    }
+
+    const accountInputs = Array.isArray(input.accounts) ? input.accounts : [];
+    const transactionInputs = Array.isArray(input.transactions) ? input.transactions : [];
+    const roundInputs = Array.isArray(input.rounds) ? input.rounds : [];
+    const orderInputs = Array.isArray(input.orders) ? input.orders : [];
+    if (!Array.isArray(input.accounts)) conflicts.push('accounts must be an array');
+    if (!Array.isArray(input.transactions)) conflicts.push('transactions must be an array');
+    if (!Array.isArray(input.rounds)) conflicts.push('rounds must be an array');
+    if (!Array.isArray(input.orders)) conflicts.push('orders must be an array');
+
+    const accounts: Array<LedgerAccount & { balanceHundredths: number }> = [];
+    const accountIds = new Set<string>();
+    const lineUserIds = new Set<string>();
+    let totalBalanceHundredths = 0;
+    for (const rawAccount of accountInputs) {
+      if (rawAccount === null || typeof rawAccount !== 'object' || Array.isArray(rawAccount)) {
+        conflicts.push('account record is invalid');
+        continue;
+      }
+      const source = rawAccount as FinancialSnapshotAccount;
+      const playerId = typeof source.playerId === 'string' ? source.playerId : '';
+      if (!playerId || accountIds.has(playerId)) {
+        conflicts.push(`duplicate account ID ${playerId || '<missing>'}`);
+      }
+      accountIds.add(playerId);
+      const lineUserId = source.lineUserId;
+      if (lineUserId && lineUserIds.has(lineUserId)) {
+        conflicts.push(`duplicate line user ID ${lineUserId}`);
+      }
+      if (lineUserId) lineUserIds.add(lineUserId);
+      const balanceHundredths = sourceBalanceHundredths(source);
+      if (balanceHundredths === null) {
+        conflicts.push(
+          `account ${playerId || '<missing>'} balance is not exactly representable in hundredths`,
+        );
+        continue;
+      }
+      if (balanceHundredths < 0) {
+        conflicts.push(`account ${playerId || '<missing>'} has a negative or unsafe balance`);
+      }
+      if (!Number.isSafeInteger(balanceHundredths)) {
+        conflicts.push(`account ${playerId || '<missing>'} has a negative or unsafe balance`);
+      }
+      totalBalanceHundredths += balanceHundredths;
+      if (!Number.isSafeInteger(totalBalanceHundredths)) {
+        conflicts.push('total balance exceeds the supported range');
+      }
+      if (typeof source.active !== 'boolean' || !['player', 'house'].includes(source.kind)) {
+        conflicts.push(`account ${playerId || '<missing>'} has invalid account metadata`);
+      }
+      if (typeof source.displayName !== 'string' || !source.displayName.trim()) {
+        conflicts.push(`account ${playerId || '<missing>'} has an invalid display name`);
+      }
+      accounts.push({
+        playerId,
+        lineUserId: lineUserId ?? null,
+        displayName: typeof source.displayName === 'string' ? source.displayName : '',
+        balanceHundredths,
+        active: source.active === true,
+        kind: source.kind === 'house' ? 'house' : 'player',
+        createdAt: typeof source.createdAt === 'number' ? source.createdAt : 0,
+        updatedAt: typeof source.updatedAt === 'number' ? source.updatedAt : 0,
+      });
+    }
+
+    const transactions: FinancialTransaction[] = [];
+    const transactionIds = new Set<string>();
+    for (const rawTransaction of transactionInputs) {
+      if (rawTransaction === null || typeof rawTransaction !== 'object' || Array.isArray(rawTransaction)) {
+        conflicts.push('transaction record is invalid');
+        continue;
+      }
+      const transaction = rawTransaction as FinancialTransaction;
+      if (!transaction.transactionId || transactionIds.has(transaction.transactionId)) {
+        conflicts.push(`duplicate transaction ID ${transaction.transactionId || '<missing>'}`);
+      }
+      transactionIds.add(transaction.transactionId);
+      if (!accountIds.has(transaction.playerId)) {
+        conflicts.push(`transaction ${transaction.transactionId || '<missing>'} has missing account reference`);
+      }
+      if (!['deposit', 'withdrawal'].includes(transaction.type)) {
+        conflicts.push(`transaction ${transaction.transactionId || '<missing>'} has unrecognized type`);
+      }
+      if (!['pending', 'approved', 'rejected'].includes(transaction.status)) {
+        conflicts.push(`transaction ${transaction.transactionId || '<missing>'} has unrecognized status`);
+      }
+      if (
+        !Number.isSafeInteger(transaction.requestedAmountHundredths) ||
+        transaction.requestedAmountHundredths <= 0 ||
+        (transaction.actualAmountHundredths !== null &&
+          (!Number.isSafeInteger(transaction.actualAmountHundredths) ||
+            transaction.actualAmountHundredths < 0))
+      ) {
+        conflicts.push(`transaction ${transaction.transactionId || '<missing>'} has an unsafe amount`);
+      }
+      transactions.push(transaction);
+    }
+
+    const rounds: RocketRound[] = [];
+    const roundIds = new Set<string>();
+    for (const rawRound of roundInputs) {
+      if (rawRound === null || typeof rawRound !== 'object' || Array.isArray(rawRound)) {
+        conflicts.push('round record is invalid');
+        continue;
+      }
+      const round = rawRound as RocketRound;
+      if (!round.roundId || roundIds.has(round.roundId)) {
+        conflicts.push(`duplicate round ID ${round.roundId || '<missing>'}`);
+      }
+      roundIds.add(round.roundId);
+      if (!['active', 'closed', 'void'].includes(round.status)) {
+        conflicts.push(`round ${round.roundId || '<missing>'} has unrecognized status`);
+      }
+      if (typeof round.quoteReleased !== 'boolean') {
+        conflicts.push(`round ${round.roundId || '<missing>'} has invalid quote state`);
+      }
+      rounds.push(round);
+    }
+
+    const orders: LedgerOrder[] = [];
+    const orderIds = new Set<string>();
+    const validOrderStatuses = [
+      'pending_hold',
+      'pending_match',
+      'matched',
+      'cancelled',
+      'resolved',
+      'settled',
+      'void',
+    ];
+    for (const rawOrder of orderInputs) {
+      if (rawOrder === null || typeof rawOrder !== 'object' || Array.isArray(rawOrder)) {
+        conflicts.push('order record is invalid');
+        continue;
+      }
+      const order = rawOrder as LedgerOrder;
+      if (!order.orderNumber || orderIds.has(order.orderNumber)) {
+        conflicts.push(`duplicate order ID ${order.orderNumber || '<missing>'}`);
+      }
+      orderIds.add(order.orderNumber);
+      if (!validOrderStatuses.includes(order.status)) {
+        conflicts.push(`order ${order.orderNumber || '<missing>'} has unrecognized order status`);
+      }
+      if (!roundIds.has(order.roundId) || !accountIds.has(order.creatorId) ||
+          (order.matcherId !== null && !accountIds.has(order.matcherId))) {
+        conflicts.push(`order ${order.orderNumber || '<missing>'} has missing account reference`);
+      }
+      if (!Number.isSafeInteger(order.stakeHundredths) || order.stakeHundredths <= 0) {
+        conflicts.push(`order ${order.orderNumber || '<missing>'} has an unsafe stake`);
+      }
+      orders.push(order);
+    }
+
+    const reconciliation = input.reconciliation;
+    if (reconciliation === null || typeof reconciliation !== 'object' || Array.isArray(reconciliation)) {
+      conflicts.push('reconciliation is required');
+    }
+    const expected = (reconciliation ?? {}) as Partial<SnapshotReconciliation>;
+    const expectedCounts = {
+      accountCount: expected.accountCount,
+      transactionCount: expected.transactionCount,
+      roundCount: expected.roundCount,
+      orderCount: expected.orderCount,
+    };
+    const actualCounts = {
+      accountCount: accounts.length,
+      transactionCount: transactions.length,
+      roundCount: rounds.length,
+      orderCount: orders.length,
+    };
+    for (const [name, actual] of Object.entries(actualCounts)) {
+      if (expectedCounts[name as keyof typeof expectedCounts] !== actual) {
+        conflicts.push(`${name.replace(/Count$/, '')} count mismatch`);
+      }
+    }
+    if (expected.totalBalanceHundredths !== totalBalanceHundredths) {
+      conflicts.push('total balance mismatch');
+    }
+
+    if (conflicts.length > 0) return { normalized: null, conflicts };
+    return {
+      normalized: {
+        snapshotId,
+        schemaVersion: IMPORT_SCHEMA_VERSION,
+        accounts,
+        transactions,
+        rounds,
+        orders,
+        reconciliation: {
+          accountCount: accounts.length,
+          transactionCount: transactions.length,
+          roundCount: rounds.length,
+          orderCount: orders.length,
+          totalBalanceHundredths,
+        },
+      },
+      conflicts,
+    };
+  }
+
+  private previewImport(rawInput: unknown): ImportPreview {
+    const { normalized, conflicts } = this.validateImportSnapshot(rawInput);
+    const snapshotId = normalized?.snapshotId ??
+      (rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput) &&
+        typeof (rawInput as Record<string, unknown>).snapshotId === 'string'
+        ? (rawInput as Record<string, unknown>).snapshotId as string
+        : null);
+    const counts = normalized?.reconciliation ?? {
+      accountCount: Array.isArray((rawInput as Record<string, unknown> | null)?.accounts)
+        ? ((rawInput as Record<string, unknown>).accounts as unknown[]).length : 0,
+      transactionCount: Array.isArray((rawInput as Record<string, unknown> | null)?.transactions)
+        ? ((rawInput as Record<string, unknown>).transactions as unknown[]).length : 0,
+      roundCount: Array.isArray((rawInput as Record<string, unknown> | null)?.rounds)
+        ? ((rawInput as Record<string, unknown>).rounds as unknown[]).length : 0,
+      orderCount: Array.isArray((rawInput as Record<string, unknown> | null)?.orders)
+        ? ((rawInput as Record<string, unknown>).orders as unknown[]).length : 0,
+      totalBalanceHundredths: 0,
+    };
+    if (normalized) {
+      const imported = this.state.storage.sql
+        .exec<ImportRow>('SELECT * FROM imported_snapshots WHERE snapshot_id = ?', normalized.snapshotId)
+        .toArray()[0];
+      if (!imported) {
+        for (const account of normalized.accounts) {
+          if (account.kind === 'house') continue;
+          if (this.accountRow(account.playerId)) conflicts.push(`duplicate account ID ${account.playerId}`);
+        }
+        for (const transaction of normalized.transactions) {
+          if (this.transactionRow(transaction.transactionId)) {
+            conflicts.push(`duplicate transaction ID ${transaction.transactionId}`);
+          }
+        }
+        for (const round of normalized.rounds) {
+          if (this.roundRow(round.roundId)) conflicts.push(`duplicate round ID ${round.roundId}`);
+        }
+        for (const order of normalized.orders) {
+          if (this.orderRow(order.orderNumber)) conflicts.push(`duplicate order ID ${order.orderNumber}`);
+        }
+      }
+    }
+    return {
+      canImport: conflicts.length === 0 && normalized !== null,
+      conflicts: Array.from(new Set(conflicts)),
+      snapshotId,
+      accountCount: counts.accountCount,
+      transactionCount: counts.transactionCount,
+      roundCount: counts.roundCount,
+      orderCount: counts.orderCount,
+      totalBalanceHundredths: counts.totalBalanceHundredths,
+    };
+  }
+
+  private importSnapshot(rawInput: ImportFinancialSnapshotInput): ImportResult {
+    const input = this.validateIdempotentInput({ ...rawInput });
+    input.provenance = validateText(input.provenance, 'provenance', 240);
+    const { normalized, conflicts } = this.validateImportSnapshot(input.snapshot);
+    if (!normalized || conflicts.length > 0) {
+      throw new CoordinatorError('IMPORT_CONFLICT', conflicts.join('; ') || 'Snapshot cannot be imported');
+    }
+    const preview = this.previewImport(input.snapshot);
+    if (!preview.canImport) {
+      throw new CoordinatorError('IMPORT_CONFLICT', preview.conflicts.join('; '));
+    }
+    const fingerprint = stableJson({ snapshot: normalized, provenance: input.provenance });
+    return this.state.storage.transactionSync(() => {
+      const existing = this.state.storage.sql
+        .exec<ImportRow>('SELECT * FROM imported_snapshots WHERE snapshot_id = ?', normalized.snapshotId)
+        .toArray()[0];
+      if (existing) {
+        if (existing.request_fingerprint !== fingerprint) {
+          throw new CoordinatorError('IMPORT_CONFLICT', 'Snapshot ID was imported with different content');
+        }
+        return JSON.parse(existing.result_json) as ImportResult;
+      }
+
+      const now = Date.now();
+      for (const account of normalized.accounts) {
+        if (account.kind === 'house') {
+          const house = this.accountRow(HOUSE_ACCOUNT_ID);
+          if (!house || house.balance_hundredths !== account.balanceHundredths) {
+            throw new CoordinatorError('IMPORT_CONFLICT', 'Imported house account does not match coordinator state');
+          }
+          continue;
+        }
+        this.state.storage.sql.exec(
+          `INSERT INTO accounts
+            (player_id, line_user_id, display_name, balance_hundredths, active, kind, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          account.playerId,
+          account.lineUserId,
+          account.displayName,
+          account.balanceHundredths,
+          account.active ? 1 : 0,
+          account.kind,
+          account.createdAt || now,
+          account.updatedAt || now,
+        );
+        if (account.balanceHundredths > 0) {
+          this.addLedgerEntry({
+            accountId: account.playerId,
+            idempotencyKey: `import:${normalized.snapshotId}:account:${account.playerId}`,
+            deltaHundredths: account.balanceHundredths,
+            balanceAfterHundredths: account.balanceHundredths,
+            eventType: 'opening_balance',
+            referenceId: normalized.snapshotId,
+            reason: `Imported opening balance (${input.provenance})`,
+          });
+        }
+      }
+      for (const transaction of normalized.transactions) {
+        this.state.storage.sql.exec(
+          `INSERT INTO transactions
+            (transaction_id, player_id, type, requested_amount_hundredths,
+             actual_amount_hundredths, status, bank_name, account_number,
+             account_name, actor_id, reason, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          transaction.transactionId,
+          transaction.playerId,
+          transaction.type,
+          transaction.requestedAmountHundredths,
+          transaction.actualAmountHundredths,
+          transaction.status,
+          transaction.bankName,
+          transaction.accountNumber,
+          transaction.accountName,
+          transaction.actorId,
+          transaction.reason,
+          transaction.createdAt || now,
+          transaction.updatedAt || now,
+        );
+      }
+      for (const round of normalized.rounds) {
+        this.state.storage.sql.exec(
+          `INSERT INTO rounds
+            (round_id, name, status, quote_released, target_min, target_max, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          round.roundId,
+          round.name,
+          round.status,
+          round.quoteReleased ? 1 : 0,
+          round.targetMin,
+          round.targetMax,
+          round.createdAt || now,
+          round.updatedAt || now,
+        );
+      }
+      for (const order of normalized.orders) {
+        this.state.storage.sql.exec(
+          `INSERT INTO orders
+            (order_number, round_id, creator_id, matcher_id, stake_hundredths,
+             status, order_json, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          order.orderNumber,
+          order.roundId,
+          order.creatorId,
+          order.matcherId,
+          order.stakeHundredths,
+          order.status,
+          JSON.stringify(order),
+          order.createdAt || now,
+          order.settledAt || order.createdAt || now,
+        );
+      }
+      const result: ImportResult = {
+        importedAccountCount: normalized.accounts.length,
+        importedTransactionCount: normalized.transactions.length,
+        importedRoundCount: normalized.rounds.length,
+        importedOrderCount: normalized.orders.length,
+      };
+      this.state.storage.sql.exec(
+        `INSERT INTO imported_snapshots
+          (snapshot_id, schema_version, provenance, request_fingerprint, result_json,
+           account_count, transaction_count, round_count, order_count,
+           total_balance_hundredths, unresolved_conflicts, imported_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+        normalized.snapshotId,
+        normalized.schemaVersion,
+        input.provenance,
+        fingerprint,
+        JSON.stringify(result),
+        normalized.reconciliation.accountCount,
+        normalized.reconciliation.transactionCount,
+        normalized.reconciliation.roundCount,
+        normalized.reconciliation.orderCount,
+        normalized.reconciliation.totalBalanceHundredths,
+        now,
+      );
+      return result;
+    });
+  }
+
+  private activateAuthority(rawInput: ActivateAuthorityInput): void {
+    const input = this.validateIdempotentInput({ ...rawInput });
+    input.operatorId = validateIdentifier(input.operatorId, 'operatorId');
+    input.snapshotId = validateIdentifier(input.snapshotId, 'snapshotId');
+    if (input.confirmation !== AUTHORITY_CONFIRMATION) {
+      throw new CoordinatorError('IMPORT_CONFLICT', 'Explicit authority activation confirmation is required');
+    }
+    const result = this.replayOrBegin('activateAuthority', input.idempotencyKey, input, () => {
+      const authority = this.state.storage.sql
+        .exec<AuthorityRow>('SELECT * FROM authority_state WHERE authority_id = ?', 'financial')
+        .toArray()[0];
+      if (!authority || authority.schema_version !== IMPORT_SCHEMA_VERSION) {
+        throw new CoordinatorError('IMPORT_CONFLICT', 'Required authority schema is not ready');
+      }
+      if (authority.active === 1) {
+        if (authority.snapshot_id !== input.snapshotId) {
+          throw new CoordinatorError('IMPORT_CONFLICT', 'A different snapshot is already active');
+        }
+      }
+      const imported = this.state.storage.sql
+        .exec<ImportRow>('SELECT * FROM imported_snapshots WHERE snapshot_id = ?', input.snapshotId)
+        .toArray()[0];
+      if (!imported || imported.unresolved_conflicts !== 0) {
+        throw new CoordinatorError('IMPORT_CONFLICT', 'Snapshot import has not been verified');
+      }
+      if (
+        input.accountCount !== imported.account_count ||
+        input.transactionCount !== imported.transaction_count ||
+        input.roundCount !== imported.round_count ||
+        input.orderCount !== imported.order_count
+      ) {
+        throw new CoordinatorError('IMPORT_CONFLICT', 'Activation totals do not match the imported snapshot');
+      }
+      const actualAccountCount = this.state.storage.sql
+        .exec<{ count: number }>("SELECT COUNT(*) AS count FROM accounts WHERE kind = 'player'")
+        .toArray()[0]?.count ?? 0;
+      const actualTransactionCount = this.state.storage.sql
+        .exec<{ count: number }>('SELECT COUNT(*) AS count FROM transactions')
+        .toArray()[0]?.count ?? 0;
+      const actualRoundCount = this.state.storage.sql
+        .exec<{ count: number }>('SELECT COUNT(*) AS count FROM rounds')
+        .toArray()[0]?.count ?? 0;
+      const actualOrderCount = this.state.storage.sql
+        .exec<{ count: number }>('SELECT COUNT(*) AS count FROM orders')
+        .toArray()[0]?.count ?? 0;
+      if (
+        input.accountCount !== actualAccountCount ||
+        input.transactionCount !== actualTransactionCount ||
+        input.roundCount !== actualRoundCount ||
+        input.orderCount !== actualOrderCount
+      ) {
+        throw new CoordinatorError('IMPORT_CONFLICT', 'Activation totals do not match coordinator state');
+      }
+      if (authority.active === 1) return { activated: true };
+      this.state.storage.sql.exec(
+        `UPDATE authority_state
+         SET active = 1, snapshot_id = ?, account_count = ?, transaction_count = ?,
+             round_count = ?, order_count = ?, unresolved_conflicts = 0, updated_at = ?
+         WHERE authority_id = 'financial'`,
+        input.snapshotId,
+        input.accountCount,
+        input.transactionCount,
+        input.roundCount,
+        input.orderCount,
+        Date.now(),
+      );
+      return { activated: true };
+    });
+    void result;
   }
 
   private replayOrBegin<T>(
@@ -733,6 +1350,21 @@ export class FinancialCoordinator {
       throw new CoordinatorError('INVALID_STATE', 'Player account is not active');
     }
     return { row, account: mapAccount(row) };
+  }
+
+  private ensureAuthorityReady(): void {
+    const authority = this.state.storage.sql
+      .exec<AuthorityRow>(
+        'SELECT active FROM authority_state WHERE authority_id = ?',
+        'financial',
+      )
+      .toArray()[0];
+    if (!authority || authority.active !== 1) {
+      throw new CoordinatorError(
+        'AUTHORITY_NOT_READY',
+        'Financial authority is not activated after a verified snapshot import',
+      );
+    }
   }
 
   private validateIdempotentInput<T extends { idempotencyKey: string }>(

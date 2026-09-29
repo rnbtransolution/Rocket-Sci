@@ -7,9 +7,40 @@ import { createAdminSession } from '../src/adminSession';
 const lineSecret = 'local-test-secret';
 const adminPassword = 'local-test-admin-password';
 
-beforeAll(() => {
+beforeAll(async () => {
   fetchMock.activate();
   fetchMock.disableNetConnect();
+  const client = createCoordinatorClient(env);
+  const snapshot = {
+    snapshotId: 'baseline-financial-authority',
+    schemaVersion: 'financial-ledger-v1' as const,
+    accounts: [],
+    transactions: [],
+    rounds: [],
+    orders: [],
+    reconciliation: {
+      accountCount: 0,
+      transactionCount: 0,
+      roundCount: 0,
+      orderCount: 0,
+      totalBalanceHundredths: 0,
+    },
+  };
+  await client.importSnapshot({
+    idempotencyKey: 'baseline-financial-authority-import',
+    snapshot,
+    provenance: 'local-test-fixture',
+  });
+  await client.activateAuthority({
+    idempotencyKey: 'baseline-financial-authority-activation',
+    operatorId: 'local-test',
+    snapshotId: snapshot.snapshotId,
+    accountCount: 0,
+    transactionCount: 0,
+    roundCount: 0,
+    orderCount: 0,
+    confirmation: 'ACTIVATE_FINANCIAL_AUTHORITY',
+  });
 });
 
 async function adminRun(functionName: string, args: unknown[], requestId?: string) {
