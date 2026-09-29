@@ -7,6 +7,7 @@ import {
   generatePendingBoardFlex,
   generateRuleGuideFlex,
   generateMainMenuQuickReply,
+  generateMainMenuFlex,
   attachMainMenuQuickReply,
   stripQuickReply,
   MAIN_MENU_QUICK_REPLY_ITEMS,
@@ -14,6 +15,11 @@ import {
   generateDepositInvoiceFlex,
   generateWithdrawalFlex,
   generateBankRegistrationFlex,
+  generateNoticeFlex,
+  generateOrderCancelFlex,
+  generateInsufficientBalanceFlex,
+  generateWithdrawalSuccessFlex,
+  generateSlipReceivedFlex,
 } from './flexTemplates.js';
 
 export const RULE_GUIDE_TEXT = `📖 [กติกาการเล่น]
@@ -101,9 +107,11 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     // ── 0. Utility Command: !groupid ──
     if (text.toLowerCase() === '!groupid' && replyToken) {
       if (groupId) {
-        await replyToLine(replyToken, `🆔 LINE Group ID: ${groupId}`, env, false);
+        const gidFlex = generateNoticeFlex('🆔 LINE Group ID', groupId, 'info');
+        await replyToLine(replyToken, gidFlex, env, false);
       } else {
-        await replyToLine(replyToken, '⚠️ คำสั่งนี้ใช้งานได้เฉพาะในกลุ่ม LINE เท่านั้น', env, true);
+        const warnFlex = generateNoticeFlex('⚠️ แจ้งเตือน', 'คำสั่งนี้ใช้งานได้เฉพาะในกลุ่ม LINE เท่านั้นครับ', 'warning');
+        await replyToLine(replyToken, warnFlex, env, true);
       }
       return;
     }
@@ -125,20 +133,8 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     // ── 1.1 Main Menu ("เมนู", "เมนูหลัก", "menu", "เริ่ม", "start", "ช่วยเหลือ", "help") ──
     const menuKeywords = ['เมนู', 'เมนูหลัก', 'menu', 'เริ่ม', 'start', 'ช่วยเหลือ', 'help'];
     if (menuKeywords.includes(clean)) {
-      if (isGroup) {
-        await deliverPrivateNotice(
-          userId,
-          replyToken,
-          groupId,
-          '💡 [เมนูระบบดวลส่วนตัว]\nเมนูเช็คยอด เติมเงิน ถอนเงิน สามารถกดทักแชตตรงหา LINE OA เพื่อใช้งานได้ทันทีครับ 🚀\nสำหรับในกลุ่มนี้ พิมพ์ "กระดานดวล" เพื่อดูแผลค้างครับ',
-          env,
-          profile.displayName,
-          ctx
-        );
-      } else {
-        const menuPayload = generateMainMenuQuickReply(profile.displayName, profile.balance);
-        await deliverPrivateNotice(userId, replyToken, groupId, menuPayload, env, profile.displayName, ctx);
-      }
+      const menuPayload = generateMainMenuFlex(profile.displayName, profile.balance);
+      await deliverPrivateNotice(userId, replyToken, groupId, menuPayload, env, profile.displayName, ctx);
       return;
     }
 
@@ -165,7 +161,8 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
 
     if (depositAmt !== null) {
       if (depositAmt < 100 || depositAmt > 50000) {
-        await deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ยอดฝากขั้นต่ำ 100 บาท สูงสุด 50,000 บาทครับ', env, profile.displayName, ctx);
+        const limitFlex = generateNoticeFlex('⚠️ ยอดฝากไม่ถูกต้อง', 'ยอดฝากขั้นต่ำ 100 บาท สูงสุด 50,000 บาทครับ', 'warning');
+        await deliverPrivateNotice(userId, replyToken, groupId, limitFlex, env, profile.displayName, ctx);
         return;
       }
       const txId = `TX${Math.floor(100000 + Math.random() * 900000)}`;
@@ -197,15 +194,13 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       profile.accountNumber = match[2];
       profile.accountName = match[3].trim();
       await savePlayerProfile(profile, env, ctx);
-      await deliverPrivateNotice(
-        userId,
-        replyToken,
-        groupId,
-        `✅ บันทึกข้อมูลบัญชีธนาคารเรียบร้อยแล้วครับ!\n🏦 ธนาคาร: ${profile.bankName}\n🔢 เลขบัญชี: ${profile.accountNumber}\n👤 ชื่อ: ${profile.accountName}\n\nท่านสามารถพิมพ์ "ถอน [จำนวน]" เพื่อแจ้งถอนได้ทันทีครับ 💸`,
-        env,
-        profile.displayName,
-        ctx
+      const bankSuccessFlex = generateNoticeFlex(
+        '✅ บันทึกบัญชีธนาคารเรียบร้อย',
+        `🏦 ธนาคาร: ${profile.bankName}\n🔢 เลขบัญชี: ${profile.accountNumber}\n👤 ชื่อ: ${profile.accountName}`,
+        'success',
+        '💡 ท่านสามารถพิมพ์ "ถอน [จำนวน]" เพื่อแจ้งถอนได้ทันทีครับ 💸'
       );
+      await deliverPrivateNotice(userId, replyToken, groupId, bankSuccessFlex, env, profile.displayName, ctx);
       return;
     }
 
@@ -233,23 +228,19 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       const match = cleanWithoutCommas.match(withdrawAmtRegex)!;
       const withdrawAmt = parseInt(match[1], 10);
       if (withdrawAmt < 100) {
-        await deliverPrivateNotice(userId, replyToken, groupId, '⚠️ ยอดถอนขั้นต่ำ 100 pt ครับ', env, profile.displayName, ctx);
+        const minFlex = generateNoticeFlex('⚠️ ยอดถอนขั้นต่ำ', 'ยอดถอนขั้นต่ำคือ 100 pt ครับ\nกรุณาระบุจำนวนตั้งแต่ 100 pt ขึ้นไป', 'warning');
+        await deliverPrivateNotice(userId, replyToken, groupId, minFlex, env, profile.displayName, ctx);
         return;
       }
       if (profile.balance < withdrawAmt) {
-        await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ แต้มคงเหลือไม่พอครับ (มี ${profile.balance} pt ต้องการถอน ${withdrawAmt} pt)`, env, profile.displayName, ctx);
+        const needed = withdrawAmt - profile.balance;
+        const insufficientFlex = generateInsufficientBalanceFlex(profile.balance, needed);
+        await deliverPrivateNotice(userId, replyToken, groupId, insufficientFlex, env, profile.displayName, ctx);
         return;
       }
       if (!profile.bankName || !profile.accountNumber) {
-        await deliverPrivateNotice(
-          userId,
-          replyToken,
-          groupId,
-          '❌ ท่านยังไม่ได้ลงทะเบียนบัญชีรับเงิน กรุณาพิมพ์:\nบัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ-สกุล]\nเช่น บัญชี กสิกร 0123456789 สมชาย ใจดี',
-          env,
-          profile.displayName,
-          ctx
-        );
+        const bankRegFlex = generateBankRegistrationFlex();
+        await deliverPrivateNotice(userId, replyToken, groupId, bankRegFlex, env, profile.displayName, ctx);
         return;
       }
 
@@ -273,15 +264,14 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       };
       await addTransaction(newTx, env, ctx);
 
-      await deliverPrivateNotice(
-        userId,
-        replyToken,
-        groupId,
-        `💸 ส่งคำขอถอนเงิน ${withdrawAmt.toLocaleString()} pt เรียบร้อยแล้วครับ!\nเข้าบัญชี: ${profile.bankName} ${profile.accountNumber} (${profile.accountName || profile.displayName})\nแต้มคงเหลือ: ${profile.balance.toLocaleString()} pt\nแอดมินกำลังดำเนินการโอนเงินให้ครับ 🙏`,
-        env,
-        profile.displayName,
-        ctx
+      const withdrawSuccessFlex = generateWithdrawalSuccessFlex(
+        withdrawAmt,
+        profile.bankName,
+        profile.accountNumber,
+        profile.accountName || profile.displayName,
+        profile.balance
       );
+      await deliverPrivateNotice(userId, replyToken, groupId, withdrawSuccessFlex, env, profile.displayName, ctx);
       return;
     }
 
@@ -307,11 +297,15 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     const clearRegex = /^(?:🧹\s*)?(ล้างกระดาน|เคลียร์กระดาน|ล้างแผล|เคลียร์แผล|ล้างแคช|เคลียร์แคช|clearboard|resetboard|clearcache)$/i;
     if (clearRegex.test(clean) || clearRegex.test(text)) {
       const res = await clearAllPendingOrders(env);
-      const msg = `🧹 ล้างกระดานดวลสดและเคลียร์แคชเรียบร้อยแล้วครับ! (ลบทั้งหมด ${res.cleared} รายการ, กระดานว่าง 0 แผล)`;
+      const clearFlex = generateNoticeFlex(
+        '🧹 ล้างกระดานดวลเรียบร้อย',
+        `ลบแผลรอคู่ทั้งหมด ${res.cleared} รายการ\nกระดานว่าง 0 แผล พร้อมเริ่มรอบใหม่ครับ 🚀`,
+        'success'
+      );
       if (replyToken) {
-        await replyToLine(replyToken, msg, env, !isGroup);
+        await replyToLine(replyToken, clearFlex, env, !isGroup);
       } else {
-        await pushToLine(userId, msg, env);
+        await pushToLine(userId, clearFlex, env);
       }
       return;
     }
@@ -329,21 +323,20 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         if (myPending) {
           targetNo = myPending.orderNumber;
         } else {
-          await deliverPrivateNotice(
-            userId,
-            replyToken,
-            groupId,
-            '⚠️ ไม่พบแผลดวลค้างของคุณที่สามารถยกเลิกได้ครับ\n(หรือพิมพ์ "ยกเลิก [เลข Order]" เช่น "ยกเลิก 518947")',
-            env,
-            profile.displayName,
-            ctx
-          );
+          const noOrderFlex = generateNoticeFlex('⚠️ ไม่พบแผลที่ยกเลิกได้', 'ไม่พบแผลดวลค้างของคุณที่สามารถยกเลิกได้ครับ\n(หรือพิมพ์ "ยกเลิก [เลข Order]" เช่น "ยกเลิก 5189")', 'warning');
+          await deliverPrivateNotice(userId, replyToken, groupId, noOrderFlex, env, profile.displayName, ctx);
           return;
         }
       }
 
       const cancelRes = await cancelOrder(targetNo, profile, env, ctx);
-      await deliverPrivateNotice(userId, replyToken, groupId, cancelRes.message, env, profile.displayName, ctx);
+      if (cancelRes.success) {
+        const cancelFlex = generateOrderCancelFlex(targetNo, cancelRes.amount || 0, profile.balance);
+        await deliverPrivateNotice(userId, replyToken, groupId, cancelFlex, env, profile.displayName, ctx);
+      } else {
+        const cancelErrFlex = generateNoticeFlex('⛔ ไม่สามารถยกเลิกได้', cancelRes.message, 'warning');
+        await deliverPrivateNotice(userId, replyToken, groupId, cancelErrFlex, env, profile.displayName, ctx);
+      }
       return;
     }
 
@@ -433,7 +426,12 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         updatedAt: Date.now(),
       }));
       if (replyToken) {
-        await replyToLine(replyToken, `🚀 เปิดรอบดวล: ${roundName} (ราคาช่าง 330-380s) เรียบร้อยครับ`, env, !isGroup);
+        const openFlex = generateNoticeFlex(
+          `🚀 เปิดรอบดวล: ${roundName}`,
+          `ราคาช่าง 330-380 วินาที\nพร้อมเปิดรับคำสั่งดวลแล้วครับ 🚀`,
+          'success'
+        );
+        await replyToLine(replyToken, openFlex, env, !isGroup);
       }
       return;
     }
@@ -449,18 +447,28 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       }
       // Also clear pending unmatched orders so board resets cleanly for next round
       await clearAllPendingOrders(env);
+      const closeFlex = generateNoticeFlex(
+        `⛔ ปิดรับดวลรอบ: ${roundName}`,
+        `ล็อครอบเรียบร้อย (ล้างกระดานรอคู่ 0 แผล)\nรอลุ้นผลการแข่งขันครับ 💥`,
+        'warning'
+      );
       if (replyToken) {
-        await replyToLine(replyToken, `⛔ ปิดรับดวลรอบ ${roundName} เรียบร้อยแล้วครับ! (ล้างกระดานรอคู่เรียบร้อย 0 แผล)`, env, !isGroup);
+        await replyToLine(replyToken, closeFlex, env, !isGroup);
       } else {
-        await pushToLine(userId, `⛔ ปิดรับดวลรอบ ${roundName} เรียบร้อยแล้วครับ! (ล้างกระดานรอคู่เรียบร้อย 0 แผล)`, env);
+        await pushToLine(userId, closeFlex, env);
       }
       return;
     }
 
     // ── Fallback for Unrecognized Private Messages ──
     if (!isGroup) {
-      const fallbackMsg = `🤖 ได้รับข้อความแล้วครับ 💬\nท่านสามารถแตะเลือกทำรายการ เช็คยอด, ฝากเงิน, ถอนเงิน หรือกติกาจากปุ่มด้านล่างได้ทันทีครับ 👇`;
-      await deliverPrivateNotice(userId, replyToken, null, fallbackMsg, env, profile.displayName, ctx);
+      const fallbackFlex = generateNoticeFlex(
+        '🤖 ยินดีต้อนรับครับ',
+        'ท่านสามารถแตะเลือกทำรายการจากเมนูด้านล่างได้ทันทีครับ 👇',
+        'info',
+        'เช็คยอด • ฝากเงิน • ถอนเงิน • กติกา • กระดานดวล'
+      );
+      await deliverPrivateNotice(userId, replyToken, null, fallbackFlex, env, profile.displayName, ctx);
       return;
     }
   }
@@ -468,8 +476,12 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
   // ── Follow Event (User Adds or Unblocks Bot) ──
   if (event.type === 'follow' && userId) {
     const profile = await getOrCreatePlayerProfile(userId, env, ctx);
-    const welcomeMsg = `🚀 ยินดีต้อนรับคุณ ${profile.displayName} สู่ระบบดวล Rocket Science!\n\nท่านสามารถแตะเมนูด้านล่างเพื่อ เช็คยอด, ฝากเงิน, ถอนเงิน หรือดูกติกาได้ตลอดเวลาครับ 👇`;
-    await deliverPrivateNotice(userId, event.replyToken, null, welcomeMsg, env, profile.displayName, ctx);
+    const welcomeFlex = generateNoticeFlex(
+      `🚀 ยินดีต้อนรับคุณ ${profile.displayName}`,
+      'ยินดีต้อนรับสู่ระบบดวล Rocket Science!\n\nท่านสามารถแตะเมนูด้านล่างเพื่อ เช็คยอด, ฝากเงิน, ถอนเงิน หรือดูกติกาได้ตลอดเวลาครับ 👇',
+      'info'
+    );
+    await deliverPrivateNotice(userId, event.replyToken, null, welcomeFlex, env, profile.displayName, ctx);
     return;
   }
 
@@ -493,8 +505,8 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       createdAt: Date.now(),
     };
     await addTransaction(newTx, env, ctx);
-    const msg = `✅ ได้รับรูปสลิปโอนเงินเรียบร้อยแล้วครับ! (รหัสรายการ: #${txId})\nระบบได้ส่งให้แอดมินตรวจสอบยอดเงินเข้าบัญชีเรียบร้อย เมื่อตรวจสอบสำเร็จแต้มจะเข้าทันทีครับ 🙏`;
-    await deliverPrivateNotice(userId, replyToken, groupId, msg, env, profile.displayName, ctx);
+    const slipFlex = generateSlipReceivedFlex(txId);
+    await deliverPrivateNotice(userId, replyToken, groupId, slipFlex, env, profile.displayName, ctx);
     return;
   }
 
@@ -536,11 +548,16 @@ async function handleCreateOrder(
   const targetGroupId = groupId || activeGroupId || null;
 
   if (!targetGroupId) {
+    const noGroupFlex = generateNoticeFlex(
+      '⚠️ ไม่พบกลุ่ม LINE',
+      'ยังไม่พบกลุ่ม LINE ที่เปิดใช้งาน กรุณาส่งคำสั่งนี้ในกลุ่มดวล LINE ครับ 🚀',
+      'warning'
+    );
     await deliverPrivateNotice(
       userId,
       replyToken,
       null,
-      '⚠️ ยังไม่พบกลุ่ม LINE ที่เปิดใช้งาน กรุณาส่งคำสั่งนี้ในกลุ่มดวล LINE ครับ 🚀',
+      noGroupFlex,
       env,
       profile.displayName,
       ctx
@@ -568,7 +585,12 @@ async function handleCreateOrder(
 
   // Only reject order if round is actively CLOSED (in-flight countdown "3-2-go" / locked)
   if (round.status === 'CLOSED') {
-    await deliverPrivateNotice(userId, replyToken, groupId, '⛔ ปิดรับออเดอร์รอบนี้แล้วครับ (ล็อครอบระหว่างการแข่งขัน) กรุณารอรอบถัดไปครับ 🙏', env, profile.displayName, ctx);
+    const closedFlex = generateNoticeFlex(
+      '⛔ ปิดรับออเดอร์รอบนี้แล้ว',
+      'ปิดรับออเดอร์รอบนี้แล้วครับ (ล็อครอบระหว่างการแข่งขัน)\nกรุณารอรอบถัดไปครับ 🙏',
+      'warning'
+    );
+    await deliverPrivateNotice(userId, replyToken, groupId, closedFlex, env, profile.displayName, ctx);
     return;
   }
 
@@ -589,33 +611,53 @@ async function handleCreateOrder(
       const rawOffset = match[1].replace('+', '').trim();
       offsetDelta = parseInt(rawOffset, 10) || 0;
       if (![5, -5, 10, -10].includes(offsetDelta)) {
-        await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ (เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)`, env, profile.displayName, ctx);
+        const offsetFlex = generateNoticeFlex(
+          '⚠️ ปรับราคาช่างไม่ถูกต้อง',
+          'การปรับราคาช่างรองรับเฉพาะ +/-5 และ +/-10 วินาทีเท่านั้นครับ\n(เช่น +5ชล, -5ชถ, +10ชล, -10ชถ)',
+          'warning'
+        );
+        await deliverPrivateNotice(userId, replyToken, groupId, offsetFlex, env, profile.displayName, ctx);
         return;
       }
     }
   }
 
   if (amount < 50 || amount > 50000) {
-    await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ยอดดวลต้องอยู่ระหว่าง 50 ถึง 50,000 pt ครับ (คุณระบุ ${amount} pt)`, env, profile.displayName, ctx);
+    const limitFlex = generateNoticeFlex(
+      '⚠️ ยอดดวลไม่อยู่ในเกณฑ์',
+      `ยอดดวลต้องอยู่ระหว่าง 50 ถึง 50,000 pt ครับ\n(คุณระบุ ${amount.toLocaleString()} pt)`,
+      'warning'
+    );
+    await deliverPrivateNotice(userId, replyToken, groupId, limitFlex, env, profile.displayName, ctx);
     return;
   }
 
   if (isCustom) {
     if (rangeMin >= rangeMax) {
-      await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-350 (คุณระบุ ${rangeMin}-${rangeMax})`, env, profile.displayName, ctx);
+      const rangeFlex = generateNoticeFlex(
+        '⚠️ ระบุช่วงเวลาไม่ถูกต้อง',
+        `ระบุช่วงเวลาจากต่ำไปสูงเท่านั้นครับ เช่น 300-350\n(คุณระบุ ${rangeMin}-${rangeMax})`,
+        'warning'
+      );
+      await deliverPrivateNotice(userId, replyToken, groupId, rangeFlex, env, profile.displayName, ctx);
       return;
     }
     if (rangeMax - rangeMin > 50) {
       const diff = rangeMax - rangeMin;
-      await deliverPrivateNotice(userId, replyToken, groupId, `⚠️ ช่วงราคาต้องห่างกันไม่เกิน 50 วินาทีครับ (คุณระบุ ${rangeMin}-${rangeMax} ห่าง ${diff} วิ)`, env, profile.displayName, ctx);
+      const rangeSpanFlex = generateNoticeFlex(
+        '⚠️ ช่วงราคาห่างเกินไป',
+        `ช่วงราคาต้องห่างกันไม่เกิน 50 วินาทีครับ\n(คุณระบุ ${rangeMin}-${rangeMax} ห่าง ${diff} วิ)`,
+        'warning'
+      );
+      await deliverPrivateNotice(userId, replyToken, groupId, rangeSpanFlex, env, profile.displayName, ctx);
       return;
     }
   }
 
   if (profile.balance < amount) {
     const needed = amount - profile.balance;
-    const msg = `⚠️ แต้มไม่พอครับ (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt)\n💡 พิมพ์ "ฝากเงิน" ในแชตนี้เพื่อเติมเครดิตได้เลยครับ 🚀`;
-    await deliverPrivateNotice(userId, replyToken, groupId, msg, env, profile.displayName, ctx);
+    const insufficientFlex = generateInsufficientBalanceFlex(profile.balance, needed);
+    await deliverPrivateNotice(userId, replyToken, groupId, insufficientFlex, env, profile.displayName, ctx);
     return;
   }
 
@@ -668,23 +710,31 @@ async function handleCreateOrder(
     cardDispatched = !!pushRes.success;
   }
 
-  // 7. Send Confirmation Message to Player
-  const confirmMsg = isPreQuote
-    ? `⏳ Order #${orderNumber} ถูกถืออยู่รอราคาช่างครับ (จำนวน ${amount.toLocaleString()} pt)\nเมื่อแอดมินเปิดราคาช่างอย่างเป็นทางการ ระบบจะเปิดลงกระดานให้อัตโนมัติครับ 🚀`
-    : `✅ Order #${orderNumber} เปิดดวลสำเร็จแล้วครับ 🚀\nรายการ: ${newOrder.userTypedCmd || ''} (${amount.toLocaleString()} pt)\nแต้มคงเหลือ: ${profile.balance.toLocaleString()} pt`;
+  // 7. Send Confirmation Message to Player (always Flex card in DM)
+  const confirmFlex = isPreQuote
+    ? generateNoticeFlex(
+        '⏳ ถือออเดอร์รอราคาช่าง',
+        `Order #${orderNumber} ถูกถืออยู่รอราคาช่างครับ (${amount.toLocaleString()} pt)\nเมื่อแอดมินเปิดราคาช่าง ระบบจะลงกระดานให้อัตโนมัติครับ 🚀`,
+        'info'
+      )
+    : generateNoticeFlex(
+        `✅ เปิดแผล #${orderNumber} สำเร็จ`,
+        `รายการ: ${newOrder.userTypedCmd || ''} (${amount.toLocaleString()} pt)\nแต้มคงเหลือ: ${profile.balance.toLocaleString()} pt 💎`,
+        'success'
+      );
 
   if (groupId) {
     // If order was created in a group, replyToken was already used for the group order card.
     // Push the private confirmation to the player's DM asynchronously so it never blocks the webhook.
     if (userId && userId.startsWith('U')) {
-      ctx?.waitUntil(pushToLine(userId, confirmMsg, env).catch(e => console.error(e)));
+      ctx?.waitUntil(pushToLine(userId, confirmFlex, env).catch(e => console.error(e)));
     }
   } else {
     // In private DM where order was created, reply to user directly
     if (replyToken) {
-      await replyToLine(replyToken, confirmMsg, env, true);
+      await replyToLine(replyToken, confirmFlex, env, true);
     } else if (userId && userId.startsWith('U')) {
-      ctx?.waitUntil(pushToLine(userId, confirmMsg, env).catch(e => console.error(e)));
+      ctx?.waitUntil(pushToLine(userId, confirmFlex, env).catch(e => console.error(e)));
     }
   }
 }
@@ -754,16 +804,34 @@ async function handleMatchOrder(
   // Generate match card
   const matchFlex = generateMatchNotificationFlex(order);
 
-  // Match notification: reply to group if requested via group, and push to DM of both players
+  // Match notification: send match card to group without floating quick reply, and push to DM of both players
   const creatorLineId = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId;
   const matchPromises: Promise<any>[] = [updatePersistence];
   
-  if (replyToken) {
-    matchPromises.push(replyToLine(replyToken, matchFlex, env, !groupId));
+  if (groupId) {
+    if (replyToken) {
+      matchPromises.push(replyToLine(replyToken, matchFlex, env, false));
+    } else if (order.groupId) {
+      matchPromises.push(pushToLine(order.groupId, matchFlex, env));
+    }
+    // Also push match card to matcher's DM
+    if (userId && userId.startsWith('U')) {
+      matchPromises.push(pushToLine(userId, matchFlex, env));
+    }
   } else {
-    matchPromises.push(pushToLine(userId, matchFlex, env));
+    // Matched in DM
+    if (replyToken) {
+      matchPromises.push(replyToLine(replyToken, matchFlex, env, true));
+    } else if (userId && userId.startsWith('U')) {
+      matchPromises.push(pushToLine(userId, matchFlex, env));
+    }
+    // Also broadcast match card to the group where the order originated
+    if (order.groupId) {
+      matchPromises.push(pushToLine(order.groupId, matchFlex, env));
+    }
   }
 
+  // Push match card to creator's DM
   if (creatorLineId && creatorLineId !== userId) {
     matchPromises.push(pushToLine(creatorLineId, matchFlex, env));
   }
@@ -780,7 +848,7 @@ async function cancelOrder(
   profile: PlayerProfile,
   env: Env,
   ctx?: ExecutionContext
-): Promise<{ success: boolean; message: string }> {
+): Promise<{ success: boolean; message: string; amount?: number }> {
   const resolvedNo = await resolveOrderNumber(orderNo, null, env);
   if (!resolvedNo) return { success: false, message: `🚫 ไม่พบแผล Order #${orderNo}` };
 
@@ -808,6 +876,7 @@ async function cancelOrder(
 
   return {
     success: true,
+    amount: order.amount,
     message: `✅ ยกเลิก Order #${resolvedNo} เรียบร้อยแล้วครับ!\n💰 คืนแต้ม: +${order.amount.toLocaleString()} pt\n💎 แต้มคงเหลือปัจจุบัน: ${profile.balance.toLocaleString()} pt 🚀`,
   };
 }
@@ -933,11 +1002,16 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
           cancelledCount++;
           const amt = Number(order.amount) || 0;
           const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
+          const cancelPreQuoteFlex = generateNoticeFlex(
+            `🚫 ยกเลิก Order #${order.orderNumber} อัตโนมัติ`,
+            `จบรอบดวลโดยไม่มีการประกาศราคาช่างอย่างเป็นทางการ\nระบบคืนแต้ม: +${amt.toLocaleString()} pt เรียบร้อยครับ ✅`,
+            'warning'
+          );
           const notifyPromise = deliverPrivateNotice(
             rawLine,
             undefined,
             order.groupId || null,
-            `🚫 Order #${order.orderNumber} ถูกยกเลิกอัตโนมัติ เนื่องจากจบรอบดวลโดยไม่มีการประกาศราคาช่างอย่างเป็นทางการ ✅ (คืนแต้ม ${amt.toLocaleString()} pt)`,
+            cancelPreQuoteFlex,
             env,
             order.creatorName
           );
@@ -1002,11 +1076,16 @@ export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, 
   // Notify each converted player that their pre-quote order is now active
   const notifyPromises = convertedOrders.map(async (o) => {
     const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${o.creatorId}`)) || o.creatorLineUserId || o.creatorId;
+    const releaseFlex = generateNoticeFlex(
+      `🚀 ราคาช่างเปิดแล้ว: ${bandMin}-${bandMax}s`,
+      `Order #${o.orderNumber} (${o.amount.toLocaleString()} pt ${o.side === 'low' ? 'ชถ/ต่ำ' : 'ชล/สูง'})\nเปิดลงกระดานรอคู่เรียบร้อย พร้อมจับคู่แล้วครับ 🚀`,
+      'success'
+    );
     return deliverPrivateNotice(
       rawLine,
       undefined,
       o.groupId || null,
-      `✅ ราคาช่างอย่างเป็นทางการแล้ว: ${bandMin}-${bandMax} วิ\n🧾 Order #${o.orderNumber} (${o.amount.toLocaleString()} pt ${o.side === 'low' ? 'ชถ/ต่ำ' : 'ชล/สูง'}) เปิดรอคู่แล้ว พร้อมจับคู่ครับ 🚀`,
+      releaseFlex,
       env,
       o.creatorName
     );
@@ -1762,59 +1841,17 @@ async function deliverPrivateNotice(
   }
 
   // ── 2. If interaction originated in a LINE Group ──
-  // Check if payload is personal financial (balance, deposit, withdrawal)
-  const isPersonalFinancial =
-    typeof payload === 'object' &&
-    (payload.altText?.includes('ยอดคงเหลือ') ||
-      payload.altText?.includes('ยอดแต้มคงเหลือ') ||
-      payload.altText?.includes('เติมเงิน') ||
-      payload.altText?.includes('ถอนเงิน'));
-
-  // REPLY FIRST (< 40ms) using ephemeral replyToken so the bot is NEVER silent!
-  let replyDispatched = false;
-  if (replyToken) {
-    let groupReplyPayload: any;
-    if (isPersonalFinancial) {
-      // In group: deliver clear, immediate balance or financial feedback
-      if (typeof payload === 'object' && (payload.altText?.includes('ยอดคงเหลือ') || payload.altText?.includes('ยอดแต้มคงเหลือ'))) {
-        groupReplyPayload = displayName
-          ? `📢 @${displayName}\n${payload.altText} 🚀\n(ส่งข้อมูลรายละเอียดให้ทางแชตส่วนตัวแล้วครับ 💬)`
-          : `${payload.altText} 🚀\n(ส่งข้อมูลรายละเอียดให้ทางแชตส่วนตัวแล้วครับ 💬)`;
-      } else {
-        groupReplyPayload = displayName
-          ? `📢 @${displayName}\nส่งข้อมูลรายการให้ทางแชตส่วนตัวแล้วครับ 💬`
-          : 'ส่งข้อมูลรายการให้ทางแชตส่วนตัวแล้วครับ 💬';
-      }
-    } else {
-      // For general messages (cancellations, rules, error notices), reply directly to the group
-      let summaryText = typeof payload === 'string' ? payload : (payload.altText || payload.text || '⚠️ ไม่สามารถทำรายการได้ครับ');
-      if (displayName && !summaryText.startsWith('📢')) {
-        summaryText = `📢 @${displayName}\n${summaryText}`;
-      }
-      groupReplyPayload = typeof payload === 'object' && payload.type === 'flex' ? payload : summaryText;
-    }
-
-    replyDispatched = await replyToLine(replyToken, stripQuickReply(groupReplyPayload), env, false);
-  }
-
-  // If personal financial card, ALSO deliver the full interactive card to user's private DM asynchronously
-  if (isPersonalFinancial && targetLineId && targetLineId.startsWith('U')) {
-    const dmPush = pushToLine(targetLineId, payload, env);
+  // STRICT USER RULE: Any private-related message must ONLY be responded in DM.
+  // The LINE Group is reserved exclusively for order matching cards only.
+  // Never broadcast personal balance, private notices, cancellations, or error messages into the group.
+  if (targetLineId && targetLineId.startsWith('U')) {
+    const enriched = attachMainMenuQuickReply(payload);
+    const dmPush = pushToLine(targetLineId, enriched, env);
     if (ctx) {
       ctx.waitUntil(dmPush);
     } else {
       dmPush.catch((e) => console.error('[deliverPrivateNotice DM push error]:', e));
     }
-  }
-
-  // Fallback: If group reply via replyToken failed and we didn't send anything to the group, push to group
-  if (!replyDispatched && groupId) {
-    let summaryText = typeof payload === 'string' ? payload : (payload.altText || payload.text || '⚠️ ไม่สามารถทำรายการได้ครับ');
-    if (displayName && !summaryText.startsWith('📢')) {
-      summaryText = `📢 @${displayName}\n${summaryText}`;
-    }
-    const fallbackPayload = typeof payload === 'object' && payload.type === 'flex' ? payload : summaryText;
-    await pushToLine(groupId, stripQuickReply(fallbackPayload), env);
   }
 }
 

@@ -397,15 +397,78 @@ export function generateBalanceFlex(displayName: string, balance: number): any {
     contents: {
       type: 'bubble',
       size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#0A3D34',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: '💰 ยอดแต้มคงเหลือ',
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'xs',
+            align: 'center',
+          },
+        ],
+      },
       body: {
         type: 'box',
         layout: 'vertical',
         paddingAll: 'md',
-        spacing: 'sm',
+        spacing: 'xs',
         contents: [
-          { type: 'text', text: `👤 คุณ ${displayName}`, color: '#64748B', size: 'xs' },
-          { type: 'text', text: `${balance.toLocaleString()} pt`, weight: 'bold', color: '#059669', size: 'xl' },
-          { type: 'text', text: '💡 พิมพ์ "ฝาก" หรือ "ถอน"', color: '#94A3B8', size: 'xxs', wrap: true },
+          {
+            type: 'text',
+            text: `👤 ผู้เล่น: ${displayName || 'สมาชิก'}`,
+            color: '#64748B',
+            size: 'xs',
+            align: 'center',
+          },
+          {
+            type: 'text',
+            text: `${Number(balance || 0).toLocaleString()} pt`,
+            weight: 'bold',
+            color: '#059669',
+            size: 'xxl',
+            align: 'center',
+            margin: 'xs',
+          },
+          {
+            type: 'text',
+            text: 'แต้มคงเหลือพร้อมใช้งาน',
+            color: '#94A3B8',
+            size: 'xxs',
+            align: 'center',
+          },
+          {
+            type: 'separator',
+            margin: 'sm',
+            color: '#F1F5F9',
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            spacing: 'xs',
+            margin: 'sm',
+            contents: [
+              {
+                type: 'button',
+                style: 'primary',
+                height: 'sm',
+                color: '#059669',
+                action: { type: 'message', label: '💳 ฝากเงิน', text: 'ฝากเงิน' },
+              },
+              {
+                type: 'button',
+                style: 'primary',
+                height: 'sm',
+                color: '#0284C7',
+                action: { type: 'message', label: '💸 ถอนเงิน', text: 'ถอนเงิน' },
+              },
+            ],
+          },
         ],
       },
     },
@@ -501,6 +564,369 @@ export function generateCreditAdjustmentFlex(displayName: string, oldBalance: nu
             ],
           },
           { type: 'text', text: '💡 พิมพ์ "ฝาก" หรือ "ถอน"', color: '#94A3B8', size: 'xxs', wrap: true, margin: 'sm' },
+        ],
+      },
+    },
+  };
+}
+
+// ── 3c. Universal Notice & Status Flex Card (เปลี่ยนข้อความธรรมดาเป็น Flex Card) ──
+export function generateNoticeFlex(
+  title: string,
+  message: string,
+  type: 'info' | 'success' | 'warning' | 'error' = 'info',
+  hint?: string
+): any {
+  const headerColors: Record<string, string> = {
+    info: '#0A3D34',     // Deep Forest Green
+    success: '#059669',  // Emerald Green
+    warning: '#D97706',  // Amber
+    error: '#DC2626',    // Crimson Red
+  };
+
+  const headerColor = headerColors[type] || headerColors.info;
+
+  return {
+    type: 'flex',
+    altText: `🚀 ${title}: ${message.slice(0, 40)}`,
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: headerColor,
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: title,
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'xs',
+            align: 'center',
+            wrap: true,
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        paddingAll: 'md',
+        contents: [
+          {
+            type: 'text',
+            text: message,
+            color: '#1E293B',
+            size: 'sm',
+            align: 'center',
+            wrap: true,
+          },
+          ...(hint
+            ? [
+                { type: 'separator', margin: 'sm', color: '#E2E8F0' },
+                {
+                  type: 'text',
+                  text: hint,
+                  color: '#64748B',
+                  size: 'xxs',
+                  align: 'center',
+                  wrap: true,
+                },
+              ]
+            : []),
+        ],
+      },
+    },
+  };
+}
+
+// ── 3d. Order Cancellation Confirmation Flex Card ──
+export function generateOrderCancelFlex(orderNumber: string, refundAmount: number, currentBalance: number): any {
+  return {
+    type: 'flex',
+    altText: `⛔ ยกเลิก Order #${orderNumber} เรียบร้อยแล้ว`,
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#475569',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: `⛔ ยกเลิก Order #${orderNumber}`,
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'xs',
+            align: 'center',
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        paddingAll: 'md',
+        contents: [
+          {
+            type: 'text',
+            text: 'ยกเลิกแผลดวลเรียบร้อยแล้วครับ',
+            weight: 'bold',
+            color: '#1E293B',
+            size: 'sm',
+            align: 'center',
+          },
+          {
+            type: 'separator',
+            margin: 'xs',
+            color: '#E2E8F0',
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: 'คืนแต้ม:', color: '#64748B', size: 'xs', flex: 5 },
+              { type: 'text', text: `+${refundAmount.toLocaleString()} pt`, weight: 'bold', color: '#059669', size: 'xs', flex: 5, align: 'end' },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: 'แต้มคงเหลือ:', color: '#64748B', size: 'xs', flex: 5 },
+              { type: 'text', text: `${currentBalance.toLocaleString()} pt`, weight: 'bold', color: '#0284C7', size: 'xs', flex: 5, align: 'end' },
+            ],
+          },
+        ],
+      },
+    },
+  };
+}
+
+// ── 3e. Insufficient Balance Notice Flex Card ──
+export function generateInsufficientBalanceFlex(currentBalance: number, neededAmount: number): any {
+  const diff = Math.max(0, neededAmount - currentBalance);
+  return {
+    type: 'flex',
+    altText: `⚠️ แต้มไม่พอสำหรับรายการนี้ (ขาด ${diff.toLocaleString()} pt)`,
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#DC2626',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: '⚠️ แต้มคงเหลือไม่พอ',
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'xs',
+            align: 'center',
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        paddingAll: 'md',
+        contents: [
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: 'แต้มที่มีอยู่:', color: '#64748B', size: 'xs', flex: 5 },
+              { type: 'text', text: `${currentBalance.toLocaleString()} pt`, weight: 'bold', color: '#1E293B', size: 'xs', flex: 5, align: 'end' },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: 'ยอดที่ต้องการ:', color: '#64748B', size: 'xs', flex: 5 },
+              { type: 'text', text: `${neededAmount.toLocaleString()} pt`, weight: 'bold', color: '#DC2626', size: 'xs', flex: 5, align: 'end' },
+            ],
+          },
+          {
+            type: 'separator',
+            margin: 'xs',
+            color: '#E2E8F0',
+          },
+          {
+            type: 'text',
+            text: `💡 ขาดอีก ${diff.toLocaleString()} pt พิมพ์ "ฝากเงิน" เพื่อเติมแต้มได้ทันทีครับ 🚀`,
+            color: '#64748B',
+            size: 'xxs',
+            align: 'center',
+            wrap: true,
+          },
+        ],
+      },
+    },
+  };
+}
+
+// ── 3f. Withdrawal Requested Confirmation Flex Card ──
+export function generateWithdrawalSuccessFlex(
+  withdrawAmt: number,
+  bankName: string,
+  accountNumber: string,
+  accountName: string,
+  remainingBalance: number
+): any {
+  return {
+    type: 'flex',
+    altText: `💸 แจ้งถอนเงิน ${withdrawAmt.toLocaleString()} pt เรียบร้อยแล้ว`,
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#0284C7',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: '💸 ส่งคำขอถอนเงินเรียบร้อย',
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'xs',
+            align: 'center',
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'xs',
+        paddingAll: 'md',
+        contents: [
+          {
+            type: 'text',
+            text: `${withdrawAmt.toLocaleString()} pt`,
+            weight: 'bold',
+            color: '#0284C7',
+            size: 'xl',
+            align: 'center',
+          },
+          {
+            type: 'text',
+            text: 'ยอดที่แจ้งถอน',
+            color: '#94A3B8',
+            size: 'xxs',
+            align: 'center',
+          },
+          {
+            type: 'separator',
+            margin: 'sm',
+            color: '#F1F5F9',
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            margin: 'xs',
+            contents: [
+              { type: 'text', text: '🏦 ธนาคาร', color: '#94A3B8', size: 'xxs', flex: 4 },
+              { type: 'text', text: bankName, weight: 'bold', color: '#334155', size: 'xxs', flex: 6, align: 'end' },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: '🔢 เลขบัญชี', color: '#94A3B8', size: 'xxs', flex: 4 },
+              { type: 'text', text: accountNumber, weight: 'bold', color: '#334155', size: 'xxs', flex: 6, align: 'end' },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: '👤 ชื่อบัญชี', color: '#94A3B8', size: 'xxs', flex: 4 },
+              { type: 'text', text: accountName, weight: 'bold', color: '#334155', size: 'xxs', flex: 6, align: 'end' },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: '💎 แต้มคงเหลือ', color: '#94A3B8', size: 'xxs', flex: 4 },
+              { type: 'text', text: `${remainingBalance.toLocaleString()} pt`, weight: 'bold', color: '#059669', size: 'xxs', flex: 6, align: 'end' },
+            ],
+          },
+          {
+            type: 'separator',
+            margin: 'sm',
+            color: '#F1F5F9',
+          },
+          {
+            type: 'text',
+            text: 'แอดมินกำลังดำเนินการตรวจสอบและโอนเงินให้ครับ 🙏',
+            size: 'xxs',
+            color: '#64748B',
+            align: 'center',
+            wrap: true,
+          },
+        ],
+      },
+    },
+  };
+}
+
+// ── 3g. Slip Received Notice Flex Card ──
+export function generateSlipReceivedFlex(txId: string): any {
+  return {
+    type: 'flex',
+    altText: `🧾 ได้รับสลิปโอนเงินแล้ว (#${txId})`,
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#059669',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: '🧾 ได้รับสลิปโอนเงินแล้ว',
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'xs',
+            align: 'center',
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        paddingAll: 'md',
+        contents: [
+          {
+            type: 'text',
+            text: `รหัสรายการ: #${txId}`,
+            weight: 'bold',
+            color: '#1E293B',
+            size: 'sm',
+            align: 'center',
+          },
+          {
+            type: 'text',
+            text: 'ระบบได้ส่งภาพสลิปให้แอดมินตรวจสอบยอดเงินเข้าบัญชีเรียบร้อย เมื่อตรวจสอบสำเร็จแต้มจะเข้ากระเป๋าของคุณทันทีครับ 🙏',
+            color: '#64748B',
+            size: 'xs',
+            align: 'center',
+            wrap: true,
+          },
         ],
       },
     },
@@ -1036,18 +1462,27 @@ export const MAIN_MENU_QUICK_REPLY_ITEMS = [
  */
 export function attachMainMenuQuickReply(payload: any): any {
   if (payload === null || payload === undefined) {
+    const notice = generateNoticeFlex('🚀 Rocket Science', 'ยินดีต้อนรับสู่ระบบดวล Rocket Science');
     return {
-      type: 'text',
-      text: '🚀 Rocket Science',
+      ...notice,
       quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
     };
   }
 
-  // 1. Plain string or number payload
+  // 1. Plain string or number payload: ALWAYS convert to Flex style message!
   if (typeof payload === 'string' || typeof payload === 'number') {
+    const textStr = String(payload).trim();
+    const lines = textStr.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const firstLine = lines[0] || '🚀 แจ้งเตือน';
+    const restLines = lines.slice(1).join('\n');
+    const title = firstLine.length <= 40 ? firstLine : firstLine.slice(0, 40);
+    const bodyMessage = restLines.length > 0 ? restLines : firstLine;
+    const isError = textStr.includes('⚠️') || textStr.includes('⛔') || textStr.includes('🚫') || textStr.includes('ไม่พอ') || textStr.includes('ผิดพลาด') || textStr.includes('ไม่พบ');
+    const isSuccess = textStr.includes('✅') || textStr.includes('สำเร็จ');
+    const variant = isError ? 'warning' : (isSuccess ? 'success' : 'info');
+    const flex = generateNoticeFlex(title, bodyMessage, variant);
     return {
-      type: 'text',
-      text: String(payload),
+      ...flex,
       quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
     };
   }
@@ -1065,8 +1500,23 @@ export function attachMainMenuQuickReply(payload: any): any {
       };
     }
 
-    // If it's already a text or flex message object
-    if (payload.type === 'text' || payload.type === 'flex') {
+    // If it's already a text message object: convert to Flex style message!
+    if (payload.type === 'text') {
+      const textStr = String(payload.text || '').trim();
+      const titleMatch = textStr.match(/^([^\n]+)/);
+      const title = titleMatch ? titleMatch[1].slice(0, 30) : '🚀 แจ้งเตือน';
+      const isError = textStr.includes('⚠️') || textStr.includes('⛔') || textStr.includes('🚫');
+      const isSuccess = textStr.includes('✅') || textStr.includes('สำเร็จ');
+      const variant = isError ? 'warning' : (isSuccess ? 'success' : 'info');
+      const flex = generateNoticeFlex(title, textStr, variant);
+      return {
+        ...flex,
+        quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
+      };
+    }
+
+    // If it's already a flex message object
+    if (payload.type === 'flex') {
       if (payload.quickReply && Array.isArray(payload.quickReply.items) && payload.quickReply.items.length > 0) {
         return payload;
       }
@@ -1101,9 +1551,9 @@ export function stripQuickReply(payload: any): any {
 }
 
 export function generateMainMenuQuickReply(displayName: string, balance: number): any {
+  const flex = generateMainMenuFlex(displayName, balance);
   return {
-    type: 'text',
-    text: '🚀 Rocket Science เมนูหลัก (1:1)\n\nดูแต้ม เติมเงิน ถอนเงิน และกติกาได้จากปุ่มด้านล่างเลยครับ 👇',
+    ...flex,
     quickReply: {
       items: [...MAIN_MENU_QUICK_REPLY_ITEMS],
     },
