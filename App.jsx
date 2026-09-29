@@ -482,8 +482,9 @@ export default function App() {
       const interval = setInterval(fetchGAS, 3000);
       return () => clearInterval(interval);
 
-    } else if (API_BASE_URL) {
-      // Live Cloudflare Worker or Node.js Backend: direct high-speed sync
+    } else if (isGitHubPages || API_BASE_URL) {
+      // Live Cloudflare Worker: sub-second adaptive polling (< 800ms) with zero-stacking
+      let cancelled = false;
       const fetchFromBackend = async () => {
         try {
           const res = await fetch(`${API_BASE_URL}/api/run`, {
@@ -506,54 +507,35 @@ export default function App() {
         }
       };
 
-      fetchFromBackend();
-      const interval = setInterval(fetchFromBackend, 2000);
-
-      // Attempt SSE if stream endpoint is active
-      let es;
-      try {
-        const sseQs = ADMIN_API_KEY ? `?apiKey=${encodeURIComponent(ADMIN_API_KEY)}` : '';
-        es = new EventSource(`${API_BASE_URL}/api/events${sseQs}`);
-        es.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            applyData(data);
-          } catch (_) {}
-        };
-        es.onerror = () => {
-          if (es) es.close();
-        };
-      } catch (_) {}
-
-      return () => {
-        clearInterval(interval);
-        if (es) es.close();
-      };
-
-    } else if (isGitHubPages) {
-      // GitHub Pages hosted: poll the Cloudflare Worker (LINE webhook authority) via RPC
-      // ── Zero-Delay Continuous Polling (timeout = 0) ──
-      // Re-fetches immediately after each cycle completes. The awaited
-      // while-loop guarantees no request stacking (unlike setInterval(fn, 0)).
-      let cancelled = false;
-      const continuousPoll = async () => {
+      // ── Sub-Second Responsive Polling Loop ──
+      // Awaited while-loop guarantees zero request stacking.
+      // 800ms when tab is active (delivers updates in < 1 second).
+      // 3000ms when tab is hidden to save background resources.
+      const pollLoop = async () => {
         while (!cancelled) {
-          try {
-            const data = await runBackendFunction('getDashboardData', []);
-            if (data) {
-              applyData(data);
-            }
-          } catch (e) {
-            console.warn('[GitHub Pages Worker Polling Note]:', e?.message || e);
-          }
-          await new Promise((r) => setTimeout(r, 0));
+          await fetchFromBackend();
+          const delay = (typeof document !== 'undefined' && document.hidden) ? 3000 : 800;
+          await new Promise((r) => setTimeout(r, delay));
         }
       };
 
-      continuousPoll();
+      pollLoop();
+
+      // Trigger immediate poll when admin refocuses tab or becomes visible
+      const onVisibilityChange = () => {
+        if (typeof document !== 'undefined' && !document.hidden && !cancelled) {
+          fetchFromBackend();
+        }
+      };
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', onVisibilityChange);
+      }
 
       return () => {
         cancelled = true;
+        if (typeof document !== 'undefined') {
+          document.removeEventListener('visibilitychange', onVisibilityChange);
+        }
       };
 
     } else if (isLiveBackend) {

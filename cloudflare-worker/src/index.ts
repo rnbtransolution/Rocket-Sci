@@ -218,12 +218,26 @@ export default {
         let result: any = null;
 
         if (functionName === 'getDashboardData') {
-          const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
-          const activeGroupId = await env.KV_CACHE.get('ACTIVE_GROUP_ID');
-          const pendingBets = await getPendingOrdersList(env);
-          const players = await getPlayersList(env);
-          const transactions = await getTransactionsList(env);
-          const lineGroupsRaw = await env.KV_CACHE.get('LINE_GROUPS');
+          const [
+            roundStr,
+            activeGroupId,
+            pendingBets,
+            players,
+            transactions,
+            lineGroupsRaw,
+            chatLogsRaw,
+            cachedQuotaRaw,
+          ] = await Promise.all([
+            env.KV_CACHE.get('ACTIVE_ROUND'),
+            env.KV_CACHE.get('ACTIVE_GROUP_ID'),
+            getPendingOrdersList(env),
+            getPlayersList(env),
+            getTransactionsList(env),
+            env.KV_CACHE.get('LINE_GROUPS'),
+            env.KV_CACHE.get('CHAT_LOGS'),
+            env.KV_CACHE.get('CACHED_LINE_QUOTA'),
+          ]);
+
           let parsedGroups = lineGroupsRaw ? JSON.parse(lineGroupsRaw) : [];
           if (!Array.isArray(parsedGroups)) parsedGroups = [];
           const validGroups = parsedGroups.filter((g: any) => g && g.id && /^[CR][0-9a-f]{32}$/i.test(String(g.id).trim()));
@@ -231,32 +245,51 @@ export default {
           const lineGroups = validGroups.length > 0
             ? validGroups
             : [{ id: validActiveGroupId, name: '.Test', lastMessage: 'เชื่อมต่อแล้ว', timestamp: 'Live' }];
-          const chatLogsRaw = await env.KV_CACHE.get('CHAT_LOGS');
           const chatLogs = chatLogsRaw ? JSON.parse(chatLogsRaw) : [];
 
+          // High-speed non-blocking quota resolution: serve immediately from cache (< 1ms)
           let lineQuota: any = null;
-          try {
+          if (cachedQuotaRaw) {
+            try {
+              lineQuota = JSON.parse(cachedQuotaRaw);
+            } catch (_) {}
+          }
+
+          // If quota not in cache or older than 60s, refresh in background without blocking dashboard RPC
+          const quotaAge = lineQuota?.cachedAt ? (Date.now() - lineQuota.cachedAt) : Infinity;
+          if (!lineQuota || quotaAge > 60000) {
             const token = env.LINE_CHANNEL_ACCESS_TOKEN;
             if (token) {
-              const [qRes, cRes] = await Promise.all([
-                fetch('https://api.line.me/v2/bot/message/quota', { headers: { Authorization: `Bearer ${token}` } }),
-                fetch('https://api.line.me/v2/bot/message/quota/consumption', { headers: { Authorization: `Bearer ${token}` } }),
-              ]);
-              if (qRes.ok && cRes.ok) {
-                const qJson: any = await qRes.json();
-                const cJson: any = await cRes.json();
-                const totalLimit = qJson.value || 0;
-                const used = cJson.totalUsage || 0;
-                lineQuota = {
-                  type: qJson.type || 'limited',
-                  limit: totalLimit,
-                  totalUsage: used,
-                  remaining: Math.max(0, totalLimit - used),
-                  isExhausted: totalLimit > 0 && used >= totalLimit,
-                };
+              const refreshQuotaPromise = (async () => {
+                try {
+                  const [qRes, cRes] = await Promise.all([
+                    fetch('https://api.line.me/v2/bot/message/quota', { headers: { Authorization: `Bearer ${token}` } }),
+                    fetch('https://api.line.me/v2/bot/message/quota/consumption', { headers: { Authorization: `Bearer ${token}` } }),
+                  ]);
+                  if (qRes.ok && cRes.ok) {
+                    const qJson: any = await qRes.json();
+                    const cJson: any = await cRes.json();
+                    const totalLimit = qJson.value || 0;
+                    const used = cJson.totalUsage || 0;
+                    const freshQuota = {
+                      type: qJson.type || 'limited',
+                      limit: totalLimit,
+                      totalUsage: used,
+                      remaining: Math.max(0, totalLimit - used),
+                      isExhausted: totalLimit > 0 && used >= totalLimit,
+                      cachedAt: Date.now(),
+                    };
+                    await env.KV_CACHE.put('CACHED_LINE_QUOTA', JSON.stringify(freshQuota), { expirationTtl: 300 });
+                  }
+                } catch (_) {}
+              })();
+              if (ctx) {
+                ctx.waitUntil(refreshQuotaPromise);
+              } else {
+                refreshQuotaPromise.catch(() => {});
               }
             }
-          } catch (_) {}
+          }
 
           result = {
             players,
