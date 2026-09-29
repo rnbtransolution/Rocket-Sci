@@ -193,8 +193,11 @@ The snapshot must declare `schemaVersion: "financial-ledger-v1"`, a unique
 arrays, and matching `reconciliation` counts and hundredths total. Decimal
 source balances are accepted only when exactly representable in hundredths;
 values with unsafe precision are reported as conflicts and are never
-truncated. The preview checks duplicate IDs, references, statuses, balances,
-and totals without changing SQLite rows.
+truncated. A coordinator export includes the `__house__` account; its balance
+is imported with the same provenance-tagged immutable opening entry as player
+balances, and activation reconciles account totals against ledger totals. The
+preview checks duplicate IDs (including existing LINE user IDs), references,
+statuses, balances, schema shape, and totals without changing SQLite rows.
 
 After the source reconciliation and dry-run report have been reviewed, an
 authorized operator may apply the snapshot only with all three explicit
@@ -207,14 +210,16 @@ node scripts/financial-migration.mjs ./path/to/snapshot.json \
 ```
 
 `--apply` first calls the authenticated Worker `/api/run` preview, then
-performs an idempotent import and requires explicit activation confirmation.
-Repeated imports of the same snapshot are safe and opening ledger entries
-retain the source provenance. Verify the reported account/order/transaction/
-round totals and that no conflicts remain before activation. Only after that
-verification should the operator activate authority and route traffic to the
-Worker. Never put session tokens or snapshot data in source control, and do
-not substitute a production URL, KV namespace, Durable Object, Sheets
-endpoint, or GAS endpoint for the local dry run.
+performs a durable, bounded, restartable chunked import, and requires explicit
+activation confirmation. Repeating an import resumes committed cursors without
+duplicate rows or ledger entries; activation remains blocked while the import
+status is incomplete. Opening ledger entries retain the source provenance.
+Verify the reported account/order/transaction/round totals, schema checks, and
+ledger reconciliation, and confirm that no conflicts remain before activation.
+Only after that verification should the operator activate authority and route
+traffic to the Worker. Never put session tokens or snapshot data in source
+control, and do not substitute a production URL, KV namespace, Durable Object,
+Sheets endpoint, or GAS endpoint for the local dry run.
 
 ---
 

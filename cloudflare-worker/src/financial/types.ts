@@ -376,9 +376,12 @@ export interface ImportFinancialSnapshotInput {
   idempotencyKey: string;
   snapshot: FinancialSnapshot;
   provenance: string;
+  chunkSize?: number;
+  maxChunksPerCall?: number;
 }
 
 export interface ImportResult {
+  readonly complete: boolean;
   readonly importedAccountCount: number;
   readonly importedTransactionCount: number;
   readonly importedRoundCount: number;

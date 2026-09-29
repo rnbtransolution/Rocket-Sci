@@ -47,6 +47,9 @@ import {
 const HOUSE_ACCOUNT_ID = '__house__';
 const IMPORT_SCHEMA_VERSION = 'financial-ledger-v1';
 const AUTHORITY_CONFIRMATION = 'ACTIVATE_FINANCIAL_AUTHORITY';
+const DEFAULT_IMPORT_CHUNK_SIZE = 100;
+const MAX_IMPORT_CHUNK_SIZE = 1_000;
+const MAX_IMPORT_CHUNKS_PER_CALL = 1_000;
 const FINANCIAL_MUTATIONS = new Set([
   'createPlayer',
   'adjustBalance',
@@ -182,6 +185,12 @@ interface ImportRow {
   order_count: number;
   total_balance_hundredths: number;
   unresolved_conflicts: number;
+  status: 'in_progress' | 'complete';
+  account_cursor: number;
+  transaction_cursor: number;
+  round_cursor: number;
+  order_cursor: number;
+  house_account_included: number;
   imported_at: number;
 }
 
@@ -193,6 +202,204 @@ interface NormalizedImport {
   rounds: RocketRound[];
   orders: LedgerOrder[];
   reconciliation: SnapshotReconciliation;
+}
+
+export interface SchemaTableMetadata {
+  readonly sql: string;
+  readonly columns: readonly string[];
+}
+
+const REQUIRED_SCHEMA: Record<string, {
+  columns: readonly string[];
+  fragments: readonly string[];
+}> = {
+  accounts: {
+    columns: [
+      'player_id',
+      'line_user_id',
+      'display_name',
+      'balance_hundredths',
+      'active',
+      'kind',
+      'created_at',
+      'updated_at',
+    ],
+    fragments: [
+      'primary key',
+      'unique',
+      'check (balance_hundredths >= 0)',
+      "check (active in (0, 1))",
+      "check (kind in ('player', 'house'))",
+    ],
+  },
+  ledger: {
+    columns: [
+      'entry_id',
+      'account_id',
+      'idempotency_key',
+      'delta_hundredths',
+      'balance_after_hundredths',
+      'event_type',
+      'reference_id',
+      'actor_id',
+      'reason',
+      'created_at',
+    ],
+    fragments: [
+      'primary key',
+      'unique (account_id, idempotency_key)',
+      'check (balance_after_hundredths >= 0)',
+    ],
+  },
+  transactions: {
+    columns: [
+      'transaction_id',
+      'player_id',
+      'type',
+      'requested_amount_hundredths',
+      'actual_amount_hundredths',
+      'status',
+      'bank_name',
+      'account_number',
+      'account_name',
+      'actor_id',
+      'reason',
+      'created_at',
+      'updated_at',
+    ],
+    fragments: [
+      'primary key',
+      "check (type in ('deposit', 'withdrawal'))",
+      "check (status in ('pending', 'approved', 'rejected'))",
+      'check (requested_amount_hundredths > 0)',
+      'check (actual_amount_hundredths >= 0)',
+    ],
+  },
+  rounds: {
+    columns: [
+      'round_id',
+      'name',
+      'status',
+      'quote_released',
+      'target_min',
+      'target_max',
+      'created_at',
+      'updated_at',
+    ],
+    fragments: [
+      'primary key',
+      "check (status in ('active', 'closed', 'void'))",
+      'check (quote_released in (0, 1))',
+    ],
+  },
+  orders: {
+    columns: [
+      'order_number',
+      'round_id',
+      'creator_id',
+      'matcher_id',
+      'stake_hundredths',
+      'status',
+      'order_json',
+      'created_at',
+      'updated_at',
+    ],
+    fragments: [
+      'primary key',
+      'check (stake_hundredths > 0)',
+      "check (status in ('pending_hold', 'pending_match', 'matched', 'cancelled', 'resolved', 'settled', 'void'))",
+    ],
+  },
+  idempotency_results: {
+    columns: [
+      'operation',
+      'idempotency_key',
+      'request_fingerprint',
+      'result_json',
+      'created_at',
+    ],
+    fragments: ['primary key (operation, idempotency_key)'],
+  },
+  projection_outbox: {
+    columns: [
+      'outbox_id',
+      'event_type',
+      'payload_json',
+      'created_at',
+      'delivered_at',
+      'attempt_count',
+      'next_attempt_at',
+    ],
+    fragments: ['primary key'],
+  },
+  authority_state: {
+    columns: [
+      'authority_id',
+      'active',
+      'schema_version',
+      'snapshot_id',
+      'account_count',
+      'transaction_count',
+      'round_count',
+      'order_count',
+      'unresolved_conflicts',
+      'updated_at',
+    ],
+    fragments: ['primary key', 'check (active in (0, 1))'],
+  },
+  imported_snapshots: {
+    columns: [
+      'snapshot_id',
+      'schema_version',
+      'provenance',
+      'request_fingerprint',
+      'result_json',
+      'account_count',
+      'transaction_count',
+      'round_count',
+      'order_count',
+      'total_balance_hundredths',
+      'unresolved_conflicts',
+      'status',
+      'account_cursor',
+      'transaction_cursor',
+      'round_cursor',
+      'order_cursor',
+      'house_account_included',
+      'imported_at',
+    ],
+    fragments: [
+      'primary key',
+      "check (status in ('in_progress', 'complete'))",
+      'check (house_account_included in (0, 1))',
+    ],
+  },
+};
+
+export function findSchemaConflicts(
+  tables: Record<string, SchemaTableMetadata | undefined>,
+): string[] {
+  const conflicts: string[] = [];
+  for (const [tableName, requirement] of Object.entries(REQUIRED_SCHEMA)) {
+    const table = tables[tableName];
+    if (!table) {
+      conflicts.push(`required schema table ${tableName} is missing`);
+      continue;
+    }
+    const columns = new Set(table.columns);
+    for (const column of requirement.columns) {
+      if (!columns.has(column)) {
+        conflicts.push(`required schema column ${tableName}.${column} is missing`);
+      }
+    }
+    const normalizedSql = table.sql.toLowerCase().replace(/\s+/g, ' ').trim();
+    for (const fragment of requirement.fragments) {
+      if (!normalizedSql.includes(fragment)) {
+        conflicts.push(`required schema constraint ${tableName}.${fragment} is missing`);
+      }
+    }
+  }
+  return conflicts;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -526,7 +733,7 @@ export class FinancialCoordinator {
         creator_id TEXT NOT NULL REFERENCES accounts(player_id),
         matcher_id TEXT REFERENCES accounts(player_id),
         stake_hundredths INTEGER NOT NULL CHECK (stake_hundredths > 0),
-        status TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending_hold', 'pending_match', 'matched', 'cancelled', 'resolved', 'settled', 'void')),
         order_json TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
@@ -580,6 +787,12 @@ export class FinancialCoordinator {
         order_count INTEGER NOT NULL,
         total_balance_hundredths INTEGER NOT NULL,
         unresolved_conflicts INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL CHECK (status IN ('in_progress', 'complete')),
+        account_cursor INTEGER NOT NULL DEFAULT 0,
+        transaction_cursor INTEGER NOT NULL DEFAULT 0,
+        round_cursor INTEGER NOT NULL DEFAULT 0,
+        order_cursor INTEGER NOT NULL DEFAULT 0,
+        house_account_included INTEGER NOT NULL DEFAULT 0 CHECK (house_account_included IN (0, 1)),
         imported_at INTEGER NOT NULL
       )
     `);
@@ -615,13 +828,51 @@ export class FinancialCoordinator {
       now,
       now,
     );
-    sql.exec(
-      `INSERT OR IGNORE INTO authority_state
-        (authority_id, active, schema_version, snapshot_id, updated_at)
-       VALUES ('financial', 0, ?, NULL, ?)`,
-      IMPORT_SCHEMA_VERSION,
-      now,
-    );
+    if (this.schemaConflicts().length === 0) {
+      sql.exec(
+        `INSERT OR IGNORE INTO authority_state
+          (authority_id, active, schema_version, snapshot_id, updated_at)
+         VALUES ('financial', 0, ?, NULL, ?)`,
+        IMPORT_SCHEMA_VERSION,
+        now,
+      );
+    }
+  }
+
+  private schemaMetadata(): Record<string, SchemaTableMetadata | undefined> {
+    const metadata: Record<string, SchemaTableMetadata | undefined> = {};
+    for (const tableName of Object.keys(REQUIRED_SCHEMA)) {
+      const definition = this.state.storage.sql
+        .exec<{ sql: string | null }>(
+          "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+          tableName,
+        )
+        .toArray()[0]?.sql;
+      if (!definition) {
+        metadata[tableName] = undefined;
+        continue;
+      }
+      const columns = this.state.storage.sql
+        .exec<{ name: string }>(`PRAGMA table_info(${tableName})`)
+        .toArray()
+        .map((column) => column.name);
+      metadata[tableName] = { sql: definition, columns };
+    }
+    return metadata;
+  }
+
+  private schemaConflicts(): string[] {
+    return findSchemaConflicts(this.schemaMetadata());
+  }
+
+  private ensureSchemaReady(): void {
+    const conflicts = this.schemaConflicts();
+    if (conflicts.length > 0) {
+      throw new CoordinatorError(
+        'IMPORT_CONFLICT',
+        `Required financial schema is not ready: ${conflicts.join('; ')}`,
+      );
+    }
   }
 
   private accountRow(playerId: string): AccountRow | undefined {
@@ -719,6 +970,7 @@ export class FinancialCoordinator {
     const accounts: Array<LedgerAccount & { balanceHundredths: number }> = [];
     const accountIds = new Set<string>();
     const lineUserIds = new Set<string>();
+    let houseAccountCount = 0;
     let totalBalanceHundredths = 0;
     for (const rawAccount of accountInputs) {
       if (rawAccount === null || typeof rawAccount !== 'object' || Array.isArray(rawAccount)) {
@@ -732,10 +984,13 @@ export class FinancialCoordinator {
       }
       accountIds.add(playerId);
       const lineUserId = source.lineUserId;
-      if (lineUserId && lineUserIds.has(lineUserId)) {
+      if (lineUserId !== null && typeof lineUserId !== 'string') {
+        conflicts.push(`account ${playerId || '<missing>'} has an invalid LINE user ID`);
+      }
+      if (typeof lineUserId === 'string' && lineUserId && lineUserIds.has(lineUserId)) {
         conflicts.push(`duplicate line user ID ${lineUserId}`);
       }
-      if (lineUserId) lineUserIds.add(lineUserId);
+      if (typeof lineUserId === 'string' && lineUserId) lineUserIds.add(lineUserId);
       const balanceHundredths = sourceBalanceHundredths(source);
       if (balanceHundredths === null) {
         conflicts.push(
@@ -756,6 +1011,14 @@ export class FinancialCoordinator {
       if (typeof source.active !== 'boolean' || !['player', 'house'].includes(source.kind)) {
         conflicts.push(`account ${playerId || '<missing>'} has invalid account metadata`);
       }
+      if (source.kind === 'house') {
+        houseAccountCount += 1;
+        if (playerId !== HOUSE_ACCOUNT_ID) {
+          conflicts.push(`house account must use ID ${HOUSE_ACCOUNT_ID}`);
+        }
+      } else if (playerId === HOUSE_ACCOUNT_ID) {
+        conflicts.push(`account ${HOUSE_ACCOUNT_ID} must have kind house`);
+      }
       if (typeof source.displayName !== 'string' || !source.displayName.trim()) {
         conflicts.push(`account ${playerId || '<missing>'} has an invalid display name`);
       }
@@ -770,6 +1033,7 @@ export class FinancialCoordinator {
         updatedAt: typeof source.updatedAt === 'number' ? source.updatedAt : 0,
       });
     }
+    if (houseAccountCount > 1) conflicts.push('snapshot contains multiple house accounts');
 
     const transactions: FinancialTransaction[] = [];
     const transactionIds = new Set<string>();
@@ -881,7 +1145,10 @@ export class FinancialCoordinator {
         conflicts.push(`${name.replace(/Count$/, '')} count mismatch`);
       }
     }
-    if (expected.totalBalanceHundredths !== totalBalanceHundredths) {
+    const expectedTotal = expected.totalBalanceHundredths;
+    if (typeof expectedTotal !== 'number' || !Number.isSafeInteger(expectedTotal) || expectedTotal < 0) {
+      conflicts.push('total balance is negative or unsafe');
+    } else if (expectedTotal !== totalBalanceHundredths) {
       conflicts.push('total balance mismatch');
     }
 
@@ -908,6 +1175,7 @@ export class FinancialCoordinator {
 
   private previewImport(rawInput: unknown): ImportPreview {
     const { normalized, conflicts } = this.validateImportSnapshot(rawInput);
+    conflicts.push(...this.schemaConflicts());
     const snapshotId = normalized?.snapshotId ??
       (rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput) &&
         typeof (rawInput as Record<string, unknown>).snapshotId === 'string'
@@ -930,8 +1198,20 @@ export class FinancialCoordinator {
         .toArray()[0];
       if (!imported) {
         for (const account of normalized.accounts) {
-          if (account.kind === 'house') continue;
-          if (this.accountRow(account.playerId)) conflicts.push(`duplicate account ID ${account.playerId}`);
+          if (account.kind !== 'house' && this.accountRow(account.playerId)) {
+            conflicts.push(`duplicate account ID ${account.playerId}`);
+          }
+          if (account.lineUserId) {
+            const existingLineUser = this.state.storage.sql
+              .exec<AccountRow>(
+                'SELECT * FROM accounts WHERE line_user_id = ?',
+                account.lineUserId,
+              )
+              .toArray()[0];
+            if (existingLineUser && existingLineUser.player_id !== account.playerId) {
+              conflicts.push(`duplicate line user ID ${account.lineUserId}`);
+            }
+          }
         }
         for (const transaction of normalized.transactions) {
           if (this.transactionRow(transaction.transactionId)) {
@@ -961,6 +1241,26 @@ export class FinancialCoordinator {
   private importSnapshot(rawInput: ImportFinancialSnapshotInput): ImportResult {
     const input = this.validateIdempotentInput({ ...rawInput });
     input.provenance = validateText(input.provenance, 'provenance', 240);
+    this.ensureSchemaReady();
+    const chunkSize = input.chunkSize ?? DEFAULT_IMPORT_CHUNK_SIZE;
+    const maxChunksPerCall = input.maxChunksPerCall ?? MAX_IMPORT_CHUNKS_PER_CALL;
+    if (
+      !Number.isSafeInteger(chunkSize) ||
+      chunkSize < 1 ||
+      chunkSize > MAX_IMPORT_CHUNK_SIZE
+    ) {
+      throw new CoordinatorError('INVALID_INPUT', `chunkSize must be between 1 and ${MAX_IMPORT_CHUNK_SIZE}`);
+    }
+    if (
+      !Number.isSafeInteger(maxChunksPerCall) ||
+      maxChunksPerCall < 1 ||
+      maxChunksPerCall > MAX_IMPORT_CHUNKS_PER_CALL
+    ) {
+      throw new CoordinatorError(
+        'INVALID_INPUT',
+        `maxChunksPerCall must be between 1 and ${MAX_IMPORT_CHUNKS_PER_CALL}`,
+      );
+    }
     const { normalized, conflicts } = this.validateImportSnapshot(input.snapshot);
     if (!normalized || conflicts.length > 0) {
       throw new CoordinatorError('IMPORT_CONFLICT', conflicts.join('; ') || 'Snapshot cannot be imported');
@@ -970,131 +1270,252 @@ export class FinancialCoordinator {
       throw new CoordinatorError('IMPORT_CONFLICT', preview.conflicts.join('; '));
     }
     const fingerprint = stableJson({ snapshot: normalized, provenance: input.provenance });
-    return this.state.storage.transactionSync(() => {
-      const existing = this.state.storage.sql
-        .exec<ImportRow>('SELECT * FROM imported_snapshots WHERE snapshot_id = ?', normalized.snapshotId)
-        .toArray()[0];
-      if (existing) {
-        if (existing.request_fingerprint !== fingerprint) {
-          throw new CoordinatorError('IMPORT_CONFLICT', 'Snapshot ID was imported with different content');
-        }
-        return JSON.parse(existing.result_json) as ImportResult;
-      }
-
+    const existing = this.importRow(normalized.snapshotId);
+    if (existing && existing.request_fingerprint !== fingerprint) {
+      throw new CoordinatorError('IMPORT_CONFLICT', 'Snapshot ID was imported with different content');
+    }
+    if (!existing) {
       const now = Date.now();
-      for (const account of normalized.accounts) {
-        if (account.kind === 'house') {
-          const house = this.accountRow(HOUSE_ACCOUNT_ID);
-          if (!house || house.balance_hundredths !== account.balanceHundredths) {
-            throw new CoordinatorError('IMPORT_CONFLICT', 'Imported house account does not match coordinator state');
-          }
-          continue;
-        }
-        this.state.storage.sql.exec(
-          `INSERT INTO accounts
-            (player_id, line_user_id, display_name, balance_hundredths, active, kind, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          account.playerId,
-          account.lineUserId,
-          account.displayName,
-          account.balanceHundredths,
-          account.active ? 1 : 0,
-          account.kind,
-          account.createdAt || now,
-          account.updatedAt || now,
-        );
-        if (account.balanceHundredths > 0) {
-          this.addLedgerEntry({
-            accountId: account.playerId,
-            idempotencyKey: `import:${normalized.snapshotId}:account:${account.playerId}`,
-            deltaHundredths: account.balanceHundredths,
-            balanceAfterHundredths: account.balanceHundredths,
-            eventType: 'opening_balance',
-            referenceId: normalized.snapshotId,
-            reason: `Imported opening balance (${input.provenance})`,
-          });
-        }
-      }
-      for (const transaction of normalized.transactions) {
-        this.state.storage.sql.exec(
-          `INSERT INTO transactions
-            (transaction_id, player_id, type, requested_amount_hundredths,
-             actual_amount_hundredths, status, bank_name, account_number,
-             account_name, actor_id, reason, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          transaction.transactionId,
-          transaction.playerId,
-          transaction.type,
-          transaction.requestedAmountHundredths,
-          transaction.actualAmountHundredths,
-          transaction.status,
-          transaction.bankName,
-          transaction.accountNumber,
-          transaction.accountName,
-          transaction.actorId,
-          transaction.reason,
-          transaction.createdAt || now,
-          transaction.updatedAt || now,
-        );
-      }
-      for (const round of normalized.rounds) {
-        this.state.storage.sql.exec(
-          `INSERT INTO rounds
-            (round_id, name, status, quote_released, target_min, target_max, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          round.roundId,
-          round.name,
-          round.status,
-          round.quoteReleased ? 1 : 0,
-          round.targetMin,
-          round.targetMax,
-          round.createdAt || now,
-          round.updatedAt || now,
-        );
-      }
-      for (const order of normalized.orders) {
-        this.state.storage.sql.exec(
-          `INSERT INTO orders
-            (order_number, round_id, creator_id, matcher_id, stake_hundredths,
-             status, order_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          order.orderNumber,
-          order.roundId,
-          order.creatorId,
-          order.matcherId,
-          order.stakeHundredths,
-          order.status,
-          JSON.stringify(order),
-          order.createdAt || now,
-          order.settledAt || order.createdAt || now,
-        );
-      }
-      const result: ImportResult = {
-        importedAccountCount: normalized.accounts.length,
-        importedTransactionCount: normalized.transactions.length,
-        importedRoundCount: normalized.rounds.length,
-        importedOrderCount: normalized.orders.length,
-      };
       this.state.storage.sql.exec(
         `INSERT INTO imported_snapshots
           (snapshot_id, schema_version, provenance, request_fingerprint, result_json,
            account_count, transaction_count, round_count, order_count,
-           total_balance_hundredths, unresolved_conflicts, imported_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+           total_balance_hundredths, unresolved_conflicts, status,
+           account_cursor, transaction_cursor, round_cursor, order_cursor,
+           house_account_included, imported_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         normalized.snapshotId,
         normalized.schemaVersion,
         input.provenance,
         fingerprint,
-        JSON.stringify(result),
+        JSON.stringify({
+          complete: false,
+          importedAccountCount: 0,
+          importedTransactionCount: 0,
+          importedRoundCount: 0,
+          importedOrderCount: 0,
+        } satisfies ImportResult),
         normalized.reconciliation.accountCount,
         normalized.reconciliation.transactionCount,
         normalized.reconciliation.roundCount,
         normalized.reconciliation.orderCount,
         normalized.reconciliation.totalBalanceHundredths,
+        0,
+        'in_progress',
+        0,
+        0,
+        0,
+        0,
+        normalized.accounts.some((account) => account.kind === 'house') ? 1 : 0,
         now,
       );
-      return result;
-    });
+    }
+
+    let chunks = 0;
+    while (chunks < maxChunksPerCall) {
+      const progress = this.importRow(normalized.snapshotId);
+      if (!progress) {
+        throw new CoordinatorError('INTERNAL', 'Import progress record was not created');
+      }
+      if (progress.status === 'complete') return JSON.parse(progress.result_json) as ImportResult;
+
+      const committed = this.state.storage.transactionSync(() => {
+        const current = this.importRow(normalized.snapshotId);
+        if (!current) throw new CoordinatorError('INTERNAL', 'Import progress record disappeared');
+        if (current.status === 'complete') return false;
+        const now = Date.now();
+        if (current.account_cursor < normalized.accounts.length) {
+          const end = Math.min(current.account_cursor + chunkSize, normalized.accounts.length);
+          for (const account of normalized.accounts.slice(current.account_cursor, end)) {
+            if (account.kind === 'house') {
+              const house = this.accountRow(HOUSE_ACCOUNT_ID);
+              if (!house) {
+                throw new CoordinatorError('IMPORT_CONFLICT', 'Required house account is missing');
+              }
+              this.state.storage.sql.exec(
+                `UPDATE accounts
+                 SET line_user_id = ?, display_name = ?, balance_hundredths = ?,
+                     active = ?, kind = ?, created_at = ?, updated_at = ?
+                 WHERE player_id = ?`,
+                account.lineUserId,
+                account.displayName,
+                account.balanceHundredths,
+                account.active ? 1 : 0,
+                account.kind,
+                account.createdAt || now,
+                account.updatedAt || now,
+                HOUSE_ACCOUNT_ID,
+              );
+              if (account.balanceHundredths > 0) {
+                this.addLedgerEntry({
+                  accountId: HOUSE_ACCOUNT_ID,
+                  idempotencyKey: `import:${normalized.snapshotId}:account:${HOUSE_ACCOUNT_ID}`,
+                  deltaHundredths: account.balanceHundredths,
+                  balanceAfterHundredths: account.balanceHundredths,
+                  eventType: 'opening_balance',
+                  referenceId: normalized.snapshotId,
+                  reason: `Imported opening balance (${input.provenance})`,
+                });
+              }
+              continue;
+            }
+            this.state.storage.sql.exec(
+              `INSERT INTO accounts
+                (player_id, line_user_id, display_name, balance_hundredths, active, kind, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              account.playerId,
+              account.lineUserId,
+              account.displayName,
+              account.balanceHundredths,
+              account.active ? 1 : 0,
+              account.kind,
+              account.createdAt || now,
+              account.updatedAt || now,
+            );
+            if (account.balanceHundredths > 0) {
+              this.addLedgerEntry({
+                accountId: account.playerId,
+                idempotencyKey: `import:${normalized.snapshotId}:account:${account.playerId}`,
+                deltaHundredths: account.balanceHundredths,
+                balanceAfterHundredths: account.balanceHundredths,
+                eventType: 'opening_balance',
+                referenceId: normalized.snapshotId,
+                reason: `Imported opening balance (${input.provenance})`,
+              });
+            }
+          }
+          this.updateImportCursor(normalized.snapshotId, 'account_cursor', end);
+          return true;
+        }
+        if (current.transaction_cursor < normalized.transactions.length) {
+          const end = Math.min(
+            current.transaction_cursor + chunkSize,
+            normalized.transactions.length,
+          );
+          for (const transaction of normalized.transactions.slice(current.transaction_cursor, end)) {
+            this.state.storage.sql.exec(
+              `INSERT INTO transactions
+                (transaction_id, player_id, type, requested_amount_hundredths,
+                 actual_amount_hundredths, status, bank_name, account_number,
+                 account_name, actor_id, reason, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              transaction.transactionId,
+              transaction.playerId,
+              transaction.type,
+              transaction.requestedAmountHundredths,
+              transaction.actualAmountHundredths,
+              transaction.status,
+              transaction.bankName,
+              transaction.accountNumber,
+              transaction.accountName,
+              transaction.actorId,
+              transaction.reason,
+              transaction.createdAt || now,
+              transaction.updatedAt || now,
+            );
+          }
+          this.updateImportCursor(normalized.snapshotId, 'transaction_cursor', end);
+          return true;
+        }
+        if (current.round_cursor < normalized.rounds.length) {
+          const end = Math.min(current.round_cursor + chunkSize, normalized.rounds.length);
+          for (const round of normalized.rounds.slice(current.round_cursor, end)) {
+            this.state.storage.sql.exec(
+              `INSERT INTO rounds
+                (round_id, name, status, quote_released, target_min, target_max, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              round.roundId,
+              round.name,
+              round.status,
+              round.quoteReleased ? 1 : 0,
+              round.targetMin,
+              round.targetMax,
+              round.createdAt || now,
+              round.updatedAt || now,
+            );
+          }
+          this.updateImportCursor(normalized.snapshotId, 'round_cursor', end);
+          return true;
+        }
+        if (current.order_cursor < normalized.orders.length) {
+          const end = Math.min(current.order_cursor + chunkSize, normalized.orders.length);
+          for (const order of normalized.orders.slice(current.order_cursor, end)) {
+            this.state.storage.sql.exec(
+              `INSERT INTO orders
+                (order_number, round_id, creator_id, matcher_id, stake_hundredths,
+                 status, order_json, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              order.orderNumber,
+              order.roundId,
+              order.creatorId,
+              order.matcherId,
+              order.stakeHundredths,
+              order.status,
+              JSON.stringify(order),
+              order.createdAt || now,
+              order.settledAt || order.createdAt || now,
+            );
+          }
+          this.updateImportCursor(normalized.snapshotId, 'order_cursor', end);
+          return true;
+        }
+
+        const completed: ImportResult = {
+          complete: true,
+          importedAccountCount: normalized.accounts.length,
+          importedTransactionCount: normalized.transactions.length,
+          importedRoundCount: normalized.rounds.length,
+          importedOrderCount: normalized.orders.length,
+        };
+        this.state.storage.sql.exec(
+          `UPDATE imported_snapshots
+           SET status = 'complete', result_json = ?, imported_at = ?
+           WHERE snapshot_id = ?`,
+          JSON.stringify(completed),
+          now,
+          normalized.snapshotId,
+        );
+        return false;
+      });
+      if (!committed) {
+        const completed = this.importRow(normalized.snapshotId);
+        if (!completed) throw new CoordinatorError('INTERNAL', 'Import completion record disappeared');
+        return JSON.parse(completed.result_json) as ImportResult;
+      }
+      chunks += 1;
+    }
+
+    const partial = this.importRow(normalized.snapshotId);
+    if (!partial) throw new CoordinatorError('INTERNAL', 'Import progress record disappeared');
+    return this.importResultFromProgress(partial);
+  }
+
+  private importRow(snapshotId: string): ImportRow | undefined {
+    return this.state.storage.sql
+      .exec<ImportRow>('SELECT * FROM imported_snapshots WHERE snapshot_id = ?', snapshotId)
+      .toArray()[0];
+  }
+
+  private updateImportCursor(
+    snapshotId: string,
+    cursor: 'account_cursor' | 'transaction_cursor' | 'round_cursor' | 'order_cursor',
+    value: number,
+  ): void {
+    this.state.storage.sql.exec(
+      `UPDATE imported_snapshots SET ${cursor} = ? WHERE snapshot_id = ?`,
+      value,
+      snapshotId,
+    );
+  }
+
+  private importResultFromProgress(progress: ImportRow): ImportResult {
+    return {
+      complete: progress.status === 'complete',
+      importedAccountCount: progress.account_cursor,
+      importedTransactionCount: progress.transaction_cursor,
+      importedRoundCount: progress.round_cursor,
+      importedOrderCount: progress.order_cursor,
+    };
   }
 
   private activateAuthority(rawInput: ActivateAuthorityInput): void {
@@ -1104,6 +1525,7 @@ export class FinancialCoordinator {
     if (input.confirmation !== AUTHORITY_CONFIRMATION) {
       throw new CoordinatorError('IMPORT_CONFLICT', 'Explicit authority activation confirmation is required');
     }
+    this.ensureSchemaReady();
     const result = this.replayOrBegin('activateAuthority', input.idempotencyKey, input, () => {
       const authority = this.state.storage.sql
         .exec<AuthorityRow>('SELECT * FROM authority_state WHERE authority_id = ?', 'financial')
@@ -1119,8 +1541,12 @@ export class FinancialCoordinator {
       const imported = this.state.storage.sql
         .exec<ImportRow>('SELECT * FROM imported_snapshots WHERE snapshot_id = ?', input.snapshotId)
         .toArray()[0];
-      if (!imported || imported.unresolved_conflicts !== 0) {
-        throw new CoordinatorError('IMPORT_CONFLICT', 'Snapshot import has not been verified');
+      if (
+        !imported ||
+        imported.unresolved_conflicts !== 0 ||
+        imported.status !== 'complete'
+      ) {
+        throw new CoordinatorError('IMPORT_CONFLICT', 'Snapshot import has not been verified and completed');
       }
       if (
         input.accountCount !== imported.account_count ||
@@ -1131,7 +1557,11 @@ export class FinancialCoordinator {
         throw new CoordinatorError('IMPORT_CONFLICT', 'Activation totals do not match the imported snapshot');
       }
       const actualAccountCount = this.state.storage.sql
-        .exec<{ count: number }>("SELECT COUNT(*) AS count FROM accounts WHERE kind = 'player'")
+        .exec<{ count: number }>(
+          imported.house_account_included === 1
+            ? 'SELECT COUNT(*) AS count FROM accounts'
+            : "SELECT COUNT(*) AS count FROM accounts WHERE kind = 'player'",
+        )
         .toArray()[0]?.count ?? 0;
       const actualTransactionCount = this.state.storage.sql
         .exec<{ count: number }>('SELECT COUNT(*) AS count FROM transactions')
@@ -1149,6 +1579,23 @@ export class FinancialCoordinator {
         input.orderCount !== actualOrderCount
       ) {
         throw new CoordinatorError('IMPORT_CONFLICT', 'Activation totals do not match coordinator state');
+      }
+      const actualBalance = this.state.storage.sql
+        .exec<{ total: number | null }>(
+          'SELECT COALESCE(SUM(balance_hundredths), 0) AS total FROM accounts',
+        )
+        .toArray()[0]?.total ?? 0;
+      const importedBalance = imported.total_balance_hundredths;
+      const ledgerBalance = this.state.storage.sql
+        .exec<{ total: number | null }>(
+          'SELECT COALESCE(SUM(delta_hundredths), 0) AS total FROM ledger',
+        )
+        .toArray()[0]?.total ?? 0;
+      if (actualBalance !== importedBalance || ledgerBalance !== actualBalance) {
+        throw new CoordinatorError(
+          'IMPORT_CONFLICT',
+          'Imported account and ledger totals do not reconcile',
+        );
       }
       if (authority.active === 1) return { activated: true };
       this.state.storage.sql.exec(
@@ -1353,6 +1800,12 @@ export class FinancialCoordinator {
   }
 
   private ensureAuthorityReady(): void {
+    if (this.schemaConflicts().length > 0) {
+      throw new CoordinatorError(
+        'AUTHORITY_NOT_READY',
+        'Financial schema verification failed; authority remains closed',
+      );
+    }
     const authority = this.state.storage.sql
       .exec<AuthorityRow>(
         'SELECT active FROM authority_state WHERE authority_id = ?',
