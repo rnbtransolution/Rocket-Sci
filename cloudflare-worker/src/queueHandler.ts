@@ -702,13 +702,33 @@ async function handleCreateOrder(
   // 6. Send Order Flex to Group Chat
   const flexCard = generateOrderFlex(newOrder);
   let cardDispatched = false;
+  let replySuccess = false;
+  let pushSuccess = false;
+
   if (groupId && replyToken) {
-    cardDispatched = await replyToLine(replyToken, flexCard, env, false);
+    replySuccess = await replyToLine(replyToken, flexCard, env, false);
+    cardDispatched = replySuccess;
   }
   if (!cardDispatched && targetGroupId) {
     const pushRes = await pushToLine(targetGroupId, flexCard, env);
-    cardDispatched = !!pushRes.success;
+    pushSuccess = !!pushRes.success;
+    cardDispatched = pushSuccess;
   }
+
+  try {
+    await env.KV_CACHE.put('LAST_ORDER_CREATE_DEBUG', JSON.stringify({
+      orderNumber,
+      cmd: text,
+      amount,
+      userId,
+      groupId,
+      targetGroupId,
+      cardDispatched,
+      replySuccess,
+      pushSuccess,
+      time: new Date().toISOString()
+    }));
+  } catch (_) {}
 
   // 7. Send Confirmation Message to Player (always Flex card in DM)
   const confirmFlex = isPreQuote
@@ -1390,7 +1410,7 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
     if (cached) {
       try { list = JSON.parse(cached); } catch (_) {}
     }
-    const idx = list.findIndex(p => p.lineUserId === profile.lineUserId || (profile.shortId && (p.shortId === profile.shortId || p.id === profile.shortId)));
+    const otherPlayers = list.filter(p => p.lineUserId !== profile.lineUserId && (!profile.shortId || (p.shortId !== profile.shortId && p.id !== profile.shortId)));
     const entry = {
       id: profile.shortId || profile.lineUserId,
       name: profile.displayName || 'ผู้เล่น',
@@ -1405,13 +1425,9 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
       registeredAt: profile.registeredAt || Date.now(),
       updatedAt: profile.updatedAt,
     };
-    if (idx >= 0) {
-      list[idx] = { ...list[idx], ...entry };
-    } else {
-      list.push(entry);
-    }
+    const updatedList = [...otherPlayers, entry];
     // Cap the list document to keep the KV value well under the 25MB limit
-    await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(list.slice(-500)));
+    await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(updatedList.slice(-500)));
 
     // Offload sync to Google Sheets in background — throttled to 1 write/min/user
     // so bet-storm balance writes never pile up on slow GAS execution.
@@ -1522,17 +1538,7 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
   const cached = await env.KV_CACHE.get(cacheKey);
   let profile = cached ? (JSON.parse(cached) as PlayerProfile) : null;
 
-  // 2. Check PLAYERS_LIST for existing player (admin top-up or earlier registration)
-  let playersListEntry: any = null;
-  try {
-    const listRaw = await env.KV_CACHE.get('PLAYERS_LIST');
-    if (listRaw) {
-      const list = JSON.parse(listRaw) as any[];
-      playersListEntry = list.find((p: any) => p.lineUserId === userId || p.shortId === shortId || p.id === shortId || p.id === userId) || null;
-    }
-  } catch (_) {}
-
-  // 3. Also check shortId key if direct profile not found
+  // 2. Also check shortId key if direct profile not found
   if (!profile) {
     try {
       const shortCached = await env.KV_CACHE.get(`USER_${shortId}`);
@@ -1542,37 +1548,39 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
     } catch (_) {}
   }
 
-  // If existing profile was found either directly, via shortId, or via PLAYERS_LIST:
-  if (profile || playersListEntry) {
-    const base = profile || (playersListEntry as PlayerProfile);
-    let effectiveBalance = Number(base.balance) || 0;
-    if (playersListEntry && playersListEntry.balance !== undefined) {
-      const listBal = Number(playersListEntry.balance) || 0;
-      const listUpdated = Number(playersListEntry.updatedAt) || 0;
-      const profUpdated = Number(profile?.updatedAt) || 0;
-      if (listUpdated >= profUpdated || listBal > effectiveBalance) {
-        effectiveBalance = listBal;
-      }
-    }
+  // If found in direct KV keys, ensure canonical links and return authoritative profile
+  if (profile) {
+    if (!profile.shortId) profile.shortId = shortId;
+    if (!profile.lineUserId) profile.lineUserId = userId;
+    return profile;
+  }
 
-    const mergedProfile: PlayerProfile = {
-      ...base,
+  // 3. Fallback to PLAYERS_LIST only if profile not yet in direct KV
+  let playersListEntry: any = null;
+  try {
+    const listRaw = await env.KV_CACHE.get('PLAYERS_LIST');
+    if (listRaw) {
+      const list = JSON.parse(listRaw) as any[];
+      playersListEntry = list.find((p: any) => p.lineUserId === userId || p.shortId === shortId || p.id === shortId || p.id === userId) || null;
+    }
+  } catch (_) {}
+
+  if (playersListEntry) {
+    const restoredProfile: PlayerProfile = {
       shortId,
       lineUserId: userId,
-      displayName: base.displayName || playersListEntry?.name || 'ผู้เล่น',
-      balance: effectiveBalance,
-      bankName: base.bankName || playersListEntry?.bankName || '',
-      accountNumber: base.accountNumber || playersListEntry?.bankAccount || playersListEntry?.accountNumber || '',
-      accountName: base.accountName || playersListEntry?.accountName || base.displayName || 'ผู้เล่น',
-      updatedAt: Date.now(),
-      registeredAt: base.registeredAt || playersListEntry?.registeredAt || Date.now(),
+      displayName: playersListEntry.name || playersListEntry.displayName || 'ผู้เล่น',
+      balance: Number(playersListEntry.balance) || 0,
+      bankName: playersListEntry.bankName || '',
+      accountNumber: playersListEntry.bankAccount || playersListEntry.accountNumber || '',
+      accountName: playersListEntry.accountName || playersListEntry.displayName || playersListEntry.name || 'ผู้เล่น',
+      updatedAt: Number(playersListEntry.updatedAt) || Date.now(),
+      registeredAt: Number(playersListEntry.registeredAt) || Date.now(),
     };
-
-    // Ensure links are active
-    await env.KV_CACHE.put(cacheKey, JSON.stringify(mergedProfile));
-    await env.KV_CACHE.put(`USER_${shortId}`, JSON.stringify(mergedProfile));
+    await env.KV_CACHE.put(cacheKey, JSON.stringify(restoredProfile));
+    await env.KV_CACHE.put(`USER_${shortId}`, JSON.stringify(restoredProfile));
     await env.KV_CACHE.put(`RAW_LINE_${shortId}`, userId);
-    return mergedProfile;
+    return restoredProfile;
   }
 
   // 4. Truly new player: fetch LINE user display name via Messaging API

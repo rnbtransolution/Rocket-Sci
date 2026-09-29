@@ -185,7 +185,13 @@ export default {
           })
         );
 
-        await interactiveProcessing;
+        // Immediate HTTP 200 OK (< 15ms) to satisfy LINE Webhook 1-second timeout SLA.
+        // ctx.waitUntil keeps background isolate alive to finish all processing, KV updates & LINE messages.
+        if (ctx && typeof ctx.waitUntil === 'function') {
+          ctx.waitUntil(interactiveProcessing);
+        } else {
+          await interactiveProcessing;
+        }
       }
 
       return new Response(JSON.stringify({ status: 'ok' }), {
@@ -1353,6 +1359,63 @@ export default {
             await pushToLine(activeGroupId, orderFlex, env);
           }
           result = { success: true, order: newOrder };
+        } else if (functionName === 'adminGetDebugLogs') {
+          const [lastOrderDebug, lastLineError, lastLineSuccess, lastWebhookError, lastDelivery] = await Promise.all([
+            env.KV_CACHE.get('LAST_ORDER_CREATE_DEBUG'),
+            env.KV_CACHE.get('LAST_LINE_ERROR'),
+            env.KV_CACHE.get('LAST_LINE_SUCCESS'),
+            env.KV_CACHE.get('LAST_WEBHOOK_ERROR'),
+            env.KV_CACHE.get('LAST_DELIVERY_DEBUG'),
+          ]);
+          result = {
+            lastOrderDebug: lastOrderDebug ? JSON.parse(lastOrderDebug) : null,
+            lastLineError: lastLineError ? JSON.parse(lastLineError) : null,
+            lastLineSuccess: lastLineSuccess ? JSON.parse(lastLineSuccess) : null,
+            lastWebhookError: lastWebhookError ? JSON.parse(lastWebhookError) : null,
+            lastDelivery: lastDelivery ? JSON.parse(lastDelivery) : null,
+          };
+        } else if (functionName === 'adminResetTestData') {
+          // 1. Clean pending bets list
+          await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]));
+
+          // 2. Fix player balance to 1900 and deduplicate PLAYERS_LIST
+          const targetUserId = 'Ua34bcbb1d365c657cc1a7f3576c76e26';
+          const targetShortId = 'PLC76E26';
+          const cleanProfile = {
+            shortId: targetShortId,
+            lineUserId: targetUserId,
+            displayName: 'ITT (อิท)',
+            balance: 1900,
+            bankName: 'GSB',
+            accountNumber: '085739573623',
+            accountName: 'เอกราช ลครศรี',
+            registeredAt: 1790662664117,
+            updatedAt: Date.now(),
+          };
+          await env.KV_CACHE.put(`USER_${targetUserId}`, JSON.stringify(cleanProfile));
+          await env.KV_CACHE.put(`USER_${targetShortId}`, JSON.stringify(cleanProfile));
+          await env.KV_CACHE.put(`RAW_LINE_${targetShortId}`, targetUserId);
+
+          const listRaw = await env.KV_CACHE.get('PLAYERS_LIST');
+          let list = listRaw ? JSON.parse(listRaw) : [];
+          if (!Array.isArray(list)) list = [];
+          const deduped = list.filter((p: any) => p.lineUserId !== targetUserId && p.shortId !== targetShortId && p.id !== targetShortId);
+          deduped.push({
+            id: targetShortId,
+            name: cleanProfile.displayName,
+            displayName: cleanProfile.displayName,
+            shortId: targetShortId,
+            lineUserId: targetUserId,
+            balance: 1900,
+            bankName: cleanProfile.bankName,
+            accountNumber: cleanProfile.accountNumber,
+            bankAccount: cleanProfile.accountNumber,
+            accountName: cleanProfile.accountName,
+            registeredAt: cleanProfile.registeredAt,
+            updatedAt: cleanProfile.updatedAt,
+          });
+          await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(deduped));
+          result = { success: true, restoredBalance: 1900, pendingCleared: true };
         }
 
         return new Response(JSON.stringify({ success: true, data: result }), {
