@@ -61,8 +61,11 @@ export function createCoordinatorClient(env: Env, coordinatorName = 'financial-c
     getAccounts: (playerIds) => send('getAccounts', { playerIds }),
     getLedgerEntries: (playerId) => send('getLedgerEntries', { playerId }),
     getSnapshot: () => send('getSnapshot'),
+    listAccounts: (input) => send('listAccounts', input ?? {}),
+    listTransactions: (input) => send('listTransactions', input ?? {}),
     getOrder: (orderNumber) => send('getOrder', { orderNumber }),
-    getOrdersByStatus: (statuses) => send('getOrdersByStatus', { statuses }),
+    getOrdersByStatus: (statuses, limit) =>
+      send('getOrdersByStatus', limit === undefined ? { statuses } : { statuses, limit }),
     drainProjections: () => send<ProjectionDrainResult>('drainProjections'),
     createPlayer: (input) => send('createPlayer', input),
     adjustBalance: (input) => send('adjustBalance', input),

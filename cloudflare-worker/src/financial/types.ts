@@ -106,6 +106,31 @@ export function validateStakeHundredths(value: unknown): PointHundredths {
   return stake;
 }
 
+export const MAX_FINAL_SECONDS = 3600;
+
+/**
+ * Final rocket air time is persisted as a REAL number of seconds and compared
+ * against REAL order ranges, so tenths-of-a-second input from the dashboard is
+ * supported. Finer or malformed values are rejected before any round mutation.
+ * Returns the value normalized to exact tenths to avoid float dust in storage.
+ */
+export function validateFinalSeconds(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > MAX_FINAL_SECONDS) {
+    throw new CoordinatorError(
+      'INVALID_INPUT',
+      `finalSeconds must be a finite number between 0 and ${MAX_FINAL_SECONDS}`,
+    );
+  }
+  const tenths = Math.round(value * 10);
+  if (Math.abs(value * 10 - tenths) > 1e-6) {
+    throw new CoordinatorError(
+      'INVALID_INPUT',
+      'finalSeconds supports tenths-of-a-second precision only',
+    );
+  }
+  return tenths / 10;
+}
+
 export interface LedgerAccount {
   readonly playerId: string;
   readonly lineUserId: string | null;
@@ -186,6 +211,27 @@ export interface DashboardSnapshot {
   readonly rounds: RocketRound[];
   readonly orders: LedgerOrder[];
   readonly totalBalanceHundredths: PointHundredths;
+}
+
+export interface Page<T> {
+  readonly items: T[];
+  readonly nextCursor: string | null;
+}
+
+export const ACCOUNT_PAGE_MAX = 500;
+export const TRANSACTION_PAGE_DEFAULT = 100;
+export const TRANSACTION_PAGE_MAX = 500;
+export const ORDER_STATUS_SCAN_DEFAULT = 250;
+export const ORDER_STATUS_SCAN_MAX = 1000;
+
+export interface ListAccountsInput {
+  readonly limit?: number;
+  readonly cursor?: string;
+}
+
+export interface ListTransactionsInput {
+  readonly limit?: number;
+  readonly cursor?: string;
 }
 
 export interface ProjectionDrainResult {
@@ -405,8 +451,10 @@ export interface CoordinatorClient {
   getAccounts(playerIds: string[]): Promise<LedgerAccount[]>;
   getLedgerEntries(playerId: string): Promise<LedgerEntry[]>;
   getSnapshot(): Promise<DashboardSnapshot>;
+  listAccounts(input?: ListAccountsInput): Promise<Page<LedgerAccount>>;
+  listTransactions(input?: ListTransactionsInput): Promise<Page<FinancialTransaction>>;
   getOrder(orderNumber: string): Promise<LedgerOrder | null>;
-  getOrdersByStatus(statuses: LedgerOrderStatus[]): Promise<LedgerOrder[]>;
+  getOrdersByStatus(statuses: LedgerOrderStatus[], limit?: number): Promise<LedgerOrder[]>;
   drainProjections(): Promise<ProjectionDrainResult>;
   createPlayer(input: CreatePlayerInput): Promise<LedgerAccount>;
   adjustBalance(input: AdjustBalanceInput): Promise<LedgerAccount>;

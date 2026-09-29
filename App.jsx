@@ -5,18 +5,21 @@ import {
   isValidLoginSession,
   requireAdminToken,
 } from './frontendAuth.js';
+import {
+  DASHBOARD_PAGE_LIMITS,
+  buildRunBody,
+  createRequestId,
+  isSupportedFinalTime,
+} from './frontendRequests.js';
 import { 
-  MessageSquare, 
   User, 
   Send, 
-  Upload, 
   CheckCircle, 
   AlertTriangle, 
   XCircle, 
   Rocket, 
   Layers, 
   Clock, 
-  DollarSign, 
   Database,
   Users,
   Settings,
@@ -187,7 +190,12 @@ export default function App() {
   };
   const API_BASE_URL = getApiBaseUrl();
 
-  const runBackendFunction = useCallback(async (functionName, args = []) => {
+  const runBackendFunction = useCallback(async (functionName, args = [], suppliedRequestId) => {
+    const requestId = suppliedRequestId ?? (
+      functionName === 'adminLogin' || functionName === 'getDashboardData' || functionName === 'getP2PResults'
+        ? undefined
+        : createRequestId()
+    );
     const token = typeof window !== 'undefined' ? sessionStorage.getItem('rocket_admin_token') : null;
     requireAdminToken(token, functionName);
     if (isGAS) {
@@ -211,7 +219,7 @@ export default function App() {
               });
 
             if (typeof runner.executeAdminAction === 'function') {
-              runner.executeAdminAction(functionName, args, token);
+              runner.executeAdminAction(functionName, args, token, requestId);
             } else {
               reject(new Error('ไม่พบฟังก์ชัน executeAdminAction'));
             }
@@ -231,7 +239,7 @@ export default function App() {
       const res = await fetch(targetUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ functionName, args }),
+        body: JSON.stringify(buildRunBody(functionName, args, requestId)),
       });
 
       const contentType = res.headers.get('content-type') || '';
@@ -508,7 +516,7 @@ export default function App() {
     let cancelled = false;
     const fetchDashboard = async () => {
       try {
-        const data = await runBackendFunction('getDashboardData', []);
+        const data = await runBackendFunction('getDashboardData', [DASHBOARD_PAGE_LIMITS]);
         if (!cancelled) applyData(data);
       } catch (e) {
         console.warn('[Dashboard API Polling Note]:', e?.message || e);
@@ -1625,21 +1633,12 @@ export default function App() {
     addToast(txId.startsWith('WD') ? `แอดมินอนุมัติคำขอถอนเงินยอด ${targetTx.requestedAmount} THB โอนเงินแล้วเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)` : `แอดมินอนุมัติเครดิตเติมเงินยอด ${approvedAmount} THB แมนนวลเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)`, 'success');
 
     // Run backend in background
-    if (isGAS) {
-      runBackendFunction('adminApproveTransaction', [txId]).catch((err) => {
-          console.error('[GAS Approve Error]:', err);
-          // Rollback on failure
-          setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
-          addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
-        });
-    } else {
-      runBackendFunction('adminApproveTransaction', [txId]).catch(err => {
-        console.error('[Background Approve Error]:', err);
-        // Rollback on failure
-        setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
-        addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
-      });
-    }
+    const approveRequestId = createRequestId();
+    runBackendFunction('adminApproveTransaction', [txId], approveRequestId).catch((err) => {
+      console.error('[Approve Error]:', err);
+      setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
+      addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
+    });
   };
 
   const handleAdminRejectReview = (txId, reason) => {
@@ -1662,26 +1661,17 @@ export default function App() {
     }
 
     // Run backend in background
-    if (isGAS) {
-      runBackendFunction('adminRejectTransaction', [txId, reason]).catch((err) => {
-          console.error('[GAS Reject Error]:', err);
-          // Rollback on failure
-          setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
-          addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
-        });
-    } else {
-      runBackendFunction('adminRejectTransaction', [txId, reason]).catch(err => {
-        console.error('[Background Reject Error]:', err);
-        // Rollback on failure
-        setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
-        addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
-      });
-    }
+    const rejectRequestId = createRequestId();
+    runBackendFunction('adminRejectTransaction', [txId, reason], rejectRequestId).catch((err) => {
+      console.error('[Reject Error]:', err);
+      setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
+      addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
+    });
   };
 
   // Submit manual telemetry flight result (No flight animation, resolve immediately)
   const handleSubmitOnsiteResult = (finalTime) => {
-    if (!finalTime || finalTime <= 0) {
+    if (!isSupportedFinalTime(finalTime)) {
       addToast('⚠️ กรุณาระบุเวลาผลการบินของบั้งไฟให้ถูกต้อง', 'warning');
       return;
     }
@@ -1713,7 +1703,8 @@ export default function App() {
     setFlightLogs(prev => [`💥 Telemetry link settled. Final Air Time: ${finalTime}s.`, ...prev]);
 
     try {
-      const data = await runBackendFunction('adminResolveBets', [finalTime, tMin, tMax]);
+      const resolveRequestId = createRequestId();
+      const data = await runBackendFunction('adminResolveBets', [finalTime, tMin, tMax], resolveRequestId);
       const committed = validateSettlementResponse(data);
       setPlayers(committed.dashboard.players);
       setTransactions(committed.dashboard.transactions);
@@ -2400,7 +2391,7 @@ export default function App() {
 
                 {/* Settle Round Primary Button */}
                 <button
-                  onClick={() => handleSubmitOnsiteResult(Number(customRocketTime) || 355)}
+                  onClick={() => handleSubmitOnsiteResult(Number(customRocketTime))}
                   className="w-full py-3.5 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider rounded-lg flex items-center justify-center gap-2 active:scale-95 transition-all font-heading cursor-pointer"
                 >
                   <CheckCircle size={16} />
@@ -2442,9 +2433,17 @@ export default function App() {
                           <span className="text-slate-400">{f.timestamp}</span>
                           <span className="font-bold text-slate-800">เวลา: {f.duration}s</span>
                           <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                            f.duration < targetTime ? 'bg-sky-50 text-sky-700 border border-sky-100' : 'bg-rose-50 text-rose-700 border border-rose-100'
+                            f.duration < Number(targetMin)
+                              ? 'bg-sky-50 text-sky-700 border border-sky-100'
+                              : f.duration > Number(targetMax)
+                                ? 'bg-rose-50 text-rose-700 border border-rose-100'
+                                : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
                           }`}>
-                            {f.duration < targetTime ? 'LOW' : 'HIGH'}
+                            {f.duration < Number(targetMin)
+                              ? 'LOW'
+                              : f.duration > Number(targetMax)
+                                ? 'HIGH'
+                                : 'RANGE'}
                           </span>
                           <span className="text-slate-500">เคลียร์ {f.betsResolved} บิล</span>
                         </div>

@@ -107,20 +107,23 @@ it('fails admin login explicitly when the Worker credential is missing', async (
 });
 
 it('returns an explicit dashboard failure when the player snapshot fails', async () => {
-  let snapshotCalls = 0;
+  let accountReads = 0;
   const coordinatorStub = {
     fetch: async (_input: RequestInfo | URL, init?: RequestInit) => {
       const { operation } = JSON.parse(String(init?.body));
       if (operation === 'getOrdersByStatus') return Response.json({ result: [] });
-      if (operation === 'getSnapshot') {
-        snapshotCalls++;
-        if (snapshotCalls === 1) {
+      if (operation === 'listAccounts') {
+        accountReads++;
+        if (accountReads === 1) {
           return Response.json(
             { error: { code: 'INTERNAL', message: 'Snapshot temporarily unavailable' } },
             { status: 500 },
           );
         }
-        return Response.json({ result: { accounts: [], transactions: [], totalBalanceHundredths: 0 } });
+        return Response.json({ result: { items: [], nextCursor: null } });
+      }
+      if (operation === 'listTransactions') {
+        return Response.json({ result: { items: [], nextCursor: null } });
       }
       throw new Error(`Unexpected coordinator operation: ${operation}`);
     },
@@ -156,7 +159,7 @@ it('returns an explicit dashboard failure when the player snapshot fails', async
   expect(await response.json()).toMatchObject({
     error: { code: 'INTERNAL', message: 'Snapshot temporarily unavailable' },
   });
-  expect(snapshotCalls).toBe(1);
+  expect(accountReads).toBe(1);
 });
 
 it('keeps the active Worker round when replacement is blocked by an unsettled match', async () => {
@@ -509,4 +512,213 @@ it('voids the active dashboard round through the coordinator', async () => {
 
   expect((await adminRun('adminVoidRound', [])).status).toBe(200);
   expect(await client.getAccount(playerId)).toMatchObject({ balanceHundredths: 10_000 });
+});
+
+it('never aliases a LINE user to another player account when short-ID suffixes collide', async () => {
+  const client = createCoordinatorClient(env);
+  fetchMock
+    .get('https://api.line.me')
+    .intercept({ path: /.*/, method: 'GET' })
+    .reply(200, { displayName: 'Collision User' })
+    .persist();
+  fetchMock
+    .get('https://api.line.me')
+    .intercept({ path: /.*/, method: 'POST' })
+    .reply(200, {})
+    .persist();
+
+  const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase();
+  const lineA = `U${'a'.repeat(26)}${suffix}`;
+  const lineB = `U${'b'.repeat(26)}${suffix}`;
+  const playerAId = `PL${suffix}`;
+
+  const createA = await adminRun('adminCreatePlayer', [lineA, 'Player A', 100], `collision-create-a-${suffix}`);
+  expect(createA.status, JSON.stringify(await createA.clone().json())).toBe(200);
+  expect(await client.getAccount(playerAId)).toMatchObject({ lineUserId: lineA });
+
+  const balanceEventB = {
+    type: 'message',
+    timestamp: Date.now(),
+    webhookEventId: `collision-b-${suffix}`,
+    replyToken: `collision-token-${suffix}`,
+    source: { type: 'user', userId: lineB },
+    message: { id: `collision-msg-${suffix}`, type: 'text', text: 'ยอด' },
+  };
+  expect((await signedWebhook(balanceEventB)).status).toBe(200);
+
+  const accountB = await client.getAccountByLineUserId(lineB);
+  expect(accountB).not.toBeNull();
+  expect(accountB!.playerId).not.toBe(playerAId);
+  expect(await client.getAccount(playerAId)).toMatchObject({
+    lineUserId: lineA,
+    balanceHundredths: 10_000,
+  });
+  expect(await env.KV_CACHE.get(`RAW_LINE_${playerAId}`)).toBe(lineA);
+
+  // A repeated event from B must resolve to the same dedicated account.
+  expect((await signedWebhook({ ...balanceEventB, webhookEventId: `collision-b2-${suffix}` })).status).toBe(200);
+  expect((await client.getAccountByLineUserId(lineB))!.playerId).toBe(accountB!.playerId);
+});
+
+it('ignores a cached short ID that is already claimed by another LINE user', async () => {
+  const client = createCoordinatorClient(env);
+  fetchMock
+    .get('https://api.line.me')
+    .intercept({ path: /.*/, method: 'GET' })
+    .reply(200, { displayName: 'Stale Cache User' })
+    .persist();
+  fetchMock
+    .get('https://api.line.me')
+    .intercept({ path: /.*/, method: 'POST' })
+    .reply(200, {})
+    .persist();
+
+  const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase();
+  const ownerLine = `U${'c'.repeat(26)}${suffix}`;
+  const staleLine = `U${'d'.repeat(26)}${suffix}`;
+  const ownerPlayerId = `PL${suffix}`;
+
+  const createOwner = await adminRun('adminCreatePlayer', [ownerLine, 'Cache Owner', 0], `stale-cache-owner-${suffix}`);
+  expect(createOwner.status, JSON.stringify(await createOwner.clone().json())).toBe(200);
+  expect(await client.getAccount(ownerPlayerId)).toMatchObject({ lineUserId: ownerLine });
+
+  // Stale cache: this user's KV profile points at another player's short ID.
+  await env.KV_CACHE.put(`USER_${staleLine}`, JSON.stringify({
+    shortId: ownerPlayerId,
+    lineUserId: staleLine,
+    displayName: 'Stale Cache User',
+    balance: 0,
+    registeredAt: Date.now(),
+    updatedAt: Date.now(),
+  }));
+
+  const event = {
+    type: 'message',
+    timestamp: Date.now(),
+    webhookEventId: `stale-cache-${suffix}`,
+    replyToken: `stale-cache-token-${suffix}`,
+    source: { type: 'user', userId: staleLine },
+    message: { id: `stale-cache-msg-${suffix}`, type: 'text', text: 'ยอด' },
+  };
+  expect((await signedWebhook(event)).status).toBe(200);
+
+  const account = await client.getAccountByLineUserId(staleLine);
+  expect(account).not.toBeNull();
+  expect(account!.playerId).not.toBe(ownerPlayerId);
+  expect(await client.getAccount(ownerPlayerId)).toMatchObject({ lineUserId: ownerLine });
+});
+
+it('reconciles a repeated adminCreatePlayer for an already-registered LINE user', async () => {
+  const client = createCoordinatorClient(env);
+  const lineId = `U${crypto.randomUUID().replaceAll('-', '')}`;
+  const first = await adminRun('adminCreatePlayer', [lineId, 'Reconciled Player', 25], `reconcile-create-${crypto.randomUUID()}`);
+  expect(first.status, JSON.stringify(await first.clone().json())).toBe(200);
+  const firstBody = await first.json() as { data: { player: { shortId: string } } };
+  const playerId = firstBody.data.player.shortId;
+  const account = await client.getAccount(playerId);
+  expect(account).toMatchObject({ lineUserId: lineId, balanceHundredths: 2_500 });
+
+  const duplicate = await adminRun('adminCreatePlayer', [lineId, 'Reconciled Player', 25], `reconcile-create-${crypto.randomUUID()}`);
+  expect(duplicate.status, JSON.stringify(await duplicate.clone().json())).toBe(200);
+  const duplicateBody = await duplicate.json() as { data: { player: { shortId: string } } };
+  expect(duplicateBody.data.player.shortId).toBe(playerId);
+  expect((await client.getLedgerEntries(playerId))).toHaveLength(1);
+});
+
+it('rejects a malformed final time without closing the round, then settles a retried request once', async () => {
+  const client = createCoordinatorClient(env);
+  const tag = crypto.randomUUID();
+  const requestId = `worker-settle-fractional-${tag}`;
+  expect((await adminRun('adminOpenRound', [`Fractional Round ${tag}`], `fractional-open-${tag}`)).status).toBe(200);
+  const activeRound = JSON.parse((await env.KV_CACHE.get('ACTIVE_ROUND'))!);
+
+  const creatorId = `player-frac-creator-${tag}`;
+  const matcherId = `player-frac-matcher-${tag}`;
+  for (const playerId of [creatorId, matcherId]) {
+    await client.createPlayer({
+      idempotencyKey: `${playerId}-opening`,
+      playerId,
+      lineUserId: `${playerId}-line`,
+      displayName: 'Fractional Participant',
+      openingBalanceHundredths: 10_000,
+    });
+  }
+  const order = await client.createOrder({
+    idempotencyKey: `${tag}-order`,
+    roundId: activeRound.roundId,
+    creatorId,
+    side: 'low',
+    stakeHundredths: 1_000,
+    betType: 'custom_range',
+    rangeMin: 330,
+    rangeMax: 380,
+    creatorName: 'Fractional Creator',
+    groupId: 'fractional-test-group',
+  });
+  await client.matchOrder({
+    idempotencyKey: `${tag}-match`,
+    orderNumber: order.orderNumber,
+    matcherId,
+    stakeHundredths: 1_000,
+    matcherName: 'Fractional Matcher',
+  });
+
+  // Malformed sub-tenths time: rejected and must not close the round or
+  // strand the matched order.
+  const malformed = await adminRun('adminResolveBets', [355.55, 330, 380], requestId);
+  expect(malformed.status).toBe(400);
+  const roundAfterReject = await client.getSnapshot();
+  expect(roundAfterReject.rounds.find((round) => round.roundId === activeRound.roundId))
+    .toMatchObject({ status: 'active' });
+  expect(await client.getOrder(order.orderNumber)).toMatchObject({ status: 'matched', finalSeconds: null });
+  expect(JSON.parse((await env.KV_CACHE.get('ACTIVE_ROUND'))!).status).toBe('ACTIVE');
+
+  // Corrected retry with the same request ID settles exactly once.
+  const settled = await adminRun('adminResolveBets', [355.5, 330, 380], requestId);
+  expect(settled.status, JSON.stringify(await settled.clone().json())).toBe(200);
+  const settledBody = await settled.json() as { data: { finalTime: number; resolvedCount: number } };
+  expect(settledBody.data.finalTime).toBe(355.5);
+  expect(settledBody.data.resolvedCount).toBe(1);
+
+  const creatorEntriesAfterSettle = (await client.getLedgerEntries(creatorId)).length;
+  const matcherEntriesAfterSettle = (await client.getLedgerEntries(matcherId)).length;
+
+  // A replayed retry repeats no ledger effects.
+  const replay = await adminRun('adminResolveBets', [355.5, 330, 380], requestId);
+  expect(replay.status).toBe(200);
+  expect((await client.getLedgerEntries(creatorId)).length).toBe(creatorEntriesAfterSettle);
+  expect((await client.getLedgerEntries(matcherId)).length).toBe(matcherEntriesAfterSettle);
+  expect(await client.getAccount(creatorId)).toMatchObject({ balanceHundredths: 10_000 });
+  expect(await client.getAccount(matcherId)).toMatchObject({ balanceHundredths: 10_000 });
+  expect(await client.getOrder(order.orderNumber)).toMatchObject({
+    status: 'settled',
+    finalSeconds: 355.5,
+    winnerSide: 'draw',
+  });
+});
+
+it('serves bounded dashboard reads with page info under repeated polling', async () => {
+  for (let poll = 0; poll < 2; poll++) {
+    const response = await adminRun('getDashboardData', [{ playersLimit: 1, transactionsLimit: 1 }]);
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+    const body = await response.json() as { data: any };
+    expect(body.data.players.length).toBeLessThanOrEqual(1);
+    expect(body.data.transactions.length).toBeLessThanOrEqual(1);
+    expect(body.data.pageInfo).toMatchObject({
+      playersLimit: 1,
+      transactionsLimit: 1,
+      playersReturned: body.data.players.length,
+      transactionsReturned: body.data.transactions.length,
+    });
+    expect(body.data.pageInfo.transactionsNextCursor === null ||
+      typeof body.data.pageInfo.transactionsNextCursor === 'string').toBe(true);
+  }
+
+  // Default polling stays bounded even with an unbounded backing store.
+  const unbounded = await adminRun('getDashboardData', []);
+  expect(unbounded.status).toBe(200);
+  const unboundedBody = await unbounded.json() as { data: any };
+  expect(unboundedBody.data.players.length).toBeLessThanOrEqual(500);
+  expect(unboundedBody.data.transactions.length).toBeLessThanOrEqual(100);
+  expect(unboundedBody.data.pageInfo).toMatchObject({ playersLimit: 500, transactionsLimit: 100 });
 });

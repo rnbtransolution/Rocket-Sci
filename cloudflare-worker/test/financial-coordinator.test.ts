@@ -1027,3 +1027,273 @@ it('refuses to replace a round while matched orders remain unsettled', async () 
   )).toHaveLength(2);
   expect(await client.getOrder(matchedCustom.orderNumber)).toMatchObject({ status: 'settled' });
 });
+
+it('settles fractional final times at tenths precision across range boundaries', async () => {
+  const client = createCoordinatorClient(env);
+  const cases = [
+    { key: 'below-range', finalSeconds: 329.9, side: 'low' as const, winnerSide: 'low' as const },
+    { key: 'at-min', finalSeconds: 330, side: 'low' as const, winnerSide: 'draw' as const },
+    { key: 'inside-range', finalSeconds: 355.5, side: 'low' as const, winnerSide: 'draw' as const },
+    { key: 'at-max', finalSeconds: 380, side: 'low' as const, winnerSide: 'draw' as const },
+    { key: 'above-range', finalSeconds: 380.1, side: 'low' as const, winnerSide: 'high' as const },
+  ];
+
+  for (const scenario of cases) {
+    const roundId = `round-tenths-${scenario.key}-${crypto.randomUUID()}`;
+    const creatorId = `player-tenths-creator-${scenario.key}-${crypto.randomUUID()}`;
+    const matcherId = `player-tenths-matcher-${scenario.key}-${crypto.randomUUID()}`;
+    for (const [playerId, displayName] of [[creatorId, 'Tenths Creator'], [matcherId, 'Tenths Matcher']] as const) {
+      await client.createPlayer({
+        idempotencyKey: `${playerId}-opening`,
+        playerId,
+        lineUserId: `${playerId}-line`,
+        displayName,
+        openingBalanceHundredths: 10_000,
+      });
+    }
+    await client.openRound({ idempotencyKey: `${roundId}-open`, roundId, name: 'Tenths Round' });
+    await client.releaseQuote({ idempotencyKey: `${roundId}-quote`, roundId, targetMin: 330, targetMax: 380 });
+    const order = await client.createOrder({
+      idempotencyKey: `${roundId}-order`,
+      roundId,
+      creatorId,
+      side: scenario.side,
+      stakeHundredths: 10_000,
+      betType: 'pre_quote',
+      rangeMin: 1,
+      rangeMax: 2,
+      creatorName: 'Tenths Creator',
+      groupId: `${roundId}-group`,
+    });
+    await client.matchOrder({
+      idempotencyKey: `${roundId}-match`,
+      orderNumber: order.orderNumber,
+      matcherId,
+      stakeHundredths: 10_000,
+      matcherName: 'Tenths Matcher',
+    });
+
+    const settled = await client.resolveRound({
+      idempotencyKey: `${roundId}-resolve`,
+      roundId,
+      finalSeconds: scenario.finalSeconds,
+    });
+
+    expect(settled.orders).toEqual([expect.objectContaining({
+      orderNumber: order.orderNumber,
+      status: 'settled',
+      winnerSide: scenario.winnerSide,
+    })]);
+    expect(await client.getOrder(order.orderNumber)).toMatchObject({
+      finalSeconds: scenario.finalSeconds,
+      winnerSide: scenario.winnerSide,
+    });
+  }
+});
+
+it('rejects unsupported final times without touching round or order state', async () => {
+  const client = createCoordinatorClient(env);
+  const roundId = `round-invalid-time-${crypto.randomUUID()}`;
+  const creatorId = `player-invalid-time-creator-${crypto.randomUUID()}`;
+  const matcherId = `player-invalid-time-matcher-${crypto.randomUUID()}`;
+  for (const playerId of [creatorId, matcherId]) {
+    await client.createPlayer({
+      idempotencyKey: `${playerId}-opening`,
+      playerId,
+      lineUserId: `${playerId}-line`,
+      displayName: 'Invalid Time Participant',
+      openingBalanceHundredths: 10_000,
+    });
+  }
+  await client.openRound({ idempotencyKey: `${roundId}-open`, roundId, name: 'Invalid Time Round' });
+  await client.releaseQuote({ idempotencyKey: `${roundId}-quote`, roundId, targetMin: 330, targetMax: 380 });
+  const order = await client.createOrder({
+    idempotencyKey: `${roundId}-order`,
+    roundId,
+    creatorId,
+    side: 'low',
+    stakeHundredths: 10_000,
+    betType: 'pre_quote',
+    rangeMin: 1,
+    rangeMax: 2,
+    creatorName: 'Invalid Time Creator',
+    groupId: `${roundId}-group`,
+  });
+  await client.matchOrder({
+    idempotencyKey: `${roundId}-match`,
+    orderNumber: order.orderNumber,
+    matcherId,
+    stakeHundredths: 10_000,
+    matcherName: 'Invalid Time Matcher',
+  });
+
+  for (const badTime of [330.05, -1, Number.NaN, Number.POSITIVE_INFINITY, '355.5']) {
+    await expect(client.resolveRound({
+      idempotencyKey: `${roundId}-resolve`,
+      roundId,
+      finalSeconds: badTime as number,
+    })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  }
+
+  // Nothing was recorded: the matched order and round remain settleable and a
+  // corrected retry with the same idempotency key succeeds exactly once.
+  expect(await client.getOrder(order.orderNumber)).toMatchObject({ status: 'matched', finalSeconds: null });
+  const settled = await client.resolveRound({
+    idempotencyKey: `${roundId}-resolve`,
+    roundId,
+    finalSeconds: 355.5,
+  });
+  expect(settled.orders[0]).toMatchObject({ orderNumber: order.orderNumber, winnerSide: 'draw' });
+  const replay = await client.resolveRound({
+    idempotencyKey: `${roundId}-resolve`,
+    roundId,
+    finalSeconds: 355.5,
+  });
+  expect(replay).toEqual(settled);
+  expect(await client.getAccount(creatorId)).toMatchObject({ balanceHundredths: 10_000 });
+  expect(await client.getAccount(matcherId)).toMatchObject({ balanceHundredths: 10_000 });
+});
+
+it('paginates accounts with a stable cursor and bounded page sizes', async () => {
+  const client = createCoordinatorClient(env, 'coordinator-paged-accounts');
+  const authoritySnapshot = {
+    snapshotId: 'paged-accounts-authority',
+    schemaVersion: 'financial-ledger-v1' as const,
+    accounts: [], transactions: [], rounds: [], orders: [],
+    reconciliation: { accountCount: 0, transactionCount: 0, roundCount: 0, orderCount: 0, totalBalanceHundredths: 0 },
+  };
+  await client.importSnapshot({ idempotencyKey: 'paged-accounts-import', snapshot: authoritySnapshot, provenance: 'local-test-fixture' });
+  await client.activateAuthority({
+    idempotencyKey: 'paged-accounts-activation', operatorId: 'local-test', snapshotId: authoritySnapshot.snapshotId,
+    accountCount: 0, transactionCount: 0, roundCount: 0, orderCount: 0, confirmation: 'ACTIVATE_FINANCIAL_AUTHORITY',
+  });
+  for (let index = 0; index < 5; index++) {
+    await client.createPlayer({
+      idempotencyKey: `paged-account-${index}`,
+      playerId: `paged-player-${index}`,
+      lineUserId: `paged-player-${index}-line`,
+      displayName: `Paged Player ${index}`,
+      openingBalanceHundredths: 0,
+    });
+  }
+
+  const seen: string[] = [];
+  let cursor: string | null = null;
+  let pages = 0;
+  do {
+    const page = await client.listAccounts({ limit: 2, cursor: cursor ?? undefined });
+    pages += 1;
+    expect(page.items.length).toBeLessThanOrEqual(2);
+    for (const account of page.items) {
+      expect(seen).not.toContain(account.playerId);
+      seen.push(account.playerId);
+    }
+    cursor = page.nextCursor;
+    expect(pages).toBeLessThanOrEqual(10);
+  } while (cursor);
+
+  for (let index = 0; index < 5; index++) {
+    expect(seen).toContain(`paged-player-${index}`);
+  }
+
+  const oversized = await client.listAccounts({ limit: 100_000 });
+  expect(oversized.items.length).toBeLessThanOrEqual(500);
+});
+
+it('paginates transactions newest-first with a stable cursor and bounded pages', async () => {
+  const client = createCoordinatorClient(env, 'coordinator-paged-transactions');
+  const authoritySnapshot = {
+    snapshotId: 'paged-transactions-authority',
+    schemaVersion: 'financial-ledger-v1' as const,
+    accounts: [], transactions: [], rounds: [], orders: [],
+    reconciliation: { accountCount: 0, transactionCount: 0, roundCount: 0, orderCount: 0, totalBalanceHundredths: 0 },
+  };
+  await client.importSnapshot({ idempotencyKey: 'paged-transactions-import', snapshot: authoritySnapshot, provenance: 'local-test-fixture' });
+  await client.activateAuthority({
+    idempotencyKey: 'paged-transactions-activation', operatorId: 'local-test', snapshotId: authoritySnapshot.snapshotId,
+    accountCount: 0, transactionCount: 0, roundCount: 0, orderCount: 0, confirmation: 'ACTIVATE_FINANCIAL_AUTHORITY',
+  });
+  await client.createPlayer({
+    idempotencyKey: 'paged-tx-player-opening',
+    playerId: 'paged-tx-player',
+    lineUserId: 'paged-tx-player-line',
+    displayName: 'Paged Tx Player',
+    openingBalanceHundredths: 0,
+  });
+  for (let index = 0; index < 5; index++) {
+    await client.requestDeposit({
+      idempotencyKey: `paged-tx-${index}`,
+      transactionId: `paged-tx-${index}`,
+      playerId: 'paged-tx-player',
+      amountHundredths: 100 * (index + 1),
+    });
+  }
+
+  const seen: string[] = [];
+  let cursor: string | null = null;
+  let pages = 0;
+  do {
+    const page = await client.listTransactions({ limit: 2, cursor: cursor ?? undefined });
+    pages += 1;
+    expect(page.items.length).toBeLessThanOrEqual(2);
+    for (const transaction of page.items) {
+      expect(seen).not.toContain(transaction.transactionId);
+      seen.push(transaction.transactionId);
+    }
+    cursor = page.nextCursor;
+    expect(pages).toBeLessThanOrEqual(10);
+  } while (cursor);
+
+  expect(seen).toHaveLength(5);
+  // Newest-first ordering is preserved for the dashboard.
+  expect(seen).toEqual(['paged-tx-4', 'paged-tx-3', 'paged-tx-2', 'paged-tx-1', 'paged-tx-0']);
+
+  const firstPage = await client.listTransactions({ limit: 2 });
+  expect(firstPage.items.map((transaction) => transaction.transactionId)).toEqual(['paged-tx-4', 'paged-tx-3']);
+  expect(firstPage.nextCursor).not.toBeNull();
+});
+
+it('bounds order status scans with an explicit page limit', async () => {
+  const client = createCoordinatorClient(env, 'coordinator-bounded-orders');
+  const authoritySnapshot = {
+    snapshotId: 'bounded-orders-authority',
+    schemaVersion: 'financial-ledger-v1' as const,
+    accounts: [], transactions: [], rounds: [], orders: [],
+    reconciliation: { accountCount: 0, transactionCount: 0, roundCount: 0, orderCount: 0, totalBalanceHundredths: 0 },
+  };
+  await client.importSnapshot({ idempotencyKey: 'bounded-orders-import', snapshot: authoritySnapshot, provenance: 'local-test-fixture' });
+  await client.activateAuthority({
+    idempotencyKey: 'bounded-orders-activation', operatorId: 'local-test', snapshotId: authoritySnapshot.snapshotId,
+    accountCount: 0, transactionCount: 0, roundCount: 0, orderCount: 0, confirmation: 'ACTIVATE_FINANCIAL_AUTHORITY',
+  });
+  await client.createPlayer({
+    idempotencyKey: 'bounded-orders-player-opening',
+    playerId: 'bounded-orders-player',
+    lineUserId: 'bounded-orders-player-line',
+    displayName: 'Bounded Orders Player',
+    openingBalanceHundredths: 1_000_000,
+  });
+  await client.openRound({ idempotencyKey: 'bounded-orders-round-open', roundId: 'bounded-orders-round', name: 'Bounded Orders' });
+
+  for (let index = 0; index < 5; index++) {
+    await client.createOrder({
+      idempotencyKey: `bounded-orders-order-${index}`,
+      roundId: 'bounded-orders-round',
+      creatorId: 'bounded-orders-player',
+      side: 'low',
+      stakeHundredths: 1_000,
+      betType: 'custom_range',
+      rangeMin: 330,
+      rangeMax: 380,
+      creatorName: 'Bounded Orders Player',
+      groupId: 'bounded-orders-group',
+    });
+  }
+
+  const unbounded = await client.getOrdersByStatus(['pending_match']);
+  expect(unbounded.length).toBe(5);
+  const limited = await client.getOrdersByStatus(['pending_match'], 3);
+  expect(limited.length).toBe(3);
+  await expect(client.getOrdersByStatus(['pending_match'], 0)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  await expect(client.getOrdersByStatus(['pending_match'], 1_001)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+});

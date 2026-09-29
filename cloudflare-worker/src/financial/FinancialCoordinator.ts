@@ -1,7 +1,13 @@
 import type { Env } from '../types';
 import { calculateWinPayout } from './payout';
 import {
+  ACCOUNT_PAGE_MAX,
   CoordinatorError,
+  ORDER_STATUS_SCAN_DEFAULT,
+  ORDER_STATUS_SCAN_MAX,
+  TRANSACTION_PAGE_DEFAULT,
+  TRANSACTION_PAGE_MAX,
+  validateFinalSeconds,
   validateIdentifier,
   validatePointHundredths,
   validateStakeHundredths,
@@ -30,6 +36,7 @@ import {
   type LedgerOrderStatus,
   type MatchOrderInput,
   type OpenRoundInput,
+  type Page,
   type ProjectionDrainResult,
   type ReleaseQuoteInput,
   type RequestDepositInput,
@@ -564,6 +571,14 @@ export class FinancialCoordinator {
       }
       case 'getSnapshot':
         return this.getSnapshot();
+      case 'listAccounts': {
+        const input = asRecord(rawInput);
+        return this.listAccounts(input.limit, input.cursor);
+      }
+      case 'listTransactions': {
+        const input = asRecord(rawInput);
+        return this.listTransactions(input.limit, input.cursor);
+      }
       case 'previewImport':
         return this.previewImport(rawInput as FinancialSnapshot);
       case 'importSnapshot':
@@ -595,9 +610,25 @@ export class FinancialCoordinator {
           }
           return status;
         });
+        let scanLimit = ORDER_STATUS_SCAN_DEFAULT;
+        if (input.limit !== undefined) {
+          if (!Number.isSafeInteger(input.limit) ||
+              (input.limit as number) < 1 ||
+              (input.limit as number) > ORDER_STATUS_SCAN_MAX) {
+            throw new CoordinatorError(
+              'INVALID_INPUT',
+              `Order status scan limit must be between 1 and ${ORDER_STATUS_SCAN_MAX}`,
+            );
+          }
+          scanLimit = input.limit as number;
+        }
         const placeholders = statuses.map(() => '?').join(', ');
         return this.state.storage.sql
-          .exec<OrderRow>(`SELECT * FROM orders WHERE status IN (${placeholders}) ORDER BY created_at DESC`, ...statuses)
+          .exec<OrderRow>(
+            `SELECT * FROM orders WHERE status IN (${placeholders}) ORDER BY created_at DESC, order_number DESC LIMIT ?`,
+            ...statuses,
+            scanLimit,
+          )
           .toArray()
           .map((row) => this.mapOrder(row));
       }
@@ -941,6 +972,77 @@ export class FinancialCoordinator {
     return { accounts, transactions, rounds, orders, totalBalanceHundredths };
   }
 
+  private clampPageLimit(value: unknown, defaultLimit: number, maxLimit: number): number {
+    if (value === undefined || value === null) return defaultLimit;
+    const numeric = typeof value === 'number' ? Math.floor(value) : Number.NaN;
+    if (!Number.isSafeInteger(numeric) || numeric < 1) return defaultLimit;
+    return Math.min(numeric, maxLimit);
+  }
+
+  private listAccounts(rawLimit: unknown, rawCursor: unknown): Page<LedgerAccount> {
+    const limit = this.clampPageLimit(rawLimit, ACCOUNT_PAGE_MAX, ACCOUNT_PAGE_MAX);
+    const cursor = rawCursor === undefined || rawCursor === null
+      ? null
+      : validateIdentifier(rawCursor, 'cursor');
+    const rows = (cursor === null
+      ? this.state.storage.sql.exec<AccountRow>(
+        'SELECT * FROM accounts ORDER BY player_id, kind LIMIT ?',
+        limit + 1,
+      )
+      : this.state.storage.sql.exec<AccountRow>(
+        'SELECT * FROM accounts WHERE player_id > ? ORDER BY player_id, kind LIMIT ?',
+        cursor,
+        limit + 1,
+      )
+    ).toArray();
+    const items = rows.slice(0, limit).map(mapAccount);
+    return {
+      items,
+      nextCursor: rows.length > limit && items.length > 0 ? items[items.length - 1].playerId : null,
+    };
+  }
+
+  private listTransactions(rawLimit: unknown, rawCursor: unknown): Page<FinancialTransaction> {
+    const limit = this.clampPageLimit(rawLimit, TRANSACTION_PAGE_DEFAULT, TRANSACTION_PAGE_MAX);
+    let cursor: { createdAt: number; transactionId: string } | null = null;
+    if (rawCursor !== undefined && rawCursor !== null) {
+      try {
+        const parsed = JSON.parse(String(rawCursor)) as unknown;
+        if (!Array.isArray(parsed) || parsed.length !== 2 ||
+            !Number.isSafeInteger(parsed[0]) || typeof parsed[1] !== 'string' || !parsed[1]) {
+          throw new Error('bad cursor');
+        }
+        cursor = { createdAt: parsed[0] as number, transactionId: validateIdentifier(parsed[1], 'cursor') };
+      } catch (error) {
+        if (error instanceof CoordinatorError) throw error;
+        throw new CoordinatorError('INVALID_INPUT', 'Transaction cursor is invalid');
+      }
+    }
+    const rows = (cursor === null
+      ? this.state.storage.sql.exec<TransactionRow>(
+        'SELECT * FROM transactions ORDER BY created_at DESC, transaction_id DESC LIMIT ?',
+        limit + 1,
+      )
+      : this.state.storage.sql.exec<TransactionRow>(
+        `SELECT * FROM transactions
+         WHERE created_at < ? OR (created_at = ? AND transaction_id < ?)
+         ORDER BY created_at DESC, transaction_id DESC LIMIT ?`,
+        cursor.createdAt,
+        cursor.createdAt,
+        cursor.transactionId,
+        limit + 1,
+      )
+    ).toArray();
+    const items = rows.slice(0, limit).map(mapTransaction);
+    const last = items[items.length - 1];
+    return {
+      items,
+      nextCursor: rows.length > limit && last
+        ? JSON.stringify([last.createdAt, last.transactionId])
+        : null,
+    };
+  }
+
   private validateImportSnapshot(raw: unknown): {
     normalized: NormalizedImport | null;
     conflicts: string[];
@@ -1116,6 +1218,15 @@ export class FinancialCoordinator {
       if (!roundIds.has(order.roundId) || !accountIds.has(order.creatorId) ||
           (order.matcherId !== null && !accountIds.has(order.matcherId))) {
         conflicts.push(`order ${order.orderNumber || '<missing>'} has missing account reference`);
+      }
+      // A matched/resolved/settled order represents stakes held from BOTH sides;
+      // without a valid, distinct matcher any settlement would create a credit
+      // with no opposing stake.
+      if (['matched', 'resolved', 'settled'].includes(order.status) &&
+          (!order.matcherId || order.matcherId === order.creatorId || !accountIds.has(order.matcherId))) {
+        conflicts.push(
+          `order ${order.orderNumber || '<missing>'} is ${order.status} without a valid distinct matcher`,
+        );
       }
       if (!Number.isSafeInteger(order.stakeHundredths) || order.stakeHundredths <= 0) {
         conflicts.push(`order ${order.orderNumber || '<missing>'} has an unsafe stake`);
@@ -2781,9 +2892,7 @@ export class FinancialCoordinator {
   private resolveRound(rawInput: ResolveRoundInput): RoundSettlementResult {
     const input = this.validateIdempotentInput({ ...rawInput });
     input.roundId = validateIdentifier(input.roundId, 'roundId');
-    if (!Number.isSafeInteger(input.finalSeconds) || input.finalSeconds < 0) {
-      throw new CoordinatorError('INVALID_INPUT', 'finalSeconds must be a nonnegative whole-second value');
-    }
+    input.finalSeconds = validateFinalSeconds(input.finalSeconds);
 
     return this.replayOrBegin('resolveRound', input.idempotencyKey, input, () => {
       const round = this.roundRow(input.roundId);

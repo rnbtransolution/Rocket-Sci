@@ -1153,10 +1153,10 @@ async function resolveOrderNumber(
 
 // ── User Profile, Transactions & Group Helpers ──
 
-export async function getPlayersList(env: Env): Promise<any[]> {
-  const snapshot = await createCoordinatorClient(env).getSnapshot();
+export async function getPlayersList(env: Env, limit = 500): Promise<any[]> {
+  const page = await createCoordinatorClient(env).listAccounts({ limit });
   const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
-  const players = snapshot.accounts.filter((account) => account.kind === 'player' && account.active);
+  const players = page.items.filter((account) => account.kind === 'player' && account.active);
   return await Promise.all(players.map(async (account, idx) => {
     const cached = account.lineUserId
       ? await env.KV_CACHE.get(`USER_${account.lineUserId}`)
@@ -1195,15 +1195,27 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
   }
 }
 
-export async function getTransactionsList(env: Env): Promise<Transaction[]> {
-  const snapshot = await createCoordinatorClient(env).getSnapshot();
-  const transactions = await Promise.all(snapshot.transactions.map(async (transaction): Promise<Transaction> => {
+export async function getTransactionsPage(
+  env: Env,
+  limit = 100,
+  cursor?: string,
+): Promise<{ transactions: Transaction[]; nextCursor: string | null }> {
+  const client = createCoordinatorClient(env);
+  const page = await client.listTransactions({ limit, cursor });
+  const accountIds = [...new Set(page.items.map((transaction) => transaction.playerId))];
+  const accountPages = await Promise.all(
+    Array.from({ length: Math.ceil(accountIds.length / 500) }, (_, pageIndex) =>
+      accountIds.length > 0 ? client.getAccounts(accountIds.slice(pageIndex * 500, (pageIndex + 1) * 500)) : []
+    ),
+  );
+  const accountNames = new Map(accountPages.flat().map((account) => [account.playerId, account.displayName]));
+  const transactions = await Promise.all(page.items.map(async (transaction): Promise<Transaction> => {
     const metadata = await env.KV_CACHE.get(`TX_META_${transaction.transactionId}`);
     const profile = metadata ? JSON.parse(metadata) as { slipRef?: string } : null;
     return {
       id: transaction.transactionId,
       playerId: transaction.playerId,
-      playerName: snapshot.accounts.find((account) => account.playerId === transaction.playerId)?.displayName || '',
+      playerName: accountNames.get(transaction.playerId) || '',
       requestedAmount: transaction.requestedAmountHundredths / 100,
       actualAmount: (transaction.actualAmountHundredths ?? 0) / 100,
       slipRef: profile?.slipRef || '',
@@ -1218,7 +1230,11 @@ export async function getTransactionsList(env: Env): Promise<Transaction[]> {
       createdAt: transaction.createdAt,
     };
   }));
-  return transactions.sort((left, right) => right.createdAt - left.createdAt);
+  return { transactions, nextCursor: page.nextCursor };
+}
+
+export async function getTransactionsList(env: Env, limit = 100): Promise<Transaction[]> {
+  return (await getTransactionsPage(env, limit)).transactions;
 }
 
 /** Record an inbound user message into the dashboard chat feed. */
@@ -1236,16 +1252,57 @@ export async function logUserMessage(
   }
 }
 
+/**
+ * Deterministic collision tag for player-ID derivation. The short-ID suffix
+ * (`PL` + last 6 of the LINE user ID) is a display handle, never identity:
+ * two different LINE users can share it. When the suffix is already claimed
+ * by another LINE user we derive a stable alternate ID from a hash of the
+ * full LINE user ID so retries always pick the same candidate.
+ */
+function shortIdCollisionTag(userId: string, attempt: number): string {
+  let hash = 0x811c9dc5 ^ attempt;
+  for (let i = 0; i < userId.length; i++) {
+    hash ^= userId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36).toUpperCase().padStart(4, '0').slice(-4);
+}
+
+/**
+ * Returns a player ID derived from `base` that is either unused or already
+ * bound to this exact LINE user ID. Never returns an ID owned by a
+ * different LINE user.
+ */
+export async function deriveAvailablePlayerId(
+  userId: string,
+  base: string,
+  coordinator: Pick<ReturnType<typeof createCoordinatorClient>, 'getAccount'>,
+): Promise<string> {
+  for (let attempt = 0; attempt <= 100; attempt++) {
+    const candidate = attempt === 0 ? base : `${base}-${shortIdCollisionTag(userId, attempt)}`;
+    const existing = await coordinator.getAccount(candidate);
+    if (!existing || existing.lineUserId === userId) return candidate;
+  }
+  throw new CoordinatorError('INTERNAL', 'Unable to derive a collision-free player ID');
+}
+
 export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: ExecutionContext): Promise<PlayerProfile> {
   const cacheKey = `USER_${userId}`;
   const coordinator = createCoordinatorClient(env);
   const cached = await env.KV_CACHE.get(cacheKey);
   const cachedProfile = cached ? JSON.parse(cached) as PlayerProfile : null;
-  const proposedShortId = cachedProfile?.shortId || `PL${userId.slice(-6).toUpperCase()}`;
-  const existingAccount = await coordinator.getAccount(proposedShortId)
-    || await coordinator.getAccountByLineUserId(userId);
-  const shortId = existingAccount?.playerId || proposedShortId;
+
+  // Canonical identity is the full LINE user ID. A cached/derived short ID is
+  // only adopted when it is unclaimed or already bound to this same user.
+  let existingAccount = await coordinator.getAccountByLineUserId(userId);
+  if (!existingAccount && cachedProfile?.shortId) {
+    const cachedAccount = await coordinator.getAccount(cachedProfile.shortId);
+    if (cachedAccount && (!cachedAccount.lineUserId || cachedAccount.lineUserId === userId)) {
+      existingAccount = cachedAccount;
+    }
+  }
   if (existingAccount) {
+    const shortId = existingAccount.playerId;
     const profile: PlayerProfile = {
       ...(cachedProfile || {}),
       shortId,
@@ -1259,6 +1316,9 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
     await env.KV_CACHE.put(`RAW_LINE_${shortId}`, userId);
     return profile;
   }
+
+  const proposedShortId = cachedProfile?.shortId || `PL${userId.slice(-6).toUpperCase()}`;
+  const shortId = await deriveAvailablePlayerId(userId, proposedShortId, coordinator);
 
   // Fetch LINE user display name via Messaging API
   let displayName = cachedProfile?.displayName || 'ผู้เล่น';
@@ -1281,16 +1341,27 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
     updatedAt: Date.now(),
   };
 
-  const account = await coordinator.createPlayer({
-    idempotencyKey: `line-register:${userId}`,
-    playerId: shortId,
-    lineUserId: userId,
-    displayName,
-    openingBalanceHundredths: 0,
-  });
+  let account: LedgerAccount;
+  try {
+    account = await coordinator.createPlayer({
+      idempotencyKey: `line-register:${userId}`,
+      playerId: shortId,
+      lineUserId: userId,
+      displayName,
+      openingBalanceHundredths: 0,
+    });
+  } catch (error) {
+    // A concurrent registration may have claimed this LINE user ID first;
+    // reconcile to the canonical account instead of aliasing another player.
+    if (!(error instanceof CoordinatorError) || error.code !== 'DUPLICATE_ID') throw error;
+    const raced = await coordinator.getAccountByLineUserId(userId);
+    if (!raced) throw error;
+    account = raced;
+    newProfile.shortId = account.playerId;
+  }
   newProfile.balance = account.balanceHundredths / 100;
   await env.KV_CACHE.put(cacheKey, JSON.stringify(newProfile));
-  await env.KV_CACHE.put(`RAW_LINE_${shortId}`, userId);
+  await env.KV_CACHE.put(`RAW_LINE_${newProfile.shortId}`, userId);
   return newProfile;
 }
 

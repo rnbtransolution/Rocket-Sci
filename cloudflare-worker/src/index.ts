@@ -1,7 +1,7 @@
 import { Env, LineWebhookPayload, QueueMessage, LineEvent } from './types.js';
 import { verifyLineSignature } from './signature.js';
 import { createCoordinatorClient } from './financial/client.js';
-import { CoordinatorError, type LedgerOrder } from './financial/types.js';
+import { CoordinatorError, validateFinalSeconds, type LedgerOrder } from './financial/types.js';
 import { createAdminSession, verifyAdminSession } from './adminSession.js';
 import {
   processLineEvent,
@@ -12,12 +12,14 @@ import {
   getPlayersList,
   savePlayerProfile,
   getTransactionsList,
+  getTransactionsPage,
   pushToLine,
   logUserMessage,
   getMatchedOrdersList,
   getSettledOrdersList,
   mapCoordinatorOrder,
   mapCoordinatorOrders,
+  deriveAvailablePlayerId,
 } from './queueHandler.js';
 import {
   generateRuleGuideFlex,
@@ -217,11 +219,23 @@ export default {
         let result: any = null;
 
         if (functionName === 'getDashboardData') {
+          // Bounded reads: polling must never materialize unbounded snapshots.
+          const pageOptions = (args[0] && typeof args[0] === 'object' && !Array.isArray(args[0]))
+            ? args[0] as { playersLimit?: unknown; transactionsLimit?: unknown }
+            : {};
+          const clampLimit = (value: unknown, fallback: number, max: number): number => {
+            const numeric = typeof value === 'number' ? Math.floor(value) : Number.NaN;
+            if (!Number.isSafeInteger(numeric) || numeric < 1) return fallback;
+            return Math.min(numeric, max);
+          };
+          const playersLimit = clampLimit(pageOptions.playersLimit, 500, 500);
+          const transactionsLimit = clampLimit(pageOptions.transactionsLimit, 100, 500);
           const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
           const activeGroupId = await env.KV_CACHE.get('ACTIVE_GROUP_ID');
           const pendingBets = await getPendingOrdersList(env);
-          const players = await getPlayersList(env);
-          const transactions = await getTransactionsList(env);
+          const players = await getPlayersList(env, playersLimit);
+          const transactionsPage = await getTransactionsPage(env, transactionsLimit);
+          const transactions = transactionsPage.transactions;
           const lineGroupsRaw = await env.KV_CACHE.get('LINE_GROUPS');
           let parsedGroups = lineGroupsRaw ? JSON.parse(lineGroupsRaw) : [];
           if (!Array.isArray(parsedGroups)) parsedGroups = [];
@@ -268,6 +282,13 @@ export default {
             roundStatus: roundStr ? (JSON.parse(roundStr).status || 'ACTIVE') : 'ACTIVE',
             serverTime: new Date().toISOString(),
             lineQuota,
+            pageInfo: {
+              playersLimit,
+              playersReturned: players.length,
+              transactionsLimit,
+              transactionsReturned: transactions.length,
+              transactionsNextCursor: transactionsPage.nextCursor,
+            },
           };
         } else if (functionName === 'getP2PResults') {
           const settledOrders = await getSettledOrdersList(env);
@@ -491,8 +512,26 @@ export default {
           if (!Number.isSafeInteger(bal) || bal < 0) {
             throw new CoordinatorError('INVALID_INPUT', 'Opening balance must be a nonnegative whole-point amount');
           }
-          const shortId = lineId && lineId.length <= 8 ? lineId.toUpperCase() : `PL${lineId.slice(-6).toUpperCase()}`;
-          const account = await createCoordinatorClient(env).createPlayer({
+          const coordinator = createCoordinatorClient(env);
+          // Canonical identity is the full LINE user ID: re-creating an already
+          // registered LINE user reconciles to their existing account.
+          const existingByLineId = await coordinator.getAccountByLineUserId(lineId);
+          if (existingByLineId) {
+            const existingProfile = {
+              shortId: existingByLineId.playerId,
+              lineUserId: existingByLineId.lineUserId || lineId,
+              displayName: existingByLineId.displayName,
+              balance: existingByLineId.balanceHundredths / 100,
+              registeredAt: existingByLineId.createdAt,
+              updatedAt: existingByLineId.updatedAt,
+            };
+            await env.KV_CACHE.put(`USER_${lineId}`, JSON.stringify(existingProfile));
+            await env.KV_CACHE.put(`RAW_LINE_${existingByLineId.playerId}`, lineId);
+            result = { success: true, player: existingProfile, existing: true };
+          } else {
+          const proposedShortId = lineId && lineId.length <= 8 ? lineId.toUpperCase() : `PL${lineId.slice(-6).toUpperCase()}`;
+          const shortId = await deriveAvailablePlayerId(lineId, proposedShortId, coordinator);
+          const account = await coordinator.createPlayer({
             idempotencyKey: `admin-create-player:${requestId}`,
             playerId: shortId,
             lineUserId: lineId,
@@ -530,6 +569,7 @@ export default {
           }
 
           result = { success: true, player: newP };
+          }
         } else if (functionName === 'adminUpdatePlayerName') {
           const userId = args[0];
           const newName = args[1];
@@ -1100,10 +1140,13 @@ export default {
           }
           result = { success: true };
         } else if (functionName === 'adminResolveBets') {
-          const finalSeconds = Number(args[0]);
-          if (!Number.isFinite(finalSeconds) || finalSeconds < 0) {
-            throw new CoordinatorError('INVALID_INPUT', 'Final time must be a nonnegative number');
+          // Validate the final time BEFORE any close/settlement mutation so a
+          // malformed or unsupported time can never close a round early or
+          // strand matched orders; a corrected retry stays possible.
+          if (args[0] === undefined || args[0] === null || args[0] === '') {
+            throw new CoordinatorError('INVALID_INPUT', 'Final time is required to settle a round');
           }
+          const finalSeconds = validateFinalSeconds(Number(args[0]));
           const activeRoundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
           if (!activeRoundStr) throw new CoordinatorError('INVALID_STATE', 'There is no active round to settle');
           const activeRound = JSON.parse(activeRoundStr);

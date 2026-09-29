@@ -750,3 +750,74 @@ it('rejects malformed pre-existing authority and import schemas explicitly', () 
     expect.stringContaining('imported_snapshots'),
   ]));
 });
+
+it('rejects matched or settled orders without a valid distinct matcher before any import', async () => {
+  const client = createCoordinatorClient(env, 'financial-migration-matched-order-guard');
+  const round = {
+    roundId: 'matched-guard-round',
+    name: 'Matched Guard Round',
+    status: 'closed' as const,
+    quoteReleased: true,
+    targetMin: 330,
+    targetMax: 380,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const baseOrder = {
+    orderNumber: '000001',
+    roundId: round.roundId,
+    creatorId: 'matched-guard-creator',
+    creatorName: 'Creator',
+    side: 'low' as const,
+    stakeHundredths: 1_000,
+    betType: 'range' as const,
+    rangeMin: 330,
+    rangeMax: 380,
+    rangeOffset: 0,
+    groupId: 'matched-guard-group',
+    createdAt: 1,
+    matchedAt: 1,
+    winnerSide: null,
+    finalSeconds: null,
+    settledAt: null,
+  };
+  const variants: Array<{ key: string; status: 'matched' | 'resolved' | 'settled'; matcherId: string | null }> = [
+    { key: 'matched-no-matcher', status: 'matched', matcherId: null },
+    { key: 'matched-self', status: 'matched', matcherId: 'matched-guard-creator' },
+    { key: 'matched-unknown', status: 'matched', matcherId: 'matched-guard-ghost' },
+    { key: 'settled-no-matcher', status: 'settled', matcherId: null },
+    { key: 'resolved-self', status: 'resolved', matcherId: 'matched-guard-creator' },
+  ];
+
+  for (const variant of variants) {
+    const invalid = snapshot({
+      snapshotId: `matched-guard-${variant.key}`,
+      accounts: [account('matched-guard-creator', 1_000), houseAccount(0)],
+      rounds: [round],
+      orders: [{ ...baseOrder, status: variant.status, matcherId: variant.matcherId, matcherName: null }],
+      reconciliation: {
+        accountCount: 2,
+        transactionCount: 0,
+        roundCount: 1,
+        orderCount: 1,
+        totalBalanceHundredths: 1_000,
+      },
+    });
+
+    const preview = await client.previewImport(invalid);
+    expect(preview.canImport).toBe(false);
+    expect(preview.conflicts.join('; ')).toContain('valid distinct matcher');
+
+    await expect(client.importSnapshot({
+      idempotencyKey: `matched-guard-import-${variant.key}`,
+      snapshot: invalid,
+      provenance: 'local-test-fixture',
+    })).rejects.toMatchObject({ code: 'IMPORT_CONFLICT' });
+
+    // Fail before any partial import: no rows from the rejected snapshot exist.
+    const current = await client.getSnapshot();
+    expect(current.accounts.filter((row) => row.playerId === 'matched-guard-creator')).toHaveLength(0);
+    expect(current.orders).toHaveLength(0);
+    expect(current.rounds).toHaveLength(0);
+  }
+});

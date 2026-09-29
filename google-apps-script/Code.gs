@@ -506,7 +506,7 @@ function getWorkerApiUrl_() {
   return url;
 }
 
-function proxyAdminAction_(functionName, args, sessionToken) {
+function proxyAdminAction_(functionName, args, sessionToken, suppliedRequestId) {
   if (!WORKER_PROXY_ACTIONS_[functionName]) return migrationRequired_(functionName);
   if (functionName !== 'adminLogin' && (!sessionToken || !String(sessionToken).trim())) {
     return { success: false, error: 'UNAUTHORIZED', message: 'Worker session token required' };
@@ -518,7 +518,7 @@ function proxyAdminAction_(functionName, args, sessionToken) {
     payload: JSON.stringify({ functionName: functionName, args: args || [] }),
     muteHttpExceptions: true
   };
-  var requestId = args && (args.requestId || args.idempotencyKey);
+  var requestId = suppliedRequestId || (args && (args.requestId || args.idempotencyKey));
   if (requestId) {
     options.payload = JSON.stringify({
       functionName: functionName,
@@ -626,11 +626,11 @@ function applyProjectionEvent_(event) {
 /**
  * Universal Action Dispatcher for Admin RPC functions.
  */
-function executeAdminAction(functionName, args, sessionToken) {
+function executeAdminAction(functionName, args, sessionToken, requestId) {
   args = args || [];
   if (WORKER_PROXY_ACTIONS_[functionName]) {
     invalidateDashboardCache();
-    return proxyAdminAction_(functionName, args, sessionToken);
+    return proxyAdminAction_(functionName, args, sessionToken, requestId);
   }
   if (LEGACY_FINANCIAL_ACTIONS_[functionName]) return migrationRequired_(functionName);
   var result;
