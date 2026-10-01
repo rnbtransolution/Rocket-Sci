@@ -19,12 +19,12 @@ const getApiBaseUrl = () => {
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://localhost:3001';
     }
-    if (hostname.includes('github.io')) {
-      // GitHub Pages admin portal: talk directly to the Cloudflare Worker (LINE webhook authority)
+    if (hostname.includes('github.io') || hostname.includes('bangfai-rocket.cloud') || (!isGASHost && port !== '3001')) {
+      // Custom domain, GitHub Pages, or external portal: talk directly to Cloudflare Worker
       return CF_WORKER_BASE_URL;
     }
   }
-  return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || '';
+  return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || CF_WORKER_BASE_URL;
 };
 
 const API_BASE_URL = getApiBaseUrl();
