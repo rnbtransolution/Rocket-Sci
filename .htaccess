@@ -1,0 +1,48 @@
+# ── Hostinger LiteSpeed / Apache Production Config ──
+# Target Domain: www.bangfai-rocket.cloud
+
+# 1. Disable Directory Browsing
+Options -Indexes
+
+# 2. Rewrite Engine & Canonical Redirections
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Force HTTPS
+  RewriteCond %{HTTPS} off
+  RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+  # Force WWW (Canonical redirect: bangfai-rocket.cloud -> www.bangfai-rocket.cloud)
+  RewriteCond %{HTTP_HOST} ^bangfai-rocket\.cloud$ [NC]
+  RewriteRule ^(.*)$ https://www.bangfai-rocket.cloud/$1 [L,R=301]
+
+  # SPA Routing (Single Page App Fallback to index.html)
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# 3. Security & Caching Headers
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-XSS-Protection "1; mode=block"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+
+  # Prevent Caching of index.html so users and admins always get the latest real-time code
+  <FilesMatch "^(index\.html|)$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate, max-age=0"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+
+  # Long-term Cache for Static Fonts & Media
+  <FilesMatch "\.(ico|jpe?g|png|gif|svg|woff2?|ttf|eot)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+</IfModule>
+
+# 4. LiteSpeed / Gzip Compression
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json application/xml
+</IfModule>
