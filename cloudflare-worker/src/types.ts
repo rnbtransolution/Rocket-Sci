@@ -90,6 +90,12 @@ export interface Order {
   winnerName?: string | null;
   finalTime?: number | null;
   settledAt?: number;
+  id?: string;
+  playerLowId?: string | null;
+  playerLowName?: string | null;
+  playerHighId?: string | null;
+  playerHighName?: string | null;
+  timestamp?: string;
 }
 
 export interface PlayerProfile {

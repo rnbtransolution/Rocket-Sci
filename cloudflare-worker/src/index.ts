@@ -1,4 +1,4 @@
-import { Env, LineWebhookPayload, QueueMessage, LineEvent, PlayerProfile } from './types.js';
+import { Env, LineWebhookPayload, QueueMessage, LineEvent, PlayerProfile, Order } from './types.js';
 import { verifyLineSignature } from './signature.js';
 import {
   processLineEvent,
@@ -35,6 +35,30 @@ import {
 function formatTime(timestamp?: number): string {
   const d = timestamp ? new Date(timestamp) : new Date();
   return d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+
+function formatOrderForDashboard(b: Order): any {
+  const isLow = b.side === 'low';
+  const playerLowId = b.playerLowId || (isLow ? (b.creatorId || b.creatorLineUserId || '') : (b.matcherId || b.matcherLineUserId || ''));
+  const playerLowName = b.playerLowName || (isLow ? b.creatorName : (b.matcherName || ''));
+  const playerHighId = b.playerHighId || (!isLow ? (b.creatorId || b.creatorLineUserId || '') : (b.matcherId || b.matcherLineUserId || ''));
+  const playerHighName = b.playerHighName || (!isLow ? b.creatorName : (b.matcherName || ''));
+
+  return {
+    ...b,
+    id: b.id || `bet_${b.orderNumber}`,
+    orderNumber: b.orderNumber,
+    playerLowId,
+    playerLowName,
+    playerHighId,
+    playerHighName,
+    amount: Number(b.amount) || 0,
+    type: b.betType || 'range',
+    rangeMin: b.rangeMin,
+    rangeMax: b.rangeMax,
+    status: b.status,
+    timestamp: b.createdAt ? new Date(b.createdAt).toLocaleTimeString('th-TH', { hour12: false, hour: '2-digit', minute: '2-digit' }) : '',
+  };
 }
 
 async function resolveTargetGroupIds(target: string | undefined, env: Env): Promise<string[]> {
@@ -304,7 +328,7 @@ export default {
             result = {
               players,
               transactions,
-              bets: pendingBets,
+              bets: pendingBets.map(formatOrderForDashboard),
               chatLogs,
               activeGroupId: validActiveGroupId,
               lineGroups,
@@ -318,7 +342,15 @@ export default {
             if (requestedUserId) {
               const matchedPlayer = players.find((p: any) => p.id === requestedUserId || p.lineUserId === requestedUserId);
               const userTransactions = transactions.filter((t: any) => t.playerId === requestedUserId);
-              const userBets = pendingBets.filter((b: any) => b.creatorId === requestedUserId || b.creatorLineUserId === requestedUserId || b.matcherId === requestedUserId);
+              const formattedBets = pendingBets.map(formatOrderForDashboard);
+              const userBets = formattedBets.filter((b: any) =>
+                b.playerLowId === requestedUserId ||
+                b.playerHighId === requestedUserId ||
+                b.creatorId === requestedUserId ||
+                b.creatorLineUserId === requestedUserId ||
+                b.matcherId === requestedUserId ||
+                b.matcherLineUserId === requestedUserId
+              );
               const userChatLogs = chatLogs.filter((l: any) => l.userId === requestedUserId);
               result = {
                 players: matchedPlayer ? [matchedPlayer] : [],
@@ -335,16 +367,24 @@ export default {
               result = {
                 players: [],
                 transactions: [],
-                bets: pendingBets.filter((b: any) => b.status === 'pending_match').map((b: any) => ({
-                  orderNumber: b.orderNumber,
-                  side: b.side,
-                  amount: b.amount,
-                  betType: b.betType,
-                  rangeMin: b.rangeMin,
-                  rangeMax: b.rangeMax,
-                  status: b.status,
-                  createdAt: b.createdAt,
-                })),
+                bets: pendingBets.filter((b: any) => b.status === 'pending_match').map((b: any) => {
+                  const f = formatOrderForDashboard(b);
+                  return {
+                    id: f.id,
+                    orderNumber: f.orderNumber,
+                    side: f.side,
+                    playerLowName: f.playerLowName,
+                    playerHighName: f.playerHighName,
+                    amount: f.amount,
+                    type: f.type,
+                    betType: f.betType,
+                    rangeMin: f.rangeMin,
+                    rangeMax: f.rangeMax,
+                    status: f.status,
+                    createdAt: f.createdAt,
+                    timestamp: f.timestamp,
+                  };
+                }),
                 chatLogs: [],
                 activeGroupId: validActiveGroupId,
                 lineGroups: [],
@@ -772,14 +812,14 @@ export default {
               transactions: Array.isArray(sheetsData.transactions) && sheetsData.transactions.length > 0
                 ? [...kvTx, ...sheetsData.transactions].slice(0, 100)
                 : kvTx,
-              bets: kvBets,
+              bets: kvBets.map(formatOrderForDashboard),
               activeGroupId: (await env.KV_CACHE.get('ACTIVE_GROUP_ID')) || '',
             };
           } else {
             result = {
               players: kvPlayers,
               transactions: kvTx,
-              bets: kvBets,
+              bets: kvBets.map(formatOrderForDashboard),
               activeGroupId: (await env.KV_CACHE.get('ACTIVE_GROUP_ID')) || '',
             };
           }

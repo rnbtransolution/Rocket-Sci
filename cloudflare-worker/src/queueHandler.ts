@@ -720,6 +720,11 @@ async function handleCreateOrder(
     rocketName: round?.name || null,
     offset: isPreQuote ? offsetDelta : undefined,
     createdAt: Date.now(),
+    id: `bet_${orderNumber}`,
+    playerLowId: side === 'low' ? profile.shortId : null,
+    playerLowName: side === 'low' ? profile.displayName : null,
+    playerHighId: side === 'high' ? profile.shortId : null,
+    playerHighName: side === 'high' ? profile.displayName : null,
   };
 
   // Persist PRE_CHARGE order immediately
@@ -856,6 +861,13 @@ async function handleMatchOrder(
   order.matcherName = profile.displayName;
   order.matcherLineUserId = profile.lineUserId;
   order.matchedAt = Date.now();
+  if (order.side === 'low') {
+    order.playerHighId = profile.shortId;
+    order.playerHighName = profile.displayName;
+  } else {
+    order.playerLowId = profile.shortId;
+    order.playerLowName = profile.displayName;
+  }
 
   const updatePersistence = Promise.all([
     env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(order)),
@@ -1197,6 +1209,10 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
         low.matcherName = high.creatorName;
         low.matcherLineUserId = high.creatorLineUserId;
         low.matchedAt = Date.now();
+        low.playerLowId = low.creatorId;
+        low.playerLowName = low.creatorName;
+        low.playerHighId = high.creatorId;
+        low.playerHighName = high.creatorName;
 
         // High mirrors as matched for settlement bookkeeping (keeping both records)
         high.status = 'matched_paired';
@@ -1204,6 +1220,10 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
         high.matcherName = low.creatorName;
         high.matcherLineUserId = low.creatorLineUserId;
         high.matchedAt = Date.now();
+        high.playerLowId = low.creatorId;
+        high.playerLowName = low.creatorName;
+        high.playerHighId = high.creatorId;
+        high.playerHighName = high.creatorName;
 
         await Promise.all([
           env.KV_ORDERS.put(`ORDER_${low.orderNumber}`, JSON.stringify(low)),

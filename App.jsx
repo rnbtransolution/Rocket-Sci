@@ -781,7 +781,10 @@ export default function App() {
         const midPoint = (minSec + maxSec) / 2;
         isLowWinner = timeSec <= midPoint;
       }
-      const winnerName = isLowWinner ? b.playerLowName : b.playerHighName;
+      const isLowOrder = b.side === 'low';
+      const lowWinnerName = b.playerLowName || (isLowOrder ? b.creatorName : b.matcherName) || 'ฝั่งต่ำ';
+      const highWinnerName = b.playerHighName || (!isLowOrder ? b.creatorName : b.matcherName) || 'ฝั่งสูง';
+      const winnerName = isLowWinner ? lowWinnerName : highWinnerName;
       return {
         orderNumber: b.orderNumber,
         winnerName: winnerName,
@@ -920,7 +923,12 @@ export default function App() {
       accountName: '-'
     };
     const playerTransactions = transactions.filter(t => t.playerId === playerUserId);
-    const playerBets = bets.filter(b => b.playerLowId === playerUserId || b.playerHighId === playerUserId);
+    const playerBets = bets.filter(b => {
+      const isLow = b.side === 'low';
+      const lowId = b.playerLowId || (isLow ? (b.creatorId || b.creatorLineUserId) : (b.matcherId || b.matcherLineUserId));
+      const highId = b.playerHighId || (!isLow && b.side === 'high' ? (b.creatorId || b.creatorLineUserId) : (b.matcherId || b.matcherLineUserId));
+      return lowId === playerUserId || highId === playerUserId || b.creatorId === playerUserId || b.creatorLineUserId === playerUserId || b.matcherId === playerUserId || b.matcherLineUserId === playerUserId;
+    });
 
     return (
       <PlayerDashboard 
@@ -1543,8 +1551,14 @@ export default function App() {
               if (betSearchQuery && betSearchQuery.trim()) {
                 const q = betSearchQuery.trim().toLowerCase();
                 const matchOrder = b.orderNumber && b.orderNumber.toString().toLowerCase().includes(q);
-                const matchLow = b.playerLowName && b.playerLowName.toLowerCase().includes(q);
-                const matchHigh = b.playerHighName && b.playerHighName.toLowerCase().includes(q);
+                const isLow = b.side === 'low';
+                const lowName = b.playerLowName || (isLow ? b.creatorName : b.matcherName);
+                const lowId = b.playerLowId || (isLow ? (b.creatorId || b.creatorLineUserId) : (b.matcherId || b.matcherLineUserId));
+                const highName = b.playerHighName || (!isLow && b.side === 'high' ? b.creatorName : b.matcherName);
+                const highId = b.playerHighId || (!isLow && b.side === 'high' ? (b.creatorId || b.creatorLineUserId) : (b.matcherId || b.matcherLineUserId));
+
+                const matchLow = (lowName && String(lowName).toLowerCase().includes(q)) || (lowId && String(lowId).toLowerCase().includes(q));
+                const matchHigh = (highName && String(highName).toLowerCase().includes(q)) || (highId && String(highId).toLowerCase().includes(q));
                 if (!matchOrder && !matchLow && !matchHigh) return false;
               }
               return true;
@@ -1666,27 +1680,48 @@ export default function App() {
                             </td>
                           </tr>
                         ) : (
-                          filteredBets.slice().reverse().map(b => (
-                            <tr key={b.id} className="hover:bg-indigo-50/20 transition-colors">
+                          filteredBets.slice().reverse().map(b => {
+                          const isLow = b.side === 'low';
+                          const pLowName = b.playerLowName || (isLow ? b.creatorName : b.matcherName);
+                          const pLowId = b.playerLowId || (isLow ? (b.creatorId || b.creatorLineUserId) : (b.matcherId || b.matcherLineUserId));
+                          const pHighName = b.playerHighName || (!isLow && b.side === 'high' ? b.creatorName : b.matcherName);
+                          const pHighId = b.playerHighId || (!isLow && b.side === 'high' ? (b.creatorId || b.creatorLineUserId) : (b.matcherId || b.matcherLineUserId));
+
+                          return (
+                            <tr key={b.id || `bet_${b.orderNumber}`} className="hover:bg-indigo-50/20 transition-colors">
                               <td className="py-3 px-3 font-bold text-slate-800 font-mono">
                                 Order #{b.orderNumber}
                                 <div className="text-[10px] text-slate-400 font-sans font-normal">{b.timestamp || ''}</div>
                               </td>
                               <td className="py-3 px-3">
-                                {b.playerLowName ? (
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="w-2 h-2 rounded-full bg-sky-500 shrink-0"></span>
-                                    <span className="text-sky-800 font-black">{b.playerLowName}</span>
+                                {pLowName ? (
+                                  <div className="flex flex-col gap-0.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="w-2 h-2 rounded-full bg-sky-500 shrink-0"></span>
+                                      <span className="text-sky-800 font-black">{pLowName}</span>
+                                    </div>
+                                    {pLowId && (
+                                      <span className="text-[10px] text-slate-500 font-mono font-bold pl-3.5 flex items-center gap-1">
+                                        <span className="px-1.5 py-0.2 bg-sky-50 border border-sky-200 text-sky-700 rounded text-[9.5px]">ID: {pLowId}</span>
+                                      </span>
+                                    )}
                                   </div>
                                 ) : (
                                   <span className="text-slate-300 italic font-sans">-- รอผู้เล่น --</span>
                                 )}
                               </td>
                               <td className="py-3 px-3">
-                                {b.playerHighName ? (
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0"></span>
-                                    <span className="text-rose-800 font-black">{b.playerHighName}</span>
+                                {pHighName ? (
+                                  <div className="flex flex-col gap-0.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0"></span>
+                                      <span className="text-rose-800 font-black">{pHighName}</span>
+                                    </div>
+                                    {pHighId && (
+                                      <span className="text-[10px] text-slate-500 font-mono font-bold pl-3.5 flex items-center gap-1">
+                                        <span className="px-1.5 py-0.2 bg-rose-50 border border-rose-200 text-rose-700 rounded text-[9.5px]">ID: {pHighId}</span>
+                                      </span>
+                                    )}
                                   </div>
                                 ) : (
                                   <span className="text-slate-300 italic font-sans">-- รอผู้เล่น --</span>
@@ -1747,7 +1782,8 @@ export default function App() {
                                 )}
                               </td>
                             </tr>
-                          ))
+                          );
+                        })
                         )}
                       </tbody>
                     </table>
@@ -3181,9 +3217,16 @@ function PlayerDashboard({ player, transactions, bets, playerUserId, players }) 
                   <div className="text-center py-12 text-slate-400 text-xs italic font-sans">ไม่มีประวัติการส่งข้อมูลดวลเวลาบั้งไฟ</div>
                 ) : (
                   bets.slice().reverse().map(b => {
-                    const isLow = b.playerLowId === playerUserId;
+                    const isOrderLow = b.side === 'low';
+                    const lowId = b.playerLowId || (isOrderLow ? (b.creatorId || b.creatorLineUserId) : (b.matcherId || b.matcherLineUserId));
+                    const isLow = lowId === playerUserId || (isOrderLow && (b.creatorId === playerUserId || b.creatorLineUserId === playerUserId));
                     const sideText = isLow ? 'ต่ำ (LOW)' : 'สูง (HIGH)';
-                    const opponentText = isLow ? b.playerHighName : b.playerLowName;
+                    const lowName = b.playerLowName || (isOrderLow ? b.creatorName : b.matcherName);
+                    const highName = b.playerHighName || (!isOrderLow ? b.creatorName : b.matcherName);
+                    const opponentText = isLow ? highName : lowName;
+                    const opponentId = isLow 
+                      ? (b.playerHighId || (!isOrderLow ? (b.creatorId || b.creatorLineUserId) : (b.matcherId || b.matcherLineUserId)))
+                      : (b.playerLowId || (isOrderLow ? (b.creatorId || b.creatorLineUserId) : (b.matcherId || b.matcherLineUserId)));
                     
                     let payoutBadge = 'รอจับคู่';
                     let payoutColor = 'bg-slate-100 text-slate-500 border border-slate-200';
@@ -3227,7 +3270,10 @@ function PlayerDashboard({ player, transactions, bets, playerUserId, players }) 
                         </div>
                         {opponentText && (
                           <div className="text-[10px] text-slate-500 pt-1.5 border-t border-slate-50 flex justify-between font-sans">
-                            <span>คู่ดวล: {opponentText}</span>
+                            <span>
+                              คู่ดวล: <strong className="text-slate-700">{opponentText}</strong>
+                              {opponentId && <span className="ml-1 text-[9px] px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded text-slate-500 font-mono">ID: {opponentId}</span>}
+                            </span>
                             {b.finalTime !== undefined && (
                               <span>เวลาบั้งไฟ: <strong className="text-slate-700">{b.finalTime}s</strong></span>
                             )}
