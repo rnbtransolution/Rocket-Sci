@@ -95,19 +95,26 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     const evtTime = new Date(event.timestamp || Date.now()).toLocaleTimeString('th-TH', {
       hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
     });
-    let displayName = 'ผู้เล่น';
-    try {
-      const cached = await env.KV_CACHE.get(`USER_${userId}`);
-      if (cached) displayName = JSON.parse(cached).displayName || displayName;
-    } catch (_) {}
-    ctx?.waitUntil(logUserMessage(env, {
-      timestamp: evtTime,
-      userId,
-      displayName,
-      sender: 'user',
-      text: displayText || '[empty]',
-      type: msgType,
-    }));
+    const logTask = async () => {
+      let displayName = 'ผู้เล่น';
+      try {
+        const cached = await env.KV_CACHE.get(`USER_${userId}`);
+        if (cached) displayName = JSON.parse(cached).displayName || displayName;
+      } catch (_) {}
+      await logUserMessage(env, {
+        timestamp: evtTime,
+        userId,
+        displayName,
+        sender: 'user',
+        text: displayText || '[empty]',
+        type: msgType,
+      });
+    };
+    if (ctx) {
+      ctx.waitUntil(logTask());
+    } else {
+      logTask().catch(() => {});
+    }
   }
 
   // Offload group activity recording to background (0ms on critical path)
@@ -597,8 +604,11 @@ async function handleCreateOrder(
     return;
   }
 
-  // Check if round is closed
-  const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
+  // 1. Parallel fetch of ACTIVE_ROUND & PENDING_ORDERS_LIST (1 roundtrip instead of 2+)
+  const [roundStr, pendingList] = await Promise.all([
+    env.KV_CACHE.get('ACTIVE_ROUND'),
+    getPendingOrdersList(env),
+  ]);
   let round = roundStr ? (JSON.parse(roundStr) as RocketRound) : null;
 
   // Auto-initialize or reactivate round if null, VOID, or RESOLVED (previous round ended)
@@ -612,7 +622,11 @@ async function handleCreateOrder(
       quoteReleased: false,
       updatedAt: Date.now(),
     };
-    await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round));
+    if (ctx) {
+      ctx.waitUntil(env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round)).catch(() => {}));
+    } else {
+      env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round)).catch(() => {});
+    }
   }
 
   // Only reject order if round is actively CLOSED (in-flight countdown "3-2-go" / locked)
@@ -693,17 +707,19 @@ async function handleCreateOrder(
     return;
   }
 
-  // 1. Determine if this is a pre-quote order
-  const quoteReleased = !!(round && round.quoteReleased === true);
-  const isPreQuote = !isCustom && !quoteReleased;
+  // 2. Generate unique orderNumber in-memory (0ms KV latency)
+  const existingNumbers = new Set(pendingList.map((o) => o.orderNumber));
   let orderNumber = Math.floor(1000 + Math.random() * 9000).toString();
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const existing = await env.KV_ORDERS.get(`ORDER_${orderNumber}`);
-    if (!existing) break;
+  for (let attempt = 0; attempt < 20 && existingNumbers.has(orderNumber); attempt++) {
     orderNumber = Math.floor(1000 + Math.random() * 9000).toString();
   }
 
-  // 2. Create Order in PRE_CHARGE state first to prevent "ghost charges"
+  // 3. Determine order status
+  const quoteReleased = !!(round && round.quoteReleased === true);
+  const isPreQuote = !isCustom && !quoteReleased;
+  const orderStatus = isPreQuote ? 'pending_hold' : 'pending_match';
+
+  // 4. Construct Order object
   const newOrder: Order = {
     orderNumber,
     creatorId: profile.shortId,
@@ -714,7 +730,7 @@ async function handleCreateOrder(
     betType: isPreQuote ? 'pre_quote' : (isCustom ? 'custom_range' : 'range'),
     rangeMin: isPreQuote ? offsetDelta : (isCustom ? rangeMin : ((round?.targetMin || 330) + offsetDelta)),
     rangeMax: isPreQuote ? offsetDelta : (isCustom ? rangeMax : ((round?.targetMax || 380) + offsetDelta)),
-    status: 'PRE_CHARGE',
+    status: orderStatus,
     groupId: targetGroupId,
     userTypedCmd: text,
     rocketName: round?.name || null,
@@ -727,77 +743,89 @@ async function handleCreateOrder(
     playerHighName: side === 'high' ? profile.displayName : null,
   };
 
-  // Persist PRE_CHARGE order immediately
-  await env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder));
-
-  // 3. Deduct balance
+  // 5. Update profile balance in-memory
   profile.balance -= amount;
-  await savePlayerProfile(profile, env, ctx);
 
-  // 4. Finalize Order status
-  newOrder.status = isPreQuote ? 'pending_hold' : 'pending_match';
-  await env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder));
-
-  // 5. Update index (tracks both pending_match and pending_hold pre-quote orders)
-  await addToPendingOrdersList(newOrder, env);
-
-  // 6. Send Order Flex to Group Chat
+  // 6. Generate Group Flex Card in-memory (< 0.1ms)
   const flexCard = generateOrderFlex(newOrder);
+
+  // 7. Update pending orders list in-memory
+  const updatedPendingList = [newOrder, ...pendingList.filter((o) => o.orderNumber !== orderNumber)].slice(0, 300);
+
+  // 8. Pipeline Order Persistence & LINE Dispatch Concurrently (< 500ms)
+  const persistenceTask = Promise.all([
+    env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder)),
+    savePlayerProfile(profile, env, ctx),
+    env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updatedPendingList), { expirationTtl: 86400 }),
+  ]);
+
   let cardDispatched = false;
-  let replySuccess = false;
-  let pushSuccess = false;
-
-  if (groupId && replyToken) {
-    replySuccess = await replyToLine(replyToken, flexCard, env, false);
-    cardDispatched = replySuccess;
-  }
-  if (!cardDispatched && targetGroupId) {
-    const pushRes = await pushToLine(targetGroupId, flexCard, env);
-    pushSuccess = !!pushRes.success;
-    cardDispatched = pushSuccess;
-  }
-
-  try {
-    await env.KV_CACHE.put('LAST_ORDER_CREATE_DEBUG', JSON.stringify({
-      orderNumber,
-      cmd: text,
-      amount,
-      userId,
-      groupId,
-      targetGroupId,
-      cardDispatched,
-      replySuccess,
-      pushSuccess,
-      time: new Date().toISOString()
-    }));
-  } catch (_) {}
-
-  // 7. Send Confirmation Message to Player (always Flex card in DM)
-  const confirmFlex = isPreQuote
-    ? generateNoticeFlex(
-        '⏳ ถือออเดอร์รอราคาช่าง',
-        `Order #${orderNumber} ถูกถืออยู่รอราคาช่างครับ (${amount.toLocaleString()} pt)\nเมื่อแอดมินเปิดราคาช่าง ระบบจะลงกระดานให้อัตโนมัติครับ 🚀`,
-        'info'
-      )
-    : generateNoticeFlex(
-        `✅ เปิดแผล #${orderNumber} สำเร็จ`,
-        `รายการ: ${newOrder.userTypedCmd || ''} (${amount.toLocaleString()} pt)\nแต้มคงเหลือ: ${profile.balance.toLocaleString()} pt 💎`,
-        'success'
-      );
-
   if (groupId) {
-    // If order was created in a group, replyToken was already used for the group order card.
-    // Push the private confirmation to the player's DM asynchronously so it never blocks the webhook.
-    if (userId && userId.startsWith('U')) {
-      ctx?.waitUntil(pushToLine(userId, confirmFlex, env).catch(e => console.error(e)));
+    // ── Order created in LINE Group: Dispatch directly to the Group Chat ──
+    if (replyToken) {
+      cardDispatched = await replyToLine(replyToken, flexCard, env, false);
     }
+    if (!cardDispatched && targetGroupId) {
+      const pushRes = await pushToLine(targetGroupId, flexCard, env);
+      cardDispatched = !!pushRes.success;
+    }
+
+    // STRICT USER RULE: Never send private DM confirmation when order is created in a LINE Group.
+    // The group received the Order Flex card. Sending DM wastes monthly LINE push quota.
   } else {
-    // In private DM where order was created, reply to user directly
+    // ── Order created in 1-on-1 private chat (DM): ──
+    // 1) Broadcast Order Flex to the main Group
+    if (targetGroupId) {
+      if (ctx) {
+        ctx.waitUntil(pushToLine(targetGroupId, flexCard, env).catch((e) => console.error(e)));
+      } else {
+        pushToLine(targetGroupId, flexCard, env).catch(() => {});
+      }
+    }
+
+    // 2) Send private confirmation to the player in DM
+    const confirmFlex = isPreQuote
+      ? generateNoticeFlex(
+          '⏳ ถือออเดอร์รอราคาช่าง',
+          `Order #${orderNumber} ถูกถืออยู่รอราคาช่างครับ (${amount.toLocaleString()} pt)\nเมื่อแอดมินเปิดราคาช่าง ระบบจะลงกระดานให้อัตโนมัติครับ 🚀`,
+          'info'
+        )
+      : generateNoticeFlex(
+          `✅ เปิดแผล #${orderNumber} สำเร็จ`,
+          `รายการ: ${newOrder.userTypedCmd || ''} (${amount.toLocaleString()} pt)\nแต้มคงเหลือ: ${profile.balance.toLocaleString()} pt 💎`,
+          'success'
+        );
+
     if (replyToken) {
       await replyToLine(replyToken, confirmFlex, env, true);
     } else if (userId && userId.startsWith('U')) {
-      ctx?.waitUntil(pushToLine(userId, confirmFlex, env).catch(e => console.error(e)));
+      if (ctx) {
+        ctx.waitUntil(pushToLine(userId, confirmFlex, env).catch((e) => console.error(e)));
+      } else {
+        pushToLine(userId, confirmFlex, env).catch(() => {});
+      }
     }
+  }
+
+  // Ensure persistence completes
+  await persistenceTask;
+
+  if (ctx) {
+    ctx.waitUntil(
+      env.KV_CACHE.put(
+        'LAST_ORDER_CREATE_DEBUG',
+        JSON.stringify({
+          orderNumber,
+          cmd: text,
+          amount,
+          userId,
+          groupId,
+          targetGroupId,
+          cardDispatched,
+          time: new Date().toISOString(),
+        })
+      ).catch(() => {})
+    );
   }
 }
 
@@ -1462,49 +1490,78 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
   try {
     profile.updatedAt = Date.now();
     const cacheKey = `USER_${profile.lineUserId}`;
-    await env.KV_CACHE.put(cacheKey, JSON.stringify(profile));
-    if (profile.shortId) {
-      await env.KV_CACHE.put(`RAW_LINE_${profile.shortId}`, profile.lineUserId);
-      await env.KV_CACHE.put(`USER_${profile.shortId}`, JSON.stringify(profile));
-    }
+    const profileJson = JSON.stringify(profile);
 
-    let list: any[] = [];
-    const cached = await env.KV_CACHE.get('PLAYERS_LIST');
-    if (cached) {
-      try { list = JSON.parse(cached); } catch (_) {}
+    const primaryPuts: Promise<any>[] = [
+      env.KV_CACHE.put(cacheKey, profileJson),
+    ];
+    if (profile.shortId) {
+      primaryPuts.push(env.KV_CACHE.put(`RAW_LINE_${profile.shortId}`, profile.lineUserId));
+      primaryPuts.push(env.KV_CACHE.put(`USER_${profile.shortId}`, profileJson));
     }
-    const otherPlayers = list.filter(p => p.lineUserId !== profile.lineUserId && (!profile.shortId || (p.shortId !== profile.shortId && p.id !== profile.shortId)));
-    const entry = {
-      id: profile.shortId || profile.lineUserId,
-      name: profile.displayName || 'ผู้เล่น',
-      displayName: profile.displayName || 'ผู้เล่น',
-      shortId: profile.shortId,
-      lineUserId: profile.lineUserId,
-      balance: Number(profile.balance) || 0,
-      bankName: profile.bankName || '',
-      accountNumber: profile.accountNumber || '',
-      bankAccount: profile.accountNumber || '',
-      accountName: profile.accountName || profile.displayName || '',
-      registeredAt: profile.registeredAt || Date.now(),
-      updatedAt: profile.updatedAt,
+    await Promise.all(primaryPuts);
+
+    // Update directory array PLAYERS_LIST in background (read-only listing view, non-blocking)
+    const updateDirectory = async () => {
+      try {
+        let list: any[] = [];
+        const cached = await env.KV_CACHE.get('PLAYERS_LIST');
+        if (cached) {
+          try { list = JSON.parse(cached); } catch (_) {}
+        }
+        const otherPlayers = list.filter(
+          (p) =>
+            p.lineUserId !== profile.lineUserId &&
+            (!profile.shortId || (p.shortId !== profile.shortId && p.id !== profile.shortId))
+        );
+        const entry = {
+          id: profile.shortId || profile.lineUserId,
+          name: profile.displayName || 'ผู้เล่น',
+          displayName: profile.displayName || 'ผู้เล่น',
+          shortId: profile.shortId,
+          lineUserId: profile.lineUserId,
+          balance: Number(profile.balance) || 0,
+          bankName: profile.bankName || '',
+          accountNumber: profile.accountNumber || '',
+          bankAccount: profile.accountNumber || '',
+          accountName: profile.accountName || profile.displayName || '',
+          registeredAt: profile.registeredAt || Date.now(),
+          updatedAt: profile.updatedAt,
+        };
+        const updatedList = [...otherPlayers, entry];
+        await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(updatedList.slice(-500)));
+      } catch (err) {
+        console.error('[Worker] updateDirectory in savePlayerProfile error:', err);
+      }
     };
-    const updatedList = [...otherPlayers, entry];
-    // Cap the list document to keep the KV value well under the 25MB limit
-    await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(updatedList.slice(-500)));
+
+    if (ctx) {
+      ctx.waitUntil(updateDirectory());
+    } else {
+      updateDirectory().catch(() => {});
+    }
 
     // Offload sync to Google Sheets in background — throttled to 1 write/min/user
-    // so bet-storm balance writes never pile up on slow GAS execution.
-    if (env.GAS_FALLBACK_URL && !(await isGasSyncThrottled('SAVE', profile.lineUserId, env))) {
-      const syncPromise = fetch(env.GAS_FALLBACK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          functionName: 'adminSetPlayerBalance',
-          args: [profile.lineUserId, profile.balance, profile.displayName, true],
-          apiKey: env.ADMIN_API_KEY,
-        }),
-      }).catch((e) => console.warn('[Worker] Sheets player balance sync error:', e));
-      if (ctx) ctx.waitUntil(syncPromise);
+    if (env.GAS_FALLBACK_URL) {
+      const gasUrl = env.GAS_FALLBACK_URL;
+      const runGasSync = async () => {
+        if (!(await isGasSyncThrottled('SAVE', profile.lineUserId, env))) {
+          await fetch(gasUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              functionName: 'adminSetPlayerBalance',
+              args: [profile.lineUserId, profile.balance, profile.displayName, true],
+              apiKey: env.ADMIN_API_KEY,
+            }),
+          }).catch((e) => console.warn('[Worker] Sheets player balance sync error:', e));
+        }
+      };
+      if (ctx) {
+        ctx.waitUntil(runGasSync());
+      } else {
+        runGasSync().catch(() => {});
+      }
     }
   } catch (err) {
     console.error('[Worker] savePlayerProfile error:', err);
@@ -1757,11 +1814,11 @@ async function replyToLine(replyToken: string, payload: any, env: Env, attachQui
       return false;
     }
     try {
-      await env.KV_CACHE.put('LAST_LINE_SUCCESS', JSON.stringify({
+      env.KV_CACHE.put('LAST_LINE_SUCCESS', JSON.stringify({
         action: 'replyToLine',
         status: res.status,
         time: new Date().toISOString()
-      }));
+      })).catch(() => {});
     } catch (_) {}
     return true;
   } catch (err: any) {

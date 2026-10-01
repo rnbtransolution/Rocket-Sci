@@ -172,16 +172,8 @@ export default {
 
       const events = payload.events || [];
 
-      // ── High-Speed Interactive Execution (< 150ms) ──
+      // ── High-Speed Interactive Execution (< 50ms) ──
       if (events.length > 0) {
-        // Inject a per-event UUID so the inline path and the queue consumer can
-        // dedup against each other. Previously BOTH paths executed the full
-        // processLineEvent(), double-charging replies/pushes and double-writing
-        // ledger entries for every single user message.
-        for (const event of events) {
-          event.webhookEventId = event.webhookEventId || crypto.randomUUID();
-        }
-
         // Replay-probe isolation: LINE Console "Verify" button sends a synthetic
         // event with a fake replyToken (no real user behind it). Reply/push calls
         // on it fail noisily and pollute logs — acknowledge without processing.
@@ -193,13 +185,18 @@ export default {
           events.map(async (event) => {
             try {
               if (!isVerifyProbe) {
+                // Deduplicate redelivered webhook events if LINE provides webhookEventId
                 if (event.webhookEventId) {
                   const seen = await env.KV_CACHE.get(`SEEN_EVENT_${event.webhookEventId}`);
                   if (seen) {
                     console.log(`[Worker] Duplicate webhookEventId ${event.webhookEventId} dropped.`);
                     return;
                   }
-                  await env.KV_CACHE.put(`SEEN_EVENT_${event.webhookEventId}`, '1', { expirationTtl: 600 });
+                  if (ctx) {
+                    ctx.waitUntil(env.KV_CACHE.put(`SEEN_EVENT_${event.webhookEventId}`, '1', { expirationTtl: 600 }).catch(() => {}));
+                  } else {
+                    env.KV_CACHE.put(`SEEN_EVENT_${event.webhookEventId}`, '1', { expirationTtl: 600 }).catch(() => {});
+                  }
                 }
                 await processLineEvent(event, env, ctx);
               }
