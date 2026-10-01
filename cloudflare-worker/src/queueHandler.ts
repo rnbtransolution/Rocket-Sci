@@ -55,6 +55,23 @@ export const RULE_GUIDE_TEXT = `📖 [กติกาการเล่น]
 • 350-400ถ500 ชตย`;
 
 /**
+ * Verify whether a LINE user has administrative privileges for chat commands
+ */
+async function isSenderLineAdmin(userId: string | undefined, env: Env): Promise<boolean> {
+  if (!userId) return false;
+  const envAdmins = (env.ADMIN_LINE_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (envAdmins.includes(userId)) return true;
+  try {
+    const cachedAdminsStr = await env.KV_CACHE.get('ADMIN_LINE_USER_IDS');
+    if (cachedAdminsStr) {
+      const cachedAdmins = cachedAdminsStr.split(',').map(s => s.trim()).filter(Boolean);
+      if (cachedAdmins.includes(userId)) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+/**
  * Cloudflare Worker Queue & Background Event Processor
  * Executes all order validation, atomic balance locking, and LINE API calls with sub-second latency.
  */
@@ -296,6 +313,11 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     // ── 1.3 Admin/System Command: Clear Board & Cache ("ล้างกระดาน", "เคลียร์แผล", "ล้างแคช", "clearboard") ──
     const clearRegex = /^(?:🧹\s*)?(ล้างกระดาน|เคลียร์กระดาน|ล้างแผล|เคลียร์แผล|ล้างแคช|เคลียร์แคช|clearboard|resetboard|clearcache)$/i;
     if (clearRegex.test(clean) || clearRegex.test(text)) {
+      if (!(await isSenderLineAdmin(userId, env))) {
+        const unauthFlex = generateNoticeFlex('⚠️ สิทธิ์ไม่เพียงพอ', 'คำสั่งล้างกระดานสงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นครับ', 'warning');
+        if (replyToken) await replyToLine(replyToken, unauthFlex, env, !isGroup);
+        return;
+      }
       const res = await clearAllPendingOrders(env);
       const clearFlex = generateNoticeFlex(
         '🧹 ล้างกระดานดวลเรียบร้อย',
@@ -414,6 +436,11 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     // ── 5. Admin Commands (e.g. "เปิด [ชื่อ]", "ปิดรอบ") ──
     const openRoundRegex = /^(เปิด|เปิดรอบ|รอบ)\s*(.+)$/;
     if (openRoundRegex.test(text)) {
+      if (!(await isSenderLineAdmin(userId, env))) {
+        const unauthFlex = generateNoticeFlex('⚠️ สิทธิ์ไม่เพียงพอ', 'คำสั่งเปิดรอบสงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นครับ', 'warning');
+        if (replyToken) await replyToLine(replyToken, unauthFlex, env, !isGroup);
+        return;
+      }
       const match = text.match(openRoundRegex);
       const roundName = match ? match[2].trim() : 'รอบดวลสด';
       await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify({
@@ -437,6 +464,11 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     }
 
     if (clean === 'ปิดรอบ' || clean === 'ปิดรับดวล' || clean === 'ล็อครอบ' || clean === '3-2-go' || clean === '32go') {
+      if (!(await isSenderLineAdmin(userId, env))) {
+        const unauthFlex = generateNoticeFlex('⚠️ สิทธิ์ไม่เพียงพอ', 'คำสั่งปิดรอบสงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นครับ', 'warning');
+        if (replyToken) await replyToLine(replyToken, unauthFlex, env, !isGroup);
+        return;
+      }
       const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
       let roundName = 'รอบดวลสด';
       if (roundStr) {
@@ -664,7 +696,12 @@ async function handleCreateOrder(
   // 1. Determine if this is a pre-quote order
   const quoteReleased = !!(round && round.quoteReleased === true);
   const isPreQuote = !isCustom && !quoteReleased;
-  const orderNumber = Math.floor(1000 + Math.random() * 9000).toString();
+  let orderNumber = Math.floor(1000 + Math.random() * 9000).toString();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const existing = await env.KV_ORDERS.get(`ORDER_${orderNumber}`);
+    if (!existing) break;
+    orderNumber = Math.floor(1000 + Math.random() * 9000).toString();
+  }
 
   // 2. Create Order in PRE_CHARGE state first to prevent "ghost charges"
   const newOrder: Order = {
@@ -796,7 +833,13 @@ async function handleMatchOrder(
     return;
   }
 
-  const effectiveAmt = matchAmt || order.amount;
+  if (matchAmt && matchAmt !== order.amount) {
+    const msg = `การรับแผลต้องรับเต็มจำนวน ${order.amount.toLocaleString()} pt ครับ (ระบุ ${matchAmt.toLocaleString()} pt)`;
+    await deliverPrivateNotice(userId, replyToken, groupId, generateMatchMismatchFlex(resolvedNo, msg, 'กรุณาระบุยอดให้ตรงกับคำขอดวลครับ 🚀'), env, profile.displayName, ctx);
+    return;
+  }
+
+  const effectiveAmt = order.amount;
   if (profile.balance < effectiveAmt) {
     const needed = effectiveAmt - profile.balance;
     const msg = `แต้มไม่พอรับแผลครับ (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt)`;
@@ -1152,12 +1195,14 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
         low.status = 'matched';
         low.matcherId = high.creatorId;
         low.matcherName = high.creatorName;
+        low.matcherLineUserId = high.creatorLineUserId;
         low.matchedAt = Date.now();
 
         // High mirrors as matched for settlement bookkeeping (keeping both records)
-        high.status = 'matched';
+        high.status = 'matched_paired';
         high.matcherId = low.creatorId;
         high.matcherName = low.creatorName;
+        high.matcherLineUserId = low.creatorLineUserId;
         high.matchedAt = Date.now();
 
         await Promise.all([
@@ -1166,7 +1211,6 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
           removeFromPendingOrdersList(low.orderNumber, env),
           removeFromPendingOrdersList(high.orderNumber, env),
           addToMatchedOrdersList(low, env),
-          addToMatchedOrdersList(high, env),
           pushToLine(lowNotify, matchFlex, env),
           pushToLine(highNotify, matchFlex, env),
         ]);
@@ -1258,10 +1302,9 @@ export async function voidAllRoundOrders(env: Env, ctx?: ExecutionContext): Prom
 export async function getPendingOrdersList(env: Env): Promise<Order[]> {
   try {
     const cached = await env.KV_CACHE.get('PENDING_ORDERS_LIST');
-    const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
     if (cached !== null) {
       const list = JSON.parse(cached) as Order[];
-      return list.filter((o) => o && (o.status === 'pending_match' || o.status === 'pending_hold') && (o.createdAt || 0) > twoHoursAgo);
+      return list.filter((o) => o && (o.status === 'pending_match' || o.status === 'pending_hold'));
     }
     // Fallback removed: KV_ORDERS.list is too slow for the hot path.
     // PENDING_ORDERS_LIST is the primary index.

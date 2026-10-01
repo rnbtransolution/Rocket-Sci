@@ -8,16 +8,7 @@
 // Optional: LINE_CHANNEL_SECRET, ALLOW_LINE_WEBHOOK (=true only if GAS is the LINE webhook)
 function getScriptSecret_(key) {
   var props = PropertiesService.getScriptProperties();
-  var val = (props.getProperty(key) || '').toString();
-  if (val && val !== '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=') return val;
-  if (key === 'LINE_CHANNEL_ACCESS_TOKEN') {
-    var newToken = 'PpuZyApV5ZnAbv30gq3h5F7+gwidiQyhUWiyyZWIFLVMXbWg7gAylFzy+2WYPsYWsx9IAhC2YCf3Y+0QLpr50IVoLEyTO8iljM6OmidmF1A/3p3BaXk2A6rphlobN7ipKJdZMBQrGEvwvjHTgmhE8wdB04t89/1O/w1cDnyilFU=';
-    try { props.setProperty('LINE_CHANNEL_ACCESS_TOKEN', newToken); } catch (_) {}
-    return newToken;
-  }
-  if (key === 'SLIP_API_KEY') return 'WNsIQaS1CqRpyHwPHb0SA5wcdh55sQYZT6cSNLSSssY=';
-  if (key === 'ADMIN_API_KEY') return 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
-  return '';
+  return (props.getProperty(key) || '').toString().trim();
 }
 
 function getLineToken_() {
@@ -447,6 +438,25 @@ function adminOpenRound(name) {
 function doGet(e) {
   // Read-only JSON API for external clients (mutations must use authenticated POST / google.script.run)
   if (e && e.parameter && (e.parameter.action === 'getDashboardData' || e.parameter.api === '1')) {
+    var providedKey = (e.parameter.apiKey || e.parameter.adminKey || '').toString().trim();
+    var expectedKey = getAdminApiKey_();
+    var isAdmin = (expectedKey && providedKey === expectedKey);
+    if (!isAdmin) {
+      // Redact sensitive player and financial data for unauthenticated callers
+      var round = getActiveRocketRound();
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        data: {
+          activeRound: round,
+          roundStatus: getRocketRoundStatus(),
+          serverTime: new Date().toISOString(),
+          players: [],
+          transactions: [],
+          bets: [],
+          chatLogs: []
+        }
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
     var data = getDashboardData();
     return ContentService.createTextOutput(JSON.stringify({ success: true, data: data }))
       .setMimeType(ContentService.MimeType.JSON);
@@ -485,8 +495,16 @@ function invalidateDashboardCache() {
 /**
  * Universal Action Dispatcher for Admin RPC functions.
  */
-function executeAdminAction(functionName, args) {
+function executeAdminAction(functionName, args, adminKey) {
   args = args || [];
+  var publicFns = { getDashboardData: true, adminLogin: true, adminGetLineQuota: true };
+  if (!publicFns[functionName]) {
+    var expectedKey = getAdminApiKey_();
+    var provided = adminKey || (args && args.length > 0 && typeof args[args.length - 1] === 'object' && args[args.length - 1] && args[args.length - 1].adminKey ? args[args.length - 1].adminKey : null);
+    if (!expectedKey || provided !== expectedKey) {
+      return { success: false, error: 'Unauthorized: Admin authorization required' };
+    }
+  }
   var result;
   switch (functionName) {
     case 'getDashboardData': return getDashboardData(args[0]);
@@ -583,6 +601,26 @@ function doPost(e) {
     }
 
     // Process LINE Messaging API webhook events
+    const allowWebhook = (PropertiesService.getScriptProperties().getProperty('ALLOW_LINE_WEBHOOK') || '').toString().toLowerCase();
+    if (allowWebhook !== 'true') {
+      return ContentService.createTextOutput(JSON.stringify({ status: 'ignored', message: 'LINE webhook is disabled for GAS' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    const channelSecret = PropertiesService.getScriptProperties().getProperty('LINE_CHANNEL_SECRET');
+    if (!channelSecret) {
+      return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'LINE_CHANNEL_SECRET not configured' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    const rawBody = (e.postData && e.postData.contents) ? e.postData.contents : '';
+    const sigHeader = (e.headers && (e.headers['x-line-signature'] || e.headers['X-Line-Signature'])) || '';
+    const computedSignature = Utilities.base64Encode(Utilities.computeHmacSha256Signature(rawBody, channelSecret));
+    if (sigHeader !== computedSignature) {
+      return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'Invalid LINE signature' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     const events = postData.events || [];
     for (let i = 0; i < events.length; i++) {
       const event = events[i];
@@ -1304,9 +1342,19 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   // ─────────────────────────────────────────────────────────────
   // 5. ADMIN COMMANDS (Round Control & Quotes)
   // ─────────────────────────────────────────────────────────────
+  function isGasSenderAdmin_(uid) {
+    if (!uid) return false;
+    var adminIds = (PropertiesService.getScriptProperties().getProperty('ADMIN_LINE_USER_IDS') || '').split(',').map(function(s) { return s.trim(); });
+    return adminIds.indexOf(uid) !== -1;
+  }
+
   // Admin Command: Close / Lock Round
   var closeRoundRegex = /^(ปิดรอบ|ปิดรับดวล|ล็อครอบ|3-2-go|32go)$/i;
   if (closeRoundRegex.test(clean)) {
+    if (!isGasSenderAdmin_(userId)) {
+      replyToLine(replyToken, '⚠️ คำสั่งนี้สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นครับ', userId);
+      return;
+    }
     var currentRound = getActiveRocketRound();
     // If the ราคาช่าง was never officially released, cancel + refund held pre-quote bets.
     if (!getQuoteReleased()) {
@@ -1320,6 +1368,10 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   // Admin Command: Open Round
   var openRoundRegex = /^(เปิดรอบ|เปิดรับดวล)$/i;
   if (openRoundRegex.test(clean)) {
+    if (!isGasSenderAdmin_(userId)) {
+      replyToLine(replyToken, '⚠️ คำสั่งนี้สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นครับ', userId);
+      return;
+    }
     setRocketRoundStatus('ACTIVE');
     setQuoteReleased(false);
     var activeRound = getActiveRocketRound();
@@ -1330,6 +1382,10 @@ function handleTextMessage(text, userId, displayName, replyToken, groupId, messa
   // Admin Command: Set Quote
   var adminQuoteRegex = /^(ราคา|quote|setquote)\s*(\d{2,5})[-\/](\d{2,5})$/i;
   if (adminQuoteRegex.test(clean) || adminQuoteRegex.test(rawTrimmed)) {
+    if (!isGasSenderAdmin_(userId)) {
+      replyToLine(replyToken, '⚠️ คำสั่งนี้สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นครับ', userId);
+      return;
+    }
     var qm = rawTrimmed.match(adminQuoteRegex) || clean.match(adminQuoteRegex);
     var qMin = parseInt(qm[2]);
     var qMax = parseInt(qm[3]);
@@ -1862,53 +1918,67 @@ function handleImageSlipMessage(messageId, userId, displayName, replyToken, grou
     sendSlipNotice(`❌ สลิปไม่มีรหัสอ้างอิง!\nระบบตรวจพบว่าสลิปนี้ไม่มีเลขอ้างอิงธุรกรรม (transRef) อาจเป็นภาพ Screenshot หรือถูกตัดต่อ\n\nกรุณาส่งสลิปจากแอปธนาคารโดยตรงครับ`);
     return;
   }
-  
-  // GUARD 2: Block duplicate ref codes (checks ALL statuses, not just 'success')
-  if (checkIfRefExists(refCode)) {
-    logTransaction(userId, displayName, 0, actualAmount, refCode, 'escalated', 'Duplicate transaction ref code — already submitted before');
-    sendSlipNotice(`⚠️ ตรวจพบสลิปซ้ำในระบบ!\nเลขอ้างอิง: ${refCode}\nสลิปนี้เคยถูกนำมาใช้งานแล้ว ไม่ว่าจะผ่านหรือไม่ผ่านก็ตาม\n\nรายการส่งให้แอดมินตรวจสอบกรณีพิเศษครับ`);
+
+  // GUARD 1.5: Reject slips where amount could not be verified or is zero
+  if (!actualAmount || actualAmount <= 0) {
+    logTransaction(userId, displayName, 0, 0, refCode, 'escalated', 'Slip amount is 0 or could not be verified');
+    sendSlipNotice(`⚠️ ไม่พบยอดเงินที่ถูกต้องในสลิป!\nระบบไม่สามารถยืนยันยอดเงินที่โอนได้ รายการส่งให้แอดมินตรวจสอบเป็นกรณีพิเศษครับ`);
     return;
   }
- 
-  // GUARD 3: Block slips older than 24 hours (stale slip fraud prevention)
-  var slipDateStr = '';
-  if (slipData.data) {
-    if (slipData.data.dateTime) {
-      slipDateStr = slipData.data.dateTime;
-    } else if (slipData.data.rawSlip && slipData.data.rawSlip.date) {
-      slipDateStr = slipData.data.rawSlip.date;
-    } else if (slipData.data.rawSlip && slipData.data.rawSlip.transDate) {
-      slipDateStr = slipData.data.rawSlip.transDate;
-    } else if (slipData.data.date) {
-      slipDateStr = slipData.data.date;
-    } else if (slipData.data.transDate) {
-      slipDateStr = slipData.data.transDate;
-    }
-  }
- 
-  if (slipDateStr) {
-    const slipDate = new Date(slipDateStr);
-    const nowDate = new Date();
-    const hoursDiff = (nowDate - slipDate) / (1000 * 60 * 60);
-    if (!isNaN(hoursDiff) && hoursDiff > 24) {
-      logTransaction(userId, displayName, 0, actualAmount, refCode, 'escalated', `Stale slip rejected — slip date: ${slipDateStr} is more than 24 hours old`);
-      sendSlipNotice(`⏰ สลิปหมดอายุ!\nสลิปนี้มีวันที่: ${slipDateStr}\nระบบยอมรับเฉพาะสลิปที่โอนภายใน 24 ชั่วโมงที่ผ่านมาเท่านั้น\n\nกรุณาโอนใหม่และส่งสลิปทันทีครับ`);
+  
+  // GUARD 2 & Idempotent Credit: Lock check and credit to prevent duplicate concurrent deliveries
+  var slipLock = LockService.getScriptLock();
+  try {
+    slipLock.waitLock(15000);
+
+    if (checkIfRefExists(refCode)) {
+      logTransaction(userId, displayName, 0, actualAmount, refCode, 'escalated', 'Duplicate transaction ref code — already submitted before');
+      sendSlipNotice(`⚠️ ตรวจพบสลิปซ้ำในระบบ!\nเลขอ้างอิง: ${refCode}\nสลิปนี้เคยถูกนำมาใช้งานแล้ว ไม่ว่าจะผ่านหรือไม่ผ่านก็ตาม\n\nรายการส่งให้แอดมินตรวจสอบกรณีพิเศษครับ`);
       return;
     }
+   
+    // GUARD 3: Block slips older than 24 hours (stale slip fraud prevention)
+    var slipDateStr = '';
+    if (slipData.data) {
+      if (slipData.data.dateTime) {
+        slipDateStr = slipData.data.dateTime;
+      } else if (slipData.data.rawSlip && slipData.data.rawSlip.date) {
+        slipDateStr = slipData.data.rawSlip.date;
+      } else if (slipData.data.rawSlip && slipData.data.rawSlip.transDate) {
+        slipDateStr = slipData.data.rawSlip.transDate;
+      } else if (slipData.data.date) {
+        slipDateStr = slipData.data.date;
+      } else if (slipData.data.transDate) {
+        slipDateStr = slipData.data.transDate;
+      }
+    }
+   
+    if (slipDateStr) {
+      const slipDate = new Date(slipDateStr);
+      const nowDate = new Date();
+      const hoursDiff = (nowDate - slipDate) / (1000 * 60 * 60);
+      if (!isNaN(hoursDiff) && hoursDiff > 24) {
+        logTransaction(userId, displayName, 0, actualAmount, refCode, 'escalated', `Stale slip rejected — slip date: ${slipDateStr} is more than 24 hours old`);
+        sendSlipNotice(`⏰ สลิปหมดอายุ!\nสลิปนี้มีวันที่: ${slipDateStr}\nระบบยอมรับเฉพาะสลิปที่โอนภายใน 24 ชั่วโมงที่ผ่านมาเท่านั้น\n\nกรุณาโอนใหม่และส่งสลิปทันทีครับ`);
+        return;
+      }
+    }
+    
+    // Official transfer amount is ALWAYS verified actualAmount
+    var requestedAmount = findPendingRequestedAmount(userId);
+    var finalCreditAmount = actualAmount;
+
+    // SUCCESS: Credit player balance 1:1 based on verified actual slip amount
+    adjustPlayerBalance(userId, finalCreditAmount, displayName);
+    
+    var noteStr = (requestedAmount && requestedAmount !== finalCreditAmount)
+      ? 'Auto approved via Slip Scanner. Marked ' + requestedAmount + ' THB vs Slip ' + finalCreditAmount + ' THB. Ref: ' + refCode
+      : 'Auto approved via Slip Scanner. Ref: ' + refCode;
+
+    logTransaction(userId, displayName, requestedAmount || finalCreditAmount, finalCreditAmount, refCode, 'success', noteStr);
+  } finally {
+    slipLock.releaseLock();
   }
-  
-  // Official transfer amount is ALWAYS per the pay-in slip (actualAmount)
-  var requestedAmount = findPendingRequestedAmount(userId);
-  var finalCreditAmount = actualAmount > 0 ? actualAmount : (requestedAmount || 100);
-
-  // SUCCESS: Credit player balance 1:1 based on actual slip amount, log transaction as success
-  adjustPlayerBalance(userId, finalCreditAmount, displayName);
-  
-  var noteStr = (requestedAmount && requestedAmount !== finalCreditAmount)
-    ? 'Auto approved via Slip Scanner. Marked ' + requestedAmount + ' THB vs Slip ' + finalCreditAmount + ' THB. Ref: ' + refCode
-    : 'Auto approved via Slip Scanner. Ref: ' + refCode;
-
-  logTransaction(userId, displayName, requestedAmount || finalCreditAmount, finalCreditAmount, refCode, 'success', noteStr);
   
   // GUARD: Remove the duplicate logTransaction call that appeared after the first one.
   // The single call to logTransaction at line ~767 already handles upsert of the PENDING_SLIP row.
@@ -2209,23 +2279,28 @@ function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmo
     adjustPlayerBalance(searchId, -finalMatchAmt, displayName);
 
     // If partial match: create Child split order keeping original orderNo for the remaining amount
-    if (isSplit && remainingAmount >= 100) {
-      splitOrderNumber = orderNo;
-      sheet.appendRow([
-        splitOrderNumber,
-        creatorSide === 'low' ? creatorId : '',
-        creatorSide === 'low' ? creatorName : '',
-        creatorSide === 'high' ? creatorId : '',
-        creatorSide === 'high' ? creatorName : '',
-        remainingAmount,
-        betType,
-        rMin || '',
-        rMax || '',
-        'pending_match',
-        '',
-        new Date(),
-        targetGroupId || ''
-      ]);
+    if (isSplit) {
+      if (remainingAmount >= 100) {
+        splitOrderNumber = orderNo;
+        sheet.appendRow([
+          splitOrderNumber,
+          creatorSide === 'low' ? creatorId : '',
+          creatorSide === 'low' ? creatorName : '',
+          creatorSide === 'high' ? creatorId : '',
+          creatorSide === 'high' ? creatorName : '',
+          remainingAmount,
+          betType,
+          rMin || '',
+          rMax || '',
+          'pending_match',
+          '',
+          new Date(),
+          targetGroupId || ''
+        ]);
+      } else if (remainingAmount > 0) {
+        // Refund sub-100 remainder to creator so funds are not stranded
+        adjustPlayerBalance(creatorId, remainingAmount, creatorName);
+      }
     }
 
     var rangeInfoStr = (rMin && rMax) ? (rMin + '-' + rMax + 's') : '';
@@ -2867,9 +2942,9 @@ function adminApproveTransaction(txId) {
     const rowTxId = tData[i][0] ? tData[i][0].toString().trim() : '';
     if (rowTxId === searchId) {
       const currentStatus = (tData[i][6] || '').toString().toLowerCase();
-      if (currentStatus === 'success') {
-        // Idempotent: never credit twice
-        return getDashboardData();
+      if (currentStatus === 'success' || currentStatus === 'rejected') {
+        // Idempotent: never credit twice or approve already rejected
+        return true;
       }
 
       const userId = tData[i][1];
@@ -2923,6 +2998,11 @@ function adminRejectTransaction(txId, reason) {
   for (let i = 1; i < tData.length; i++) {
     const rowTxId = tData[i][0] ? tData[i][0].toString().trim() : '';
     if (rowTxId === searchId) {
+      const currentStatus = (tData[i][6] || '').toString().toLowerCase();
+      if (currentStatus === 'success' || currentStatus === 'rejected') {
+        // Idempotent: never refund or reject twice
+        return true;
+      }
       const userId = tData[i][1];
       const displayName = tData[i][2];
       const reqAmt = Number(tData[i][3]) || 0;
@@ -2951,14 +3031,21 @@ function adminRejectTransaction(txId, reason) {
   return false;
 }
 
-
 /**
  * Resolve matched bets in spreadsheet database based on final rocket time
  */
 function adminResolveBets(finalTime, targetMin, targetMax) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const bSheet = ss.getSheetByName('Bets');
-  if (!bSheet) return getDashboardData();
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (e) {
+    Logger.log('[adminResolveBets] Could not acquire lock: ' + e.toString());
+    return { success: false, error: 'ระบบกำลังประมวลผลการตัดสินรอบอยู่ กรุณารอสักครู่' };
+  }
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const bSheet = ss.getSheetByName('Bets');
+    if (!bSheet) return getDashboardData();
 
   // If the ราคาช่าง was never officially released, cancel + refund held pre-quote bets.
   if (!getQuoteReleased()) {
@@ -3143,8 +3230,13 @@ function adminResolveBets(finalTime, targetMin, targetMax) {
     Logger.log("Error pushing P2P breakdown flex: " + e.toString());
   }
 
-  setRocketRoundStatus('ACTIVE');
-  return getDashboardData();
+    setRocketRoundStatus('ACTIVE');
+    return getDashboardData();
+  } finally {
+    try {
+      lock.releaseLock();
+    } catch (_) {}
+  }
 }
 
 function adminVoidRound() {
@@ -6631,8 +6723,9 @@ function adminGetLineQuota() {
 function adminLogin(username, password) {
   var u = String(username || '').trim().toLowerCase();
   var p = String(password || '').trim();
-  if (u === 'admin' && (p === 'P@ssW0rd2026' || p === 'rocket-admin' || p === getAdminApiKey_())) {
-    return { success: true, message: 'Authentication successful', username: 'Admin' };
+  var expectedKey = getAdminApiKey_();
+  if (expectedKey && u === 'admin' && p === expectedKey) {
+    return { success: true, message: 'Authentication successful', username: 'Admin', adminKey: expectedKey };
   }
   return { success: false, error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
 }

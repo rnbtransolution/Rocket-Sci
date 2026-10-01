@@ -1,6 +1,7 @@
 import os
 import glob
 import re
+import sys
 
 project_dir = os.path.dirname(os.path.abspath(__file__))
 dist_dir = os.path.join(project_dir, "dist")
@@ -15,7 +16,7 @@ js_files = glob.glob(os.path.join(assets_dir, "*.js"))
 
 if not css_files or not js_files:
     print("Error: Compiled files not found in dist/assets/")
-    exit(1)
+    sys.exit(1)
 
 css_path = css_files[0]
 js_path = js_files[0]
@@ -83,7 +84,8 @@ if css_idx != -1:
     html_content = html_content.replace(old_link_tag, replacement)
     print(f"  CSS inlined ({len(css_content_clean):,} chars). {len(font_link_tags)} @import(s) moved to <link> tags.")
 else:
-    print("Warning: CSS link not found in index.html")
+    print("Error: CSS link not found in index.html")
+    sys.exit(1)
 
 # Locate JS script tag in HTML, remove from head, insert at bottom of body
 js_src = f'src="/assets/{js_name}"'
@@ -96,7 +98,8 @@ if js_idx != -1:
     html_content = html_content.replace("</body>", f"<script>\n{js_content}\n</script>\n</body>")
     print(f"  JS inlined at end of body ({len(js_content):,} chars).")
 else:
-    print("Warning: JS script tag not found in index.html")
+    print("Error: JS script tag not found in index.html")
+    sys.exit(1)
 
 # Insert error listener in <head> for early crash capturing
 error_listener_head = """<head>

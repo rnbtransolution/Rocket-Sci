@@ -16,6 +16,7 @@ export interface Env {
   GAS_FALLBACK_URL?: string;
   SLIP_API_KEY?: string;
   SLIP_API_URL?: string;
+  ADMIN_LINE_USER_IDS?: string;
 }
 
 // ── Queue Message Structure ──
@@ -78,7 +79,7 @@ export interface Order {
   betType: 'range' | 'custom_range' | 'pre_quote';
   rangeMin: number;
   rangeMax: number;
-  status: 'pending_match' | 'pending_hold' | 'matched' | 'cancelled' | 'resolved' | 'settled' | 'void' | 'PRE_CHARGE' | 'refunding';
+  status: 'pending_match' | 'pending_hold' | 'matched' | 'matched_paired' | 'cancelled' | 'resolved' | 'settled' | 'void' | 'PRE_CHARGE' | 'refunding';
   groupId?: string | null;
   userTypedCmd?: string | null;
   rocketName?: string | null;

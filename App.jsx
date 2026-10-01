@@ -1,28 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
-  MessageSquare, 
   User, 
   Send, 
-  Upload, 
   CheckCircle, 
   AlertTriangle, 
   XCircle, 
   Rocket, 
   Layers, 
   Clock, 
-  DollarSign, 
   Database,
   Users,
-  Settings,
-  HelpCircle,
   FileText,
   RefreshCw,
-  ArrowRight,
-  TrendingDown,
   TrendingUp,
   RotateCcw,
-  Wifi,
-  Battery,
   ShieldCheck,
   Zap,
   Info,
@@ -117,8 +108,8 @@ const SLIP_PRESETS = [
 ];
 
 const ADMIN_USERNAME = import.meta.env.VITE_ADMIN_USERNAME || 'Admin';
-const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN_PASSCODE || 'P@ssW0rd2026';
-const ADMIN_PASSCODE = import.meta.env.VITE_ADMIN_PASSCODE || 'P@ssW0rd2026';
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN_PASSCODE || '';
+const ADMIN_PASSCODE = import.meta.env.VITE_ADMIN_PASSCODE || '';
 
 export default function App() {
   const isGASHost = typeof window !== 'undefined' && (
@@ -159,7 +150,14 @@ export default function App() {
     return import.meta.env.VITE_API_BASE_URL || '';
   };
   const API_BASE_URL = getApiBaseUrl();
-  const ADMIN_API_KEY = import.meta.env.VITE_ADMIN_API_KEY || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
+  const getAdminApiKey = () => {
+    if (typeof window !== 'undefined') {
+      const stored = sessionStorage.getItem('rocket_admin_key') || localStorage.getItem('rocket_admin_key');
+      if (stored) return stored;
+    }
+    return '';
+  };
+  const ADMIN_API_KEY = getAdminApiKey();
 
   const runBackendFunction = async (functionName, args = []) => {
     if (isGAS) {
@@ -226,7 +224,16 @@ export default function App() {
   };
 
   // Security and Mode States
-  const [playerUserId, setPlayerUserId] = useState(null);
+  const [playerUserId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const uid = urlParams.get('userId');
+      if (uid) {
+        return uid.trim().toLowerCase() === 'user' ? 'user' : uid.trim();
+      }
+    }
+    return null;
+  });
   const [adminAuthenticated, setAdminAuthenticated] = useState(() => {
     if (typeof window !== 'undefined') {
       return sessionStorage.getItem('rocket_admin_auth') === 'true';
@@ -247,6 +254,7 @@ export default function App() {
       if (typeof window !== 'undefined') {
         sessionStorage.removeItem('rocket_admin_auth');
         sessionStorage.removeItem('rocket_admin_user');
+        sessionStorage.removeItem('rocket_admin_key');
       }
       setAdminAuthenticated(false);
       setPasswordInput('');
@@ -254,17 +262,19 @@ export default function App() {
     }
   };
 
-  // App States (Instant 0ms hydration from localStorage cache)
   const getInitialCache = () => {
     try {
       if (typeof window !== 'undefined') {
         const cached = localStorage.getItem('rocket_sci_dashboard_cache');
         if (cached) return JSON.parse(cached);
       }
-    } catch (_) {}
+    } catch {
+      // ignore invalid cache
+    }
     return null;
   };
   const initialCache = getInitialCache();
+  const lastDashboardCacheRef = useRef('');
 
   const [players, setPlayers] = useState(initialCache?.players || INITIAL_PLAYERS);
   const [transactions, setTransactions] = useState(initialCache?.transactions || []);
@@ -273,7 +283,6 @@ export default function App() {
   const [flights, setFlights] = useState([]);
   
   // Dashboard & Navigation controls (default to quote setup first)
-  const [lineChatType, setLineChatType] = useState('private'); // 'private' | 'group'
   const [adminTab, setAdminTab] = useState('quote'); // 'quote' | 'settle' | 'bets' | 'review' | 'players' | 'logs' | 'broadcast'
   const [customBroadcastText, setCustomBroadcastText] = useState('');
   const [isSendingBroadcast, setIsSendingBroadcast] = useState(false);
@@ -306,43 +315,15 @@ export default function App() {
   const [confirmDelete, setConfirmDelete] = useState(null); // { player }
   const [deleteSaving, setDeleteSaving] = useState(false);
   
-  // LINE billing session states
-  const [billingStep, setBillingStep] = useState('idle');
-  const [depositAmount, setDepositAmount] = useState(0);
-  const [activeTxId, setActiveTxId] = useState(null);
-  const [selectedPresetId, setSelectedPresetId] = useState(SLIP_PRESETS[0].id);
-  const [customSlipAmount, setCustomSlipAmount] = useState(0);
-  const [useCustomSlip, setUseCustomSlip] = useState(false);
-  const [scannerLogs, setScannerLogs] = useState([]);
-  const [billingResult, setBillingResult] = useState(null);
-
-  // Private chat states
-  const [myPrivateInput, setMyPrivateInput] = useState('');
-  const [privateMessages, setPrivateMessages] = useState([
-    { id: 'bot_welcome', sender: 'bot', text: '🏦 ยินดีต้อนรับสู่ระบบบริหารจัดการธุรกรรม Bang Fai Commander\n\nโอนเงินด้วยยอดที่ท่านเลือก และส่งสลิปที่มี QR code ระบบจะเติมเครดิตให้อัตโนมัติในสเกล 1:1 ครับ\n\nกรุณาเลือกบริการจากเมนูด้านล่าง หรือพิมพ์บอกเราได้เลยครับ\n(เช่น พิมพ์ "ฝากเงิน", "ถอนยอด" หรือ "เช็คยอด")', time: '13:00' }
-  ]);
-
-  // Real LINE OA chat states
-  const [chatLogs, setChatLogs] = useState([]);
-  const [selectedChatPlayerId, setSelectedChatPlayerId] = useState('GROUP_STREAM');
-  const [adminChatInput, setAdminChatInput] = useState('');
-  const liveChatEndRef = useRef(null);
-  const liveChatContainerRef = useRef(null);
-  
-  // Group chat states (manual entries)
-  const [groupMessages, setGroupMessages] = useState([]);
-  const [myGroupInput, setMyGroupInput] = useState('');
   
   // Rocket telemetry states
-  const [rocketFlightTime, setRocketFlightTime] = useState(0.00);
-  const [rocketStatus, setRocketStatus] = useState('idle');
   const [rocketName, setRocketName] = useState(''); // Technician / Rocket Team Name (entered manually by admin)
   const [targetMin, setTargetMin] = useState(''); // Range Min (entered manually by admin)
   const [targetMax, setTargetMax] = useState(''); // Range Max (entered manually by admin)
   const [quoteBetAmount, setQuoteBetAmount] = useState(''); // Bet Amount (entered manually by admin)
   const [quoteIsChotoy, setQuoteIsChotoy] = useState(false);
 
-  const handleBroadcastFastQuote = async (overrideMin = null, overrideMax = null, overrideAmt = null, overrideChotoy = null) => {
+  const handleBroadcastFastQuote = async (overrideMin = null, overrideMax = null, overrideChotoy = null) => {
     const min = overrideMin !== null ? overrideMin : targetMin;
     const max = overrideMax !== null ? overrideMax : targetMax;
     const isChotoy = overrideChotoy !== null ? overrideChotoy : quoteIsChotoy;
@@ -353,53 +334,6 @@ export default function App() {
       return;
     }
 
-    const quoteFlex = {
-      "type": "bubble",
-      "size": "micro",
-      "header": {
-        "type": "box",
-        "layout": "vertical",
-        "backgroundColor": "#BAE6FD",
-        "paddingAll": "sm",
-        "contents": [
-          {
-            "type": "text",
-            "text": `🚀 ราคาช่างเปิด ➔ ${name}`,
-            "weight": "bold",
-            "color": "#0369A1",
-            "size": "sm",
-            "align": "center",
-            "wrap": true
-          }
-        ]
-      },
-      "body": {
-        "type": "box",
-        "layout": "vertical",
-        "backgroundColor": "#F0F9FF",
-        "spacing": "xs",
-        "paddingAll": "sm",
-        "contents": [
-          {
-            "type": "text",
-            "text": `⏱️ ช่วงราคา: ${min}-${max} วิ${isChotoy ? ' (ชตย)' : ''}`,
-            "weight": "bold",
-            "color": "#0284C7",
-            "size": "xs",
-            "align": "center",
-            "wrap": true
-          },
-          {
-            "type": "text",
-            "text": "⚡ พิมพ์ ชล / ชถ (±5, ±10) ได้ทันที",
-            "color": "#64748B",
-            "size": "xxs",
-            "align": "center"
-          }
-        ]
-      }
-    };
-
     try {
       const res = await runBackendFunction('adminBroadcastQuote', [broadcastTargetGroup || 'ALL', name, min, max, isChotoy]);
       if (res && res.success === false) {
@@ -407,7 +341,7 @@ export default function App() {
       } else {
         addToast(`🚀 ประกาศราคาสำเร็จ (${min}-${max}s)`, 'success');
       }
-    } catch (e) {
+    } catch {
       addToast('❌ ส่งไม่สำเร็จ', 'danger');
     }
   };
@@ -416,24 +350,7 @@ export default function App() {
   const [settlementResult, setSettlementResult] = useState(null); // Settle results popup summary
   const [activeGroupId, setActiveGroupId] = useState(null); // Active connected LINE Group ID
   const [lineGroups, setLineGroups] = useState([]); // List of active connected LINE Groups
-  const [chatTypeMode, setChatTypeMode] = useState('group'); // 'group' or 'private'
   const [broadcastTargetGroup, setBroadcastTargetGroup] = useState('ALL'); // Multi-group broadcast target
-
-  const privateChatEndRef = useRef(null);
-  const groupChatEndRef = useRef(null);
-  const privateChatContainerRef = useRef(null);
-  const groupChatContainerRef = useRef(null);
-
-  // Parse URL query parameter userId on mount
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const uid = urlParams.get('userId');
-    if (uid) {
-      // Normalize 'user' simulator ID to lowercase 'user' to prevent case-sensitive duplicate accounts
-      const normalizedUid = uid.trim().toLowerCase() === 'user' ? 'user' : uid.trim();
-      setPlayerUserId(normalizedUid);
-    }
-  }, []);
 
   // Detect live Node.js Express backend (localhost, Render, Vercel, Railway, or custom host)
   const isLiveBackend = typeof window !== 'undefined' && !isGAS;
@@ -445,7 +362,7 @@ export default function App() {
       if (Array.isArray(data.players)) setPlayers(data.players);
       if (Array.isArray(data.transactions)) setTransactions(data.transactions);
       if (Array.isArray(data.bets)) setBets(data.bets);
-      if (Array.isArray(data.chatLogs)) setChatLogs(data.chatLogs);
+      if (Array.isArray(data.flights)) setFlights(data.flights);
       if (data.activeGroupId !== undefined) setActiveGroupId(data.activeGroupId);
       if (data.lineGroups && data.lineGroups.length > 0) {
         setLineGroups(data.lineGroups);
@@ -462,9 +379,15 @@ export default function App() {
       }
       try {
         if (typeof window !== 'undefined') {
-          localStorage.setItem('rocket_sci_dashboard_cache', JSON.stringify(data));
+          const serialized = JSON.stringify(data);
+          if (serialized !== lastDashboardCacheRef.current) {
+            lastDashboardCacheRef.current = serialized;
+            localStorage.setItem('rocket_sci_dashboard_cache', serialized);
+          }
         }
-      } catch (_) {}
+      } catch {
+        // ignore cache write errors
+      }
     };
 
     if (isGAS) {
@@ -552,7 +475,9 @@ export default function App() {
           try {
             const data = JSON.parse(event.data);
             applyData(data);
-          } catch (_) {}
+          } catch {
+            // ignore malformed SSE payload
+          }
         };
 
         es.onerror = () => {
@@ -568,26 +493,7 @@ export default function App() {
         if (reconnectTimer) clearTimeout(reconnectTimer);
       };
     }
-  }, [isGAS, isLiveBackend, isGitHubPages]);
-
-  // Auto scroll chats inside container without moving the browser viewport
-  useEffect(() => {
-    if (privateChatContainerRef.current) {
-      privateChatContainerRef.current.scrollTop = privateChatContainerRef.current.scrollHeight;
-    }
-  }, [billingStep, scannerLogs, privateMessages]);
-
-  useEffect(() => {
-    if (groupChatContainerRef.current) {
-      groupChatContainerRef.current.scrollTop = groupChatContainerRef.current.scrollHeight;
-    }
-  }, [bets, groupMessages]);
-
-  useEffect(() => {
-    if (liveChatContainerRef.current) {
-      liveChatContainerRef.current.scrollTop = liveChatContainerRef.current.scrollHeight;
-    }
-  }, [chatLogs, selectedChatPlayerId]);
+  }, [isGAS, isLiveBackend, isGitHubPages, ADMIN_API_KEY, API_BASE_URL]);
 
   // Toast Notification manager
   const addToast = (msg, type = 'info') => {
@@ -610,8 +516,6 @@ export default function App() {
       return;
     }
     
-    setRocketStatus('idle');
-    setRocketFlightTime(0.00);
     setSettlementResult(null);
     setRocketName('');
     addToast('🔒 ปิดและรีเซ็ตพอร์ทัลรอบปัจจุบันเรียบร้อย (รักษาข้อมูลผู้เล่นและธุรกรรมครบถ้วน 100%)', 'info');
@@ -623,8 +527,6 @@ export default function App() {
       return;
     }
     
-    setRocketStatus('idle');
-    setRocketFlightTime(0.00);
     setSettlementResult(null);
 
     try {
@@ -634,18 +536,18 @@ export default function App() {
         if (data.players) setPlayers(data.players);
         if (data.transactions) setTransactions(data.transactions);
         if (data.bets) setBets(data.bets);
-        if (data.chatLogs) setChatLogs(data.chatLogs);
       } else {
         setPlayers(INITIAL_PLAYERS);
         setTransactions([]);
         setBets([]);
-        setChatLogs([]);
       }
       try {
         if (typeof window !== 'undefined') {
           localStorage.removeItem('rocket_sci_dashboard_cache');
         }
-      } catch (_) {}
+      } catch {
+        // ignore cache removal error
+      }
       addToast('✅ ล้างระเบียนข้อมูลระบบ (Factory Reset) สำเร็จแล้ว', 'success');
     } catch (err) {
       console.error("Failed to reset database:", err);
@@ -667,7 +569,6 @@ export default function App() {
               setPlayers(Array.isArray(d.players) ? d.players : []);
               setTransactions(Array.isArray(d.transactions) ? d.transactions : []);
               setBets(Array.isArray(d.bets) ? d.bets : []);
-              setChatLogs(Array.isArray(d.chatLogs) ? d.chatLogs : []);
               if (d.activeGroupId !== undefined) setActiveGroupId(d.activeGroupId);
               if (d.lineGroups) setLineGroups(d.lineGroups);
               addToast('✅ อัปเดตข้อมูลสดสำเร็จ', 'success');
@@ -687,7 +588,6 @@ export default function App() {
             setPlayers(Array.isArray(d.players) ? d.players : []);
             setTransactions(Array.isArray(d.transactions) ? d.transactions : []);
             setBets(Array.isArray(d.bets) ? d.bets : []);
-            setChatLogs(Array.isArray(d.chatLogs) ? d.chatLogs : []);
             if (d.activeGroupId !== undefined) setActiveGroupId(d.activeGroupId);
             if (d.lineGroups) setLineGroups(d.lineGroups);
             if (typeof window !== 'undefined') {
@@ -717,942 +617,8 @@ export default function App() {
       window.handleClosePortal = handleClosePortal;
       window.forceSyncFreshData = forceSyncFreshData;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Process private chat messages via interactive bot simulation
-  const handleSendPrivateMessage = (customText = null) => {
-    const textToSend = customText !== null ? customText : myPrivateInput;
-    if (!textToSend.toString().trim()) return;
-
-    if (customText === null) {
-      setMyPrivateInput('');
-    }
-
-    const tStr = new Date().toLocaleTimeString().slice(0, 5);
-    const userMsgId = 'user_msg_' + Date.now();
-    
-    // Add user message to chat history
-    setPrivateMessages(prev => [...prev, {
-      id: userMsgId,
-      sender: 'user',
-      text: textToSend.toString(),
-      time: tStr
-    }]);
-
-    // Bot reply logic simulation
-    setTimeout(() => {
-      const clean = textToSend.toString().replace(/\s+/g, '').toLowerCase();
-      const botTime = new Date().toLocaleTimeString().slice(0, 5);
-      const botMsgId = 'bot_msg_' + Date.now();
-
-      // 1. CHECK BALANCE ("เช็คยอด", "คงเหลือ", "balance")
-      if (clean === 'เช็คยอด' || clean === 'คงเหลือ' || clean === 'balance') {
-        const userBal = players.find(p => p.isUser)?.balance || 0;
-        setPrivateMessages(prev => [...prev, {
-          id: botMsgId,
-          sender: 'bot',
-          text: `💳 ยอดเครดิตคงเหลือของคุณ:\n\n👤 ผู้เล่น: คุณ (You)\n💰 คงเหลือ: ${userBal.toFixed(2)} แต้ม`,
-          time: botTime
-        }]);
-        return;
-      }
-
-      // 2. LIST ACTIVE DEALS ("รายการจับคู่", "matched", "รายการดวล")
-      if (clean === 'รายการจับคู่' || clean === 'matched' || clean === 'รายการดวล') {
-        const activeBets = bets.filter(b => (b.playerLowId === 'user' || b.playerHighId === 'user') && (b.status === 'matched' || b.status === 'pending_match'));
-        if (activeBets.length === 0) {
-          setPrivateMessages(prev => [...prev, {
-            id: botMsgId,
-            sender: 'bot',
-            text: `📝 รายการดวลของคุณ:\n\n❌ ปัจจุบันไม่มีแผลดวลค้างหรือรอคู่ในระบบครับ`,
-            time: botTime
-          }]);
-        } else {
-          setPrivateMessages(prev => [...prev, {
-            id: botMsgId + '_header',
-            sender: 'bot',
-            text: `📝 พบแผลดวลของคุณในระบบ ${activeBets.length} รายการ:`,
-            time: botTime
-          }]);
-          
-          activeBets.forEach((b, idx) => {
-            const sideText = b.playerLowId === 'user' ? 'ต่ำ (Low)' : 'สูง (High)';
-            const opponent = b.playerLowId === 'user' ? b.playerHighName : b.playerLowName;
-            const statusText = b.status === 'matched' ? 'ดวลกันอยู่ ☄️' : 'รอคู่ดวล ⏳';
-            setPrivateMessages(prev => [...prev, {
-              id: `${botMsgId}_card_${b.orderNumber}`,
-              sender: 'bot',
-              isMatchCard: true,
-              betData: {
-                orderNumber: b.orderNumber,
-                amount: b.amount,
-                side: sideText,
-                opponent: opponent || 'รอคู่...',
-                status: b.status,
-                statusText: statusText
-              },
-              time: botTime
-            }]);
-          });
-        }
-        return;
-      }
-
-      // 3. CANCEL DEAL ("ยกเลิก [orderNo]")
-      const cancelRegex = /^(ยกเลิก|cancel)(?:order|#)?(\d+)$/;
-      if (cancelRegex.test(clean)) {
-        const orderNo = clean.match(cancelRegex)[2];
-        const targetBet = bets.find(b => b.orderNumber === orderNo);
-        if (!targetBet) {
-          setPrivateMessages(prev => [...prev, {
-            id: botMsgId,
-            sender: 'bot',
-            text: `❌ ไม่พบเลขแผลดวล Order #${orderNo} ในระบบครับ`,
-            time: botTime
-          }]);
-          return;
-        }
-
-        const isLowMe = targetBet.playerLowId === 'user';
-        const isHighMe = targetBet.playerHighId === 'user';
-        if (!isLowMe && !isHighMe) {
-          setPrivateMessages(prev => [...prev, {
-            id: botMsgId,
-            sender: 'bot',
-            text: `❌ ขออภัยครับ แผลดวลนี้ไม่ใช่แผลดวลของคุณ จึงไม่สามารถกดยกเลิกได้`,
-            time: botTime
-          }]);
-          return;
-        }
-
-        if (targetBet.status === 'pending_match') {
-          // Direct refund and cancel in sandbox
-          setBets(prev => prev.map(b => b.orderNumber === orderNo ? { ...b, status: 'cancelled' } : b));
-          setPlayers(prev => prev.map(p => p.isUser ? { ...p, balance: p.balance + targetBet.amount } : p));
-          setPrivateMessages(prev => [...prev, {
-            id: botMsgId,
-            sender: 'bot',
-            text: `❌ ยกเลิกแผล Order #${orderNo} สำเร็จ!`,
-            time: botTime
-          }]);
-        } else if (targetBet.status === 'matched') {
-          // Request cancellation (pending cancel)
-          setBets(prev => prev.map(b => b.orderNumber === orderNo ? { ...b, status: 'pending_cancel' } : b));
-          setPrivateMessages(prev => [...prev, {
-            id: botMsgId,
-            sender: 'bot',
-            text: `⚠️ ส่งคำร้องขอยกเลิกแผล Order #${orderNo} สำเร็จ!\n\nเนื่องจากแผลถูกจับคู่แล้ว ต้องรอฝั่งตรงข้ามตอบรับคำขอคำขอยกเลิกแผลนี้ครับ`,
-            time: botTime
-          }]);
-        } else {
-          setPrivateMessages(prev => [...prev, {
-            id: botMsgId,
-            sender: 'bot',
-            text: `⚠️ แผลดวลนี้จบหรือยกเลิกไปแล้ว ไม่สามารถยกเลิกซ้ำได้ครับ`,
-            time: botTime
-          }]);
-        }
-        return;
-      }
-
-      // 4. INITIATE DEPOSIT ("ฝากเงิน", "เติมเงิน", "deposit", "เติมเครดิต")
-      if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit' || clean === 'เติมเครดิต') {
-        setBillingStep('input_amount');
-        setPrivateMessages(prev => [...prev, {
-          id: botMsgId,
-          sender: 'bot',
-          text: `💰 ขั้นตอนการฝากเครดิต (สเกล 1:1)\n\nกรุณากดเลือกยอดเงินที่ต้องการฝาก หรือพิมพ์ระบุจำนวนเงินที่ต้องการฝากเพื่อรับเลขที่บัญชีรับเงินได้เลยครับ:`,
-          time: botTime
-        }]);
-        return;
-      }
-
-      // 5. INITIATE WITHDRAWAL ("ถอนเงิน", "ถอนยอด", "withdraw")
-      if (clean === 'ถอนเงิน' || clean === 'ถอนยอด' || clean === 'withdraw') {
-        const userPlayer = players.find(p => p.isUser);
-        const registeredBank = userPlayer?.bankName;
-        if (!registeredBank) {
-          setPrivateMessages(prev => [...prev, {
-            id: botMsgId,
-            sender: 'bot',
-            text: `❌ ไม่พบประวัติการฝากเงินผ่านระบบ!\n\nเพื่อความปลอดภัยสูงสุด ระบบกำหนดให้บัญชีถอนเงินต้องตรงกับบัญชีที่ฝากเงินเข้ามาครั้งแรกเท่านั้น\n\nกรุณาทำรายการฝากเงินเข้ามาก่อนเพื่อลงทะเบียนบัญชีธนาคารครับ`,
-            time: botTime
-          }]);
-        } else {
-          setPrivateMessages(prev => [...prev, {
-            id: botMsgId,
-            sender: 'bot',
-            text: `💸 บัญชีธนาคารสำหรับโอนเงินคืนของคุณคือ:\n\n🏦 ธนาคาร: ${userPlayer.bankName}\n🔢 เลขบัญชี: ${userPlayer.bankAccount}\n👤 ชื่อบัญชี: ${userPlayer.accountName}\n\n💰 เครดิตคงเหลือ: ${userPlayer.balance} แต้ม\n\n💡 กรุณาพิมพ์จำนวนแต้มที่ต้องการถอนในช่องแชท:\n👉 เช่น พิมพ์ "ถอน 500" หรือ "ถอน ${Math.min(userPlayer.balance, 1000)}"`,
-            time: botTime
-          }]);
-        }
-        return;
-      }
-
-      // 6. PROCESS WITHDRAWAL REQUEST ("ถอน [amount]")
-      const withdrawRegex = /^(ถอน|withdraw)(\d+)$/;
-      if (withdrawRegex.test(clean)) {
-        const withdrawAmt = parseInt(clean.match(withdrawRegex)[2]);
-        const userPlayer = players.find(p => p.isUser);
-        if (!userPlayer || !userPlayer.bankName) {
-          setPrivateMessages(prev => [...prev, {
-            id: botMsgId,
-            sender: 'bot',
-            text: `❌ ขออภัยครับ ไม่พบข้อมูลบัญชีธนาคารสำหรับถอนเงิน (ต้องใช้บัญชีเดียวกับที่ฝากเงินเข้ามาในครั้งแรก)`,
-            time: botTime
-          }]);
-          return;
-        }
-
-        if (withdrawAmt <= 0) {
-          setPrivateMessages(prev => [...prev, {
-            id: botMsgId,
-            sender: 'bot',
-            text: `❌ จำนวนเงินถอนต้องมากกว่า 0 แต้มครับ`,
-            time: botTime
-          }]);
-          return;
-        }
-
-        if (userPlayer.balance < withdrawAmt) {
-          setPrivateMessages(prev => [...prev, {
-            id: botMsgId,
-            sender: 'bot',
-            text: `❌ เครดิตคงเหลือไม่เพียงพอสำหรับถอนเงินจำนวนนี้!\n\nยอดเงินคงเหลือของคุณ: ${userPlayer.balance} แต้ม\nต้องการถอน: ${withdrawAmt} แต้ม`,
-            time: botTime
-          }]);
-          return;
-        }
-
-        // Deduct balance and create WD transaction
-        const txId = 'WD' + Math.floor(Math.random() * 89999 + 10000);
-        setPlayers(prev => prev.map(p => p.isUser ? { ...p, balance: p.balance - withdrawAmt } : p));
-        
-        const newTx = {
-          id: txId,
-          playerId: 'user',
-          playerName: 'คุณ (You)',
-          requestedAmount: withdrawAmt,
-          actualAmount: 0,
-          slipRef: '',
-          status: 'escalated',
-          reviewReason: `Withdrawal request to ${userPlayer.bankName} ${userPlayer.bankAccount} ${userPlayer.accountName}`,
-          timestamp: new Date().toLocaleTimeString(),
-          logs: ['Withdrawal requested by user via LINE OA', 'Deducted balance and waiting for manual approve']
-        };
-        setTransactions(prev => [newTx, ...prev]);
-
-        // Send to Google Sheets if running inside GAS
-        if (isGAS) {
-          window.google.script.run
-            .withSuccessHandler(() => {
-              addToast('ส่งคำขอถอนเงินสำเร็จ! รอแอดมินดำเนินการโอนเงิน', 'info');
-            })
-            .logTransaction('user', 'คุณ (You)', withdrawAmt, 0, 'PENDING_WITHDRAW', 'escalated', `Withdrawal request to ${userPlayer.bankName} ${userPlayer.bankAccount} ${userPlayer.accountName}`);
-        }
-
-        setPrivateMessages(prev => [...prev, {
-          id: botMsgId,
-          sender: 'bot',
-          text: `📥 บันทึกคำขอถอนเงินจำนวน ${withdrawAmt} แต้ม เรียบร้อยแล้วครับ!\n\nระบบกำลังส่งต่อข้อมูลให้แอดมินพิจารณาอนุมัติโอนเงินแบบแมนนวลเข้าบัญชีธนาคาร ${userPlayer.bankName} เลขบัญชี ${userPlayer.bankAccount} ของคุณครับ\n\nยอดคงเหลือหลังทำรายการ: ${userPlayer.balance - withdrawAmt} แต้ม`,
-          time: botTime
-        }]);
-        return;
-      }
-
-      // 7. PROCESS DEPOSIT AMOUNT REQUEST (pure numbers or "ฝาก [amount]")
-      const pureNumRegex = /^\d+$/;
-      const depositTextRegex = /^(ฝาก|ฝากเงิน|เติม|เติมเงิน)(\d+)$/;
-      let depositAmt = null;
-
-      if (pureNumRegex.test(clean)) {
-        depositAmt = parseInt(clean);
-      } else if (depositTextRegex.test(clean)) {
-        depositAmt = parseInt(clean.match(depositTextRegex)[2]);
-      }
-
-      if (depositAmt !== null) {
-        if (depositAmt < 100 || depositAmt > 10000) {
-          setPrivateMessages(prev => [...prev, {
-            id: botMsgId,
-            sender: 'bot',
-            text: `⚠️ ขออภัยครับ ระบบรองรับการฝากยอดขั้นต่ำ 100 THB และสูงสุดไม่เกิน 10,000 THB ต่อครั้งครับ`,
-            time: botTime
-          }]);
-          return;
-        }
-
-        // Trigger deposit selection flow
-        setDepositAmount(depositAmt);
-        setCustomSlipAmount(depositAmt);
-        setBillingStep('waiting_deposit');
-        setBillingResult(null);
-
-        const txId = 'TX' + Math.floor(Math.random() * 89999 + 10000);
-        setActiveTxId(txId);
-
-        const newTx = {
-          id: txId,
-          playerId: 'user',
-          playerName: 'คุณ (You)',
-          requestedAmount: depositAmt,
-          actualAmount: 0,
-          slipRef: '',
-          status: 'escalated',
-          reviewReason: 'Waiting for user to upload pay slip',
-          timestamp: new Date().toLocaleTimeString(),
-          logs: ['Initial deposit order session started']
-        };
-        setTransactions(prev => [newTx, ...prev]);
-
-        // Send to Google Sheets if running inside GAS
-        if (isGAS) {
-          window.google.script.run
-            .withSuccessHandler(() => {
-              addToast('ส่งคำสั่งฝากเงินสำเร็จ! กรุณาโอนเงินและส่งสลิป', 'info');
-            })
-            .logTransaction('user', 'คุณ (You)', depositAmt, 0, 'PENDING_SLIP', 'escalated', 'Waiting for user to upload pay slip');
-        }
-
-        // Send the invoice card
-        setPrivateMessages(prev => [...prev, {
-          id: botMsgId,
-          sender: 'bot',
-          isInvoice: true,
-          amount: depositAmt,
-          time: botTime
-        }]);
-        return;
-      }
-
-      // Default fallback
-      setPrivateMessages(prev => [...prev, {
-        id: botMsgId,
-        sender: 'bot',
-        text: `🤖 ไม่เข้าใจคำสั่ง บันทึกข้อมูลแล้ว แอดมินจะติดต่อกลับครับ 💬 (พิมพ์ "เมนู" ดูคำสั่ง 🚀)`,
-        time: botTime
-      }]);
-
-    }, 400);
-  };
-
-  // Compile dynamic group messages combining seed values, user messages, and actual bets dynamically
-  const getCompiledGroupMessages = () => {
-    const msgs = [
-      { id: 'seed_1', sender: 'อาร์ต (Art)', text: 'ชล200 🚀', time: '12:25', avatar: '🦅' },
-      { id: 'seed_2', sender: 'เบนซ์ (Benz)', text: 'ต ✅', replyTo: 'ชล200 🚀', time: '12:26', avatar: '🐯' },
-      { id: 'seed_3', sender: 'เจ๋ง (Jeng)', text: '30-70ถ500 📈', time: '12:26', avatar: '🦁' },
-      { id: 'seed_4', sender: 'วชิระ ส. (โบ๊ท)', text: 'ต ✅', replyTo: '30-70ถ500 📈', time: '12:28', avatar: '🐉' }
-    ];
-
-    // Filter local manual simulator/user message inputs to remove raw betting commands (handled dynamically by bets compiler)
-    const filteredCustom = groupMessages.filter(msg => {
-      const cleanMsg = msg.text.replace(/\s+/g, '').toLowerCase();
-      const isBetCmd = /^(ชล|ล|ไล่|ชย|ชถ|ย|ถ|ถอย|ต|ติด|ครับ|เค|จ้า|\d+-\d+[ลถ])\d*$/.test(cleanMsg);
-      if (isBetCmd) return false;
-      
-      if (msg.sender === 'ระบบบอทดูด 🚀') {
-        if (msg.text.includes('จับคู่สำเร็จ') || msg.text.includes('สรุปผล Order') || msg.text.includes('ยกเลิกดีลสำเร็จ') || msg.text.includes('ร้องขอยกเลิกแผล')) {
-          return false;
-        }
-      }
-      return true;
-    });
-    
-    // Add non-bet messages
-    msgs.push(...filteredCustom);
-
-    // Generate messages from actual Sheet database bets dynamically
-    const sortedBets = [...bets];
-    sortedBets.forEach(b => {
-      if (b.orderNumber === '289276') return; // Skip seed representation
-      
-      const timestampStr = b.timestamp ? String(b.timestamp) : '';
-      const t = timestampStr ? timestampStr.split(' ')[1] || timestampStr : '12:30';
-      
-      // 1. Creation message
-      let creatorName = '';
-      let creatorText = '';
-      let creatorAvatar = '👤';
-      
-      if (b.type === 'range') {
-        const sideText = b.playerLowId ? 'ถ' : 'ล';
-        creatorText = `${b.rangeMin}-${b.rangeMax}${sideText}${b.amount} 🚀`;
-        creatorName = b.playerLowId ? b.playerLowName : b.playerHighName;
-      } else {
-        const prefix = b.playerLowId ? 'ชถ' : 'ชล';
-        creatorText = `${prefix}${b.amount} 🚀`;
-        creatorName = b.playerLowId ? b.playerLowName : b.playerHighName;
-      }
-      
-      const creatorPlayer = players.find(p => p.name === creatorName);
-      if (creatorPlayer) creatorAvatar = creatorPlayer.avatar;
-      
-      if (creatorName) {
-        msgs.push({
-          id: `bet_create_${b.orderNumber}`,
-          sender: creatorName,
-          avatar: creatorAvatar,
-          text: creatorText,
-          time: t
-        });
-      }
-      
-      // 2. Match messages
-      if (b.status === 'matched' || b.status === 'resolved') {
-        // Matcher is the side that was NOT populated originally by creator
-        const isLowCreator = (b.type === 'range' && b.playerLowId && b.playerLowId !== 'user') || 
-                             (b.type === 'high_low' && b.playerLowId && b.playerLowId !== 'user' && b.playerLowName !== 'คุณ (You)');
-        const matcherName = isLowCreator ? b.playerHighName : b.playerLowName;
-
-        let matcherAvatar = '👤';
-        const matcherPlayer = players.find(p => p.name === matcherName);
-        if (matcherPlayer) matcherAvatar = matcherPlayer.avatar;
-        
-        if (matcherName) {
-          msgs.push({
-            id: `bet_match_agree_${b.orderNumber}`,
-            sender: matcherName,
-            avatar: matcherAvatar,
-            text: 'ต ✅',
-            time: t
-          });
-          
-          msgs.push({
-            id: `bet_match_sys_${b.orderNumber}`,
-            sender: 'ระบบบอทดูด (Bang Fai Commander)',
-            text: `✅ จับคู่สำเร็จ! (Order #${b.orderNumber})\nยอดดวล: ${b.amount} แต้ม\nฝั่งต่ำ (Low): ${b.playerLowName}\nฝั่งสูง (High): ${b.playerHighName}\nสถานะ: ล็อกเครดิตเรียบร้อย รอประมวลผลเวลาบั้งไฟ ⏱️`,
-            time: t
-          });
-        }
-      }
-      
-      // 3. Pending Cancel representation
-      if (b.status === 'pending_cancel') {
-        msgs.push({
-          id: `bet_pending_cancel_${b.orderNumber}`,
-          sender: 'ระบบบอทดูด 🚀',
-          text: `⚠️ ร้องขอยกเลิกแผล! Order #${b.orderNumber}\n\nรอการยืนยันยกเลิกจากคู่ฝ่ายตรงข้าม...`,
-          time: t
-        });
-      }
-      
-      // 4. Cancel representation
-      if (b.status === 'cancelled') {
-        msgs.push({
-          id: `bet_cancel_sys_${b.orderNumber}`,
-          sender: 'ระบบบอทดูด 🚀',
-          text: `❌ ยกเลิกดีลสำเร็จ! (Order #${b.orderNumber})\nคืนยอดเครดิตเข้าบัญชีของทั้งคู่เรียบร้อย`,
-          time: t
-        });
-      }
-      
-      // 5. Settle message
-      if (b.status === 'resolved') {
-        const finalTimeVal = b.finalFlightTime || rocketFlightTime;
-        const isLowWinner = b.winnerName === b.playerLowName;
-        msgs.push({
-          id: `bet_resolve_${b.orderNumber}`,
-          sender: 'ระบบบอทดูด 🚀',
-          text: `🔔 สรุปผล Order #${b.orderNumber}\nเกณฑ์ออก: ${finalTimeVal} วินาที\nฝั่งชนะ: ${isLowWinner ? 'ต่ำ (Low)' : 'สูง (High)'} (${b.winnerName})\n💰 ยอดโอนเข้าบัญชี: +${Math.round(b.amount * 1.90)} แต้ม (หักค่าตง 10% เรียบร้อย)`,
-          time: t
-        });
-      }
-    });
-
-    return msgs;
-  };
-
-  // Trigger deposit process selection
-  const handleSelectAmount = (amt) => {
-    setDepositAmount(amt);
-    setCustomSlipAmount(amt);
-    setBillingStep('waiting_deposit');
-    setBillingResult(null);
-    
-    const txId = 'TX' + Math.floor(Math.random() * 89999 + 10000);
-    setActiveTxId(txId);
-
-    // Sandbox transaction creation
-    const newTx = {
-      id: txId,
-      playerId: 'user',
-      playerName: 'คุณ (You)',
-      requestedAmount: amt,
-      actualAmount: 0,
-      slipRef: '',
-      status: 'escalated',
-      reviewReason: 'Waiting for user to upload pay slip',
-      timestamp: new Date().toLocaleTimeString(),
-      logs: ['Initial deposit order session started']
-    };
-    setTransactions(prev => [newTx, ...prev]);
-
-    // Send to Google Sheets if running inside GAS
-    if (isGAS) {
-      window.google.script.run
-        .withSuccessHandler(() => {
-          addToast('ส่งคำสั่งฝากเงินสำเร็จ! กรุณาโอนเงินและส่งสลิป', 'info');
-        })
-        .logTransaction('user', 'คุณ (You)', amt, 0, 'PENDING_SLIP', 'escalated', 'Waiting for user to upload pay slip');
-    }
-
-    // Append user selection and invoice card to private chat
-    const tStr = new Date().toLocaleTimeString().slice(0, 5);
-    setPrivateMessages(prev => [
-      ...prev,
-      { id: 'user_amt_' + Date.now(), sender: 'user', text: `ฝากเงินจำนวน ${amt} บาท`, time: tStr },
-      { id: 'bot_invoice_' + Date.now(), sender: 'bot', isInvoice: true, amount: amt, time: tStr }
-    ]);
-  };
-
-  // Slip upload simulation handler
-  const handleUploadPaySlip = () => {
-    if (billingStep !== 'waiting_deposit') return;
-
-    setBillingStep('scanning');
-    setScannerLogs([
-      'Retrieving uploaded image bytes from LINE CDN...',
-      'Running image scaling filter...',
-      'Initializing EMVCo barcode scanner...',
-      'QR Code found! Decoding raw payload...'
-    ]);
-
-    const tStr = new Date().toLocaleTimeString().slice(0, 5);
-    // Append slip and scanning messages to chat
-    setPrivateMessages(prev => [
-      ...prev,
-      {
-        id: 'user_slip_' + Date.now(),
-        sender: 'user',
-        isSlip: true,
-        presetId: selectedPresetId,
-        useCustom: useCustomSlip,
-        customAmount: customSlipAmount,
-        time: tStr
-      },
-      {
-        id: 'bot_scanning_' + Date.now(),
-        sender: 'bot',
-        isScanning: true,
-        time: tStr
-      }
-    ]);
-
-    setTimeout(() => {
-      setScannerLogs(prev => [...prev, 'Payload decoded: 00020101021230380016...']);
-      
-      setTimeout(() => {
-        setScannerLogs(prev => [...prev, 'Youtransfer API verification triggered...']);
-        
-        setTimeout(() => {
-          const preset = SLIP_PRESETS.find(p => p.id === selectedPresetId);
-          const realAmt = useCustomSlip ? customSlipAmount : (preset ? preset.actualAmount : 100);
-          const isQRValid = useCustomSlip ? true : (preset ? preset.isValidQR : true);
-          const isDupe = useCustomSlip ? false : (preset ? preset.isDuplicate : false);
-          const ref = useCustomSlip ? 'CUSTX' + Date.now().toString().slice(-4) : (preset ? preset.refCode : 'MOCKREF');
-
-          const presetBankName = preset ? (preset.bankName.includes('SCB') ? 'SCB' : preset.bankName.includes('KBANK') ? 'KBANK' : preset.bankName.includes('BBL') ? 'BBL' : 'KTB') : 'SCB';
-          const presetAccountNo = '890-1-23456-7';
-
-          const tDoneStr = new Date().toLocaleTimeString().slice(0, 5);
-
-          // GAS Integration call
-          if (isGAS) {
-            window.google.script.run
-              .withSuccessHandler((res) => {
-                if (res && res.status === 'success') {
-                  setBillingResult({ status: 'success', amount: realAmt });
-                  setTransactions(prev => prev.map(t => t.id === activeTxId ? { ...t, status: 'success', actualAmount: realAmt, slipRef: ref, reviewReason: 'Auto verified via slip API 1:1' } : t));
-                  setPlayers(prev => prev.map(p => p.isUser ? { 
-                    ...p, 
-                    balance: p.balance + realAmt,
-                    bankName: presetBankName,
-                    bankAccount: presetAccountNo,
-                    accountName: p.name
-                  } : p));
-                  addToast('เติมเงินสำเร็จ! สแกนตรวจสอบ 1:1 เรียบร้อย', 'success');
-
-                  // Append success message
-                  setPrivateMessages(prev => {
-                    const filtered = prev.filter(m => !m.isScanning);
-                    return [...filtered, {
-                      id: 'bot_success_' + Date.now(),
-                      sender: 'bot',
-                      text: `🎉 อัปโหลดสำเร็จ!\n\nระบบสแกนสลิป ตรวจสอบ API พบยอดเงินโอน ${realAmt}.00 บาท ตรงกับบัญชีธนาคาร\n\n💰 บัญชีเครดิตของท่านได้รับการเติมเครดิต 1:1 เรียบร้อยแล้ว!\nเครดิตคงเหลือ: ${(players.find(p => p.isUser)?.balance || 0) + realAmt} แต้ม`,
-                      time: tDoneStr
-                    }];
-                  });
-
-                } else {
-                  const resReason = res ? res.reason : 'สลิปไม่ผ่านเกณฑ์การตรวจออโต้';
-                  setBillingResult({ status: 'escalate', reason: resReason });
-                  setTransactions(prev => prev.map(t => t.id === activeTxId ? { ...t, status: 'escalated', actualAmount: realAmt, slipRef: ref, reviewReason: resReason } : t));
-                  addToast('บิลตรวจสอบไม่ผ่าน ส่งเรื่องให้แอดมินแมนนวลแล้ว', 'warning');
-
-                  // Append escalated message
-                  setPrivateMessages(prev => {
-                    const filtered = prev.filter(m => !m.isScanning);
-                    return [...filtered, {
-                      id: 'bot_escalate_' + Date.now(),
-                      sender: 'bot',
-                      text: `⚠️ ดำเนินการออโต้ล้มเหลว!\n\nสาเหตุ: ${resReason}\n\nรายการได้รับการส่งต่อให้ แอดมิน (Manual Admin Review) เพื่ออนุมัติแมนนวลแล้วหลังจากเช็คธนาคาร\n\nกรุณารอสักครู่ แอดมินจะอัพยอดให้ท่านโดยเร็วที่สุดครับ`,
-                      time: tDoneStr
-                    }];
-                  });
-                }
-                setBillingStep('completed');
-              })
-              .verifyMockSlipFromClient(depositAmount, realAmt, ref, isQRValid, isDupe);
-          } else {
-            // Sandbox logic
-            if (!isQRValid) {
-              const resReason = 'สแกนคิวอาร์โค้ดล้มเหลว (Unreadable QR Code)';
-              setBillingResult({ status: 'escalate', reason: resReason });
-              setTransactions(prev => prev.map(t => t.id === activeTxId ? { ...t, status: 'escalated', actualAmount: 0, slipRef: 'ERR_NO_QR', reviewReason: 'QR Scan Failed' } : t));
-              addToast('แจ้งเตือนแอดมิน: ตรวจสอบสลิปชำรุด!', 'warning');
-
-              setPrivateMessages(prev => {
-                const filtered = prev.filter(m => !m.isScanning);
-                return [...filtered, {
-                  id: 'bot_escalate_' + Date.now(),
-                  sender: 'bot',
-                  text: `⚠️ ดำเนินการออโต้ล้มเหลว!\n\nสาเหตุ: ${resReason}\n\nรายการได้รับการส่งต่อให้ แอดมิน (Manual Admin Review) เพื่ออนุมัติแมนนวลแล้วหลังจากเช็คธนาคาร\n\nกรุณารอสักครู่ แอดมินจะอัพยอดให้ท่านโดยเร็วที่สุดครับ`,
-                  time: tDoneStr
-                }];
-              });
-
-            } else if (isDupe) {
-              const resReason = 'ตรวจพบการโอนเงินซ้ำซ้อน (Duplicate Slip Submission)';
-              setBillingResult({ status: 'escalate', reason: resReason });
-              setTransactions(prev => prev.map(t => t.id === activeTxId ? { ...t, status: 'escalated', actualAmount: realAmt, slipRef: ref, reviewReason: 'Duplicate Transaction Ref' } : t));
-              addToast('แจ้งเตือนแอดมิน: ตรวจพบสลิปโอนซ้ำ!', 'danger');
-
-              setPrivateMessages(prev => {
-                const filtered = prev.filter(m => !m.isScanning);
-                return [...filtered, {
-                  id: 'bot_escalate_' + Date.now(),
-                  sender: 'bot',
-                  text: `⚠️ ดำเนินการออโต้ล้มเหลว!\n\nสาเหตุ: ${resReason}\n\nรายการได้รับการส่งต่อให้ แอดมิน (Manual Admin Review) เพื่ออนุมัติแมนนวลแล้วหลังจากเช็คธนาคาร\n\nกรุณารอสักครู่ แอดมินจะอัพยอดให้ท่านโดยเร็วที่สุดครับ`,
-                  time: tDoneStr
-                }];
-              });
-
-            } else {
-              setBillingResult({ status: 'success', amount: realAmt });
-              setTransactions(prev => prev.map(t => t.id === activeTxId ? { 
-                ...t, 
-                status: 'success', 
-                actualAmount: realAmt, 
-                slipRef: ref, 
-                reviewReason: realAmt !== depositAmount ? `Auto verified from slip (${realAmt} THB)` : 'Auto verified 1:1' 
-              } : t));
-              setPlayers(prev => prev.map(p => p.isUser ? { 
-                ...p, 
-                balance: p.balance + realAmt,
-                bankName: presetBankName,
-                bankAccount: presetAccountNo,
-                accountName: p.name
-              } : p));
-
-              const toastMsg = realAmt !== depositAmount
-                ? `เติมเงินสำเร็จ ${realAmt} pt! (ระบบยึดตามยอดสลิปโอนจริง)`
-                : 'เติมเงินสำเร็จ! เครดิตอัพเดท 1:1 เรียบร้อย';
-              addToast(toastMsg, 'success');
-
-              setPrivateMessages(prev => {
-                const filtered = prev.filter(m => !m.isScanning);
-                return [...filtered, {
-                  id: 'bot_success_' + Date.now(),
-                  sender: 'bot',
-                  text: `🎉 อัปโหลดสำเร็จ!\n\nระบบสแกนสลิป ตรวจสอบ API พบยอดเงินโอน ${realAmt}.00 บาท ตรงกับสลิปโอนเงินจริง\n\n💰 บัญชีเครดิตของท่านได้รับการเติมเครดิต 1:1 ตามยอดสลิปเรียบร้อยแล้ว!\nเครดิตคงเหลือ: ${(players.find(p => p.isUser)?.balance || 0) + realAmt} แต้ม`,
-                  time: tDoneStr
-                }];
-              });
-            }
-            setBillingStep('completed');
-          }
-        }, 1000);
-      }, 800);
-    }, 800);
-  };
-
-  const handleResetBilling = () => {
-    setBillingStep('idle');
-    setBillingResult(null);
-    setScannerLogs([]);
-    setPrivateMessages([
-      { id: 'bot_welcome', sender: 'bot', text: '🏦 ยินดีต้อนรับสู่ระบบบริหารจัดการธุรกรรม Bang Fai Commander\n\nโอนเงินด้วยยอดที่ท่านเลือก และส่งสลิปที่มี QR code ระบบจะเติมเครดิตให้อัตโนมัติในสเกล 1:1 ครับ\n\nกรุณาเลือกบริการจากเมนูด้านล่าง หรือพิมพ์บอกเราได้เลยครับ\n(เช่น พิมพ์ "ฝากเงิน", "ถอนยอด" หรือ "เช็คยอด")', time: '13:00' }
-    ]);
-  };
-
-  // Send message inside simulated LINE Group chat
-  const handleSendGroupMessage = () => {
-    if (!myGroupInput.trim()) return;
-    const text = myGroupInput;
-    setMyGroupInput('');
-    
-    // Add user message
-    setGroupMessages(prev => [...prev, {
-      id: Date.now(),
-      sender: 'คุณ (You)',
-      avatar: '👨‍🚀',
-      text: text,
-      time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
-    }]);
-
-    // Process betting command locally (simulation fallback)
-    processGroupBetCommand(text);
-
-    // Send command to backend server and sync order card to LINE group chat
-    runBackendFunction('simulateTextMessageFromDashboard', [text, 'user', 'คุณ (You)', activeGroupId]);
-    addToast('ส่งคำสั่งไปที่ระบบบิลลิงส์แล้ว กำลังดำเนินการดวล...', 'info');
-  };
-
-  // Send admin chat message to LINE user or group from Admin console
-  const handleSendAdminChatMessage = async (overrideText = null) => {
-    const text = overrideText !== null ? overrideText : adminChatInput;
-    if (!text.trim()) return;
-
-    if (overrideText === null) {
-      setAdminChatInput('');
-    }
-
-    const tStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-    const isGroupMode = chatTypeMode === 'group';
-
-    // Resolve target: selected player/group ID, or active group, or 'ALL'
-    const targetChatId = selectedChatPlayerId === 'GROUP_STREAM'
-      ? (activeGroupId || 'ALL')
-      : (selectedChatPlayerId || (isGroupMode ? (activeGroupId || 'ALL') : 'user'));
-
-    if (!selectedChatPlayerId && !isGroupMode && targetChatId === 'user') {
-      addToast('⚠️ กรุณาเลือกผู้เล่นจากรายการด้านซ้ายก่อนส่งข้อความ 1:1 ครับ', 'warning');
-      return;
-    }
-
-    // Add locally to chat logs for instant UI feedback
-    const cleanText = text.replace(/\s+/g, '').toLowerCase();
-    const isFlexKeyword = ['เช็คยอด', 'คงเหลือ', 'balance', 'ฝากเงิน', 'เติมเงิน', 'deposit', 'ถอนเงิน', 'ถอนยอด', 'withdraw', 'เมนู', 'menu', 'เริ่ม', 'start'].includes(cleanText);
-    const targetName = isGroupMode 
-      ? (lineGroups.find(g => g.id === targetChatId)?.name || 'กลุ่มดวลสด') 
-      : (players.find(p => p.id === targetChatId)?.name || 'ผู้เล่น');
-
-    const newLog = {
-      timestamp: tStr,
-      userId: targetChatId,
-      displayName: targetName,
-      sender: 'admin',
-      text: isFlexKeyword ? `[Flex Message: ${text}]` : text,
-      type: 'text'
-    };
-    setChatLogs(prev => [...prev, newLog]);
-    addToast(isGroupMode ? `ส่งข้อความเข้า [${targetName}] สำเร็จแล้ว 🚀` : `ส่งข้อความไปยัง [${targetName}] สำเร็จแล้ว 💬`, 'success');
-
-    // High-Speed Optimistic Dispatch: Fire to backend/LINE in background with zero UI delay
-    runBackendFunction('sendAdminMessageToLine', [targetChatId, text])
-      .then(res => {
-        if (res && res.success === false) {
-          addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'ตรวจสอบกลุ่ม LINE'}`, 'warning');
-        }
-      })
-      .catch(e => {
-        console.error('Error sending admin message to LINE:', e);
-        addToast(`❌ ส่งไม่สำเร็จ: ${e?.message || 'การเชื่อมต่อขัดข้อง'}`, 'danger');
-      });
-  };
-
-  // Parse bet command from Group chat message (Sandbox fallback)
-  const processGroupBetCommand = (cmd) => {
-    const rawTrimmed = (cmd || '').trim();
-    const clean = rawTrimmed.replace(/\s+/g, '').toLowerCase();
-
-    // Check if accept/match action (e.g. "9047 500", "ต 500", "ต9047", "ต", "500")
-    const orderAndAmountRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*)?#?(\d{2,6})\s*(?:[-/:=]|ต|ติด|รับ|\s)\s*(\d{2,6})(?:\s*(?:pt|แต้ม))?$/i;
-    const keywordAndAmountRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*)(\d{2,6})(?:\s*(?:pt|แต้ม))?$/i;
-    const explicitOrderAcceptRegex = /^(?:(ต|ติด|ครับ|เค|จ้า|ยอมรับ|ดีล|รับแผล|รับ)\s*#?(\d{2,6})|#?(\d{2,6})\s*(ต|ติด|รับ)|#(\d{2,6}))$/i;
-
-    let targetOrderNo = null;
-    let customMatchAmount = null;
-    let isAcceptMatch = false;
-
-    if (orderAndAmountRegex.test(rawTrimmed)) {
-      const m1 = rawTrimmed.match(orderAndAmountRegex);
-      targetOrderNo = m1[2];
-      customMatchAmount = parseInt(m1[3]);
-      isAcceptMatch = true;
-    } else if (keywordAndAmountRegex.test(rawTrimmed)) {
-      const mK = rawTrimmed.match(keywordAndAmountRegex);
-      targetOrderNo = null;
-      customMatchAmount = parseInt(mK[2]);
-      isAcceptMatch = true;
-    } else if (explicitOrderAcceptRegex.test(rawTrimmed)) {
-      const me = rawTrimmed.match(explicitOrderAcceptRegex);
-      targetOrderNo = me[2] || me[3] || me[4];
-      isAcceptMatch = true;
-    } else if (explicitOrderAcceptRegex.test(clean)) {
-      const mc = clean.match(explicitOrderAcceptRegex);
-      targetOrderNo = mc[2] || mc[3] || mc[4];
-      isAcceptMatch = true;
-    } else if (['ต', 'ตต', 'ติด', 'ครับ', 'เค', 'จ้า', 'ยอมรับ', 'ดีล', 'รับแผล', 'รับ'].includes(clean)) {
-      isAcceptMatch = true;
-    } else if (/^\d+$/.test(clean)) {
-      const pureVal = parseInt(clean);
-      if (/^\d{4}$/.test(clean) && pureVal > 1000) {
-        targetOrderNo = clean;
-      } else {
-        customMatchAmount = pureVal;
-      }
-      isAcceptMatch = true;
-    }
-
-    if (isAcceptMatch) {
-      let openBet = null;
-      if (targetOrderNo) {
-        openBet = bets.find(b => b.orderNumber === targetOrderNo && b.status === 'pending_match');
-      } else {
-        openBet = bets.find(b => b.status === 'pending_match');
-      }
-
-      if (openBet) {
-        const user = players.find(p => p.isUser);
-        const userBal = user ? user.balance : 0;
-        const matchAmt = customMatchAmount || openBet.amount;
-
-        if (userBal < matchAmt) {
-          setGroupMessages(prev => [...prev, {
-            id: Date.now() + 1,
-            sender: 'ระบบบอทดูด 🚀',
-            text: `⚠️ แต้มไม่พอ (มี ${userBal}pt | ขาด ${matchAmt - userBal}pt) พิมพ์ "ฝากเงิน"`,
-            time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
-          }]);
-          return;
-        }
-
-        setPlayers(prev => prev.map(p => p.isUser ? { ...p, balance: p.balance - matchAmt } : p));
-        
-        const isLowCreator = !!openBet.playerLowId;
-        const updatedBet = {
-          ...openBet,
-          amount: matchAmt,
-          status: 'matched'
-        };
-        
-        if (isLowCreator) {
-          updatedBet.playerHighId = 'user';
-          updatedBet.playerHighName = 'คุณ (You)';
-        } else {
-          updatedBet.playerLowId = 'user';
-          updatedBet.playerLowName = 'คุณ (You)';
-        }
-        
-        setBets(prev => prev.map(b => b.id === openBet.id ? updatedBet : b));
-        
-        const userSide = isLowCreator ? 'สูง (HIGH) 🔴' : 'ต่ำ (LOW) 🔵';
-        addToast(`✅ จับคู่สำเร็จ! คุณอยู่ฝั่ง ${userSide} vs ${isLowCreator ? openBet.playerLowName : openBet.playerHighName} — ยอดดวล ${matchAmt} แต้ม`, 'success');
-      } else {
-        setGroupMessages(prev => [...prev, {
-          id: Date.now() + 1,
-          sender: 'ระบบบอทดูด 🚀',
-          text: targetOrderNo ? `🚫 ไม่พบแผล Order #${targetOrderNo} ที่เปิดรอคู่ครับ` : '🚫 ไม่มีแผลดวลฝั่งตรงข้ามที่รอคู่ในขณะนี้ครับ',
-          time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
-        }]);
-      }
-      return;
-    }
-
-    const rangeRegex = /^(\d+)-(\d+)([ลถตส]|สูง|ต่ำ)(\d+)$/;
-    const simpleRegex = /^(ชล|ล|ไล่|ต|ต่ำ|ชย|ชถ|ย|ถ|ถอย|ส|สูง)(\d+)$/;
-
-    let betType = 'high_low';
-    let rangeMin = null;
-    let rangeMax = null;
-    let side = '';
-    let amount = 0;
-
-    if (rangeRegex.test(clean)) {
-      const match = clean.match(rangeRegex);
-      rangeMin = parseInt(match[1]);
-      rangeMax = parseInt(match[2]);
-      side = ['ถ', 'ต', 'ต่ำ'].includes(match[3]) ? 'low' : 'high';
-      amount = parseInt(match[4]);
-      betType = 'range';
-    } else if (simpleRegex.test(clean)) {
-      const match = clean.match(simpleRegex);
-      const sub = match[1];
-      side = ['ชถ', 'ชย', 'ถอย', 'ยั่ง', 'ถ', 'ย', 'ต่ำ'].includes(sub) ? 'low' : 'high';
-      amount = parseInt(match[2]);
-      betType = 'high_low';
-    } else {
-      return;
-    }
-
-    const user = players.find(p => p.isUser);
-    const userBal = user ? user.balance : 0;
-    if (userBal < amount) {
-      return;
-    }
-
-    // Generate 4-digit order number (1000 - 9999)
-    const orderNo = Math.floor(Math.random() * 9000 + 1000).toString();
-    const newBet = {
-      id: 'bet_' + orderNo,
-      orderNumber: orderNo,
-      amount: amount,
-      type: betType,
-      rangeMin: rangeMin,
-      rangeMax: rangeMax,
-      status: 'pending_match',
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19)
-    };
-
-    if (side === 'low') {
-      newBet.playerLowId = 'user';
-      newBet.playerLowName = 'คุณ (You)';
-    } else {
-      newBet.playerHighId = 'user';
-      newBet.playerHighName = 'คุณ (You)';
-    }
-
-    setBets(prev => [newBet, ...prev]);
-
-    // Save open bet to backend database and push Order Flex Card into target LINE group!
-    const targetGroup = broadcastTargetGroup !== 'ALL' ? broadcastTargetGroup : activeGroupId;
-    runBackendFunction('saveOpenBet', [
-      orderNo,
-      user?.id || 'user',
-      user?.name || 'คุณ (You)',
-      side,
-      amount,
-      betType,
-      rangeMin,
-      rangeMax,
-      targetGroup
-    ]);
-
-    // Opponent match simulation (Sandbox only)
-    setTimeout(() => {
-      const opponents = players.filter(p => !p.isUser);
-      const opponent = opponents[Math.floor(Math.random() * opponents.length)];
-
-      setBets(prev => prev.map(b => {
-        if (b.id === 'bet_' + orderNo) {
-          const updated = { ...b, status: 'matched' };
-          if (side === 'low') {
-            updated.playerHighId = opponent.id;
-            updated.playerHighName = opponent.name;
-          } else {
-            updated.playerLowId = opponent.id;
-            updated.playerLowName = opponent.name;
-          }
-          return updated;
-        }
-        return b;
-      }));
-
-      setPlayers(prev => prev.map(p => p.id === opponent.id ? { ...p, balance: p.balance - amount } : p));
-    }, 2500);
-  };
 
   // Cancel Bet Request
   const handleRequestCancelBet = (betId) => {
@@ -1707,6 +673,9 @@ export default function App() {
           console.error('[GAS Approve Error]:', err);
           // Rollback on failure
           setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
+          if (!txId.startsWith('WD')) {
+            setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) - approvedAmount } : p));
+          }
           addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
         })
         .adminApproveTransaction(txId);
@@ -1715,6 +684,9 @@ export default function App() {
         console.error('[Background Approve Error]:', err);
         // Rollback on failure
         setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
+        if (!txId.startsWith('WD')) {
+          setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) - approvedAmount } : p));
+        }
         addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
       });
     }
@@ -1733,9 +705,6 @@ export default function App() {
       setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) + targetTx.requestedAmount } : p));
       addToast(`ปฏิเสธคำขอถอนเงินยอด ${targetTx.requestedAmount} THB และคืนเครดิตให้ผู้เล่นเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)`, 'info');
     } else {
-      if (targetTx.playerId === 'user') {
-        setBillingResult({ status: 'rejected', reason });
-      }
       addToast('ปฏิเสธการโอนสลิปเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)', 'info');
     }
 
@@ -1746,6 +715,9 @@ export default function App() {
           console.error('[GAS Reject Error]:', err);
           // Rollback on failure
           setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
+          if (txId.startsWith('WD')) {
+            setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) - targetTx.requestedAmount } : p));
+          }
           addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
         })
         .adminRejectTransaction(txId, reason);
@@ -1754,6 +726,9 @@ export default function App() {
         console.error('[Background Reject Error]:', err);
         // Rollback on failure
         setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
+        if (txId.startsWith('WD')) {
+          setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) - targetTx.requestedAmount } : p));
+        }
         addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
       });
     }
@@ -1777,8 +752,6 @@ export default function App() {
       return;
     }
 
-    setRocketFlightTime(finalTime);
-    setRocketStatus('resolved'); // Immediately resolved
     setFlightLogs(prev => [`[LAUNCHPAD] [${new Date().toLocaleTimeString()}] Manual telemetry result submitted: ${finalTime}s.`, ...prev]);
 
     resolveMatchedBets(finalTime);
@@ -1796,7 +769,7 @@ export default function App() {
     // Calculate payouts details from currently matched bets for the popup modal
     const previouslyMatched = bets.filter(b => b.status === 'matched');
     const payouts = previouslyMatched.map(b => {
-      let isLowWinner = true;
+      let isLowWinner;
       const minSec = (b.type === 'range' && b.rangeMin !== null && b.rangeMax !== null) ? Number(b.rangeMin) : tMin;
       const maxSec = (b.type === 'range' && b.rangeMin !== null && b.rangeMax !== null) ? Number(b.rangeMax) : tMax;
 
@@ -1836,13 +809,13 @@ export default function App() {
       addToast(`🚀 เคลียร์ผลรางวัลรอบ [${name}] เวลา ${finalTime}s (ช่วง ${tMin}-${tMax}s) และบรอดแคสต์ลงกลุ่มเรียบร้อย!`, 'success');
     } catch (e) {
       console.error('Settlement backend error:', e);
-      addToast(`เคลียร์ผลรางวัลแผลสดรอบ [${name}] ช่วง ${tMin}-${tMax}s เรียบร้อย! (Local Sandbox)`, 'info');
+      addToast(`❌ เกิดข้อผิดพลาดในการบันทึกผลการตัดสิน: ${e?.message || 'ระบบหลังบ้านไม่ตอบสนอง'}`, 'error');
     }
   };
 
   // Render dynamic visual bank slip card in Light Mode
   const renderSlipCard = (presetId, isCustom, custAmt) => {
-    let p = null;
+    let p;
     const effectiveAmt = custAmt || 100;
     if (isCustom || !presetId) {
       p = {
@@ -1948,20 +921,14 @@ export default function App() {
     };
     const playerTransactions = transactions.filter(t => t.playerId === playerUserId);
     const playerBets = bets.filter(b => b.playerLowId === playerUserId || b.playerHighId === playerUserId);
-    const playerChatLogs = chatLogs.filter(l => l.userId === playerUserId);
 
     return (
       <PlayerDashboard 
         player={matchedPlayer} 
         transactions={playerTransactions} 
         bets={playerBets} 
-        chatLogs={playerChatLogs}
         playerUserId={playerUserId}
         players={players}
-        isGAS={isGAS}
-        setToasts={setToasts}
-        addToast={addToast}
-        setChatLogs={setChatLogs}
       />
     );
   }
@@ -2551,9 +1518,9 @@ export default function App() {
                           <span className="text-slate-400">{f.timestamp}</span>
                           <span className="font-bold text-slate-800">เวลา: {f.duration}s</span>
                           <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                            f.duration < targetTime ? 'bg-sky-50 text-sky-700 border border-sky-100' : 'bg-rose-50 text-rose-700 border border-rose-100'
+                            f.duration < (Number(targetMin) || 330) ? 'bg-sky-50 text-sky-700 border border-sky-100' : 'bg-rose-50 text-rose-700 border border-rose-100'
                           }`}>
-                            {f.duration < targetTime ? 'LOW' : 'HIGH'}
+                            {f.duration < (Number(targetMin) || 330) ? 'LOW' : 'HIGH'}
                           </span>
                           <span className="text-slate-500">เคลียร์ {f.betsResolved} บิล</span>
                         </div>
@@ -3216,7 +2183,7 @@ export default function App() {
                           const res = await runBackendFunction('adminBroadcastFinalCall', [broadcastTargetGroup || 'ALL']);
                           if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
                           else addToast('⛔ ปิดรับดวลแล้ว', 'warning');
-                        } catch(e) {
+                        } catch {
                           addToast('❌ ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
@@ -3244,7 +2211,7 @@ export default function App() {
                           const res = await runBackendFunction('adminBroadcastVoidRound', [broadcastTargetGroup || 'ALL']);
                           if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
                           else addToast('⛔ โมฆะรอบและคืนแต้มแล้ว', 'danger');
-                        } catch(e) {
+                        } catch {
                           addToast('❌ ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
@@ -3271,7 +2238,7 @@ export default function App() {
                           const res = await runBackendFunction('adminBroadcastRuleGuide', [broadcastTargetGroup || 'ALL']);
                           if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
                           else addToast('📖 ส่งกติกาแล้ว', 'info');
-                        } catch(e) {
+                        } catch {
                           addToast('❌ ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
@@ -3300,7 +2267,7 @@ export default function App() {
                           const res = await runBackendFunction('adminBroadcastRocketLaunched', [broadcastTargetGroup || 'ALL']);
                           if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
                           else addToast('🚀 ส่งประกาศบั้งไฟออกแล้ว!', 'info');
-                        } catch(e) {
+                        } catch {
                           addToast('❌ ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
@@ -3398,7 +2365,7 @@ export default function App() {
                               addToast('📢 ส่งประกาศเข้ากลุ่มแล้ว', 'success');
                               setCustomBroadcastText('');
                             }
-                          } catch (err) {
+                          } catch {
                             addToast('❌ ส่งไม่สำเร็จ', 'danger');
                           } finally {
                             setIsSendingBroadcast(false);
@@ -3469,7 +2436,7 @@ export default function App() {
                             } else {
                               addToast(`⚠️ ส่งไม่สำเร็จ: ${testRes?.error || 'โควตาเต็ม'}`, 'warning');
                             }
-                          } catch (err) {
+                          } catch {
                             addToast('❌ ส่งไม่สำเร็จ', 'danger');
                           }
                         }}
@@ -3496,7 +2463,7 @@ export default function App() {
                           } else {
                             addToast('⚠️ ไม่พบ Group ID ในระบบ', 'warning');
                           }
-                        } catch(e) {
+                        } catch {
                           addToast('❌ ค้นหาไม่สำเร็จ', 'danger');
                         }
                       }}
@@ -3606,20 +2573,6 @@ export default function App() {
                         if (nameChanged) lastData = await runBackendFunction('adminUpdatePlayerName', [p.id, playerEditForm.name.trim()]);
                         if (balChanged) {
                           lastData = await runBackendFunction('adminSetPlayerBalance', [p.id, playerEditForm.balance, playerEditForm.name.trim()]);
-                          const delta = playerEditForm.balance - p.balance;
-                          const sign = delta >= 0 ? '+' : '';
-                          const now = new Date().toLocaleTimeString('th-TH', { hour12: false, hour: '2-digit', minute: '2-digit' });
-                          setChatLogs(prev => [
-                            ...prev,
-                            {
-                              timestamp: now,
-                              userId: p.lineUserId || p.id,
-                              displayName: 'แอดมิน',
-                              sender: 'admin',
-                              text: `💰 แจ้งเตือนปรับยอดเครดิต: ${p.balance.toLocaleString()} pt → ${playerEditForm.balance.toLocaleString()} pt (${sign}${delta.toLocaleString()} pt)`,
-                              type: 'flex',
-                            }
-                          ]);
                         }
                         if (!nameChanged && !balChanged) lastData = await runBackendFunction('getDashboardData', []);
                         
@@ -4076,8 +3029,6 @@ export default function App() {
             <button
               onClick={() => {
                 setSettlementResult(null);
-                setRocketStatus('idle');
-                setRocketFlightTime(0.00);
               }}
               className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
             >
@@ -4095,68 +3046,8 @@ export default function App() {
 // -------------------------------------------------------------
 // SECURE PLAYER STATEMENT CONSOLE
 // -------------------------------------------------------------
-function PlayerDashboard({ player, transactions, bets, chatLogs, playerUserId, players, isGAS, setToasts, addToast, setChatLogs }) {
-  const [activeTab, setActiveTab] = useState('statement'); // 'statement' | 'bets' | 'chat'
-  const [chatInput, setChatInput] = useState('');
-  const chatEndRef = useRef(null);
-
-  useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [chatLogs, activeTab]);
-
-  const handleSendMessage = (e) => {
-    e.preventDefault();
-    if (!chatInput.trim()) return;
-    const text = chatInput;
-    setChatInput('');
-
-    const tStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-    const newLog = {
-      timestamp: tStr,
-      userId: playerUserId,
-      displayName: player.name || 'ผู้เล่น',
-      sender: 'user',
-      text: text,
-      type: 'text'
-    };
-    
-    // Add locally for instant UI update
-    setChatLogs(prev => [...prev, newLog]);
-
-    if (isGAS) {
-      window.google.script.run
-        .withSuccessHandler(() => {
-          // Message processed successfully
-        })
-        .simulateTextMessageFromDashboard(text, playerUserId, player.name);
-    } else {
-      // Sandbox Simulator Reply Simulation
-      setTimeout(() => {
-        const clean = text.replace(/\s+/g, '').toLowerCase();
-        let botText = `[ระบบบอท] ได้รับข้อความ "${text}" เรียบร้อยแล้วครับ เจ้าหน้าที่จะรีบตรวจสอบโดยเร็วที่สุด`;
-        
-        if (clean === 'เช็คยอด' || clean === 'คงเหลือ' || clean === 'balance') {
-          botText = `💳 ยอดเครดิตคงเหลือของคุณ:\n\n👤 ผู้เล่น: ${player.name}\n💰 คงเหลือ: ${player.balance.toFixed(2)} แต้ม`;
-        } else if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit') {
-          botText = `💰 ฝากเครดิตเข้าระบบ (1:1)\n\nกรุณาพิมพ์จำนวนเงินที่ต้องการฝาก เช่น "100" หรือ "500" ได้เลยครับ`;
-        } else if (clean === 'ถอนเงิน' || clean === 'ถอนยอด' || clean === 'withdraw') {
-          botText = `💸 ถอนเครดิตคืนเข้าบัญชี\n\nยอดถอนขั้นต่ำคือ 100 แต้ม กรุณาพิมพ์ระบุจำนวนเงินที่ต้องการถอน เช่น "ถอน 300"`;
-        }
-
-        const botReply = {
-          timestamp: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
-          userId: playerUserId,
-          displayName: player.name,
-          sender: 'bot',
-          text: botText,
-          type: 'text'
-        };
-        setChatLogs(prev => [...prev, botReply]);
-      }, 1200);
-    }
-  };
+function PlayerDashboard({ player, transactions, bets, playerUserId, players }) {
+  const [activeTab, setActiveTab] = useState('statement'); // 'statement' | 'bets'
 
   return (
     <div className="w-full max-w-4xl min-h-screen p-4 md:p-6 flex flex-col font-sans text-slate-800 bg-slate-50">
@@ -4393,10 +3284,10 @@ function AdminLockScreen({
 
     setIsSubmitting(true);
 
-    const isUserMatch = userClean.toLowerCase() === (adminUsername || 'Admin').toLowerCase();
-    const isPassMatch = passClean === (adminPassword || 'P@ssW0rd2026') || passClean === (adminPasscode || 'P@ssW0rd2026') || passClean === 'P@ssW0rd2026';
+    const isUserMatch = adminUsername ? userClean.toLowerCase() === adminUsername.toLowerCase() : true;
+    const isPassMatch = Boolean((adminPassword && passClean === adminPassword) || (adminPasscode && passClean === adminPasscode));
 
-    let loginSuccess = isUserMatch && isPassMatch;
+    let loginSuccess = Boolean(isUserMatch && isPassMatch);
 
     // 2. If client comparison doesn't match directly, try backend RPC
     if (!loginSuccess && typeof runBackendFunction === 'function') {
@@ -4405,7 +3296,9 @@ function AdminLockScreen({
         if (res && res.success) {
           loginSuccess = true;
         }
-      } catch (_) {}
+      } catch {
+        // ignore RPC login exception
+      }
     }
 
     setIsSubmitting(false);
@@ -4414,6 +3307,7 @@ function AdminLockScreen({
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('rocket_admin_auth', 'true');
         sessionStorage.setItem('rocket_admin_user', userClean);
+        sessionStorage.setItem('rocket_admin_key', passClean);
       }
       setAdminAuthenticated(true);
       setLoginError('');

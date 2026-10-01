@@ -9,10 +9,10 @@ export async function verifyLineSignature(
   signatureHeader: string | null,
   channelSecret: string
 ): Promise<boolean> {
-  // If no secret configured during initial test/staging, soft-open with warning
+  // Fail closed if no channel secret is configured
   if (!channelSecret) {
-    console.warn('[Signature] Warning: LINE_CHANNEL_SECRET is not set — bypassing signature check until configured');
-    return true;
+    console.error('[Signature] Error: LINE_CHANNEL_SECRET is not configured — rejecting webhook request');
+    return false;
   }
 
   if (!signatureHeader || !rawBody) {
