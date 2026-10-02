@@ -189,14 +189,15 @@ export default function AdminLockScreen({
           </nav>
 
           {/* Action CTA: Sign In Button */}
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <button
               type="button"
               onClick={handleScrollToLogin}
-              className="px-4 sm:px-5 py-2 rounded-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 active:scale-95 text-white text-xs sm:text-sm font-bold tracking-wide transition-all flex items-center gap-2 cursor-pointer border border-sky-300/40 whitespace-nowrap shrink-0 shadow-lg shadow-sky-500/20"
+              className="px-3 sm:px-5 py-1.5 sm:py-2 rounded-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 active:scale-95 text-white text-xs sm:text-sm font-bold tracking-wide transition-all flex items-center gap-1.5 sm:gap-2 cursor-pointer border border-sky-300/40 whitespace-nowrap shrink-0 shadow-lg shadow-sky-500/20"
             >
-              <LogIn size={15} />
-              <span>เข้าสู่ระบบ (Sign In)</span>
+              <LogIn size={14} className="shrink-0" />
+              <span>เข้าสู่ระบบ</span>
+              <span className="hidden sm:inline">(Sign In)</span>
             </button>
 
             {/* Mobile Hamburger Toggle */}
@@ -242,18 +243,19 @@ export default function AdminLockScreen({
       </header>
 
       {/* -------------------------------------------------------------
-          HERO SECTION: FULL HOMEPAGE STYLE WITH HERO IMAGE 4 (ESA FLEET)
+          HERO SECTION: FULL HOMEPAGE STYLE WITH BACKGROUND.PNG (ATLAS V LAUNCH)
          ------------------------------------------------------------- */}
       <section 
-        className="relative w-full min-h-[calc(100vh-68px)] flex items-center bg-[#050b16] bg-cover bg-center overflow-hidden"
+        className="relative w-full min-h-[calc(100vh-68px)] flex items-center bg-[#030712] bg-cover bg-right lg:bg-center overflow-hidden"
         style={{ backgroundImage: `url(${HERO_FULL_BACKGROUND})` }}
       >
-        {/* Soft Ambient Vignette for Space & Earth Horizon Atmosphere */}
-        <div className="absolute inset-0 bg-gradient-to-r from-[#050b16]/60 via-transparent to-[#050b16]/50 pointer-events-none" />
+        {/* Rich Multi-Layered Atmospheric Gradient Overlay */}
+        <div className="absolute inset-0 bg-gradient-to-r from-[#030712]/90 via-[#030712]/60 to-[#030712]/35 pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[#071324]/90 via-transparent to-[#081528] pointer-events-none" />
         {/* Smooth Top Transition from Header */}
-        <div className="absolute top-0 inset-x-0 h-24 bg-gradient-to-b from-[#071324]/80 to-transparent pointer-events-none" />
+        <div className="absolute top-0 inset-x-0 h-24 bg-gradient-to-b from-[#071324] to-transparent pointer-events-none" />
         {/* Smooth Bottom Transition to Next Section */}
-        <div className="absolute bottom-0 inset-x-0 h-28 bg-gradient-to-t from-[#081528] via-[#081528]/40 to-transparent pointer-events-none" />
+        <div className="absolute bottom-0 inset-x-0 h-32 bg-gradient-to-t from-[#081528] via-[#081528]/80 to-transparent pointer-events-none" />
 
         <div className="relative z-10 w-full max-w-[1720px] mx-auto px-4 sm:px-8 lg:px-12 py-10 sm:py-16 flex-1 flex flex-col justify-center">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
@@ -262,27 +264,27 @@ export default function AdminLockScreen({
             <div className="order-2 lg:order-1 lg:col-span-4 xl:col-span-3 w-full flex justify-center lg:justify-start">
               <div 
                 ref={loginCardRef}
-                className="relative w-full max-w-[340px] bg-[#071324]/55 backdrop-blur-2xl border border-white/20 border-t-white/40 rounded-3xl p-5 sm:p-6 shadow-[0_24px_50px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.2)] space-y-4 overflow-hidden ring-1 ring-inset ring-white/10"
+                className="relative w-full max-w-[340px] sm:max-w-[350px] bg-[#071324]/55 backdrop-blur-2xl border border-white/20 border-t-white/40 rounded-3xl p-5 sm:p-6 shadow-[0_24px_50px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.2)] space-y-4 overflow-hidden ring-1 ring-inset ring-white/10"
               >
                 {/* Upper Specular Glass Sheen Highlight */}
                 <div className="absolute top-0 inset-x-0 h-28 bg-gradient-to-b from-white/15 to-transparent pointer-events-none rounded-t-3xl" />
 
                 {/* Card Header */}
-                <div className="relative z-10 flex items-center justify-between pb-2.5 border-b border-white/15">
-                  <div className="flex items-center gap-2.5">
+                <div className="relative z-10 flex items-center justify-between pb-2.5 border-b border-white/15 gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
                     <div className="w-9 h-9 rounded-2xl bg-white/15 border border-white/25 backdrop-blur-xl flex items-center justify-center text-sky-300 shadow-[inset_0_1px_1px_rgba(255,255,255,0.3)] shrink-0">
                       <Lock size={17} />
                     </div>
-                    <div>
-                      <h3 className="text-sm sm:text-base font-bold text-white tracking-tight drop-shadow-sm">
+                    <div className="min-w-0">
+                      <h3 className="text-sm sm:text-base font-bold text-white tracking-tight drop-shadow-sm whitespace-nowrap">
                         เข้าสู่ระบบผู้ดูแล (Admin)
                       </h3>
-                      <p className="text-[11px] text-sky-200/90 font-medium">
+                      <p className="text-[10px] sm:text-[11px] text-sky-200/90 font-medium whitespace-nowrap">
                         ยินดีต้อนรับสู่ระบบควบคุมภาคสนาม
                       </p>
                     </div>
                   </div>
-                  <span className="text-[9px] px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 rounded-full font-sans font-semibold tracking-wide backdrop-blur-md shadow-sm">
+                  <span className="text-[9px] px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 rounded-full font-sans font-semibold tracking-wide backdrop-blur-md shadow-sm shrink-0 whitespace-nowrap">
                     SECURED
                   </span>
                 </div>
@@ -399,48 +401,47 @@ export default function AdminLockScreen({
               </div>
             </div>
 
-            {/* CENTER COLUMN: Dedicated open space for the 3 ascending launch vehicles */}
-            <div className="hidden lg:block lg:order-2 lg:col-span-4 xl:col-span-5 pointer-events-none select-none" />
+            {/* CENTER COLUMN: Buffer between card and welcome block */}
+            <div className="hidden lg:block lg:order-2 lg:col-span-2 xl:col-span-2 pointer-events-none select-none" />
 
             {/* RIGHT COLUMN: WELCOME HEADINGS, VALUE PROPOSITIONS & TRUST INDICATORS */}
-            <div className="order-1 lg:order-3 lg:col-span-4 xl:col-span-4 w-full flex justify-center lg:justify-end">
-              <div className="max-w-[380px] space-y-4 text-left">
+            <div className="order-1 lg:order-3 lg:col-span-6 xl:col-span-6 w-full flex justify-center lg:justify-end min-w-0">
+              <div className="w-full max-w-full sm:max-w-[560px] space-y-4 text-left min-w-0">
                 
                 {/* Status Overline Badge (Zero Emojis - Lucide ShieldCheck) */}
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-sky-200 text-xs font-semibold shadow-sm backdrop-blur-md">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-sky-200 text-xs font-semibold shadow-sm backdrop-blur-md whitespace-nowrap">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                   <ShieldCheck size={14} className="text-sky-400" />
-                  <span>Enterprise Operations Platform</span>
+                  <span className="whitespace-nowrap">Enterprise Operations Platform</span>
                 </div>
 
                 {/* Main Headline (2-Line Restyle: Bold + Thin Italic) */}
-                <div className="space-y-1.5">
-                  <h1 className="text-3xl sm:text-4xl lg:text-[38px] font-heading text-white tracking-tight leading-[1.15] drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]">
-                    <span className="font-extrabold block">Better Solutions</span>
-                    <span className="font-light italic text-[#38bdf8] block text-2xl sm:text-3xl mt-0.5">For Your Operations</span>
+                <div className="space-y-2 min-w-0">
+                  <h1 className="text-3xl sm:text-4xl lg:text-[40px] font-heading text-white tracking-tight leading-[1.15] drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]">
+                    <span className="font-extrabold block whitespace-nowrap">Better Solutions</span>
+                    <span className="font-light italic text-[#38bdf8] block text-2xl sm:text-3xl mt-0.5 whitespace-nowrap">For Your Operations</span>
                   </h1>
-                  <h2 className="text-sm sm:text-base font-medium text-sky-100 font-thai drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
+                  <h2 className="text-xs sm:text-sm md:text-base font-medium text-sky-100 font-thai drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] whitespace-nowrap overflow-hidden text-ellipsis">
                     ระบบบริหารจัดการธุรกรรมและการแข่งขันภาคสนามระดับองค์กร
                   </h2>
-                  <p className="text-xs text-slate-200 leading-relaxed font-thai font-normal drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
-                    ศูนย์กลางประมวลผลคำสั่งซื้อและตรวจสลิปเงินโอนอัตโนมัติ พร้อมแดชบอร์ดควบคุมรอบการแข่งขัน 
-                    และระบบประมวลผลเวลาภาคสนามความเร็วสูงแบบเรียลไทม์
+                  <p className="text-[10px] sm:text-xs md:text-sm text-slate-200 font-thai font-normal drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] whitespace-nowrap overflow-hidden text-ellipsis">
+                    ศูนย์กลางประมวลผลคำสั่งซื้อ ตรวจสลิปอัตโนมัติ และระบบบันทึกเวลาเรียลไทม์
                   </p>
                 </div>
 
-                {/* Core Feature Highlights (Liquid Glass Pills) */}
-                <div className="pt-1 flex flex-wrap items-center gap-2 text-xs text-white font-medium">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md">
+                {/* Core Feature Highlights (Liquid Glass Pills - Strictly Single Line) */}
+                <div className="pt-1 flex flex-nowrap items-center gap-2 text-xs text-white font-medium max-w-full overflow-x-auto pb-1 min-w-0">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
                     <Zap size={13} className="text-amber-400" />
-                    <span>แม่นยำระดับเสี้ยววินาที</span>
+                    <span className="whitespace-nowrap">แม่นยำระดับเสี้ยววินาที</span>
                   </span>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
                     <ShieldCheck size={13} className="text-emerald-400" />
-                    <span>ตรวจสลิปอัตโนมัติ 1:1</span>
+                    <span className="whitespace-nowrap">ตรวจสลิปอัตโนมัติ 1:1</span>
                   </span>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
                     <BarChart3 size={13} className="text-sky-400" />
-                    <span>ซิงก์ข้อมูลเรียลไทม์</span>
+                    <span className="whitespace-nowrap">ซิงก์ข้อมูลเรียลไทม์</span>
                   </span>
                 </div>
 
