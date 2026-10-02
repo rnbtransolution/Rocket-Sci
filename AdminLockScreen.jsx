@@ -269,22 +269,21 @@ export default function AdminLockScreen({
       </header>
 
       {/* -------------------------------------------------------------
-          HERO SECTION: FULL HOMEPAGE STYLE WITH BLURRED BACKGROUND (ATLAS V LAUNCH)
+          HERO SECTION: FULL HOMEPAGE STYLE WITH VISIBLE BACKGROUND (ATLAS V LAUNCH)
          ------------------------------------------------------------- */}
-      <section className="relative w-full min-h-screen pt-[68px] flex items-center bg-[#071324] overflow-hidden">
-        {/* Atmospheric Blurred Background Image Layer */}
+      <section className="relative w-full min-h-screen pt-[68px] flex items-center bg-[#030712] overflow-hidden">
+        {/* Clearly Visible Background Image Layer with Subtle 10-15% Blur (3px) */}
         <div 
-          className="absolute inset-0 bg-cover bg-right lg:bg-center scale-105 filter blur-md lg:blur-lg opacity-40 brightness-90 contrast-105 pointer-events-none transition-all duration-700"
+          className="absolute inset-0 bg-cover bg-right lg:bg-center scale-102 filter blur-[3px] opacity-90 brightness-95 pointer-events-none transition-all duration-500"
           style={{ backgroundImage: `url(${HERO_FULL_BACKGROUND})` }}
         />
 
-        {/* Clean, Deep Dark Vignette & Ambient Gradient Overlays */}
-        <div className="absolute inset-0 bg-gradient-to-r from-[#071324]/92 via-[#071324]/80 to-[#071324]/68 pointer-events-none" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_75%_50%,rgba(249,115,22,0.12),transparent_60%)] pointer-events-none" />
+        {/* Soft Transparent Gradient: Keeps Rocket Launch Bright & Prominent */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/65 via-black/30 to-black/15 pointer-events-none" />
         
         {/* Soft Edge Blends */}
-        <div className="absolute top-0 inset-x-0 h-20 bg-gradient-to-b from-[#071324] to-transparent pointer-events-none" />
-        <div className="absolute bottom-0 inset-x-0 h-24 bg-gradient-to-t from-[#081528] to-transparent pointer-events-none" />
+        <div className="absolute top-0 inset-x-0 h-16 bg-gradient-to-b from-[#071324]/80 to-transparent pointer-events-none" />
+        <div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-[#081528] to-transparent pointer-events-none" />
 
         <div className="relative z-10 w-full max-w-[1720px] mx-auto px-4 sm:px-8 lg:px-12 py-10 sm:py-16 flex-1 flex flex-col justify-center">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
