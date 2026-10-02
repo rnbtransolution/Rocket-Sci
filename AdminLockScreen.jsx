@@ -14,306 +14,53 @@ import {
   X
 } from 'lucide-react';
 
+import { HERO_LAUNCH_ILLUSTRATION } from './hero_image_b64';
+
 // -------------------------------------------------------------
-// WELCOMING ROCKET LAUNCH & OPERATIONS ARTWORK
-// Inspired by friendly startup aesthetic (Login Page Reference)
+// WELCOMING ROCKET LAUNCH & OPERATIONS SHOWCASE
+// Uses the official graphic illustration (Cropped & Optimized)
 // -------------------------------------------------------------
 function AdminHeroIllustration() {
   return (
-    <div className="relative w-full max-w-[580px] mx-auto select-none">
+    <div className="relative w-full max-w-[560px] mx-auto select-none group">
       {/* Ambient background glows */}
       <div 
-        className="absolute -top-12 -left-12 w-72 h-72 rounded-full pointer-events-none opacity-40 blur-3xl"
+        className="absolute -top-12 -left-12 w-80 h-80 rounded-full pointer-events-none opacity-40 blur-3xl"
         style={{ background: 'radial-gradient(circle, #38bdf8 0%, rgba(55,81,126,0) 70%)' }}
       />
       <div 
-        className="absolute -bottom-10 -right-10 w-80 h-80 rounded-full pointer-events-none opacity-30 blur-3xl"
+        className="absolute -bottom-10 -right-10 w-80 h-80 rounded-full pointer-events-none opacity-35 blur-3xl"
         style={{ background: 'radial-gradient(circle, #f43f5e 0%, rgba(55,81,126,0) 70%)' }}
       />
 
-      {/* SVG Modern Startup Launch Artwork */}
-      <svg 
-        viewBox="0 0 680 500" 
-        className="w-full h-auto drop-shadow-2xl overflow-visible"
-        fill="none" 
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <defs>
-          {/* Rocket Body Gradient */}
-          <linearGradient id="rocketBodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#38bdf8" />
-            <stop offset="45%" stopColor="#0284c7" />
-            <stop offset="100%" stopColor="#1e3a8a" />
-          </linearGradient>
+      {/* Main Illustration Showcase Card with Glassmorphic Border */}
+      <div className="relative rounded-3xl overflow-hidden shadow-2xl border border-white/25 bg-gradient-to-br from-white via-[#f0f6ff] to-[#e1edfe] p-3 sm:p-5 transition-transform duration-500 hover:scale-[1.01]">
+        {/* Soft Background Highlight */}
+        <div className="absolute inset-0 bg-gradient-to-tr from-sky-400/10 via-transparent to-rose-400/10 pointer-events-none" />
 
-          {/* Rocket Fin & Accent Gradient */}
-          <linearGradient id="rocketCoralGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#fb7185" />
-            <stop offset="50%" stopColor="#f43f5e" />
-            <stop offset="100%" stopColor="#be123c" />
-          </linearGradient>
-
-          {/* Rocket Flame Gradients */}
-          <linearGradient id="flameOuterGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.9" />
-            <stop offset="70%" stopColor="#fbbf24" stopOpacity="0.8" />
-            <stop offset="100%" stopColor="#fef08a" stopOpacity="0" />
-          </linearGradient>
-          <linearGradient id="flameInnerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#ffffff" />
-            <stop offset="40%" stopColor="#fef08a" />
-            <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
-          </linearGradient>
-
-          {/* Cloud Gradients */}
-          <linearGradient id="cloudBaseGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
-            <stop offset="100%" stopColor="#e2e8f0" stopOpacity="0.85" />
-          </linearGradient>
-
-          {/* Card / Badge Gradient */}
-          <linearGradient id="badgeBgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#1e293b" stopOpacity="0.92" />
-            <stop offset="100%" stopColor="#0f172a" stopOpacity="0.88" />
-          </linearGradient>
-        </defs>
-
-        {/* -------------------------------------------------------------
-            BACKGROUND DECORATIVE ELEMENTS (Gears & Globe Bubble)
-           ------------------------------------------------------------- */}
-        {/* Soft Organic Floor / Hill Shape */}
-        <path 
-          d="M 20 460 Q 200 400 380 430 T 660 450 L 660 500 L 20 500 Z" 
-          fill="#1b283d" 
-          fillOpacity="0.5" 
+        {/* The Official Graphic Artwork */}
+        <img 
+          src={HERO_LAUNCH_ILLUSTRATION} 
+          alt="Mission Operations & Rocket Launch Telemetry" 
+          className="w-full h-auto object-contain rounded-2xl drop-shadow-sm select-none"
+          loading="eager"
         />
 
-        {/* Gear 1: Upper Right Large Gear (Inspired by reference) */}
-        <g transform="translate(550, 150) rotate(15)" opacity="0.32">
-          <circle cx="0" cy="0" r="44" stroke="#818cf8" strokeWidth="10" strokeDasharray="18 12" fill="none" />
-          <circle cx="0" cy="0" r="28" fill="#818cf8" fillOpacity="0.15" stroke="#818cf8" strokeWidth="2" />
-          <circle cx="0" cy="0" r="14" fill="#37517e" />
-        </g>
+        {/* Floating Glassmorphic Badge 1: Real-Time Sync (Top Left) */}
+        <div className="absolute top-5 left-5 flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-[#1b2a41]/90 backdrop-blur-md border border-[#38bdf8]/40 shadow-xl text-white">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+          </span>
+          <span className="text-[11px] font-extrabold tracking-wide font-sans">REAL-TIME SYNC</span>
+        </div>
 
-        {/* Gear 2: Middle Right Smaller Gear */}
-        <g transform="translate(535, 245) rotate(-25)" opacity="0.25">
-          <circle cx="0" cy="0" r="30" stroke="#38bdf8" strokeWidth="8" strokeDasharray="12 9" fill="none" />
-          <circle cx="0" cy="0" r="18" fill="#38bdf8" fillOpacity="0.15" stroke="#38bdf8" strokeWidth="1.5" />
-          <circle cx="0" cy="0" r="9" fill="#37517e" />
-        </g>
-
-        {/* Globe Speech Bubble (Inspired by reference) */}
-        <g transform="translate(370, 160)" opacity="0.85">
-          <rect x="0" y="0" width="46" height="34" rx="8" fill="#1e293b" stroke="#38bdf8" strokeWidth="1.5" />
-          <polygon points="12,34 20,34 14,41" fill="#1e293b" stroke="#38bdf8" strokeWidth="1.5" strokeLinejoin="round" />
-          <rect x="0.5" y="32" width="20" height="3" fill="#1e293b" />
-          {/* Globe lines inside */}
-          <circle cx="23" cy="17" r="9" stroke="#38bdf8" strokeWidth="1.2" fill="none" />
-          <line x1="14" y1="17" x2="32" y2="17" stroke="#38bdf8" strokeWidth="1" />
-          <ellipse cx="23" cy="17" rx="4.5" ry="9" stroke="#38bdf8" strokeWidth="1" fill="none" />
-        </g>
-
-        {/* -------------------------------------------------------------
-            CENTER: MODERN ASCENDING ROCKET (Inspired by reference)
-           ------------------------------------------------------------- */}
-        <g id="mainRocket" transform="translate(435, 75)">
-          {/* Rocket Propulsion Exhaust Flames */}
-          <path 
-            d="M -16 230 Q 0 310 0 330 Q 0 310 16 230 Z" 
-            fill="url(#flameOuterGrad)" 
-            filter="drop-shadow(0 0 10px #f43f5e)"
-          />
-          <path 
-            d="M -8 230 Q 0 280 0 295 Q 0 280 8 230 Z" 
-            fill="url(#flameInnerGrad)" 
-          />
-
-          {/* Left Booster Rocket */}
-          <g transform="translate(-32, 70)">
-            <path d="M 0 30 Q 8 0 16 30 L 16 140 Q 8 148 0 140 Z" fill="#0284c7" stroke="#38bdf8" strokeWidth="1" />
-            <polygon points="0,30 8,0 16,30" fill="#38bdf8" />
-            <polygon points="2,140 14,140 11,148 5,148" fill="#1e293b" />
-            <path d="M 5 148 Q 8 175 8 185 Q 8 175 11 148 Z" fill="url(#flameOuterGrad)" opacity="0.8" />
-          </g>
-
-          {/* Right Booster Rocket */}
-          <g transform="translate(16, 70)">
-            <path d="M 0 30 Q 8 0 16 30 L 16 140 Q 8 148 0 140 Z" fill="#0284c7" stroke="#38bdf8" strokeWidth="1" />
-            <polygon points="0,30 8,0 16,30" fill="#38bdf8" />
-            <polygon points="2,140 14,140 11,148 5,148" fill="#1e293b" />
-            <path d="M 5 148 Q 8 175 8 185 Q 8 175 11 148 Z" fill="url(#flameOuterGrad)" opacity="0.8" />
-          </g>
-
-          {/* Main Fuselage Body */}
-          <path 
-            d="M -26 80 Q 0 -20 26 80 L 26 215 L -26 215 Z" 
-            fill="url(#rocketBodyGrad)" 
-            stroke="#bae6fd" 
-            strokeWidth="1.5"
-          />
-
-          {/* Center Main Fin / Dorsal Spine (Coral Red) */}
-          <path 
-            d="M 0 50 L 0 230" 
-            stroke="#f43f5e" 
-            strokeWidth="4" 
-            strokeLinecap="round" 
-          />
-
-          {/* Left Wing Fin (Swept Coral Fin) */}
-          <path 
-            d="M -26 140 C -45 160 -52 210 -48 235 C -36 230 -26 215 -26 215 Z" 
-            fill="url(#rocketCoralGrad)" 
-            stroke="#fda4af" 
-            strokeWidth="1"
-          />
-
-          {/* Right Wing Fin (Swept Coral Fin) */}
-          <path 
-            d="M 26 140 C 45 160 52 210 48 235 C 36 230 26 215 26 215 Z" 
-            fill="url(#rocketCoralGrad)" 
-            stroke="#fda4af" 
-            strokeWidth="1"
-          />
-
-          {/* Cockpit Porthole Window */}
-          <circle cx="0" cy="85" r="14" fill="#0f172a" stroke="#f43f5e" strokeWidth="3" />
-          <circle cx="0" cy="85" r="10" fill="#0284c7" />
-          <path d="M -5 80 A 7 7 0 0 1 5 80" stroke="#bae6fd" strokeWidth="2" strokeLinecap="round" />
-
-          {/* Main Engine Base Ring */}
-          <rect x="-24" y="215" width="48" height="12" rx="4" fill="#0f172a" stroke="#38bdf8" strokeWidth="1" />
-          <polygon points="-18,227 18,227 14,235 -14,235" fill="#334155" />
-        </g>
-
-        {/* -------------------------------------------------------------
-            BILLOWING CLOUDS & LAUNCH SMOKE (Layered Cloud Base)
-           ------------------------------------------------------------- */}
-        <g id="launchClouds">
-          {/* Back Soft Layer */}
-          <path 
-            d="M 260 430 Q 320 360 380 400 Q 430 350 490 380 Q 560 340 620 400 Q 660 430 640 470 L 260 470 Z" 
-            fill="#93c5fd" 
-            fillOpacity="0.25" 
-          />
-
-          {/* Middle Cloud Layer */}
-          <ellipse cx="440" cy="370" rx="65" ry="35" fill="url(#cloudBaseGrad)" />
-          <ellipse cx="370" cy="385" rx="55" ry="32" fill="url(#cloudBaseGrad)" />
-          <ellipse cx="510" cy="380" rx="58" ry="30" fill="url(#cloudBaseGrad)" />
-          <ellipse cx="310" cy="405" rx="50" ry="28" fill="url(#cloudBaseGrad)" />
-          <ellipse cx="570" cy="400" rx="52" ry="28" fill="url(#cloudBaseGrad)" />
-
-          {/* Foreground Puffy Cloud Shapes */}
-          <circle cx="435" cy="385" r="42" fill="#ffffff" />
-          <circle cx="380" cy="400" r="38" fill="#ffffff" />
-          <circle cx="490" cy="395" r="38" fill="#ffffff" />
-          <circle cx="330" cy="425" r="35" fill="#ffffff" />
-          <circle cx="545" cy="420" r="35" fill="#ffffff" />
-          <circle cx="280" cy="445" r="30" fill="#f8fafc" />
-          <circle cx="595" cy="440" r="32" fill="#f8fafc" />
-        </g>
-
-        {/* -------------------------------------------------------------
-            FRIENDLY OPERATIONS TEAM (Inspired by reference figures)
-           ------------------------------------------------------------- */}
-        {/* Figure 1: Standing Operations Lead with Tablet/Clipboard (Left) */}
-        <g id="figureLead" transform="translate(345, 205)">
-          {/* Head & Hair */}
-          <circle cx="16" cy="18" r="9" fill="#fbd5b5" />
-          <path d="M 9 17 C 9 10 14 7 21 9 C 24 10 25 15 25 18 C 22 17 19 14 15 15 C 13 16 11 17 9 17 Z" fill="#1e293b" />
-          {/* Hand to ear/headset (communicating) */}
-          <path d="M 23 18 Q 28 20 26 27" stroke="#fbd5b5" strokeWidth="3" strokeLinecap="round" fill="none" />
-          
-          {/* Torso & Shirt (Crisp Periwinkle/Lavender) */}
-          <path d="M 6 30 L 26 30 L 29 78 L 3 78 Z" fill="#818cf8" />
-          {/* Collar & Dark Tie */}
-          <polygon points="13,30 19,30 17,54 15,54" fill="#1e293b" />
-          <polygon points="12,30 16,36 14,30" fill="#ffffff" />
-          <polygon points="20,30 16,36 18,30" fill="#ffffff" />
-
-          {/* Left Arm holding Clipboard */}
-          <path d="M 8 32 L -4 55 L 8 64" stroke="#818cf8" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-          {/* Tablet / Clipboard */}
-          <g transform="translate(-10, 52) rotate(6)">
-            <rect x="0" y="0" width="22" height="30" rx="3" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1" />
-            <rect x="7" y="-2" width="8" height="4" rx="1.5" fill="#64748b" />
-            <line x1="4" y1="8" x2="18" y2="8" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" />
-            <line x1="4" y1="13" x2="18" y2="13" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
-            <line x1="4" y1="18" x2="14" y2="18" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
-            <line x1="4" y1="23" x2="16" y2="23" stroke="#10b981" strokeWidth="1.5" strokeLinecap="round" />
-          </g>
-
-          {/* Legs & Trousers (Dark Slate) */}
-          <path d="M 4 78 L 13 148 L 7 150" stroke="#1e293b" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-          <path d="M 27 78 L 19 148 L 24 150" stroke="#1e293b" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-          {/* Shoes */}
-          <ellipse cx="6" cy="151" rx="6" ry="2.5" fill="#0284c7" />
-          <ellipse cx="23" cy="151" rx="6" ry="2.5" fill="#0284c7" />
-        </g>
-
-        {/* Figure 2: Specialist Seated on Cloud with Laptop (Right) */}
-        <g id="figureSpecialist" transform="translate(485, 270)">
-          {/* Head & Glasses */}
-          <circle cx="15" cy="14" r="8" fill="#fbd5b5" />
-          <path d="M 9 14 C 9 8 13 5 21 7 C 23 9 24 13 23 15 C 20 14 17 12 14 13 C 12 14 10 15 9 14 Z" fill="#1e293b" />
-          {/* Glasses */}
-          <rect x="15" y="12" width="6" height="4" rx="1" stroke="#1e293b" strokeWidth="1" fill="none" />
-
-          {/* Torso & Bright Blue Sweater */}
-          <path d="M 5 24 L 25 24 L 28 62 L 2 62 Z" fill="#0284c7" />
-
-          {/* Crossed Legs on Cloud */}
-          <path 
-            d="M 2 62 C -10 65 -6 82 12 82 C 26 82 34 76 38 68 C 32 64 26 62 18 62" 
-            fill="#1e293b" 
-          />
-          {/* Shoes */}
-          <ellipse cx="-4" cy="78" rx="5" ry="3" fill="#ffffff" />
-          <ellipse cx="32" cy="74" rx="5" ry="3" fill="#ffffff" />
-
-          {/* Arms holding laptop */}
-          <path d="M 5 26 L -2 46 L 8 48" stroke="#0284c7" strokeWidth="5" strokeLinecap="round" fill="none" />
-          <path d="M 25 26 L 22 46 L 14 48" stroke="#0284c7" strokeWidth="5" strokeLinecap="round" fill="none" />
-
-          {/* Laptop (Open towards operator) */}
-          <polygon points="-8,48 20,48 18,52 -6,52" fill="#cbd5e1" />
-          <polygon points="-5,48 17,48 15,32 -3,32" fill="#f8fafc" stroke="#94a3b8" strokeWidth="0.8" />
-          <rect x="-1" y="35" width="14" height="10" rx="1" fill="#0284c7" fillOpacity="0.3" />
-          <line x1="1" y1="38" x2="11" y2="38" stroke="#38bdf8" strokeWidth="1" strokeLinecap="round" />
-          <line x1="1" y1="41" x2="8" y2="41" stroke="#38bdf8" strokeWidth="1" strokeLinecap="round" />
-        </g>
-
-        {/* -------------------------------------------------------------
-            FLOATING VALUE BADGES (Friendly, Rounded Modern Glassmorphism)
-           ------------------------------------------------------------- */}
-        {/* Badge 1: Real-Time Sync (Top Left) */}
-        <g transform="translate(60, 110)">
-          <rect x="0" y="0" width="168" height="48" rx="14" fill="url(#badgeBgGrad)" stroke="#38bdf8" strokeWidth="1.2" filter="drop-shadow(0 4px 12px rgba(0,0,0,0.3))" />
-          <circle cx="22" cy="24" r="5" fill="#10b981" />
-          <circle cx="22" cy="24" r="9" stroke="#10b981" strokeWidth="1.5" strokeOpacity="0.5" className="animate-ping" />
-          <text x="36" y="20" fill="#94a3b8" fontSize="8.5" fontWeight="bold" letterSpacing="0.05em" fontFamily="sans-serif">REAL-TIME SYNC</text>
-          <text x="36" y="35" fill="#ffffff" fontSize="12" fontWeight="800" fontFamily="sans-serif">Live Field Control</text>
-        </g>
-
-        {/* Badge 2: Verified & Secured (Top Right) */}
-        <g transform="translate(480, 50)">
-          <rect x="0" y="0" width="164" height="48" rx="14" fill="url(#badgeBgGrad)" stroke="#818cf8" strokeWidth="1.2" filter="drop-shadow(0 4px 12px rgba(0,0,0,0.3))" />
-          <circle cx="22" cy="24" r="9" fill="#818cf8" fillOpacity="0.25" />
-          <path d="M 18 24 L 21 27 L 26 21" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          <text x="36" y="20" fill="#94a3b8" fontSize="8.5" fontWeight="bold" letterSpacing="0.05em" fontFamily="sans-serif">VERIFIED &amp; SECURED</text>
-          <text x="36" y="35" fill="#ffffff" fontSize="12" fontWeight="800" fontFamily="sans-serif">100% Data Integrity</text>
-        </g>
-
-        {/* Badge 3: Precision Timing (Bottom Center-Left) */}
-        <g transform="translate(110, 380)">
-          <rect x="0" y="0" width="164" height="48" rx="14" fill="url(#badgeBgGrad)" stroke="#38bdf8" strokeWidth="1.2" filter="drop-shadow(0 4px 12px rgba(0,0,0,0.3))" />
-          <circle cx="22" cy="24" r="9" fill="#0284c7" fillOpacity="0.3" />
-          <circle cx="22" cy="24" r="4" fill="#38bdf8" />
-          <text x="36" y="20" fill="#94a3b8" fontSize="8.5" fontWeight="bold" letterSpacing="0.05em" fontFamily="sans-serif">PRECISION TIMING</text>
-          <text x="36" y="35" fill="#38bdf8" fontSize="12" fontWeight="800" fontFamily="monospace">Sub-Second Flight</text>
-        </g>
-      </svg>
+        {/* Floating Glassmorphic Badge 2: Verified Operations (Bottom Right) */}
+        <div className="absolute bottom-5 right-5 hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#1b2a41]/90 backdrop-blur-md border border-[#818cf8]/40 shadow-xl text-white">
+          <span className="text-xs">🛡️</span>
+          <span className="text-[11px] font-extrabold tracking-wide font-sans text-[#bae6fd]">100% VERIFIED &amp; SECURED</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -419,7 +166,17 @@ export default function AdminLockScreen({
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#37517e] text-white font-sans flex flex-col selection:bg-[#47b2e4] selection:text-white">
+    <div className="min-h-screen w-full bg-[#37517e] text-white font-sans flex flex-col selection:bg-[#47b2e4] selection:text-white relative overflow-hidden">
+      {/* Background Subtle Tech Grid & Ambient Lighting */}
+      <div className="absolute inset-0 pointer-events-none opacity-15 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:28px_28px]" />
+      <div 
+        className="absolute top-0 right-1/4 w-[600px] h-[600px] rounded-full pointer-events-none opacity-20 blur-3xl"
+        style={{ background: 'radial-gradient(circle, #38bdf8 0%, rgba(55,81,126,0) 70%)' }}
+      />
+      <div 
+        className="absolute top-1/3 left-0 w-[500px] h-[500px] rounded-full pointer-events-none opacity-15 blur-3xl"
+        style={{ background: 'radial-gradient(circle, #f43f5e 0%, rgba(55,81,126,0) 70%)' }}
+      />
       {/* -------------------------------------------------------------
           TOP NAVIGATION BAR (Rescaled for Professional Alignment)
          ------------------------------------------------------------- */}
