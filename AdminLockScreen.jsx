@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { 
   User, 
   Lock, 
@@ -43,6 +43,7 @@ export default function AdminLockScreen({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState('usage');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
   const userInputRef = useRef(null);
   const docsSectionRef = useRef(null);
@@ -52,21 +53,36 @@ export default function AdminLockScreen({
   const handleNavClick = (tabKey) => {
     setActiveTab(tabKey);
     setMobileMenuOpen(false);
+    setIsLoginModalOpen(false);
     if (docsSectionRef.current) {
       docsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
 
-  // Smooth scroll back to login card and focus username input
-  const handleScrollToLogin = () => {
+  // Open login popup modal
+  const handleOpenLoginModal = () => {
     setMobileMenuOpen(false);
-    if (loginCardRef.current) {
-      loginCardRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setTimeout(() => {
-        if (userInputRef.current) userInputRef.current.focus();
-      }, 400);
-    }
+    setIsLoginModalOpen(true);
+    setTimeout(() => {
+      if (userInputRef.current) userInputRef.current.focus();
+    }, 150);
   };
+
+  // Close login popup modal
+  const handleCloseLoginModal = () => {
+    setIsLoginModalOpen(false);
+  };
+
+  // Keyboard shortcut: close modal on Escape
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && isLoginModalOpen) {
+        handleCloseLoginModal();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isLoginModalOpen]);
 
   // Handle Login submission
   const handleLogin = async (e) => {
@@ -218,7 +234,7 @@ export default function AdminLockScreen({
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <button
               type="button"
-              onClick={handleScrollToLogin}
+              onClick={handleOpenLoginModal}
               className="px-3 sm:px-5 py-1.5 sm:py-2 rounded-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 active:scale-95 text-white text-xs sm:text-sm font-bold tracking-wide transition-all flex items-center gap-1.5 sm:gap-2 cursor-pointer border border-sky-300/40 whitespace-nowrap shrink-0 shadow-lg shadow-sky-500/20"
             >
               <LogIn size={14} className="shrink-0" />
@@ -264,6 +280,14 @@ export default function AdminLockScreen({
               <FileCheck size={16} className="text-sky-400" />
               <span>ข้อกำหนดและเงื่อนไข (Terms of Use)</span>
             </button>
+            <button
+              type="button"
+              onClick={handleOpenLoginModal}
+              className="text-left px-3 py-2.5 rounded-lg text-sm font-semibold text-sky-300 bg-sky-500/15 hover:bg-sky-500/25 flex items-center gap-2 mt-1 border border-sky-400/30"
+            >
+              <LogIn size={16} className="text-sky-400" />
+              <span>เข้าสู่ระบบ (Sign In)</span>
+            </button>
           </div>
         )}
       </header>
@@ -272,209 +296,89 @@ export default function AdminLockScreen({
           HERO SECTION: FULL HOMEPAGE STYLE WITH VISIBLE BACKGROUND (ATLAS V LAUNCH)
          ------------------------------------------------------------- */}
       <section className="relative w-full min-h-screen pt-[68px] flex items-center bg-[#030712] overflow-hidden">
-        {/* Crystal Clear Background Image with minimal 1px blur (reduced by 50%) */}
+        {/* Crystal Clear Background Image (Zero Blur, Shifted Down Away from Page Header) */}
         <div 
-          className="absolute inset-0 bg-cover bg-right lg:bg-center filter blur-[1px] opacity-100 brightness-100 pointer-events-none transition-all duration-300"
-          style={{ backgroundImage: `url(${HERO_FULL_BACKGROUND})` }}
+          className="absolute inset-x-0 -bottom-24 top-14 sm:top-16 lg:top-20 bg-cover bg-no-repeat pointer-events-none transition-all duration-300"
+          style={{ 
+            backgroundImage: `url(${HERO_FULL_BACKGROUND})`,
+            backgroundPosition: '68% top'
+          }}
         />
 
-        {/* Soft Transparent Gradient: Keeps Rocket Launch 100% Prominent and Clear */}
-        <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-black/20 to-transparent pointer-events-none" />
+        {/* Soft Transparent Gradient: Enhances Left Text Legibility While Leaving Rocket 100% Crisp */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/35 to-transparent pointer-events-none" />
         
         {/* Soft Edge Blends */}
         <div className="absolute top-0 inset-x-0 h-16 bg-gradient-to-b from-[#071324]/80 to-transparent pointer-events-none" />
-        <div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-[#081528] to-transparent pointer-events-none" />
+        <div className="absolute bottom-0 inset-x-0 h-24 bg-gradient-to-t from-[#081528] to-transparent pointer-events-none" />
 
-        <div className="relative z-10 w-full max-w-[1720px] mx-auto px-4 sm:px-8 lg:px-12 py-10 sm:py-16 flex-1 flex flex-col justify-center">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
+        <div className="relative z-10 w-full max-w-[1720px] mx-auto px-4 sm:px-8 lg:px-12 py-12 sm:py-20 flex-1 flex flex-col justify-center">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
             
-            {/* LEFT COLUMN: APPLE STYLE LIQUID GLASS LOGIN CARD (Wider & Offset to Right) */}
-            <div className="order-2 lg:order-1 lg:col-span-5 xl:col-span-5 w-full flex justify-center lg:justify-start lg:pl-4 xl:pl-8 min-w-0">
-              <div 
-                ref={loginCardRef}
-                className="relative w-full max-w-[390px] sm:max-w-[420px] bg-[#071324]/55 backdrop-blur-2xl border border-white/20 border-t-white/40 rounded-3xl p-6 sm:p-7 shadow-[0_24px_50px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.2)] space-y-4 overflow-hidden ring-1 ring-inset ring-white/10"
-              >
-                {/* Upper Specular Glass Sheen Highlight */}
-                <div className="absolute top-0 inset-x-0 h-28 bg-gradient-to-b from-white/15 to-transparent pointer-events-none rounded-t-3xl" />
-
-                {/* Card Header */}
-                <div className="relative z-10 flex items-center justify-between pb-3 border-b border-white/15 gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-2xl bg-white/15 border border-white/25 backdrop-blur-xl flex items-center justify-center text-sky-300 shadow-[inset_0_1px_1px_rgba(255,255,255,0.3)] shrink-0">
-                      <Lock size={18} />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="text-base sm:text-lg font-bold text-white tracking-tight drop-shadow-sm whitespace-nowrap">
-                        เข้าสู่ระบบผู้ดูแล (Admin)
-                      </h3>
-                      <p className="text-[11px] sm:text-xs text-sky-200/90 font-medium whitespace-nowrap">
-                        ยินดีต้อนรับสู่ระบบควบคุมภาคสนาม
-                      </p>
-                    </div>
-                  </div>
-                  <span className="text-[10px] px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 rounded-full font-sans font-bold tracking-wider backdrop-blur-md shadow-sm shrink-0 whitespace-nowrap ml-2">
-                    SECURED
-                  </span>
-                </div>
-
-                {/* Login Form */}
-                <form onSubmit={handleLogin} className="relative z-10 space-y-3.5">
-                  {/* Username Input */}
-                  <div className="space-y-1">
-                    <label 
-                      htmlFor="admin-username-field" 
-                      className="text-xs font-semibold text-slate-200 block drop-shadow-sm"
-                    >
-                      ชื่อผู้ใช้ (Username)
-                    </label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-sky-300">
-                        <User size={16} />
-                      </span>
-                      <input 
-                        id="admin-username-field"
-                        ref={userInputRef}
-                        type="text"
-                        autoComplete="username"
-                        autoCapitalize="none"
-                        spellCheck="false"
-                        placeholder="ป้อนชื่อผู้ใช้..."
-                        value={usernameInput}
-                        onChange={(e) => setUsernameInput(e.target.value)}
-                        className="w-full pl-9 pr-3.5 py-2 bg-[#061120]/70 hover:bg-[#061120]/80 focus:bg-[#061120]/95 backdrop-blur-xl border border-white/20 focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 rounded-xl text-white placeholder-slate-400 font-sans text-xs tracking-normal transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]"
-                        autoFocus
-                      />
-                    </div>
-                  </div>
-
-                  {/* Password Input */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label 
-                        htmlFor="admin-password-field" 
-                        className="text-xs font-semibold text-slate-200 block drop-shadow-sm"
-                      >
-                        รหัสผ่าน (Password)
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="text-[10px] text-sky-300 hover:text-white hover:underline flex items-center gap-1 cursor-pointer transition-colors"
-                      >
-                        {showPassword ? (
-                          <>
-                            <EyeOff size={11} />
-                            <span>ซ่อน</span>
-                          </>
-                        ) : (
-                          <>
-                            <Eye size={11} />
-                            <span>แสดง</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-sky-300">
-                        <Lock size={16} />
-                      </span>
-                      <input 
-                        id="admin-password-field"
-                        type={showPassword ? "text" : "password"}
-                        autoComplete="current-password"
-                        placeholder="ป้อนรหัสผ่าน..."
-                        value={passwordInput}
-                        onChange={(e) => setPasswordInput(e.target.value)}
-                        className="w-full pl-9 pr-9 py-2 bg-[#061120]/70 hover:bg-[#061120]/80 focus:bg-[#061120]/95 backdrop-blur-xl border border-white/20 focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 rounded-xl text-white placeholder-slate-400 font-mono text-xs tracking-wider transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Error Banner */}
-                  {loginError && (
-                    <div className="p-2.5 bg-rose-500/25 border border-rose-500/50 rounded-xl flex items-center gap-2 text-rose-100 backdrop-blur-md">
-                      <AlertTriangle size={16} className="shrink-0 text-rose-300" />
-                      <span className="text-[11px] font-semibold">
-                        {loginError}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Sign-In Submit Button */}
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="w-full py-3 px-5 bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-blue-500 active:scale-[0.98] disabled:opacity-50 text-white rounded-xl text-xs sm:text-sm font-bold tracking-wide transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_8px_20px_rgba(14,165,233,0.35),inset_0_1px_1px_rgba(255,255,255,0.4)] border-t border-t-white/30 mt-1"
-                  >
-                    <LogIn size={15} />
-                    <span>{isSubmitting ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบ (Sign In)'}</span>
-                  </button>
-                </form>
-
-                {/* Card Footer Info */}
-                <div className="relative z-10 pt-2 flex flex-col sm:flex-row items-center justify-between text-[10px] text-slate-300 gap-1.5 border-t border-white/15">
-                  <span className="flex items-center gap-1 text-slate-200">
-                    <ShieldCheck size={13} className="text-sky-300" />
-                    <span>256-Bit SSL Secured</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleNavClick('usage')}
-                    className="text-sky-300 hover:text-white hover:underline flex items-center gap-1 cursor-pointer font-medium transition-colors"
-                  >
-                    <BookOpen size={11} />
-                    <span>คู่มือการใช้งาน</span>
-                  </button>
-                </div>
+            {/* LEFT COLUMN: WELCOME HEADINGS, VALUE PROPOSITIONS, PILLS & SIGN IN CTA */}
+            <div className="w-full lg:col-span-7 xl:col-span-6 flex flex-col justify-center items-start text-left min-w-0 space-y-5">
+              
+              {/* Status Overline Badge */}
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-sky-200 text-xs font-semibold shadow-sm backdrop-blur-md whitespace-nowrap">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <ShieldCheck size={14} className="text-sky-400" />
+                <span className="whitespace-nowrap">Enterprise Operations Platform</span>
               </div>
+
+              {/* Main Headline */}
+              <div className="space-y-3 min-w-0">
+                <h1 className="text-4xl sm:text-5xl lg:text-[54px] font-heading text-white tracking-tight leading-[1.1] drop-shadow-[0_2px_14px_rgba(0,0,0,0.95)]">
+                  <span className="font-extrabold block whitespace-nowrap">Better Solutions</span>
+                  <span className="font-light italic text-[#38bdf8] block text-3xl sm:text-4xl lg:text-[42px] mt-1 whitespace-nowrap">For Your Operations</span>
+                </h1>
+                <h2 className="text-sm sm:text-base md:text-lg font-medium text-sky-100 font-thai drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)]">
+                  ระบบบริหารจัดการธุรกรรมและการแข่งขันภาคสนามระดับองค์กร
+                </h2>
+                <p className="text-xs sm:text-sm md:text-base text-slate-200 font-thai font-normal max-w-xl leading-relaxed drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)]">
+                  ศูนย์กลางประมวลผลคำสั่งซื้อ ตรวจสลิปอัตโนมัติ และระบบบันทึกเวลาเรียลไทม์ แม่นยำ รวดเร็ว ตรวจสอบได้ทุกขั้นตอน
+                </p>
+              </div>
+
+              {/* Core Feature Highlights (Liquid Glass Pills) */}
+              <div className="pt-1 flex flex-wrap sm:flex-nowrap items-center gap-2.5 text-xs text-white font-medium max-w-full">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/70 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
+                  <Zap size={13} className="text-amber-400" />
+                  <span className="whitespace-nowrap">แม่นยำระดับเสี้ยววินาที</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/70 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
+                  <ShieldCheck size={13} className="text-emerald-400" />
+                  <span className="whitespace-nowrap">ตรวจสลิปอัตโนมัติ 1:1</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/70 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
+                  <BarChart3 size={13} className="text-sky-400" />
+                  <span className="whitespace-nowrap">ซิงก์ข้อมูลเรียลไทม์</span>
+                </span>
+              </div>
+
+              {/* Primary Call to Action: Open Login Popup */}
+              <div className="pt-3 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleOpenLoginModal}
+                  className="px-6 py-3 rounded-2xl bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-blue-500 active:scale-95 text-white text-sm font-bold tracking-wide transition-all flex items-center gap-2.5 cursor-pointer shadow-[0_8px_25px_rgba(14,165,233,0.4),inset_0_1px_1px_rgba(255,255,255,0.4)] border-t border-t-white/30"
+                >
+                  <LogIn size={17} />
+                  <span>เข้าสู่ระบบ (Sign In)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('usage')}
+                  className="px-5 py-3 rounded-2xl bg-white/10 hover:bg-white/15 active:scale-95 text-sky-200 hover:text-white text-sm font-medium transition-all flex items-center gap-2 cursor-pointer border border-white/15 backdrop-blur-md"
+                >
+                  <BookOpen size={16} />
+                  <span>คู่มือการใช้งาน</span>
+                </button>
+              </div>
+
             </div>
 
-            {/* CENTER COLUMN: Buffer between card and welcome block */}
-            <div className="hidden lg:block lg:order-2 lg:col-span-1 xl:col-span-1 pointer-events-none select-none" />
-
-            {/* RIGHT COLUMN: WELCOME HEADINGS, VALUE PROPOSITIONS & TRUST INDICATORS */}
-            <div className="order-1 lg:order-3 lg:col-span-6 xl:col-span-6 w-full flex justify-center lg:justify-end min-w-0">
-              <div className="w-full max-w-full sm:max-w-[560px] space-y-4 text-left min-w-0">
-                
-                {/* Status Overline Badge (Zero Emojis - Lucide ShieldCheck) */}
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-sky-200 text-xs font-semibold shadow-sm backdrop-blur-md whitespace-nowrap">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <ShieldCheck size={14} className="text-sky-400" />
-                  <span className="whitespace-nowrap">Enterprise Operations Platform</span>
-                </div>
-
-                {/* Main Headline (2-Line Restyle: Bold + Thin Italic) */}
-                <div className="space-y-2 min-w-0">
-                  <h1 className="text-3xl sm:text-4xl lg:text-[40px] font-heading text-white tracking-tight leading-[1.15] drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)]">
-                    <span className="font-extrabold block whitespace-nowrap">Better Solutions</span>
-                    <span className="font-light italic text-[#38bdf8] block text-2xl sm:text-3xl mt-0.5 whitespace-nowrap">For Your Operations</span>
-                  </h1>
-                  <h2 className="text-xs sm:text-sm md:text-base font-medium text-sky-100 font-thai drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)] whitespace-nowrap overflow-hidden text-ellipsis">
-                    ระบบบริหารจัดการธุรกรรมและการแข่งขันภาคสนามระดับองค์กร
-                  </h2>
-                  <p className="text-[10px] sm:text-xs md:text-sm text-slate-200 font-thai font-normal drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)] whitespace-nowrap overflow-hidden text-ellipsis">
-                    ศูนย์กลางประมวลผลคำสั่งซื้อ ตรวจสลิปอัตโนมัติ และระบบบันทึกเวลาเรียลไทม์
-                  </p>
-                </div>
-
-                {/* Core Feature Highlights (Liquid Glass Pills - Strictly Single Line) */}
-                <div className="pt-1 flex flex-nowrap items-center gap-2 text-xs text-white font-medium max-w-full overflow-x-auto pb-1 min-w-0">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
-                    <Zap size={13} className="text-amber-400" />
-                    <span className="whitespace-nowrap">แม่นยำระดับเสี้ยววินาที</span>
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
-                    <ShieldCheck size={13} className="text-emerald-400" />
-                    <span className="whitespace-nowrap">ตรวจสลิปอัตโนมัติ 1:1</span>
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
-                    <BarChart3 size={13} className="text-sky-400" />
-                    <span className="whitespace-nowrap">ซิงก์ข้อมูลเรียลไทม์</span>
-                  </span>
-                </div>
-
-              </div>
-            </div>
+            {/* RIGHT COLUMN: OPEN HERO SPACE SHOWCASING ATLAS V ROCKET LAUNCH */}
+            <div className="hidden lg:block lg:col-span-5 xl:col-span-6 pointer-events-none select-none" />
 
           </div>
         </div>
@@ -749,15 +653,15 @@ export default function AdminLockScreen({
             </div>
           )}
 
-          {/* Action to Jump Back to Login */}
+          {/* Action to Jump Back to Login Modal */}
           <div className="pt-4 text-center">
             <button
               type="button"
-              onClick={handleScrollToLogin}
+              onClick={handleOpenLoginModal}
               className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 active:scale-95 text-white text-xs sm:text-sm font-bold tracking-wide transition-all cursor-pointer shadow-lg shadow-sky-500/20 whitespace-nowrap border border-sky-300/40"
             >
               <LogIn size={15} />
-              <span>กลับไปที่แบบฟอร์มเข้าสู่ระบบ (Sign In)</span>
+              <span>เข้าสู่ระบบ (Sign In)</span>
             </button>
           </div>
 
@@ -806,6 +710,165 @@ export default function AdminLockScreen({
           </div>
         </div>
       </footer>
+
+      {/* -------------------------------------------------------------
+          POPUP MODAL: APPLE-STYLE LIQUID GLASS ADMIN LOGIN DIALOG
+         ------------------------------------------------------------- */}
+      {isLoginModalOpen && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md transition-all duration-300 animate-in fade-in"
+          onClick={handleCloseLoginModal}
+        >
+          <div 
+            ref={loginCardRef}
+            onClick={(e) => e.stopPropagation()}
+            className="relative w-full max-w-[420px] bg-[#071324]/90 backdrop-blur-2xl border border-white/20 border-t-white/40 rounded-3xl p-6 sm:p-7 shadow-[0_25px_60px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.2)] space-y-4 overflow-hidden ring-1 ring-inset ring-white/10 animate-in zoom-in-95 duration-200"
+          >
+            {/* Upper Specular Glass Sheen Highlight */}
+            <div className="absolute top-0 inset-x-0 h-28 bg-gradient-to-b from-white/15 to-transparent pointer-events-none rounded-t-3xl" />
+
+            {/* Close Button (X) */}
+            <button
+              type="button"
+              onClick={handleCloseLoginModal}
+              className="absolute top-4 right-4 z-20 p-2 rounded-full bg-white/10 hover:bg-white/20 active:scale-95 text-slate-300 hover:text-white transition-all cursor-pointer border border-white/10"
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+
+            {/* Card Header */}
+            <div className="relative z-10 flex items-center justify-between pb-3 border-b border-white/15 gap-3 pr-8">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-white/15 border border-white/25 backdrop-blur-xl flex items-center justify-center text-sky-300 shadow-[inset_0_1px_1px_rgba(255,255,255,0.3)] shrink-0">
+                  <Lock size={18} />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base sm:text-lg font-bold text-white tracking-tight drop-shadow-sm whitespace-nowrap">
+                    เข้าสู่ระบบผู้ดูแล (Admin)
+                  </h3>
+                  <p className="text-[11px] sm:text-xs text-sky-200/90 font-medium whitespace-nowrap">
+                    ยินดีต้อนรับสู่ระบบควบคุมภาคสนาม
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 rounded-full font-sans font-bold tracking-wider backdrop-blur-md shadow-sm shrink-0 whitespace-nowrap">
+                SECURED
+              </span>
+            </div>
+
+            {/* Login Form */}
+            <form onSubmit={handleLogin} className="relative z-10 space-y-3.5">
+              {/* Username Input */}
+              <div className="space-y-1">
+                <label 
+                  htmlFor="admin-username-field" 
+                  className="text-xs font-semibold text-slate-200 block drop-shadow-sm"
+                >
+                  ชื่อผู้ใช้ (Username)
+                </label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-sky-300">
+                    <User size={16} />
+                  </span>
+                  <input 
+                    id="admin-username-field"
+                    ref={userInputRef}
+                    type="text"
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    spellCheck="false"
+                    placeholder="ป้อนชื่อผู้ใช้..."
+                    value={usernameInput}
+                    onChange={(e) => setUsernameInput(e.target.value)}
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-[#061120]/80 hover:bg-[#061120]/90 focus:bg-[#061120] backdrop-blur-xl border border-white/20 focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 rounded-xl text-white placeholder-slate-400 font-sans text-xs tracking-normal transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              {/* Password Input */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label 
+                    htmlFor="admin-password-field" 
+                    className="text-xs font-semibold text-slate-200 block drop-shadow-sm"
+                  >
+                    รหัสผ่าน (Password)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="text-[10px] text-sky-300 hover:text-white hover:underline flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    {showPassword ? (
+                      <>
+                        <EyeOff size={11} />
+                        <span>ซ่อน</span>
+                      </>
+                    ) : (
+                      <>
+                        <Eye size={11} />
+                        <span>แสดง</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-sky-300">
+                    <Lock size={16} />
+                  </span>
+                  <input 
+                    id="admin-password-field"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    placeholder="ป้อนรหัสผ่าน..."
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    className="w-full pl-9 pr-9 py-2.5 bg-[#061120]/80 hover:bg-[#061120]/90 focus:bg-[#061120] backdrop-blur-xl border border-white/20 focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 rounded-xl text-white placeholder-slate-400 font-mono text-xs tracking-wider transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]"
+                  />
+                </div>
+              </div>
+
+              {/* Error Banner */}
+              {loginError && (
+                <div className="p-2.5 bg-rose-500/25 border border-rose-500/50 rounded-xl flex items-center gap-2 text-rose-100 backdrop-blur-md">
+                  <AlertTriangle size={16} className="shrink-0 text-rose-300" />
+                  <span className="text-[11px] font-semibold">
+                    {loginError}
+                  </span>
+                </div>
+              )}
+
+              {/* Sign-In Submit Button */}
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full py-3 px-5 bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-blue-500 active:scale-[0.98] disabled:opacity-50 text-white rounded-xl text-xs sm:text-sm font-bold tracking-wide transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_8px_20px_rgba(14,165,233,0.35),inset_0_1px_1px_rgba(255,255,255,0.4)] border-t border-t-white/30 mt-1"
+              >
+                <LogIn size={15} />
+                <span>{isSubmitting ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบ (Sign In)'}</span>
+              </button>
+            </form>
+
+            {/* Card Footer Info */}
+            <div className="relative z-10 pt-2 flex flex-col sm:flex-row items-center justify-between text-[10px] text-slate-300 gap-1.5 border-t border-white/15">
+              <span className="flex items-center gap-1 text-slate-200">
+                <ShieldCheck size={13} className="text-sky-300" />
+                <span>256-Bit SSL Secured</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => handleNavClick('usage')}
+                className="text-sky-300 hover:text-white hover:underline flex items-center gap-1 cursor-pointer font-medium transition-colors"
+              >
+                <BookOpen size={11} />
+                <span>คู่มือการใช้งาน</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
