@@ -10,6 +10,7 @@ import {
   Clock, 
   Database,
   Users,
+  User,
   FileText,
   RefreshCw,
   TrendingUp,
@@ -980,29 +981,30 @@ export default function App() {
       </div>
 
       {/* Header Panel - Cloud PMS Corporate Bar */}
-      <header className="w-full max-w-6xl mb-6 bg-white border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-sky-600 flex items-center justify-center text-white shrink-0">
+      <header className="w-full max-w-6xl mb-6 bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-3.5 sm:gap-4 shadow-xs">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-sky-600 flex items-center justify-center text-white shrink-0 shadow-sm">
             <Cloud size={22} />
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl md:text-2xl font-black tracking-tight text-slate-900 uppercase font-heading">
+              <h1 className="text-lg sm:text-xl md:text-2xl font-black tracking-tight text-slate-900 uppercase font-heading whitespace-nowrap">
                 Bang Fai Commander
               </h1>
-              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap shrink-0 ${
                 (window.isNodeJS || isGAS) ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-slate-100 border border-slate-200 text-slate-600'
               }`}>
                 {(window.isNodeJS || isGAS) ? '🟢 Cloud Connected' : '🧪 Sandbox Mode'}
               </span>
               {adminRole === 'superadmin' ? (
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-50 border border-purple-300 text-purple-700 flex items-center gap-1 shadow-xs" title="Super Admin: สิทธิ์เต็มรูปแบบทุกฟังก์ชัน">
-                  <span>🛡️ Super Admin</span>
-                  <span className="font-semibold text-purple-600/80">({usernameInput || 'Admin'})</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-50 border border-purple-300 text-purple-700 flex items-center gap-1 shadow-xs whitespace-nowrap shrink-0" title="Super Admin: สิทธิ์เต็มรูปแบบทุกฟังก์ชัน">
+                  <ShieldCheck size={12} className="text-purple-600" />
+                  <span>Super Admin</span>
                 </span>
               ) : (
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-sky-50 border border-sky-300 text-sky-700 flex items-center gap-1 shadow-xs" title="Admin: สิทธิ์ปฏิบัติการภาคสนาม (ไม่สามารถรีเซ็ตระบบได้)">
-                  <span>👤 Admin</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-sky-50 border border-sky-300 text-sky-700 flex items-center gap-1 shadow-xs whitespace-nowrap shrink-0" title="Admin: สิทธิ์ปฏิบัติการภาคสนาม (ไม่สามารถรีเซ็ตระบบได้)">
+                  <User size={12} className="text-sky-600" />
+                  <span>Admin</span>
                   <span className="font-semibold text-sky-600/80">({usernameInput || 'Admin1'})</span>
                 </span>
               )}
@@ -1012,10 +1014,10 @@ export default function App() {
             </p>
           </div>
         </div>
-        <div className="flex gap-2 justify-center md:justify-end flex-wrap">
+        <div className="flex items-center gap-1.5 sm:gap-2 justify-start xl:justify-end flex-nowrap shrink-0 overflow-x-auto">
           <button 
             onClick={handleClosePortal}
-            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+            className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
             title="รีเซ็ตและปิดรอบพอร์ทัลปัจจุบัน โดยไม่ลบข้อมูลผู้เล่นหรือประวัติธุรกรรม"
           >
             <RotateCcw size={13} className="text-amber-700" />
@@ -1023,7 +1025,7 @@ export default function App() {
           </button>
           <button 
             onClick={forceSyncFreshData}
-            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+            className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap shadow-xs"
             title="ดึงข้อมูลล่าสุดจากฐานข้อมูลและล้างแคชในเบราว์เซอร์ทันที"
           >
             <RefreshCw size={13} className="text-white" />
@@ -1032,7 +1034,7 @@ export default function App() {
           {adminRole === 'superadmin' && (
             <button 
               onClick={resetConsoleState}
-              className="px-3.5 py-2 rounded-lg text-xs font-bold bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-slate-700 hover:text-rose-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-slate-700 hover:text-rose-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
               title="ล้างข้อมูลระบบทั้งหมดกลับสู่ค่าเริ่มต้นโรงงาน (เฉพาะ Super Admin)"
             >
               <RotateCcw size={13} className="text-rose-600" />
@@ -1041,7 +1043,7 @@ export default function App() {
           )}
           <button 
             onClick={handleAdminLogout}
-            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+            className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
             title="ออกจากระบบแอดมิน"
           >
             <LogOut size={13} className="text-slate-500" />
