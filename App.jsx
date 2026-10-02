@@ -246,10 +246,69 @@ export default function App() {
     }
     return null;
   };
+
+  const deduplicatePlayersList = (list) => {
+    if (!Array.isArray(list)) return [];
+    const map = new Map();
+    for (const p of list) {
+      if (!p) continue;
+      const lineId = (p.lineUserId && String(p.lineUserId).trim().startsWith('U')) ? String(p.lineUserId).trim() : '';
+      const shortId = (p.shortId && String(p.shortId).trim().startsWith('PL')) ? String(p.shortId).trim() :
+                      (p.id && String(p.id).trim().startsWith('PL')) ? String(p.id).trim() : '';
+
+      let existingKey = null;
+      for (const [k, item] of map.entries()) {
+        const matchLine = lineId && item.lineUserId && item.lineUserId === lineId;
+        const matchShort = shortId && (item.shortId === shortId || item.id === shortId);
+        const matchId = (p.id && (item.id === p.id || item.shortId === p.id));
+        if (matchLine || matchShort || matchId) {
+          existingKey = k;
+          break;
+        }
+      }
+
+      const primaryKey = lineId || shortId || p.id || (p.displayName || p.name);
+      if (!primaryKey) continue;
+
+      if (existingKey) {
+        const existing = map.get(existingKey);
+        map.set(existingKey, {
+          ...existing,
+          ...p,
+          id: shortId || existing.shortId || existing.id || primaryKey,
+          shortId: shortId || existing.shortId || existing.id || primaryKey,
+          lineUserId: lineId || existing.lineUserId || '',
+          name: p.name || p.displayName || existing.name || existing.displayName || 'ผู้เล่น',
+          displayName: p.displayName || p.name || existing.displayName || existing.name || 'ผู้เล่น',
+          balance: (p.balance !== undefined && !isNaN(Number(p.balance))) ? Number(p.balance) : (Number(existing.balance) || 0),
+          bankName: p.bankName || existing.bankName || '',
+          bankAccount: p.bankAccount || p.accountNumber || existing.bankAccount || existing.accountNumber || '',
+          accountName: p.accountName || existing.accountName || p.displayName || p.name || '',
+          avatar: existing.avatar || p.avatar || '🐉',
+        });
+      } else {
+        map.set(primaryKey, {
+          ...p,
+          id: shortId || p.id || primaryKey,
+          shortId: shortId || p.id || primaryKey,
+          lineUserId: lineId || p.lineUserId || '',
+          name: p.name || p.displayName || 'ผู้เล่น',
+          displayName: p.displayName || p.name || 'ผู้เล่น',
+          balance: Number(p.balance) || 0,
+          bankName: p.bankName || '',
+          bankAccount: p.bankAccount || p.accountNumber || '',
+          accountName: p.accountName || p.displayName || p.name || '',
+          avatar: p.avatar || '🐉',
+        });
+      }
+    }
+    return Array.from(map.values());
+  };
+
   const initialCache = getInitialCache();
   const lastDashboardCacheRef = useRef('');
 
-  const [players, setPlayers] = useState(initialCache?.players || INITIAL_PLAYERS);
+  const [players, setPlayers] = useState(() => deduplicatePlayersList(initialCache?.players || INITIAL_PLAYERS));
   const [transactions, setTransactions] = useState(initialCache?.transactions || []);
   const [bets, setBets] = useState(initialCache?.bets || []);
   
@@ -330,9 +389,14 @@ export default function App() {
 
   // Unified live-data: GAS uses polling RPC; GitHub Pages polls GAS directly; Node.js uses SSE
   useEffect(() => {
+    // Only poll when authenticated as admin or viewing as specific player
+    if (!adminAuthenticated && !playerUserId) {
+      return;
+    }
+
     const applyData = (data) => {
       if (!data) return;
-      if (Array.isArray(data.players)) setPlayers(data.players);
+      if (Array.isArray(data.players)) setPlayers(deduplicatePlayersList(data.players));
       if (Array.isArray(data.transactions)) setTransactions(data.transactions);
       if (Array.isArray(data.bets)) setBets(data.bets);
       if (Array.isArray(data.flights)) setFlights(data.flights);
@@ -428,7 +492,7 @@ export default function App() {
         document.removeEventListener('visibilitychange', onVisibilityChange);
       }
     };
-  }, [isGAS, isLiveBackend, isGitHubPages, ADMIN_API_KEY, API_BASE_URL]);
+  }, [isGAS, isLiveBackend, isGitHubPages, ADMIN_API_KEY, API_BASE_URL, adminAuthenticated, playerUserId]);
 
   // Toast Notification manager
   const addToast = (msg, type = 'info') => {
@@ -468,7 +532,7 @@ export default function App() {
       addToast('⏳ กำลังล้างระเบียนข้อมูลระบบ (Factory Reset)...', 'info');
       const data = await runBackendFunction('resetGoogleSheetsDatabase', []);
       if (data) {
-        if (data.players) setPlayers(data.players);
+        if (data.players) setPlayers(deduplicatePlayersList(data.players));
         if (data.transactions) setTransactions(data.transactions);
         if (data.bets) setBets(data.bets);
       } else {
@@ -498,7 +562,7 @@ export default function App() {
       }
       const d = await runBackendFunction('getDashboardData', []);
       if (d) {
-        if (Array.isArray(d.players)) setPlayers(d.players);
+        if (Array.isArray(d.players)) setPlayers(deduplicatePlayersList(d.players));
         if (Array.isArray(d.transactions)) setTransactions(d.transactions);
         if (Array.isArray(d.bets)) setBets(d.bets);
         if (d.activeGroupId !== undefined) setActiveGroupId(d.activeGroupId);
@@ -710,7 +774,7 @@ export default function App() {
       const data = await runBackendFunction('adminResolveBets', [finalTime, tMin, tMax]);
       if (data) {
         if (data.bets) setBets(data.bets);
-        if (data.players) setPlayers(data.players);
+        if (data.players) setPlayers(deduplicatePlayersList(data.players));
         if (data.transactions) setTransactions(data.transactions);
       }
       addToast(`🚀 เคลียร์ผลรางวัลรอบ [${name}] เวลา ${finalTime}s (ช่วง ${tMin}-${tMax}s) และบรอดแคสต์ลงกลุ่มเรียบร้อย!`, 'success');
@@ -1970,7 +2034,7 @@ export default function App() {
                     {players.map(p => {
                       const hasBank = !!(p.bankName && p.bankAccount);
                       return (
-                        <tr key={p.id} className="hover:bg-teal-50/20 transition-colors group">
+                        <tr key={p.shortId || p.lineUserId || p.id} className="hover:bg-teal-50/20 transition-colors group">
                           {/* Player name + ID */}
                           <td className="py-3 px-3">
                             <div className="flex items-center gap-2">
@@ -2516,8 +2580,8 @@ export default function App() {
                         }
                         if (!nameChanged && !balChanged) lastData = await runBackendFunction('getDashboardData', []);
                         
-                        setPlayers(prev => prev.map(pl => pl.id === p.id ? { ...pl, name: playerEditForm.name.trim(), balance: playerEditForm.balance } : pl));
-                        if (lastData && lastData.players) setPlayers(lastData.players);
+                        setPlayers(prev => deduplicatePlayersList(prev.map(pl => pl.id === p.id ? { ...pl, name: playerEditForm.name.trim(), balance: playerEditForm.balance } : pl)));
+                        if (lastData && lastData.players) setPlayers(deduplicatePlayersList(lastData.players));
                         if (lastData && lastData.transactions) setTransactions(lastData.transactions);
                         setPlayerEditSaving(false);
                         setPlayerEditModal(null);
@@ -2617,12 +2681,12 @@ export default function App() {
                       const p = bankEditModal.player;
                       try {
                         const data = await runBackendFunction('adminSetPlayerBank', [p.id, bankEditForm.bankName, bankEditForm.bankAccount, bankEditForm.accountName]);
-                        setPlayers(prev => prev.map(pl =>
+                        setPlayers(prev => deduplicatePlayersList(prev.map(pl =>
                           pl.id === p.id
                             ? { ...pl, bankName: bankEditForm.bankName, bankAccount: bankEditForm.bankAccount, accountName: bankEditForm.accountName }
                             : pl
-                        ));
-                        if (data && data.players) setPlayers(data.players);
+                        )));
+                        if (data && data.players) setPlayers(deduplicatePlayersList(data.players));
                         setBankEditSaving(false);
                         setBankEditModal(null);
                         addToast(`✅ บันทึกบัญชีธนาคารของ ${p.name} สำเร็จ`, 'success');
@@ -2703,8 +2767,8 @@ export default function App() {
                       const avatars = ['🐉','🐯','🦅','🦁','🐻','🐼','🦊','🦉'];
                       try {
                         const data = await runBackendFunction('adminCreatePlayer', [lineId.trim(), name.trim(), balance]);
-                        setPlayers(prev => [...prev, { id: lineId.trim(), name: name.trim(), balance, bankName: '', bankAccount: '', accountName: '', avatar: avatars[prev.length % avatars.length] }]);
-                        if (data && data.players) setPlayers(data.players);
+                        setPlayers(prev => deduplicatePlayersList([...prev, { id: lineId.trim(), name: name.trim(), balance, bankName: '', bankAccount: '', accountName: '', avatar: avatars[prev.length % avatars.length] }]));
+                        if (data && data.players) setPlayers(deduplicatePlayersList(data.players));
                         setCreatePlayerSaving(false);
                         setCreatePlayerModal(false);
                         addToast(`✅ สร้างบัญชี ${name} สำเร็จ`, 'success');
@@ -2756,8 +2820,8 @@ export default function App() {
                       const p = confirmDelete.player;
                       try {
                         const data = await runBackendFunction('adminDeletePlayer', [p.id]);
-                        setPlayers(prev => prev.filter(pl => pl.id !== p.id));
-                        if (data && data.players) setPlayers(data.players);
+                        setPlayers(prev => deduplicatePlayersList(prev.filter(pl => pl.id !== p.id)));
+                        if (data && data.players) setPlayers(deduplicatePlayersList(data.players));
                         setDeleteSaving(false);
                         setConfirmDelete(null);
                         addToast(`🗑 ลบบัญชี ${p.name} สำเร็จ`, 'info');

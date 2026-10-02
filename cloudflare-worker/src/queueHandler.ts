@@ -1447,35 +1447,107 @@ async function resolveOrderNumber(
 
 // ── User Profile, Transactions & Group Helpers ──
 
+export function deduplicatePlayers(list: any[]): any[] {
+  if (!Array.isArray(list)) return [];
+  const map = new Map<string, any>();
+
+  for (const p of list) {
+    if (!p) continue;
+    const lineId = (p.lineUserId && String(p.lineUserId).trim().startsWith('U')) ? String(p.lineUserId).trim() : '';
+    const shortId = (p.shortId && String(p.shortId).trim().startsWith('PL')) ? String(p.shortId).trim() :
+                    (p.id && String(p.id).trim().startsWith('PL')) ? String(p.id).trim() : '';
+
+    // Find if this player already exists under lineId, shortId, or id
+    let existingKey: string | null = null;
+    for (const [k, item] of map.entries()) {
+      const matchLine = lineId && item.lineUserId && item.lineUserId === lineId;
+      const matchShort = shortId && (item.shortId === shortId || item.id === shortId);
+      const matchId = (p.id && (item.id === p.id || item.shortId === p.id));
+      if (matchLine || matchShort || matchId) {
+        existingKey = k;
+        break;
+      }
+    }
+
+    const primaryKey = lineId || shortId || p.id || (p.displayName || p.name);
+    if (!primaryKey) continue;
+
+    if (existingKey) {
+      const existing = map.get(existingKey);
+      // Merge records: preserve all non-empty fields, prioritize highest balance or newest
+      const merged = {
+        ...existing,
+        ...p,
+        id: shortId || existing.shortId || existing.id || primaryKey,
+        shortId: shortId || existing.shortId || existing.id || primaryKey,
+        lineUserId: lineId || existing.lineUserId || '',
+        name: p.displayName || p.name || existing.displayName || existing.name || 'ผู้เล่น',
+        displayName: p.displayName || p.name || existing.displayName || existing.name || 'ผู้เล่น',
+        balance: (p.balance !== undefined && !isNaN(Number(p.balance))) ? Number(p.balance) : (Number(existing.balance) || 0),
+        bankName: p.bankName || existing.bankName || '',
+        accountNumber: p.accountNumber || p.bankAccount || existing.accountNumber || existing.bankAccount || '',
+        bankAccount: p.bankAccount || p.accountNumber || existing.bankAccount || existing.accountNumber || '',
+        accountName: p.accountName || existing.accountName || p.displayName || p.name || '',
+        registeredAt: existing.registeredAt || p.registeredAt || Date.now(),
+        updatedAt: Math.max(existing.updatedAt || 0, p.updatedAt || 0, Date.now()),
+      };
+      map.set(existingKey, merged);
+    } else {
+      map.set(primaryKey, {
+        ...p,
+        id: shortId || p.id || primaryKey,
+        shortId: shortId || p.id || primaryKey,
+        lineUserId: lineId || p.lineUserId || '',
+        name: p.displayName || p.name || 'ผู้เล่น',
+        displayName: p.displayName || p.name || 'ผู้เล่น',
+        balance: Number(p.balance) || 0,
+        bankName: p.bankName || '',
+        accountNumber: p.accountNumber || p.bankAccount || '',
+        bankAccount: p.bankAccount || p.accountNumber || '',
+        accountName: p.accountName || p.displayName || p.name || '',
+        registeredAt: p.registeredAt || Date.now(),
+        updatedAt: p.updatedAt || Date.now(),
+      });
+    }
+  }
+  return Array.from(map.values());
+}
+
 export async function getPlayersList(env: Env): Promise<any[]> {
   try {
     const cached = await env.KV_CACHE.get('PLAYERS_LIST');
-    let list: PlayerProfile[] = [];
+    let list: any[] = [];
     if (cached) {
       try { list = JSON.parse(cached); } catch (_) {}
     }
 
+    let needsWriteBack = false;
     if (!list || list.length === 0) {
       const scanRes = await env.KV_CACHE.list({ prefix: 'USER_' });
       if (scanRes.keys && scanRes.keys.length > 0) {
         const promises = scanRes.keys.map(k => env.KV_CACHE.get(k.name));
         const raws = await Promise.all(promises);
         list = raws.filter(Boolean).map(r => JSON.parse(r!) as PlayerProfile);
-        if (list.length > 0) {
-          await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(list));
-        }
+        needsWriteBack = true;
       }
     }
 
+    const dedupedList = deduplicatePlayers(list);
+    if (needsWriteBack || dedupedList.length !== list.length) {
+      await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(dedupedList.slice(-500)));
+    }
+
     const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
-    return list.map((p, idx) => ({
-      id: p.shortId || p.lineUserId,
-      name: p.displayName || 'ผู้เล่น',
+    return dedupedList.map((p, idx) => ({
+      id: p.shortId || p.id || p.lineUserId,
+      shortId: p.shortId || p.id,
+      name: p.displayName || p.name || 'ผู้เล่น',
+      displayName: p.displayName || p.name || 'ผู้เล่น',
       balance: Number(p.balance) || 0,
       joinDate: p.registeredAt ? new Date(p.registeredAt).toLocaleDateString('th-TH') : '-',
       bankName: p.bankName || '',
-      bankAccount: p.accountNumber || '',
-      accountName: p.accountName || p.displayName || '',
+      bankAccount: p.accountNumber || p.bankAccount || '',
+      accountName: p.accountName || p.displayName || p.name || '',
       isUser: false,
       avatar: avatars[idx % avatars.length],
       lineUserId: p.lineUserId || '',
@@ -1509,11 +1581,6 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
         if (cached) {
           try { list = JSON.parse(cached); } catch (_) {}
         }
-        const otherPlayers = list.filter(
-          (p) =>
-            p.lineUserId !== profile.lineUserId &&
-            (!profile.shortId || (p.shortId !== profile.shortId && p.id !== profile.shortId))
-        );
         const entry = {
           id: profile.shortId || profile.lineUserId,
           name: profile.displayName || 'ผู้เล่น',
@@ -1528,7 +1595,7 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
           registeredAt: profile.registeredAt || Date.now(),
           updatedAt: profile.updatedAt,
         };
-        const updatedList = [...otherPlayers, entry];
+        const updatedList = deduplicatePlayers([...list, entry]);
         await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(updatedList.slice(-500)));
       } catch (err) {
         console.error('[Worker] updateDirectory in savePlayerProfile error:', err);

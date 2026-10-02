@@ -19,6 +19,7 @@ import {
   addToSettledOrdersList,
   removeFromMatchedOrdersList,
   refundPlayerPoints,
+  deduplicatePlayers,
 } from './queueHandler.js';
 import {
   generateRuleGuideFlex,
@@ -707,10 +708,13 @@ export default {
           const rawLine = await env.KV_CACHE.get(`RAW_LINE_${userId}`) || userId;
           await env.KV_CACHE.delete(`USER_${rawLine}`);
           await env.KV_CACHE.delete(`RAW_LINE_${userId}`);
+          if (userId && userId.startsWith('PL')) {
+            await env.KV_CACHE.delete(`USER_${userId}`);
+          }
           const listRaw = await env.KV_CACHE.get('PLAYERS_LIST');
           if (listRaw) {
             const list = JSON.parse(listRaw);
-            const filtered = list.filter((p: any) => p.shortId !== userId && p.lineUserId !== rawLine);
+            const filtered = list.filter((p: any) => p.shortId !== userId && p.id !== userId && p.lineUserId !== rawLine && p.lineUserId !== userId);
             await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(filtered));
           }
           result = { success: true };
@@ -805,22 +809,37 @@ export default {
           const kvTx = await getTransactionsList(env);
           const kvBets = await getPendingOrdersList(env);
           if (sheetsData && Array.isArray(sheetsData.players) && sheetsData.players.length > 0) {
-            const merged = [...kvPlayers];
+            const rawMerged = [...kvPlayers];
             for (const sp of sheetsData.players) {
-              const kvMatch = merged.find(
-                (kp: any) => kp && sp && (kp.lineUserId === sp.lineUserId || kp.shortId === sp.id || kp.lineUserId === sp.id)
-              );
-              if (!kvMatch) {
-                merged.push({
-                  shortId: sp.id || sp.shortId,
-                  lineUserId: sp.lineUserId || sp.id,
-                  displayName: sp.name || sp.displayName || 'ผู้เล่น',
-                  balance: Number(sp.balance) || 0,
-                });
-              }
+              rawMerged.push({
+                id: sp.id || sp.shortId,
+                shortId: sp.id || sp.shortId,
+                lineUserId: sp.lineUserId || sp.id,
+                name: sp.name || sp.displayName || 'ผู้เล่น',
+                displayName: sp.name || sp.displayName || 'ผู้เล่น',
+                balance: Number(sp.balance) || 0,
+                bankName: sp.bankName || '',
+                bankAccount: sp.bankAccount || sp.accountNumber || '',
+                accountName: sp.accountName || sp.name || '',
+              });
             }
+            const merged = deduplicatePlayers(rawMerged);
+            const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
             result = {
-              players: merged,
+              players: merged.map((p, idx) => ({
+                id: p.shortId || p.id || p.lineUserId,
+                shortId: p.shortId || p.id,
+                name: p.displayName || p.name || 'ผู้เล่น',
+                displayName: p.displayName || p.name || 'ผู้เล่น',
+                balance: Number(p.balance) || 0,
+                joinDate: p.registeredAt ? new Date(p.registeredAt).toLocaleDateString('th-TH') : '-',
+                bankName: p.bankName || '',
+                bankAccount: p.accountNumber || p.bankAccount || '',
+                accountName: p.accountName || p.displayName || p.name || '',
+                isUser: false,
+                avatar: avatars[idx % avatars.length],
+                lineUserId: p.lineUserId || '',
+              })),
               transactions: Array.isArray(sheetsData.transactions) && sheetsData.transactions.length > 0
                 ? [...kvTx, ...sheetsData.transactions].slice(0, 100)
                 : kvTx,

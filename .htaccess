@@ -28,6 +28,7 @@ Options -Indexes
   Header set X-Content-Type-Options "nosniff"
   Header set X-XSS-Protection "1; mode=block"
   Header set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
   # Prevent Caching of index.html so users and admins always get the latest real-time code
   <FilesMatch "^(index\.html|)$">
