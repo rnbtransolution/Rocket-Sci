@@ -272,14 +272,14 @@ export default function AdminLockScreen({
           HERO SECTION: FULL HOMEPAGE STYLE WITH VISIBLE BACKGROUND (ATLAS V LAUNCH)
          ------------------------------------------------------------- */}
       <section className="relative w-full min-h-screen pt-[68px] flex items-center bg-[#030712] overflow-hidden">
-        {/* Clearly Visible Background Image Layer with Subtle 10-15% Blur (3px) */}
+        {/* Crystal Clear Background Image with minimal 1px blur (reduced by 50%) */}
         <div 
-          className="absolute inset-0 bg-cover bg-right lg:bg-center scale-102 filter blur-[3px] opacity-90 brightness-95 pointer-events-none transition-all duration-500"
+          className="absolute inset-0 bg-cover bg-right lg:bg-center filter blur-[1px] opacity-100 brightness-100 pointer-events-none transition-all duration-300"
           style={{ backgroundImage: `url(${HERO_FULL_BACKGROUND})` }}
         />
 
-        {/* Soft Transparent Gradient: Keeps Rocket Launch Bright & Prominent */}
-        <div className="absolute inset-0 bg-gradient-to-r from-black/65 via-black/30 to-black/15 pointer-events-none" />
+        {/* Soft Transparent Gradient: Keeps Rocket Launch 100% Prominent and Clear */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-black/20 to-transparent pointer-events-none" />
         
         {/* Soft Edge Blends */}
         <div className="absolute top-0 inset-x-0 h-16 bg-gradient-to-b from-[#071324]/80 to-transparent pointer-events-none" />
@@ -432,44 +432,42 @@ export default function AdminLockScreen({
             {/* CENTER COLUMN: Buffer between card and welcome block */}
             <div className="hidden lg:block lg:order-2 lg:col-span-1 xl:col-span-1 pointer-events-none select-none" />
 
-            {/* RIGHT COLUMN: WELCOME HEADINGS, VALUE PROPOSITIONS & TRUST INDICATORS (Sleek Glass Card) */}
+            {/* RIGHT COLUMN: WELCOME HEADINGS, VALUE PROPOSITIONS & TRUST INDICATORS */}
             <div className="order-1 lg:order-3 lg:col-span-6 xl:col-span-6 w-full flex justify-center lg:justify-end min-w-0">
-              <div className="w-full max-w-full sm:max-w-[560px] bg-[#071324]/50 backdrop-blur-2xl border border-white/15 border-t-white/30 rounded-3xl p-6 sm:p-8 shadow-[0_24px_50px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.15)] space-y-4 text-left min-w-0 relative overflow-hidden ring-1 ring-inset ring-white/10">
-                {/* Upper Specular Glass Sheen Highlight */}
-                <div className="absolute top-0 inset-x-0 h-24 bg-gradient-to-b from-white/10 to-transparent pointer-events-none rounded-t-3xl" />
+              <div className="w-full max-w-full sm:max-w-[560px] space-y-4 text-left min-w-0">
                 
-                {/* Status Overline Badge */}
-                <div className="relative z-10 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-sky-200 text-xs font-semibold shadow-sm backdrop-blur-md whitespace-nowrap">
+                {/* Status Overline Badge (Zero Emojis - Lucide ShieldCheck) */}
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-sky-200 text-xs font-semibold shadow-sm backdrop-blur-md whitespace-nowrap">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                   <ShieldCheck size={14} className="text-sky-400" />
                   <span className="whitespace-nowrap">Enterprise Operations Platform</span>
                 </div>
 
-                {/* Main Headline (Bold + Thin Italic) */}
-                <div className="relative z-10 space-y-2 min-w-0">
-                  <h1 className="text-3xl sm:text-4xl lg:text-[40px] font-heading text-white tracking-tight leading-[1.15] drop-shadow-sm">
+                {/* Main Headline (2-Line Restyle: Bold + Thin Italic) */}
+                <div className="space-y-2 min-w-0">
+                  <h1 className="text-3xl sm:text-4xl lg:text-[40px] font-heading text-white tracking-tight leading-[1.15] drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)]">
                     <span className="font-extrabold block whitespace-nowrap">Better Solutions</span>
                     <span className="font-light italic text-[#38bdf8] block text-2xl sm:text-3xl mt-0.5 whitespace-nowrap">For Your Operations</span>
                   </h1>
-                  <h2 className="text-xs sm:text-sm md:text-base font-medium text-slate-200 font-thai whitespace-nowrap overflow-hidden text-ellipsis">
+                  <h2 className="text-xs sm:text-sm md:text-base font-medium text-sky-100 font-thai drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)] whitespace-nowrap overflow-hidden text-ellipsis">
                     ระบบบริหารจัดการธุรกรรมและการแข่งขันภาคสนามระดับองค์กร
                   </h2>
-                  <p className="text-[11px] sm:text-xs md:text-sm text-slate-300/90 font-thai font-normal whitespace-nowrap overflow-hidden text-ellipsis">
+                  <p className="text-[10px] sm:text-xs md:text-sm text-slate-200 font-thai font-normal drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)] whitespace-nowrap overflow-hidden text-ellipsis">
                     ศูนย์กลางประมวลผลคำสั่งซื้อ ตรวจสลิปอัตโนมัติ และระบบบันทึกเวลาเรียลไทม์
                   </p>
                 </div>
 
-                {/* Core Feature Highlights (Liquid Glass Pills) */}
-                <div className="relative z-10 pt-1 flex flex-nowrap items-center gap-2 text-xs text-white font-medium max-w-full overflow-x-auto pb-1 min-w-0">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#061120]/70 backdrop-blur-xl border border-white/15 shadow-sm whitespace-nowrap shrink-0">
+                {/* Core Feature Highlights (Liquid Glass Pills - Strictly Single Line) */}
+                <div className="pt-1 flex flex-nowrap items-center gap-2 text-xs text-white font-medium max-w-full overflow-x-auto pb-1 min-w-0">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
                     <Zap size={13} className="text-amber-400" />
                     <span className="whitespace-nowrap">แม่นยำระดับเสี้ยววินาที</span>
                   </span>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#061120]/70 backdrop-blur-xl border border-white/15 shadow-sm whitespace-nowrap shrink-0">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
                     <ShieldCheck size={13} className="text-emerald-400" />
                     <span className="whitespace-nowrap">ตรวจสลิปอัตโนมัติ 1:1</span>
                   </span>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#061120]/70 backdrop-blur-xl border border-white/15 shadow-sm whitespace-nowrap shrink-0">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
                     <BarChart3 size={13} className="text-sky-400" />
                     <span className="whitespace-nowrap">ซิงก์ข้อมูลเรียลไทม์</span>
                   </span>
