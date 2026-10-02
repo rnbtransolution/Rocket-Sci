@@ -163,21 +163,18 @@ export default function AdminLockScreen({
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#071324] text-white font-sans flex flex-col selection:bg-sky-500 selection:text-white relative overflow-x-hidden">
-      {/* Background Subtle Tech Grid & Ambient Lighting */}
-      <div className="absolute inset-0 pointer-events-none opacity-10 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:28px_28px]" />
+    <div className="min-h-screen w-full bg-slate-50 text-slate-800 font-sans flex flex-col selection:bg-sky-500 selection:text-white relative overflow-x-hidden">
+      {/* Subtle Ambient Tech Dot Grid */}
+      <div className="absolute inset-0 pointer-events-none opacity-35 bg-[radial-gradient(#94a3b8_1px,transparent_1px)] [background-size:24px_24px]" />
       <div 
         className="absolute top-0 right-1/4 w-[600px] h-[600px] rounded-full pointer-events-none opacity-20 blur-3xl"
-        style={{ background: 'radial-gradient(circle, #0284c7 0%, rgba(7,19,36,0) 70%)' }}
+        style={{ background: 'radial-gradient(circle, #38bdf8 0%, rgba(248,250,252,0) 70%)' }}
       />
-      <div 
-        className="absolute top-1/3 left-0 w-[500px] h-[500px] rounded-full pointer-events-none opacity-15 blur-3xl"
-        style={{ background: 'radial-gradient(circle, #f97316 0%, rgba(7,19,36,0) 70%)' }}
-      />
+
       {/* -------------------------------------------------------------
-          TOP NAVIGATION BAR (Rescaled for Professional Alignment)
+          TOP NAVIGATION BAR (Bright Daylight Glass Theme)
          ------------------------------------------------------------- */}
-      <header className="fixed top-0 inset-x-0 z-50 w-full bg-[#071324]/90 backdrop-blur-md border-b border-white/10 px-4 sm:px-8 lg:px-12 py-3 transition-all shadow-lg">
+      <header className="fixed top-0 inset-x-0 z-50 w-full bg-white/85 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-8 lg:px-12 py-3 transition-all shadow-xs">
         <div className="max-w-[1720px] mx-auto flex items-center justify-between gap-4 lg:gap-8">
           
           {/* Brand Logo & Title */}
@@ -185,37 +182,37 @@ export default function AdminLockScreen({
             className="flex items-center gap-3 cursor-pointer shrink-0" 
             onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center text-white border border-white/20 shrink-0 shadow-lg shadow-sky-500/20">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center text-white shrink-0 shadow-md shadow-sky-500/20">
               <Rocket size={20} className="transform -rotate-45" />
             </div>
             <div className="flex flex-col">
               <div className="flex items-center gap-2">
-                <span className="text-base sm:text-lg font-black font-heading tracking-tight text-white uppercase whitespace-nowrap">
+                <span className="text-base sm:text-lg font-black font-heading tracking-tight text-slate-900 uppercase whitespace-nowrap">
                   Bang Fai Commander
                 </span>
-                <span className="hidden md:inline-block px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider bg-white/10 text-sky-300 rounded border border-sky-400/30 whitespace-nowrap">
+                <span className="hidden md:inline-block px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider bg-sky-50 text-sky-700 rounded border border-sky-200 whitespace-nowrap">
                   Cloud Portal
                 </span>
               </div>
-              <p className="text-[11px] text-slate-300 font-normal hidden lg:block whitespace-nowrap">
+              <p className="text-[11px] text-slate-500 font-normal hidden lg:block whitespace-nowrap">
                 ระบบบริหารจัดการธุรกรรมและการแข่งขันภาคสนาม
               </p>
             </div>
           </div>
 
-          {/* Desktop Navigation Links (Clean Single-Line Alignment) */}
-          <nav className="hidden md:flex items-center gap-6 lg:gap-8 text-sm font-medium text-slate-300 shrink-0">
+          {/* Desktop Navigation Links */}
+          <nav className="hidden md:flex items-center gap-6 lg:gap-8 text-sm font-medium text-slate-600 shrink-0">
             <button 
               type="button"
               onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-              className="hover:text-white transition-colors cursor-pointer whitespace-nowrap py-1 font-medium"
+              className="hover:text-sky-600 transition-colors cursor-pointer whitespace-nowrap py-1 font-medium"
             >
               หน้าหลัก
             </button>
             <button 
               type="button"
               onClick={() => handleNavClick('usage')}
-              className={`hover:text-white transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 py-1 ${activeTab === 'usage' ? 'text-sky-400 font-bold' : ''}`}
+              className={`hover:text-sky-600 transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 py-1 ${activeTab === 'usage' ? 'text-sky-600 font-bold' : ''}`}
             >
               <BookOpen size={15} />
               <span>คู่มือการใช้งาน</span>
@@ -223,7 +220,7 @@ export default function AdminLockScreen({
             <button 
               type="button"
               onClick={() => handleNavClick('terms')}
-              className={`hover:text-white transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 py-1 ${activeTab === 'terms' ? 'text-sky-400 font-bold' : ''}`}
+              className={`hover:text-sky-600 transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 py-1 ${activeTab === 'terms' ? 'text-sky-600 font-bold' : ''}`}
             >
               <FileCheck size={15} />
               <span>ข้อกำหนดและเงื่อนไข</span>
@@ -235,7 +232,7 @@ export default function AdminLockScreen({
             <button
               type="button"
               onClick={handleOpenLoginModal}
-              className="px-3 sm:px-5 py-1.5 sm:py-2 rounded-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 active:scale-95 text-white text-xs sm:text-sm font-bold tracking-wide transition-all flex items-center gap-1.5 sm:gap-2 cursor-pointer border border-sky-300/40 whitespace-nowrap shrink-0 shadow-lg shadow-sky-500/20"
+              className="px-3 sm:px-5 py-1.5 sm:py-2 rounded-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 active:scale-95 text-white text-xs sm:text-sm font-bold tracking-wide transition-all flex items-center gap-1.5 sm:gap-2 cursor-pointer border border-sky-300/40 whitespace-nowrap shrink-0 shadow-md shadow-sky-500/25"
             >
               <LogIn size={14} className="shrink-0" />
               <span>เข้าสู่ระบบ</span>
@@ -246,7 +243,7 @@ export default function AdminLockScreen({
             <button
               type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors shrink-0"
+              className="md:hidden p-2 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors shrink-0"
               aria-label="Toggle Navigation Menu"
             >
               {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
@@ -256,36 +253,36 @@ export default function AdminLockScreen({
 
         {/* Mobile Dropdown Menu */}
         {mobileMenuOpen && (
-          <div className="md:hidden mt-3 pt-3 border-t border-white/10 flex flex-col gap-2 pb-2 bg-[#071324]/95 rounded-xl px-2">
+          <div className="md:hidden mt-3 pt-3 border-t border-slate-200 flex flex-col gap-2 pb-2 bg-white/95 rounded-xl px-2 shadow-lg">
             <button
               type="button"
               onClick={() => { setMobileMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-              className="text-left px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-white/10 hover:text-white"
+              className="text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100"
             >
               หน้าหลัก (Home)
             </button>
             <button
               type="button"
               onClick={() => handleNavClick('usage')}
-              className="text-left px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2"
+              className="text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
             >
-              <BookOpen size={16} className="text-sky-400" />
+              <BookOpen size={16} className="text-sky-600" />
               <span>คู่มือการใช้งาน (Usage Instructions)</span>
             </button>
             <button
               type="button"
               onClick={() => handleNavClick('terms')}
-              className="text-left px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2"
+              className="text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2"
             >
-              <FileCheck size={16} className="text-sky-400" />
+              <FileCheck size={16} className="text-sky-600" />
               <span>ข้อกำหนดและเงื่อนไข (Terms of Use)</span>
             </button>
             <button
               type="button"
               onClick={handleOpenLoginModal}
-              className="text-left px-3 py-2.5 rounded-lg text-sm font-semibold text-sky-300 bg-sky-500/15 hover:bg-sky-500/25 flex items-center gap-2 mt-1 border border-sky-400/30"
+              className="text-left px-3 py-2.5 rounded-lg text-sm font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 flex items-center gap-2 mt-1 border border-sky-200"
             >
-              <LogIn size={16} className="text-sky-400" />
+              <LogIn size={16} className="text-sky-600" />
               <span>เข้าสู่ระบบ (Sign In)</span>
             </button>
           </div>
@@ -293,91 +290,71 @@ export default function AdminLockScreen({
       </header>
 
       {/* -------------------------------------------------------------
-          HERO SECTION: FULL HOMEPAGE STYLE WITH VISIBLE BACKGROUND (ATLAS V LAUNCH)
+          HERO SECTION: DAYLIGHT LAUNCH BACKGROUND (ARIANE 5)
          ------------------------------------------------------------- */}
-      <section className="relative w-full min-h-screen pt-[68px] flex items-center bg-[#030712] overflow-hidden">
-        {/* Crystal Clear Background Image (Zero Blur, Shifted Down Away from Page Header) */}
+      <section className="relative w-full min-h-screen pt-[68px] flex items-center bg-[#152e4d] overflow-hidden">
+        {/* Crystal Clear Daylight Background Image (Ariane 5 Launch) */}
         <div 
-          className="absolute inset-x-0 -bottom-24 top-14 sm:top-16 lg:top-20 bg-cover bg-no-repeat pointer-events-none transition-all duration-300"
+          className="absolute inset-0 bg-cover bg-no-repeat pointer-events-none transition-all duration-300"
           style={{ 
             backgroundImage: `url(${HERO_FULL_BACKGROUND})`,
-            backgroundPosition: '68% top'
+            backgroundPosition: '60% top',
           }}
         />
 
-        {/* Soft Transparent Gradient: Enhances Left Text Legibility While Leaving Rocket 100% Crisp */}
-        <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/35 to-transparent pointer-events-none" />
+        {/* Soft Left Daylight Scrim: Ensures Razor-Sharp Readability for Left Content */}
+        <div className="absolute inset-0 bg-gradient-to-r from-slate-950/70 via-slate-950/35 to-transparent pointer-events-none" />
         
         {/* Soft Edge Blends */}
-        <div className="absolute top-0 inset-x-0 h-16 bg-gradient-to-b from-[#071324]/80 to-transparent pointer-events-none" />
-        <div className="absolute bottom-0 inset-x-0 h-24 bg-gradient-to-t from-[#081528] to-transparent pointer-events-none" />
+        <div className="absolute top-0 inset-x-0 h-16 bg-gradient-to-b from-white/30 to-transparent pointer-events-none" />
+        <div className="absolute bottom-0 inset-x-0 h-28 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none" />
 
         <div className="relative z-10 w-full max-w-[1720px] mx-auto px-4 sm:px-8 lg:px-12 py-12 sm:py-20 flex-1 flex flex-col justify-center">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
             
-            {/* LEFT COLUMN: WELCOME HEADINGS, VALUE PROPOSITIONS, PILLS & SIGN IN CTA */}
+            {/* LEFT COLUMN: WELCOME HEADINGS, VALUE PROPOSITIONS & PILLS */}
             <div className="w-full lg:col-span-7 xl:col-span-6 flex flex-col justify-center items-start text-left min-w-0 space-y-5">
               
               {/* Status Overline Badge */}
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-sky-200 text-xs font-semibold shadow-sm backdrop-blur-md whitespace-nowrap">
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/20 border border-white/30 text-white text-xs font-semibold shadow-sm backdrop-blur-md whitespace-nowrap">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <ShieldCheck size={14} className="text-sky-400" />
+                <ShieldCheck size={14} className="text-sky-300" />
                 <span className="whitespace-nowrap">Enterprise Operations Platform</span>
               </div>
 
               {/* Main Headline */}
               <div className="space-y-3 min-w-0">
-                <h1 className="text-4xl sm:text-5xl lg:text-[54px] font-heading text-white tracking-tight leading-[1.1] drop-shadow-[0_2px_14px_rgba(0,0,0,0.95)]">
+                <h1 className="text-4xl sm:text-5xl lg:text-[56px] font-heading text-white tracking-tight leading-[1.1] drop-shadow-[0_2px_14px_rgba(0,0,0,0.85)]">
                   <span className="font-extrabold block whitespace-nowrap">Better Solutions</span>
-                  <span className="font-light italic text-[#38bdf8] block text-3xl sm:text-4xl lg:text-[42px] mt-1 whitespace-nowrap">For Your Operations</span>
+                  <span className="font-light italic text-[#38bdf8] block text-3xl sm:text-4xl lg:text-[44px] mt-1 whitespace-nowrap">For Your Operations</span>
                 </h1>
-                <h2 className="text-sm sm:text-base md:text-lg font-medium text-sky-100 font-thai drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)]">
+                <h2 className="text-sm sm:text-base md:text-lg font-medium text-sky-100 font-thai drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)]">
                   ระบบบริหารจัดการธุรกรรมและการแข่งขันภาคสนามระดับองค์กร
                 </h2>
-                <p className="text-xs sm:text-sm md:text-base text-slate-200 font-thai font-normal max-w-xl leading-relaxed drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)]">
+                <p className="text-xs sm:text-sm md:text-base text-slate-100 font-thai font-normal max-w-xl leading-relaxed drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)]">
                   ศูนย์กลางประมวลผลคำสั่งซื้อ ตรวจสลิปอัตโนมัติ และระบบบันทึกเวลาเรียลไทม์ แม่นยำ รวดเร็ว ตรวจสอบได้ทุกขั้นตอน
                 </p>
               </div>
 
-              {/* Core Feature Highlights (Liquid Glass Pills) */}
+              {/* Core Feature Highlights (Liquid Glass Pills - Single Line) */}
               <div className="pt-1 flex flex-wrap sm:flex-nowrap items-center gap-2.5 text-xs text-white font-medium max-w-full">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/70 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
                   <Zap size={13} className="text-amber-400" />
                   <span className="whitespace-nowrap">แม่นยำระดับเสี้ยววินาที</span>
                 </span>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/70 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
                   <ShieldCheck size={13} className="text-emerald-400" />
                   <span className="whitespace-nowrap">ตรวจสลิปอัตโนมัติ 1:1</span>
                 </span>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/70 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md whitespace-nowrap shrink-0">
                   <BarChart3 size={13} className="text-sky-400" />
                   <span className="whitespace-nowrap">ซิงก์ข้อมูลเรียลไทม์</span>
                 </span>
               </div>
 
-              {/* Primary Call to Action: Open Login Popup */}
-              <div className="pt-3 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handleOpenLoginModal}
-                  className="px-6 py-3 rounded-2xl bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-blue-500 active:scale-95 text-white text-sm font-bold tracking-wide transition-all flex items-center gap-2.5 cursor-pointer shadow-[0_8px_25px_rgba(14,165,233,0.4),inset_0_1px_1px_rgba(255,255,255,0.4)] border-t border-t-white/30"
-                >
-                  <LogIn size={17} />
-                  <span>เข้าสู่ระบบ (Sign In)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleNavClick('usage')}
-                  className="px-5 py-3 rounded-2xl bg-white/10 hover:bg-white/15 active:scale-95 text-sky-200 hover:text-white text-sm font-medium transition-all flex items-center gap-2 cursor-pointer border border-white/15 backdrop-blur-md"
-                >
-                  <BookOpen size={16} />
-                  <span>คู่มือการใช้งาน</span>
-                </button>
-              </div>
-
             </div>
 
-            {/* RIGHT COLUMN: OPEN HERO SPACE SHOWCASING ATLAS V ROCKET LAUNCH */}
+            {/* RIGHT COLUMN: OPEN HERO SPACE SHOWCASING ARIANE 5 DAYLIGHT LAUNCH */}
             <div className="hidden lg:block lg:col-span-5 xl:col-span-6 pointer-events-none select-none" />
 
           </div>
@@ -385,98 +362,98 @@ export default function AdminLockScreen({
       </section>
 
       {/* -------------------------------------------------------------
-          CORE OPERATIONAL VALUES & CAPABILITIES (Confidential Value Proposition)
+          CORE OPERATIONAL VALUES & CAPABILITIES (Bright Daylight Theme)
          ------------------------------------------------------------- */}
-      <section className="w-full bg-[#081528] text-white py-10 px-4 sm:px-8 border-y border-white/10">
+      <section className="w-full bg-white text-slate-800 py-12 px-4 sm:px-8 border-b border-slate-200">
         <div className="max-w-7xl mx-auto flex flex-col lg:flex-row items-center justify-between gap-8">
           <div className="text-center lg:text-left max-w-sm">
-            <span className="text-xs uppercase tracking-wider font-extrabold text-sky-400 block mb-1">
+            <span className="text-xs uppercase tracking-wider font-extrabold text-sky-600 block mb-1">
               CORE OPERATIONAL VALUES
             </span>
-            <h3 className="text-lg font-extrabold text-white leading-snug">
+            <h3 className="text-lg sm:text-xl font-extrabold text-slate-900 leading-snug">
               <span>มาตรฐานความแม่นยำและความปลอดภัย</span>
-              <span className="block">ระดับมืออาชีพ</span>
+              <span className="block text-sky-600">ระดับมืออาชีพ</span>
             </h3>
-            <p className="text-xs text-slate-400 mt-1">
+            <p className="text-xs text-slate-500 mt-1">
               ออกแบบเพื่อยกระดับการปฏิบัติงานภาคสนามให้ราบรื่น โปร่งใส และรวดเร็ว
             </p>
           </div>
 
-          {/* 4 Professional Value Cards (Zero Emojis - Lucide Icons) */}
+          {/* 4 Professional Value Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 w-full lg:w-auto">
             {/* Value 1: Precision Timing */}
-            <div className="p-4 rounded-2xl bg-[#0c1e36]/80 hover:bg-[#102746] border border-white/10 hover:border-amber-400/40 transition-all text-left group">
-              <div className="w-9 h-9 rounded-xl bg-amber-400/10 border border-amber-400/25 flex items-center justify-center text-amber-400 mb-2.5 group-hover:scale-105 transition-transform">
+            <div className="p-4 rounded-2xl bg-slate-50 hover:bg-amber-50/40 border border-slate-200 hover:border-amber-300 transition-all text-left shadow-xs group">
+              <div className="w-9 h-9 rounded-xl bg-amber-100/80 border border-amber-300/50 flex items-center justify-center text-amber-600 mb-2.5 group-hover:scale-105 transition-transform">
                 <Zap size={18} />
               </div>
-              <span className="text-xs font-bold text-white block">แม่นยำระดับเสี้ยววินาที</span>
-              <span className="text-[11px] text-slate-400 font-medium block mt-0.5">High-Precision Timing</span>
+              <span className="text-xs font-bold text-slate-900 block">แม่นยำระดับเสี้ยววินาที</span>
+              <span className="text-[11px] text-slate-500 font-medium block mt-0.5">High-Precision Timing</span>
             </div>
 
             {/* Value 2: Automated Verification */}
-            <div className="p-4 rounded-2xl bg-[#0c1e36]/80 hover:bg-[#102746] border border-white/10 hover:border-emerald-400/40 transition-all text-left group">
-              <div className="w-9 h-9 rounded-xl bg-emerald-400/10 border border-emerald-400/25 flex items-center justify-center text-emerald-400 mb-2.5 group-hover:scale-105 transition-transform">
+            <div className="p-4 rounded-2xl bg-slate-50 hover:bg-emerald-50/40 border border-slate-200 hover:border-emerald-300 transition-all text-left shadow-xs group">
+              <div className="w-9 h-9 rounded-xl bg-emerald-100/80 border border-emerald-300/50 flex items-center justify-center text-emerald-600 mb-2.5 group-hover:scale-105 transition-transform">
                 <ShieldCheck size={18} />
               </div>
-              <span className="text-xs font-bold text-white block">ตรวจสอบอัตโนมัติ</span>
-              <span className="text-[11px] text-slate-400 font-medium block mt-0.5">Instant Verification</span>
+              <span className="text-xs font-bold text-slate-900 block">ตรวจสอบอัตโนมัติ</span>
+              <span className="text-[11px] text-slate-500 font-medium block mt-0.5">Instant Verification</span>
             </div>
 
             {/* Value 3: Real-Time Live Sync */}
-            <div className="p-4 rounded-2xl bg-[#0c1e36]/80 hover:bg-[#102746] border border-white/10 hover:border-sky-400/40 transition-all text-left group">
-              <div className="w-9 h-9 rounded-xl bg-sky-400/10 border border-sky-400/25 flex items-center justify-center text-sky-400 mb-2.5 group-hover:scale-105 transition-transform">
+            <div className="p-4 rounded-2xl bg-slate-50 hover:bg-sky-50/40 border border-slate-200 hover:border-sky-300 transition-all text-left shadow-xs group">
+              <div className="w-9 h-9 rounded-xl bg-sky-100/80 border border-sky-300/50 flex items-center justify-center text-sky-600 mb-2.5 group-hover:scale-105 transition-transform">
                 <BarChart3 size={18} />
               </div>
-              <span className="text-xs font-bold text-white block">ซิงก์ข้อมูลเรียลไทม์</span>
-              <span className="text-[11px] text-slate-400 font-medium block mt-0.5">Live Synchronization</span>
+              <span className="text-xs font-bold text-slate-900 block">ซิงก์ข้อมูลเรียลไทม์</span>
+              <span className="text-[11px] text-slate-500 font-medium block mt-0.5">Live Synchronization</span>
             </div>
 
             {/* Value 4: Multi-Device Ready */}
-            <div className="p-4 rounded-2xl bg-[#0c1e36]/80 hover:bg-[#102746] border border-white/10 hover:border-sky-400/40 transition-all text-left group">
-              <div className="w-9 h-9 rounded-xl bg-sky-400/10 border border-sky-400/25 flex items-center justify-center text-sky-400 mb-2.5 group-hover:scale-105 transition-transform">
+            <div className="p-4 rounded-2xl bg-slate-50 hover:bg-blue-50/40 border border-slate-200 hover:border-blue-300 transition-all text-left shadow-xs group">
+              <div className="w-9 h-9 rounded-xl bg-blue-100/80 border border-blue-300/50 flex items-center justify-center text-blue-600 mb-2.5 group-hover:scale-105 transition-transform">
                 <Smartphone size={18} />
               </div>
-              <span className="text-xs font-bold text-white block">รองรับทุกอุปกรณ์</span>
-              <span className="text-[11px] text-slate-400 font-medium block mt-0.5">Multi-Device Ready</span>
+              <span className="text-xs font-bold text-slate-900 block">รองรับทุกอุปกรณ์</span>
+              <span className="text-[11px] text-slate-500 font-medium block mt-0.5">Multi-Device Ready</span>
             </div>
           </div>
         </div>
       </section>
 
       {/* -------------------------------------------------------------
-          INTERACTIVE DOCUMENTATION & OPERATIONAL TABS SECTION
+          INTERACTIVE DOCUMENTATION & OPERATIONAL TABS SECTION (Bright Theme)
          ------------------------------------------------------------- */}
       <section 
         ref={docsSectionRef}
-        className="w-full bg-[#071324] text-white py-16 px-4 sm:px-8 border-b border-white/10 scroll-mt-16"
+        className="w-full bg-slate-50 text-slate-800 py-16 px-4 sm:px-8 border-b border-slate-200 scroll-mt-16"
       >
         <div className="max-w-5xl mx-auto space-y-8">
           
           {/* Section Header */}
           <div className="text-center space-y-2.5 max-w-2xl mx-auto">
-            <span className="px-3 py-1 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/30 text-xs font-bold uppercase tracking-wider">
+            <span className="px-3.5 py-1 rounded-full bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold uppercase tracking-wider">
               System Documentation &amp; Guidelines
             </span>
-            <h2 className="text-2xl sm:text-3xl font-extrabold font-heading text-white tracking-tight">
+            <h2 className="text-2xl sm:text-3xl font-extrabold font-heading text-slate-900 tracking-tight">
               ศูนย์ข้อมูลและคู่มือการปฏิบัติงานภาคสนาม
             </h2>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-slate-500">
               คำแนะนำขั้นตอนการทำงานสำหรับเจ้าหน้าที่และนโยบายความปลอดภัยของระบบ
             </p>
           </div>
 
-          {/* Segmented Tabs Navigation (2 Clean Balanced Tabs) */}
-          <div className="grid grid-cols-2 gap-2 p-1.5 bg-[#0b1b31] rounded-2xl max-w-md mx-auto border border-white/10">
+          {/* Segmented Tabs Navigation */}
+          <div className="grid grid-cols-2 gap-2 p-1.5 bg-slate-200/80 rounded-2xl max-w-md mx-auto border border-slate-300/60 shadow-xs">
             <button
               type="button"
               onClick={() => setActiveTab('usage')}
               className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
                 activeTab === 'usage' 
-                  ? 'bg-gradient-to-r from-sky-600 to-blue-600 text-white border border-sky-400/40 shadow-md' 
-                  : 'text-slate-300 hover:text-white hover:bg-white/5'
+                  ? 'bg-white text-sky-700 shadow-sm border border-slate-200/80' 
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <BookOpen size={16} className={activeTab === 'usage' ? 'text-white' : 'text-slate-400'} />
+              <BookOpen size={16} className={activeTab === 'usage' ? 'text-sky-600' : 'text-slate-500'} />
               <span className="whitespace-nowrap">คู่มือการใช้งาน (Usage)</span>
             </button>
 
@@ -485,116 +462,116 @@ export default function AdminLockScreen({
               onClick={() => setActiveTab('terms')}
               className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
                 activeTab === 'terms' 
-                  ? 'bg-gradient-to-r from-sky-600 to-blue-600 text-white border border-sky-400/40 shadow-md' 
-                  : 'text-slate-300 hover:text-white hover:bg-white/5'
+                  ? 'bg-white text-sky-700 shadow-sm border border-slate-200/80' 
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <FileCheck size={16} className={activeTab === 'terms' ? 'text-white' : 'text-slate-400'} />
+              <FileCheck size={16} className={activeTab === 'terms' ? 'text-sky-600' : 'text-slate-500'} />
               <span className="whitespace-nowrap">ข้อกำหนดและเงื่อนไข (Terms)</span>
             </button>
           </div>
 
-          {/* TAB 1: USAGE INSTRUCTIONS */}
+          {/* TAB 1: USAGE INSTRUCTIONS (Bright Theme) */}
           {activeTab === 'usage' && (
             <div className="space-y-6 animate-fadeIn">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 {/* Step 1 */}
-                <div className="bg-[#0c1e36]/90 p-6 rounded-2xl border border-white/10 space-y-3">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-3">
                   <div className="flex items-center gap-3">
-                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-md">
+                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
                       1
                     </span>
-                    <h3 className="text-base font-bold text-white">
-                      การลงชื่อเข้าใช้ระบบ (Sign-In &amp; Auth)
+                    <h3 className="text-base font-bold text-slate-900">
+                      การลงชื่อเข้าใช้ระบบ &amp; สิทธิ์การควบคุม (Sign-In &amp; Role Access)
                     </h3>
                   </div>
-                  <p className="text-sm text-slate-300 leading-relaxed font-thai">
-                    ผู้ดูแลระบบใช้ Username และ Password ที่ได้รับมอบหมายเพื่อเข้าสู่ระบบ คอนโซลจะผูก Session ไว้ใน <code className="text-xs bg-[#061120] border border-white/10 px-1.5 py-0.5 rounded text-sky-300">sessionStorage</code> และตรวจสอบสิทธิ์ตามมาตรฐานความปลอดภัยสูงสุด หากปิดเบราว์เซอร์เซสชันจะสิ้นสุดทันที
+                  <p className="text-sm text-slate-600 leading-relaxed font-thai">
+                    ผู้ดูแลระบบลงชื่อเข้าใช้งานด้วย Username และ Password ผ่านปุ่ม <strong className="text-sky-600">"เข้าสู่ระบบ (Sign In)"</strong> ที่แถบเมนูด้านบน โดยระบบจะแยกสิทธิ์ออกเป็น 2 ระดับตามความรับผิดชอบ:
                   </p>
-                  <ul className="text-xs text-slate-400 space-y-1.5 list-disc pl-5">
-                    <li>ห้ามใช้รหัสผ่านร่วมกันในจุดควบคุมหลายจุด</li>
-                    <li>หากพิมพ์รหัสผ่านผิดเกินกำหนด ระบบจะหน่วงเวลาอัตโนมัติ</li>
+                  <ul className="text-xs text-slate-500 space-y-1.5 list-disc pl-5">
+                    <li><strong className="text-slate-800">Super Admin (Admin):</strong> ควบคุมทุกฟังก์ชัน คอนฟิก และมีสิทธิ์สั่งรีเซ็ตฐานข้อมูล (Factory Reset)</li>
+                    <li><strong className="text-slate-800">Admin (Admin1):</strong> จัดการรอบ ป้อนราคาช่าง บันทึกเวลา ออกผลการแข่งขัน และตรวจสลิป (จำกัดสิทธิ์ห้ามทำ Factory Reset)</li>
                   </ul>
                 </div>
 
                 {/* Step 2 */}
-                <div className="bg-[#0c1e36]/90 p-6 rounded-2xl border border-white/10 space-y-3">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-3">
                   <div className="flex items-center gap-3">
-                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-md">
+                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
                       2
                     </span>
-                    <h3 className="text-base font-bold text-white">
-                      การเปิดรอบแข่งขัน &amp; อัตราต่อรอง (Rounds &amp; Quotes)
+                    <h3 className="text-base font-bold text-slate-900">
+                      การตั้งราคาช่าง &amp; ประกาศราคา (Manual Quote Entry &amp; Broadcast)
                     </h3>
                   </div>
-                  <p className="text-sm text-slate-300 leading-relaxed font-thai">
-                    ก่อนเริ่มปล่อยบั้งไฟ กรรมการกด <strong className="text-sky-300">"เปิดรอบใหม่ (Open Round)"</strong> พร้อมตั้งเวลาและราคาต่อรอง จากนั้นกด <strong className="text-sky-300">"ปล่อยราคา (Release Quote)"</strong> เพื่อเปิดรับคำสั่งซื้อ และกด <strong className="text-sky-300">"ล็อครอบ (Lock Round)"</strong> ทันทีที่บั้งไฟถูกจุดขึ้นสู่อากาศ
+                  <p className="text-sm text-slate-600 leading-relaxed font-thai">
+                    ก่อนเริ่มปล่อยบั้งไฟ แอดมินเป็นผู้ป้อนข้อมูลรอบด้วยตนเอง (Manual Data Entry) เช่น ชื่อค่ายบั้งไฟ, พิกัดเวลาเป้าหมายต่ำสุด-สูงสุด (เช่น 330-380s), แต้มดวลเริ่มต้น และเลือกตัวเลือก "เผื่อช่างไม่ต่อย (ชตย)" จากนั้นเลือกกลุ่มเป้าหมาย (ทุกกลุ่มดวลสด หรือเฉพาะกลุ่ม) แล้วกด <strong className="text-sky-600">"ประกาศราคาช่าง"</strong> เพื่อส่งราคาเข้ากลุ่ม LINE ทันที
                   </p>
-                  <ul className="text-xs text-slate-400 space-y-1.5 list-disc pl-5">
-                    <li>คำสั่งซื้อประเภท Hold จะถูกปล่อยพร้อมกันเมื่อเปิดราคา</li>
-                    <li>สถานะรอบบนกระดานแสดงผลจะอัปเดตแบบเรียลไทม์</li>
+                  <ul className="text-xs text-slate-500 space-y-1.5 list-disc pl-5">
+                    <li>คำสั่งซื้อประเภท Hold จะถูกปล่อยพร้อมกันเมื่อแอดมินประกาศราคา</li>
+                    <li>เมื่อบั้งไฟจุดขึ้นสู่อากาศ ระบบจะทำการล็อครอบเพื่อปิดรับคำสั่งซื้อทันที</li>
                   </ul>
                 </div>
 
                 {/* Step 3 */}
-                <div className="bg-[#0c1e36]/90 p-6 rounded-2xl border border-white/10 space-y-3">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-3">
                   <div className="flex items-center gap-3">
-                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-md">
+                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
                       3
                     </span>
-                    <h3 className="text-base font-bold text-white">
-                      ตรวจสลิปเงินโอน 1:1 (Automated Verification)
+                    <h3 className="text-base font-bold text-slate-900">
+                      ตรวจสลิปเงินโอน 1:1 (Automated OCR Verification)
                     </h3>
                   </div>
-                  <p className="text-sm text-slate-300 leading-relaxed font-thai">
-                    เมื่อผู้เล่นส่งรูปสลิป ระบบจะทำการอ่านรหัสสลิป ถอดรหัสตรวจสอบยอดเงินและเลข Ref Code ทันที หากผ่านเงื่อนไข ระบบจะเพิ่มเครดิต 1:1 และส่งบัตรยืนยันให้ผู้เล่นในเสี้ยววินาที
+                  <p className="text-sm text-slate-600 leading-relaxed font-thai">
+                    เมื่อผู้เล่นส่งรูปสลิป ระบบ AI Vision จะตรวจอ่าน QR Code ถอดรหัสตรวจสอบยอดเงินและเลขอ้างอิง (Ref Code) แบบ 1:1 ทันที หากผ่านเงื่อนไข ระบบจะเพิ่มเครดิตเข้ากระเป๋าผู้เล่นอัตโนมัติพร้อมส่งบัตรยืนยันกลับไปยัง LINE ทันที
                   </p>
-                  <ul className="text-xs text-slate-400 space-y-1.5 list-disc pl-5">
-                    <li>สลิปที่ไม่มี QR หรือภาพไม่ชัด จะถูกส่งเข้าคิวให้แอดมินอนุมัติมือ</li>
-                    <li>ระบบป้องกันสลิปซ้ำซ้อน 100% ด้วยการจดจำเลขอ้างอิงถาวร</li>
+                  <ul className="text-xs text-slate-500 space-y-1.5 list-disc pl-5">
+                    <li>สลิปที่ไม่มี QR หรือภาพไม่ชัด จะถูกส่งเข้าคิวให้แอดมินตรวจสอบและกดอนุมัติด้วยมือ (Manual Approval)</li>
+                    <li>ระบบป้องกันสลิปซ้ำซ้อน 100% ด้วยการจดจำเลขอ้างอิงลงฐานข้อมูลถาวร</li>
                   </ul>
                 </div>
 
                 {/* Step 4 */}
-                <div className="bg-[#0c1e36]/90 p-6 rounded-2xl border border-white/10 space-y-3">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-3">
                   <div className="flex items-center gap-3">
-                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-md">
+                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
                       4
                     </span>
-                    <h3 className="text-base font-bold text-white">
-                      การจับเวลา &amp; ออกผลการแข่งขัน (Flight Settlement)
+                    <h3 className="text-base font-bold text-slate-900">
+                      การป้อนผลเวลาบินจริง &amp; ออกผลการแข่งขัน (Manual Result Entry &amp; Settlement)
                     </h3>
                   </div>
-                  <p className="text-sm text-slate-300 leading-relaxed font-thai">
-                    ใช้หน้าปัด Telemetry Simulator จับเวลาการลอยตัวของบั้งไฟ เมื่อตกถึงพื้น กรรมการป้อนเวลาเป็นวินาที (เช่น 125.40s) ระบบจะคำนวณผลชนะตามกลุ่มเวลา (สูง / ต่ำ / เสมอ) และปรับยอดชนะเข้ากระเป๋าผู้เล่นอัตโนมัติ
+                  <p className="text-sm text-slate-600 leading-relaxed font-thai">
+                    กรรมการภาคสนามจับเวลาจริงของบั้งไฟด้วยนาฬิกาจับเวลามาตรฐาน เมื่อตกถึงพื้น แอดมินนำเวลาที่บันทึกได้มา<strong className="text-sky-600">ป้อนลงในช่อง "ผลยิงจริงในสนาม (Actual Air Time)" ด้วยตนเอง</strong> (เช่น 355.0s) ระบบจะเปรียบเทียบกับราคาช่าง แสดงผลคาดการณ์ (ต่ำ / สูง / ในราคาช่าง) และเมื่อกด <strong className="text-sky-600">"สรุปผลและชำระแต้มดีลทั้งหมด"</strong> ระบบจะโอนจ่ายแต้มผู้ชนะทันที
                   </p>
-                  <ul className="text-xs text-slate-400 space-y-1.5 list-disc pl-5">
-                    <li>กรณีบั้งไฟแตกหรือโมฆะ ให้ใช้ปุ่ม "ยกเลิกรอบ (Void Round)"</li>
-                    <li>ระบบจะคืนเครดิตแบบ Idempotent ป้องกันการคืนเงินซ้ำ</li>
+                  <ul className="text-xs text-slate-500 space-y-1.5 list-disc pl-5">
+                    <li>กรณีบั้งไฟแตก ระเบิด หรือกรรมการสั่งโมฆะ ให้ใช้ปุ่ม "ยกเลิกรอบ (Void Round)"</li>
+                    <li>ระบบจะคืนเครดิตแบบ Idempotent ป้องกันการคืนเงินซ้ำซ้อน 100%</li>
                   </ul>
                 </div>
               </div>
 
-              {/* Quick Field Tip Box (Zero Emojis - Lucide Lightbulb) */}
-              <div className="p-4 bg-[#0a1e38]/80 border border-sky-500/30 rounded-xl flex items-start gap-3">
-                <Lightbulb size={20} className="text-amber-400 shrink-0 mt-0.5" />
-                <div className="text-xs text-sky-100">
-                  <strong className="block text-sky-300 font-bold mb-0.5">ข้อแนะนำภาคสนาม (Field Pro-Tip):</strong>
-                  กรรมการควรเปิดหน้านี้บนแท็บเล็ตหรือโน้ตบุ๊กที่มีการเชื่อมต่ออินเทอร์เน็ตเสถียร หากแอดมินออกจากระบบ ให้กดปุ่ม <strong>"เข้าสู่ระบบ (Sign In)"</strong> ด้านบนเพื่อกรอกรหัสผ่านใหม่อีกครั้งโดยไม่ต้องรีเฟรชหน้าเว็บ
+              {/* Quick Field Tip Box */}
+              <div className="p-4 bg-sky-50 border border-sky-200 rounded-xl flex items-start gap-3">
+                <Lightbulb size={20} className="text-amber-500 shrink-0 mt-0.5" />
+                <div className="text-xs text-slate-700">
+                  <strong className="block text-sky-800 font-bold mb-0.5">ข้อแนะนำภาคสนาม (Field Pro-Tip):</strong>
+                  กรรมการควรเปิดหน้านี้บนแท็บเล็ตหรือโน้ตบุ๊กที่มีการเชื่อมต่ออินเทอร์เน็ตเสถียร หากแอดมินออกจากระบบ ให้กดปุ่ม <strong>"เข้าสู่ระบบ (Sign In)"</strong> ที่แถบเมนูด้านบนเพื่อเปิดหน้าต่างเข้าสู่ระบบโดยไม่ต้องรีเฟรชหน้าเว็บ
                 </div>
               </div>
             </div>
           )}
 
-          {/* TAB 2: TERMS OF USE & SECURITY */}
+          {/* TAB 2: TERMS OF USE & SECURITY (Bright Theme) */}
           {activeTab === 'terms' && (
             <div className="space-y-6 animate-fadeIn">
-              <div className="bg-[#0c1e36]/90 p-6 sm:p-8 rounded-2xl border border-white/10 space-y-6">
+              <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-xs space-y-6">
                 <div>
-                  <h3 className="text-lg font-bold text-white mb-1">
+                  <h3 className="text-lg font-bold text-slate-900 mb-1">
                     ข้อกำหนดความปลอดภัยและการใช้งานระบบ (Enterprise Compliance &amp; Terms)
                   </h3>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-500">
                     มีผลบังคับใช้สำหรับเจ้าหน้าที่ผู้ดูแลระบบ, ผู้บันทึกเวลา และกรรมการภาคสนามทุกคน
                   </p>
                 </div>
@@ -602,83 +579,71 @@ export default function AdminLockScreen({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Term 1 */}
                   <div className="space-y-2">
-                    <h4 className="text-sm font-bold text-sky-300 flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-400/40 text-[11px] flex items-center justify-center font-bold">1</span>
-                      การรักษาความลับของบัญชีผู้ดูแล (Credential Confidentiality)
+                    <h4 className="text-sm font-bold text-sky-800 flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 border border-sky-200 text-[11px] flex items-center justify-center font-bold">1</span>
+                      การแบ่งระดับสิทธิ์และการรักษาความลับของบัญชี (Two-Tier Role Access &amp; Security)
                     </h4>
-                    <p className="text-xs text-slate-300 leading-relaxed font-thai">
-                      ผู้ดูแลระบบต้องเก็บรักษา Username, Password และรหัสผ่าน Admin Key เป็นความลับสูงสุด โดยระบบแบ่งระดับสิทธิ์เป็น Super Admin (จัดการทุกระบบและล้างฐานข้อมูล) และ Admin (ปฏิบัติการภาคสนามทั่วไป) ห้ามส่งต่อหรือบันทึกในอุปกรณ์สาธารณะ หากสงสัยว่ารหัสผ่านรั่วไหล ต้องติดต่อผู้ดูแลระบบส่วนกลางเพื่อรีเซ็ตรหัสผ่านทันที
+                    <p className="text-xs text-slate-600 leading-relaxed font-thai">
+                      ผู้ดูแลระบบต้องเก็บรักษา Username, Password และรหัสผ่าน Admin Key เป็นความลับสูงสุด โดยระบบแบ่งระดับสิทธิ์เป็น Super Admin (จัดการทุกระบบและล้างฐานข้อมูล) และ Admin (ปฏิบัติการภาคสนามทั่วไป ป้อนราคาช่าง ป้อนเวลาจริง และเคลียร์ผล แต่ไม่มีสิทธิ์ล้างฐานข้อมูล) ห้ามส่งต่อหรือบันทึกในอุปกรณ์สาธารณะ หากสงสัยว่ารหัสผ่านรั่วไหล ต้องติดต่อผู้ดูแลระบบส่วนกลางเพื่อรีเซ็ตรหัสผ่านทันที
                     </p>
                   </div>
 
                   {/* Term 2 */}
                   <div className="space-y-2">
-                    <h4 className="text-sm font-bold text-sky-300 flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-400/40 text-[11px] flex items-center justify-center font-bold">2</span>
+                    <h4 className="text-sm font-bold text-sky-800 flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 border border-sky-200 text-[11px] flex items-center justify-center font-bold">2</span>
                       นโยบายป้องกันสลิปซ้ำซ้อน (Anti-Fraud Slip Quarantine)
                     </h4>
-                    <p className="text-xs text-slate-300 leading-relaxed font-thai">
+                    <p className="text-xs text-slate-600 leading-relaxed font-thai">
                       สลิปทุกใบที่ผ่านการเคลมเครดิตจะถูกบันทึกรหัสอ้างอิง (Ref Code) ลงในระบบถาวร หากมีการส่งซ้ำหรือตรวจพบการดัดแปลงภาพ ระบบจะปฏิเสธการเติมเงินและขึ้นบันทึกเตือนในหน้าตรวจสอบสลิปของแอดมินทันที
                     </p>
                   </div>
 
                   {/* Term 3 */}
                   <div className="space-y-2">
-                    <h4 className="text-sm font-bold text-sky-300 flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-400/40 text-[11px] flex items-center justify-center font-bold">3</span>
-                      การบันทึกประวัติการกระทำ (Audit Trail Logging)
+                    <h4 className="text-sm font-bold text-sky-800 flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 border border-sky-200 text-[11px] flex items-center justify-center font-bold">3</span>
+                      การบันทึกประวัติการกระทำและความรับผิดชอบ (Audit Trail Logging)
                     </h4>
-                    <p className="text-xs text-slate-300 leading-relaxed font-thai">
-                      ทุกการกระทำของผู้ดูแลระบบ ได้แก่ การเปิด/ปิดรอบ, การตั้งราคาต่อรอง, การปรับยอดเงินผู้เล่น และการอนุมัติสลิปมือ จะถูกบันทึกประวัติพร้อม Timestamp และ Admin Identifier เพื่อความโปร่งใสและตรวจสอบย้อนหลังได้ 100%
+                    <p className="text-xs text-slate-600 leading-relaxed font-thai">
+                      ทุกการกระทำของผู้ดูแลระบบ ได้แก่ การป้อนราคาช่าง (Manual Quote Entry), การบรอดแคสต์ราคา, การป้อนเวลาผลการบินจริง (Actual Flight Time Input), การสรุปผลรอบ และการอนุมัติสลิปมือ จะถูกบันทึกประวัติพร้อม Timestamp และ Admin Role เพื่อความโปร่งใสและตรวจสอบย้อนหลังได้ 100%
                     </p>
                   </div>
 
                   {/* Term 4 */}
                   <div className="space-y-2">
-                    <h4 className="text-sm font-bold text-sky-300 flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-400/40 text-[11px] flex items-center justify-center font-bold">4</span>
-                      มาตรการคืนเงินสองขั้นตอน (Two-Phase Idempotent Refund)
+                    <h4 className="text-sm font-bold text-sky-800 flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 border border-sky-200 text-[11px] flex items-center justify-center font-bold">4</span>
+                      มาตรการยกเลิกรอบและคืนเงินสองขั้นตอน (Two-Phase Idempotent Round Voiding)
                     </h4>
-                    <p className="text-xs text-slate-300 leading-relaxed font-thai">
-                      ในกรณีที่รอบแข่งขันถูกยกเลิก (Void) ระบบจะเปลี่ยนสถานะออเดอร์เป็น <code className="text-xs bg-[#061120] border border-white/10 px-1.5 py-0.5 rounded text-amber-300">refunding</code> ก่อนคืนเครดิต เมื่อยอดเงินผู้เล่นอัปเดตเรียบร้อยจึงเปลี่ยนเป็น <code className="text-xs bg-[#061120] border border-white/10 px-1.5 py-0.5 rounded text-slate-300">cancelled</code> ป้องกันการคืนเงินซ้ำซ้อนแม้อินเทอร์เน็ตขัดข้อง
+                    <p className="text-xs text-slate-600 leading-relaxed font-thai">
+                      ในกรณีที่รอบแข่งขันถูกยกเลิก (Void Round) ระบบจะเปลี่ยนสถานะออเดอร์เป็น <code className="text-xs bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">refunding</code> ก่อนคืนเครดิต เมื่อยอดเงินผู้เล่นอัปเดตเรียบร้อยจึงเปลี่ยนเป็น <code className="text-xs bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-slate-600">cancelled</code> ป้องกันการคืนเงินซ้ำซ้อนแม้อินเทอร์เน็ตขัดข้อง
                     </p>
                   </div>
                 </div>
 
-                <div className="p-3.5 bg-[#061120] border border-sky-500/30 rounded-xl text-xs text-slate-300 flex items-center gap-2">
-                  <ShieldCheck size={16} className="text-emerald-400 shrink-0" />
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 flex items-center gap-2">
+                  <ShieldCheck size={16} className="text-emerald-600 shrink-0" />
                   <span>ระบบทำงานภายใต้มาตรฐานความปลอดภัยข้อมูล TLS 1.3 และการเข้ารหัสแบบ End-to-End 256-Bit SSL</span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Action to Jump Back to Login Modal */}
-          <div className="pt-4 text-center">
-            <button
-              type="button"
-              onClick={handleOpenLoginModal}
-              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 active:scale-95 text-white text-xs sm:text-sm font-bold tracking-wide transition-all cursor-pointer shadow-lg shadow-sky-500/20 whitespace-nowrap border border-sky-300/40"
-            >
-              <LogIn size={15} />
-              <span>เข้าสู่ระบบ (Sign In)</span>
-            </button>
-          </div>
-
         </div>
       </section>
 
       {/* -------------------------------------------------------------
-          FOOTER (Corporate Navy #050e1a with Sky Blue Accents)
+          FOOTER (Bright Daylight Theme)
          ------------------------------------------------------------- */}
-      <footer className="w-full bg-[#050e1a] text-slate-400 py-8 px-4 sm:px-8 border-t border-white/10 mt-auto">
+      <footer className="w-full bg-white text-slate-500 py-8 px-4 sm:px-8 border-t border-slate-200 mt-auto">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-3 text-center md:text-left">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center text-white shrink-0 shadow-md">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center text-white shrink-0 shadow-sm">
               <Rocket size={18} className="transform -rotate-45" />
             </div>
             <div>
-              <span className="text-sm font-bold text-white uppercase block">
+              <span className="text-sm font-bold text-slate-900 uppercase block">
                 Bang Fai Commander &bull; Mission Control
               </span>
               <p className="text-xs text-slate-400">
@@ -690,69 +655,61 @@ export default function AdminLockScreen({
           <div className="flex flex-wrap items-center justify-center gap-4 text-xs">
             <button 
               type="button" 
-              onClick={() => handleNavClick('usage')} 
-              className="hover:text-sky-300 transition-colors cursor-pointer whitespace-nowrap"
-            >
-              คู่มือการใช้งาน
-            </button>
-            <span className="text-white/20">&bull;</span>
-            <button 
-              type="button" 
               onClick={() => handleNavClick('terms')} 
-              className="hover:text-sky-300 transition-colors cursor-pointer whitespace-nowrap"
+              className="hover:text-sky-600 transition-colors cursor-pointer whitespace-nowrap text-slate-600 font-medium"
             >
-              ข้อกำหนดและเงื่อนไข
+              ข้อกำหนดและเงื่อนไข (Terms of Service)
             </button>
           </div>
 
-          <div className="text-xs text-slate-500 text-center md:text-right">
+          <div className="text-xs text-slate-400 text-center md:text-right">
             <span>&copy; {new Date().getFullYear()} Bang Fai Commander. All rights reserved.</span>
           </div>
         </div>
       </footer>
 
       {/* -------------------------------------------------------------
-          POPUP MODAL: APPLE-STYLE LIQUID GLASS ADMIN LOGIN DIALOG
+          POPUP MODAL: APPLE-STYLE BRIGHT GLASS ADMIN LOGIN DIALOG
          ------------------------------------------------------------- */}
       {isLoginModalOpen && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md transition-all duration-300 animate-in fade-in"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm transition-all duration-300 animate-in fade-in"
           onClick={handleCloseLoginModal}
         >
           <div 
             ref={loginCardRef}
             onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-[420px] bg-[#071324]/90 backdrop-blur-2xl border border-white/20 border-t-white/40 rounded-3xl p-6 sm:p-7 shadow-[0_25px_60px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.2)] space-y-4 overflow-hidden ring-1 ring-inset ring-white/10 animate-in zoom-in-95 duration-200"
+            className="relative w-full max-w-[420px] bg-white rounded-3xl p-6 sm:p-7 shadow-[0_25px_60px_rgba(0,0,0,0.18)] border border-slate-200/80 space-y-4 overflow-hidden animate-in zoom-in-95 duration-200"
           >
-            {/* Upper Specular Glass Sheen Highlight */}
-            <div className="absolute top-0 inset-x-0 h-28 bg-gradient-to-b from-white/15 to-transparent pointer-events-none rounded-t-3xl" />
+            {/* Top Accent Bar */}
+            <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 rounded-t-3xl" />
 
             {/* Close Button (X) */}
             <button
               type="button"
               onClick={handleCloseLoginModal}
-              className="absolute top-4 right-4 z-20 p-2 rounded-full bg-white/10 hover:bg-white/20 active:scale-95 text-slate-300 hover:text-white transition-all cursor-pointer border border-white/10"
+              className="absolute top-4 right-4 z-20 p-2 rounded-full bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-500 hover:text-slate-800 transition-all cursor-pointer"
               aria-label="Close"
             >
               <X size={18} />
             </button>
 
             {/* Card Header */}
-            <div className="relative z-10 flex items-center justify-between pb-3 border-b border-white/15 gap-3 pr-8">
+            <div className="relative z-10 flex items-center justify-between pb-3 border-b border-slate-100 gap-3 pr-8">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-2xl bg-white/15 border border-white/25 backdrop-blur-xl flex items-center justify-center text-sky-300 shadow-[inset_0_1px_1px_rgba(255,255,255,0.3)] shrink-0">
+                <div className="w-10 h-10 rounded-2xl bg-sky-50 border border-sky-100 flex items-center justify-center text-sky-600 shadow-xs shrink-0">
                   <Lock size={18} />
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-base sm:text-lg font-bold text-white tracking-tight drop-shadow-sm whitespace-nowrap">
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight whitespace-nowrap">
                     เข้าสู่ระบบผู้ดูแล (Admin)
                   </h3>
-                  <p className="text-[11px] sm:text-xs text-sky-200/90 font-medium whitespace-nowrap">
+                  <p className="text-[11px] sm:text-xs text-slate-500 font-medium whitespace-nowrap">
                     ยินดีต้อนรับสู่ระบบควบคุมภาคสนาม
                   </p>
                 </div>
               </div>
-              <span className="text-[10px] px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 rounded-full font-sans font-bold tracking-wider backdrop-blur-md shadow-sm shrink-0 whitespace-nowrap">
+              <span className="text-[10px] px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full font-sans font-bold tracking-wider whitespace-nowrap">
                 SECURED
               </span>
             </div>
@@ -763,12 +720,12 @@ export default function AdminLockScreen({
               <div className="space-y-1">
                 <label 
                   htmlFor="admin-username-field" 
-                  className="text-xs font-semibold text-slate-200 block drop-shadow-sm"
+                  className="text-xs font-semibold text-slate-700 block"
                 >
                   ชื่อผู้ใช้ (Username)
                 </label>
                 <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-sky-300">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                     <User size={16} />
                   </span>
                   <input 
@@ -781,7 +738,7 @@ export default function AdminLockScreen({
                     placeholder="ป้อนชื่อผู้ใช้..."
                     value={usernameInput}
                     onChange={(e) => setUsernameInput(e.target.value)}
-                    className="w-full pl-9 pr-3.5 py-2.5 bg-[#061120]/80 hover:bg-[#061120]/90 focus:bg-[#061120] backdrop-blur-xl border border-white/20 focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 rounded-xl text-white placeholder-slate-400 font-sans text-xs tracking-normal transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]"
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 rounded-xl text-slate-900 placeholder-slate-400 font-sans text-xs tracking-normal transition-all shadow-xs"
                     autoFocus
                   />
                 </div>
@@ -792,14 +749,14 @@ export default function AdminLockScreen({
                 <div className="flex items-center justify-between">
                   <label 
                     htmlFor="admin-password-field" 
-                    className="text-xs font-semibold text-slate-200 block drop-shadow-sm"
+                    className="text-xs font-semibold text-slate-700 block"
                   >
                     รหัสผ่าน (Password)
                   </label>
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="text-[10px] text-sky-300 hover:text-white hover:underline flex items-center gap-1 cursor-pointer transition-colors"
+                    className="text-[10px] text-sky-600 hover:text-sky-800 hover:underline flex items-center gap-1 cursor-pointer transition-colors"
                   >
                     {showPassword ? (
                       <>
@@ -815,7 +772,7 @@ export default function AdminLockScreen({
                   </button>
                 </div>
                 <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-sky-300">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                     <Lock size={16} />
                   </span>
                   <input 
@@ -825,15 +782,15 @@ export default function AdminLockScreen({
                     placeholder="ป้อนรหัสผ่าน..."
                     value={passwordInput}
                     onChange={(e) => setPasswordInput(e.target.value)}
-                    className="w-full pl-9 pr-9 py-2.5 bg-[#061120]/80 hover:bg-[#061120]/90 focus:bg-[#061120] backdrop-blur-xl border border-white/20 focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 rounded-xl text-white placeholder-slate-400 font-mono text-xs tracking-wider transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]"
+                    className="w-full pl-9 pr-9 py-2.5 bg-slate-50 hover:bg-slate-100/60 focus:bg-white border border-slate-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 rounded-xl text-slate-900 placeholder-slate-400 font-mono text-xs tracking-wider transition-all shadow-xs"
                   />
                 </div>
               </div>
 
               {/* Error Banner */}
               {loginError && (
-                <div className="p-2.5 bg-rose-500/25 border border-rose-500/50 rounded-xl flex items-center gap-2 text-rose-100 backdrop-blur-md">
-                  <AlertTriangle size={16} className="shrink-0 text-rose-300" />
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-rose-800">
+                  <AlertTriangle size={16} className="shrink-0 text-rose-600" />
                   <span className="text-[11px] font-semibold">
                     {loginError}
                   </span>
@@ -844,7 +801,7 @@ export default function AdminLockScreen({
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full py-3 px-5 bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-blue-500 active:scale-[0.98] disabled:opacity-50 text-white rounded-xl text-xs sm:text-sm font-bold tracking-wide transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_8px_20px_rgba(14,165,233,0.35),inset_0_1px_1px_rgba(255,255,255,0.4)] border-t border-t-white/30 mt-1"
+                className="w-full py-3 px-5 bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-600 hover:to-blue-700 active:scale-[0.98] disabled:opacity-50 text-white rounded-xl text-xs sm:text-sm font-bold tracking-wide transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-sky-500/25 mt-1"
               >
                 <LogIn size={15} />
                 <span>{isSubmitting ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบ (Sign In)'}</span>
@@ -852,19 +809,14 @@ export default function AdminLockScreen({
             </form>
 
             {/* Card Footer Info */}
-            <div className="relative z-10 pt-2 flex flex-col sm:flex-row items-center justify-between text-[10px] text-slate-300 gap-1.5 border-t border-white/15">
-              <span className="flex items-center gap-1 text-slate-200">
-                <ShieldCheck size={13} className="text-sky-300" />
+            <div className="relative z-10 pt-2 flex items-center justify-between text-[10px] text-slate-400 border-t border-slate-100">
+              <span className="flex items-center gap-1 text-slate-600">
+                <ShieldCheck size={13} className="text-emerald-600" />
                 <span>256-Bit SSL Secured</span>
               </span>
-              <button
-                type="button"
-                onClick={() => handleNavClick('usage')}
-                className="text-sky-300 hover:text-white hover:underline flex items-center gap-1 cursor-pointer font-medium transition-colors"
-              >
-                <BookOpen size={11} />
-                <span>คู่มือการใช้งาน</span>
-              </button>
+              <span className="text-slate-400">
+                Mission Control &bull; TLS 1.3
+              </span>
             </div>
           </div>
         </div>
