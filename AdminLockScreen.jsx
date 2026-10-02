@@ -135,7 +135,7 @@ export default function AdminLockScreen({
       {/* -------------------------------------------------------------
           TOP NAVIGATION BAR (Rescaled for Professional Alignment)
          ------------------------------------------------------------- */}
-      <header className="sticky top-0 z-50 w-full bg-[#071324]/90 backdrop-blur-md border-b border-white/10 px-4 sm:px-8 lg:px-12 py-3 transition-all">
+      <header className="fixed top-0 inset-x-0 z-50 w-full bg-[#071324]/90 backdrop-blur-md border-b border-white/10 px-4 sm:px-8 lg:px-12 py-3 transition-all shadow-lg">
         <div className="max-w-[1720px] mx-auto flex items-center justify-between gap-4 lg:gap-8">
           
           {/* Brand Logo & Title */}
@@ -246,7 +246,7 @@ export default function AdminLockScreen({
           HERO SECTION: FULL HOMEPAGE STYLE WITH BACKGROUND.PNG (ATLAS V LAUNCH)
          ------------------------------------------------------------- */}
       <section 
-        className="relative w-full min-h-[calc(100vh-68px)] flex items-center bg-[#030712] bg-cover bg-right lg:bg-center overflow-hidden"
+        className="relative w-full min-h-screen pt-[68px] flex items-center bg-[#030712] bg-cover bg-right lg:bg-center overflow-hidden"
         style={{ backgroundImage: `url(${HERO_FULL_BACKGROUND})` }}
       >
         {/* Subtle, Soft Gradient Overlay to Keep Background Image Bright & Visible */}
@@ -514,7 +514,7 @@ export default function AdminLockScreen({
          ------------------------------------------------------------- */}
       <section 
         ref={docsSectionRef}
-        className="w-full bg-[#071324] text-white py-16 px-4 sm:px-8 border-b border-white/10"
+        className="w-full bg-[#071324] text-white py-16 px-4 sm:px-8 border-b border-white/10 scroll-mt-16"
       >
         <div className="max-w-5xl mx-auto space-y-8">
           
