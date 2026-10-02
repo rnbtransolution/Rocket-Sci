@@ -135,8 +135,8 @@ export default function AdminLockScreen({
       {/* -------------------------------------------------------------
           TOP NAVIGATION BAR (Rescaled for Professional Alignment)
          ------------------------------------------------------------- */}
-      <header className="sticky top-0 z-50 w-full bg-[#071324]/90 backdrop-blur-md border-b border-white/10 px-4 sm:px-6 lg:px-8 py-3 transition-all">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 lg:gap-8">
+      <header className="sticky top-0 z-50 w-full bg-[#071324]/90 backdrop-blur-md border-b border-white/10 px-4 sm:px-8 lg:px-12 py-3 transition-all">
+        <div className="max-w-[1720px] mx-auto flex items-center justify-between gap-4 lg:gap-8">
           
           {/* Brand Logo & Title */}
           <div 
@@ -242,55 +242,55 @@ export default function AdminLockScreen({
       </header>
 
       {/* -------------------------------------------------------------
-          HERO SECTION: FULL HOMEPAGE STYLE WITH APPLE LIQUID GLASS CARD
+          HERO SECTION: FULL HOMEPAGE STYLE WITH HERO IMAGE 4 (ESA FLEET)
          ------------------------------------------------------------- */}
       <section 
-        className="relative w-full min-h-[calc(100vh-68px)] flex items-center bg-[#071324] bg-cover bg-[position:65%_center] sm:bg-[position:75%_center] lg:bg-[position:88%_center] overflow-hidden"
+        className="relative w-full min-h-[calc(100vh-68px)] flex items-center bg-[#050b16] bg-cover bg-center overflow-hidden"
         style={{ backgroundImage: `url(${HERO_FULL_BACKGROUND})` }}
       >
-        {/* Transparent Ambient Gradient for Dramatic Rocket Visibility */}
-        <div className="absolute inset-0 bg-gradient-to-r from-[#071324]/50 via-transparent to-[#071324]/40 pointer-events-none" />
+        {/* Soft Ambient Vignette for Space & Earth Horizon Atmosphere */}
+        <div className="absolute inset-0 bg-gradient-to-r from-[#050b16]/60 via-transparent to-[#050b16]/50 pointer-events-none" />
         {/* Smooth Top Transition from Header */}
-        <div className="absolute top-0 inset-x-0 h-24 bg-gradient-to-b from-[#071324]/70 to-transparent pointer-events-none" />
+        <div className="absolute top-0 inset-x-0 h-24 bg-gradient-to-b from-[#071324]/80 to-transparent pointer-events-none" />
         {/* Smooth Bottom Transition to Next Section */}
-        <div className="absolute bottom-0 inset-x-0 h-28 bg-gradient-to-t from-[#071324] via-[#071324]/20 to-transparent pointer-events-none" />
+        <div className="absolute bottom-0 inset-x-0 h-28 bg-gradient-to-t from-[#081528] via-[#081528]/40 to-transparent pointer-events-none" />
 
-        <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-8 py-12 sm:py-20 flex-1 flex flex-col justify-center">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+        <div className="relative z-10 w-full max-w-[1720px] mx-auto px-4 sm:px-8 lg:px-12 py-10 sm:py-16 flex-1 flex flex-col justify-center">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
             
-            {/* LEFT COLUMN (Desktop): APPLE STYLE LIQUID GLASS LOGIN CARD */}
-            <div className="order-2 lg:order-1 lg:col-span-5 w-full flex justify-center lg:justify-start">
+            {/* LEFT COLUMN: APPLE STYLE LIQUID GLASS LOGIN CARD */}
+            <div className="order-2 lg:order-1 lg:col-span-4 xl:col-span-3 w-full flex justify-center lg:justify-start">
               <div 
                 ref={loginCardRef}
-                className="relative w-full max-w-md bg-[#0a192f]/45 backdrop-blur-2xl border border-white/20 border-t-white/35 rounded-3xl p-6 sm:p-8 shadow-[0_24px_50px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.2)] space-y-5 overflow-hidden ring-1 ring-inset ring-white/10"
+                className="relative w-full max-w-[340px] bg-[#071324]/55 backdrop-blur-2xl border border-white/20 border-t-white/40 rounded-3xl p-5 sm:p-6 shadow-[0_24px_50px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.2)] space-y-4 overflow-hidden ring-1 ring-inset ring-white/10"
               >
-                {/* Upper Specular Glass Sheen Highlight (Apple Acrylic Reflection) */}
-                <div className="absolute top-0 inset-x-0 h-32 bg-gradient-to-b from-white/10 to-transparent pointer-events-none rounded-t-3xl" />
+                {/* Upper Specular Glass Sheen Highlight */}
+                <div className="absolute top-0 inset-x-0 h-28 bg-gradient-to-b from-white/15 to-transparent pointer-events-none rounded-t-3xl" />
 
                 {/* Card Header */}
-                <div className="relative z-10 flex items-center justify-between pb-3 border-b border-white/15">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-white/15 border border-white/25 backdrop-blur-xl flex items-center justify-center text-sky-300 shadow-[inset_0_1px_1px_rgba(255,255,255,0.3)] shrink-0">
-                      <Lock size={19} />
+                <div className="relative z-10 flex items-center justify-between pb-2.5 border-b border-white/15">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-2xl bg-white/15 border border-white/25 backdrop-blur-xl flex items-center justify-center text-sky-300 shadow-[inset_0_1px_1px_rgba(255,255,255,0.3)] shrink-0">
+                      <Lock size={17} />
                     </div>
                     <div>
-                      <h3 className="text-base font-bold text-white tracking-tight drop-shadow-sm">
-                        เข้าสู่ระบบผู้ดูแล (Admin Portal)
+                      <h3 className="text-sm sm:text-base font-bold text-white tracking-tight drop-shadow-sm">
+                        เข้าสู่ระบบผู้ดูแล (Admin)
                       </h3>
-                      <p className="text-xs text-sky-200/90 font-medium">
-                        ยินดีต้อนรับสู่ระบบจัดการและควบคุมภาคสนาม
+                      <p className="text-[11px] text-sky-200/90 font-medium">
+                        ยินดีต้อนรับสู่ระบบควบคุมภาคสนาม
                       </p>
                     </div>
                   </div>
-                  <span className="text-[10px] px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 rounded-full font-sans font-semibold tracking-wide backdrop-blur-md shadow-sm">
-                    SECURED ACCESS
+                  <span className="text-[9px] px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 rounded-full font-sans font-semibold tracking-wide backdrop-blur-md shadow-sm">
+                    SECURED
                   </span>
                 </div>
 
                 {/* Login Form */}
-                <form onSubmit={handleLogin} className="relative z-10 space-y-4">
+                <form onSubmit={handleLogin} className="relative z-10 space-y-3.5">
                   {/* Username Input */}
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     <label 
                       htmlFor="admin-username-field" 
                       className="text-xs font-semibold text-slate-200 block drop-shadow-sm"
@@ -298,8 +298,8 @@ export default function AdminLockScreen({
                       ชื่อผู้ใช้ (Username)
                     </label>
                     <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-sky-300">
-                        <User size={17} />
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-sky-300">
+                        <User size={16} />
                       </span>
                       <input 
                         id="admin-username-field"
@@ -308,17 +308,17 @@ export default function AdminLockScreen({
                         autoComplete="username"
                         autoCapitalize="none"
                         spellCheck="false"
-                        placeholder="ป้อนชื่อผู้ใช้ (เช่น admin)..."
+                        placeholder="ป้อนชื่อผู้ใช้..."
                         value={usernameInput}
                         onChange={(e) => setUsernameInput(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2.5 bg-[#061120]/60 hover:bg-[#061120]/75 focus:bg-[#061120]/90 backdrop-blur-xl border border-white/20 focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 rounded-xl text-white placeholder-slate-400 font-sans text-sm tracking-normal transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]"
+                        className="w-full pl-9 pr-3.5 py-2 bg-[#061120]/70 hover:bg-[#061120]/80 focus:bg-[#061120]/95 backdrop-blur-xl border border-white/20 focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 rounded-xl text-white placeholder-slate-400 font-sans text-xs tracking-normal transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]"
                         autoFocus
                       />
                     </div>
                   </div>
 
                   {/* Password Input */}
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     <div className="flex items-center justify-between">
                       <label 
                         htmlFor="admin-password-field" 
@@ -329,24 +329,24 @@ export default function AdminLockScreen({
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        className="text-[11px] text-sky-300 hover:text-white hover:underline flex items-center gap-1 cursor-pointer transition-colors"
+                        className="text-[10px] text-sky-300 hover:text-white hover:underline flex items-center gap-1 cursor-pointer transition-colors"
                       >
                         {showPassword ? (
                           <>
-                            <EyeOff size={12} />
-                            <span>ซ่อนรหัสผ่าน</span>
+                            <EyeOff size={11} />
+                            <span>ซ่อน</span>
                           </>
                         ) : (
                           <>
-                            <Eye size={12} />
-                            <span>แสดงรหัสผ่าน</span>
+                            <Eye size={11} />
+                            <span>แสดง</span>
                           </>
                         )}
                       </button>
                     </div>
                     <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-sky-300">
-                        <Lock size={17} />
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-sky-300">
+                        <Lock size={16} />
                       </span>
                       <input 
                         id="admin-password-field"
@@ -355,91 +355,96 @@ export default function AdminLockScreen({
                         placeholder="ป้อนรหัสผ่าน..."
                         value={passwordInput}
                         onChange={(e) => setPasswordInput(e.target.value)}
-                        className="w-full pl-10 pr-10 py-2.5 bg-[#061120]/60 hover:bg-[#061120]/75 focus:bg-[#061120]/90 backdrop-blur-xl border border-white/20 focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 rounded-xl text-white placeholder-slate-400 font-mono text-sm tracking-wider transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]"
+                        className="w-full pl-9 pr-9 py-2 bg-[#061120]/70 hover:bg-[#061120]/80 focus:bg-[#061120]/95 backdrop-blur-xl border border-white/20 focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 rounded-xl text-white placeholder-slate-400 font-mono text-xs tracking-wider transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]"
                       />
                     </div>
                   </div>
 
                   {/* Error Banner */}
                   {loginError && (
-                    <div className="p-3 bg-rose-500/25 border border-rose-500/50 rounded-xl flex items-center gap-2.5 text-rose-100 backdrop-blur-md">
-                      <AlertTriangle size={18} className="shrink-0 text-rose-300" />
-                      <span className="text-xs font-semibold">
+                    <div className="p-2.5 bg-rose-500/25 border border-rose-500/50 rounded-xl flex items-center gap-2 text-rose-100 backdrop-blur-md">
+                      <AlertTriangle size={16} className="shrink-0 text-rose-300" />
+                      <span className="text-[11px] font-semibold">
                         {loginError}
                       </span>
                     </div>
                   )}
 
-                  {/* Sign-In Submit Button (Apple Vibrant Liquid Glass Button) */}
+                  {/* Sign-In Submit Button */}
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="w-full py-3.5 px-6 bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-blue-500 active:scale-[0.98] disabled:opacity-50 text-white rounded-xl text-sm font-bold tracking-wide transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_8px_25px_rgba(14,165,233,0.4),inset_0_1px_1px_rgba(255,255,255,0.4)] border-t border-t-white/30"
+                    className="w-full py-3 px-5 bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:to-blue-500 active:scale-[0.98] disabled:opacity-50 text-white rounded-xl text-xs sm:text-sm font-bold tracking-wide transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_8px_20px_rgba(14,165,233,0.35),inset_0_1px_1px_rgba(255,255,255,0.4)] border-t border-t-white/30 mt-1"
                   >
-                    <LogIn size={16} />
-                    <span>{isSubmitting ? 'กำลังตรวจสอบสิทธิ์...' : 'เข้าสู่ระบบ (Sign In)'}</span>
+                    <LogIn size={15} />
+                    <span>{isSubmitting ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบ (Sign In)'}</span>
                   </button>
                 </form>
 
                 {/* Card Footer Info */}
-                <div className="relative z-10 pt-2 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-300 gap-2 border-t border-white/15">
-                  <span className="flex items-center gap-1.5 text-slate-200">
-                    <ShieldCheck size={14} className="text-sky-300" />
-                    <span>256-Bit SSL Secured Portal</span>
+                <div className="relative z-10 pt-2 flex flex-col sm:flex-row items-center justify-between text-[10px] text-slate-300 gap-1.5 border-t border-white/15">
+                  <span className="flex items-center gap-1 text-slate-200">
+                    <ShieldCheck size={13} className="text-sky-300" />
+                    <span>256-Bit SSL Secured</span>
                   </span>
                   <button
                     type="button"
                     onClick={() => handleNavClick('usage')}
                     className="text-sky-300 hover:text-white hover:underline flex items-center gap-1 cursor-pointer font-medium transition-colors"
                   >
-                    <BookOpen size={12} />
-                    <span>อ่านคู่มือการใช้งาน</span>
+                    <BookOpen size={11} />
+                    <span>คู่มือการใช้งาน</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* RIGHT COLUMN (Desktop): WELCOME HEADINGS, VALUE PROPOSITIONS & TRUST INDICATORS */}
-            <div className="order-1 lg:order-2 lg:col-span-6 lg:col-start-7 lg:pl-12 xl:pl-20 space-y-6">
-              
-              {/* Status Overline Badge (Zero Emojis - Lucide ShieldCheck) */}
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/10 border border-white/20 text-sky-200 text-xs font-semibold shadow-sm backdrop-blur-md">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <ShieldCheck size={14} className="text-sky-400" />
-                <span>Enterprise Operations Management Platform</span>
-              </div>
+            {/* CENTER COLUMN: Dedicated open space for the 3 ascending launch vehicles */}
+            <div className="hidden lg:block lg:order-2 lg:col-span-4 xl:col-span-5 pointer-events-none select-none" />
 
-              {/* Main Headline (2-Line Restyle: Bold + Thin Italic) */}
-              <div className="space-y-3">
-                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-heading text-white tracking-tight leading-tight drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)]">
-                  <span className="font-extrabold block">Better Solutions</span>
-                  <span className="font-light italic text-[#38bdf8] block text-2xl sm:text-3xl lg:text-4xl mt-1.5">For Your Operations</span>
-                </h1>
-                <h2 className="text-lg sm:text-xl font-medium text-sky-100 font-thai drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
-                  ระบบบริหารจัดการธุรกรรมและการแข่งขันภาคสนามระดับองค์กร
-                </h2>
-                <p className="text-sm sm:text-base text-slate-100 leading-relaxed max-w-xl font-thai font-normal drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
-                  ศูนย์กลางประมวลผลคำสั่งซื้อและตรวจสลิปเงินโอนอัตโนมัติ พร้อมแดชบอร์ดควบคุมรอบการแข่งขัน 
-                  และระบบประมวลผลเวลาภาคสนามความเร็วสูงแบบเรียลไทม์
-                </p>
-              </div>
+            {/* RIGHT COLUMN: WELCOME HEADINGS, VALUE PROPOSITIONS & TRUST INDICATORS */}
+            <div className="order-1 lg:order-3 lg:col-span-4 xl:col-span-4 w-full flex justify-center lg:justify-end">
+              <div className="max-w-[380px] space-y-4 text-left">
+                
+                {/* Status Overline Badge (Zero Emojis - Lucide ShieldCheck) */}
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-sky-200 text-xs font-semibold shadow-sm backdrop-blur-md">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <ShieldCheck size={14} className="text-sky-400" />
+                  <span>Enterprise Operations Platform</span>
+                </div>
 
-              {/* Core Feature Highlights (Liquid Glass Pills) */}
-              <div className="pt-2 flex flex-wrap items-center gap-2.5 sm:gap-3 text-xs text-white font-medium">
-                <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900/50 backdrop-blur-xl border border-white/20 shadow-md">
-                  <Zap size={14} className="text-amber-400" />
-                  <span>แม่นยำระดับเสี้ยววินาที</span>
-                </span>
-                <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900/50 backdrop-blur-xl border border-white/20 shadow-md">
-                  <ShieldCheck size={14} className="text-emerald-400" />
-                  <span>ตรวจสลิปอัตโนมัติ 1:1</span>
-                </span>
-                <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900/50 backdrop-blur-xl border border-white/20 shadow-md">
-                  <BarChart3 size={14} className="text-sky-400" />
-                  <span>ซิงก์ข้อมูลเรียลไทม์</span>
-                </span>
-              </div>
+                {/* Main Headline (2-Line Restyle: Bold + Thin Italic) */}
+                <div className="space-y-1.5">
+                  <h1 className="text-3xl sm:text-4xl lg:text-[38px] font-heading text-white tracking-tight leading-[1.15] drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]">
+                    <span className="font-extrabold block">Better Solutions</span>
+                    <span className="font-light italic text-[#38bdf8] block text-2xl sm:text-3xl mt-0.5">For Your Operations</span>
+                  </h1>
+                  <h2 className="text-sm sm:text-base font-medium text-sky-100 font-thai drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
+                    ระบบบริหารจัดการธุรกรรมและการแข่งขันภาคสนามระดับองค์กร
+                  </h2>
+                  <p className="text-xs text-slate-200 leading-relaxed font-thai font-normal drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
+                    ศูนย์กลางประมวลผลคำสั่งซื้อและตรวจสลิปเงินโอนอัตโนมัติ พร้อมแดชบอร์ดควบคุมรอบการแข่งขัน 
+                    และระบบประมวลผลเวลาภาคสนามความเร็วสูงแบบเรียลไทม์
+                  </p>
+                </div>
 
+                {/* Core Feature Highlights (Liquid Glass Pills) */}
+                <div className="pt-1 flex flex-wrap items-center gap-2 text-xs text-white font-medium">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md">
+                    <Zap size={13} className="text-amber-400" />
+                    <span>แม่นยำระดับเสี้ยววินาที</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md">
+                    <ShieldCheck size={13} className="text-emerald-400" />
+                    <span>ตรวจสลิปอัตโนมัติ 1:1</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/60 backdrop-blur-xl border border-white/20 shadow-md">
+                    <BarChart3 size={13} className="text-sky-400" />
+                    <span>ซิงก์ข้อมูลเรียลไทม์</span>
+                  </span>
+                </div>
+
+              </div>
             </div>
 
           </div>
