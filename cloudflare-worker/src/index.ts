@@ -237,11 +237,16 @@ export default {
         const { functionName, args = [] } = body;
 
         const authHeader = request.headers.get('x-admin-key') || request.headers.get('x-admin-api-key') || body?.adminKey || body?.apiKey;
-        const validAdminKeys = [
+        const superAdminKeys = [
           env.ADMIN_API_KEY,
           'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT',
           'P@ssW0rd2026',
         ].filter(Boolean);
+        const admin1Keys = [
+          'admin1_key_8f3a9e2c1b4d5e6f',
+          'Admin@2026',
+        ];
+        const validAdminKeys = [...superAdminKeys, ...admin1Keys];
         const isAdmin = Boolean(authHeader && validAdminKeys.includes(authHeader));
         const isPublicAllowed = functionName === 'getDashboardData' || functionName === 'adminLogin' || functionName === 'getP2PResults';
         if (!isPublicAllowed && !isAdmin) {
@@ -460,13 +465,30 @@ export default {
         } else if (functionName === 'adminLogin') {
           const username = (args[0] || '').toString().trim().toLowerCase();
           const password = (args[1] || '').toString().trim();
-          const validPasses = [
+          const superPasses = [
             env.ADMIN_API_KEY,
             'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT',
             'P@ssW0rd2026',
           ].filter(Boolean);
-          if (username === 'admin' && validPasses.includes(password)) {
-            result = { success: true, adminKey: env.ADMIN_API_KEY || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT', username: 'Admin' };
+          const admin1Passes = [
+            'Admin@2026',
+            'admin1_key_8f3a9e2c1b4d5e6f',
+          ];
+
+          if (username === 'admin' && superPasses.includes(password)) {
+            result = { 
+              success: true, 
+              adminKey: env.ADMIN_API_KEY || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT', 
+              username: 'Admin', 
+              role: 'superadmin' 
+            };
+          } else if (username === 'admin1' && admin1Passes.includes(password)) {
+            result = { 
+              success: true, 
+              adminKey: 'admin1_key_8f3a9e2c1b4d5e6f', 
+              username: 'Admin1', 
+              role: 'admin' 
+            };
           } else {
             result = { success: false, error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
           }
@@ -743,6 +765,16 @@ export default {
           const res = await clearAllPendingOrders(env);
           result = { success: true, message: 'Cleared pending orders and board cache', cleared: res.cleared };
         } else if (functionName === 'resetGoogleSheetsDatabase') {
+          // Strict privilege check: Super Admin only
+          const isSuperAdmin = Boolean(authHeader && superAdminKeys.includes(authHeader));
+          if (!isSuperAdmin) {
+            return new Response(JSON.stringify({ 
+              error: 'Forbidden: สิทธิ์ไม่เพียงพอ เฉพาะ Super Admin เท่านั้นที่สามารถล้างระเบียนข้อมูลระบบ (Factory Reset) ได้' 
+            }), {
+              status: 403,
+              headers: { 'Content-Type': 'application/json', ...corsHeaders },
+            });
+          }
           // 1. Clear atomic order state in KV
           await clearAllPendingOrders(env);
           // 2. Clear players, transactions, and logs in KV

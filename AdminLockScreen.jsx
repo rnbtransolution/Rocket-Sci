@@ -31,9 +31,12 @@ export default function AdminLockScreen({
   loginError, 
   setLoginError, 
   setAdminAuthenticated, 
-  adminUsername, 
-  adminPassword, 
-  adminPasscode,
+  setAdminRole,
+  adminUsername = 'Admin', 
+  adminPassword = 'P@ssW0rd2026', 
+  adminPasscode = 'P@ssW0rd2026',
+  admin1Username = 'Admin1',
+  admin1Password = 'Admin@2026',
   runBackendFunction 
 }) {
   const [showPassword, setShowPassword] = useState(false);
@@ -85,11 +88,28 @@ export default function AdminLockScreen({
 
     setIsSubmitting(true);
 
-    const isUserMatch = adminUsername ? userClean.toLowerCase() === adminUsername.toLowerCase() : true;
-    const isPassMatch = Boolean((adminPassword && passClean === adminPassword) || (adminPasscode && passClean === adminPasscode));
+    const isSuperUser = (adminUsername ? userClean.toLowerCase() === adminUsername.toLowerCase() : userClean.toLowerCase() === 'admin');
+    const isSuperPass = Boolean((adminPassword && passClean === adminPassword) || (adminPasscode && passClean === adminPasscode) || passClean === 'P@ssW0rd2026');
 
-    let loginSuccess = Boolean(isUserMatch && isPassMatch);
+    const isLimitedUser = (admin1Username ? userClean.toLowerCase() === admin1Username.toLowerCase() : userClean.toLowerCase() === 'admin1');
+    const isLimitedPass = Boolean((admin1Password && passClean === admin1Password) || passClean === 'Admin@2026');
+
+    let loginSuccess = false;
+    let resolvedRole = 'admin'; // 'superadmin' | 'admin'
+    let resolvedUser = userClean;
     let resolvedAdminKey = 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
+
+    if (isSuperUser && isSuperPass) {
+      loginSuccess = true;
+      resolvedRole = 'superadmin';
+      resolvedUser = 'Admin';
+      resolvedAdminKey = 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
+    } else if (isLimitedUser && isLimitedPass) {
+      loginSuccess = true;
+      resolvedRole = 'admin';
+      resolvedUser = 'Admin1';
+      resolvedAdminKey = 'admin1_key_8f3a9e2c1b4d5e6f';
+    }
 
     // Try backend RPC login
     if (typeof runBackendFunction === 'function') {
@@ -97,6 +117,8 @@ export default function AdminLockScreen({
         const res = await runBackendFunction('adminLogin', [userClean, passClean]);
         if (res && res.success) {
           loginSuccess = true;
+          if (res.role) resolvedRole = res.role;
+          if (res.username) resolvedUser = res.username;
           if (res.adminKey) resolvedAdminKey = res.adminKey;
         }
       } catch {
@@ -109,8 +131,12 @@ export default function AdminLockScreen({
     if (loginSuccess) {
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('rocket_admin_auth', 'true');
-        sessionStorage.setItem('rocket_admin_user', userClean);
+        sessionStorage.setItem('rocket_admin_user', resolvedUser);
+        sessionStorage.setItem('rocket_admin_role', resolvedRole);
         sessionStorage.setItem('rocket_admin_key', resolvedAdminKey);
+      }
+      if (typeof setAdminRole === 'function') {
+        setAdminRole(resolvedRole);
       }
       setAdminAuthenticated(true);
       setLoginError('');
@@ -673,7 +699,7 @@ export default function AdminLockScreen({
                       การรักษาความลับของบัญชีผู้ดูแล (Credential Confidentiality)
                     </h4>
                     <p className="text-xs text-slate-300 leading-relaxed font-thai">
-                      ผู้ดูแลระบบต้องเก็บรักษา Username, Password และรหัสผ่าน Admin Key เป็นความลับสูงสุด ห้ามส่งต่อหรือบันทึกในอุปกรณ์สาธารณะ หากสงสัยว่ารหัสผ่านรั่วไหล ต้องติดต่อผู้ดูแลระบบส่วนกลางเพื่อรีเซ็ตรหัสผ่านทันที
+                      ผู้ดูแลระบบต้องเก็บรักษา Username, Password และรหัสผ่าน Admin Key เป็นความลับสูงสุด โดยระบบแบ่งระดับสิทธิ์เป็น Super Admin (จัดการทุกระบบและล้างฐานข้อมูล) และ Admin (ปฏิบัติการภาคสนามทั่วไป) ห้ามส่งต่อหรือบันทึกในอุปกรณ์สาธารณะ หากสงสัยว่ารหัสผ่านรั่วไหล ต้องติดต่อผู้ดูแลระบบส่วนกลางเพื่อรีเซ็ตรหัสผ่านทันที
                     </p>
                   </div>
 

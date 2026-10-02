@@ -103,9 +103,16 @@ const SLIP_PRESETS = [
   }
 ];
 
-const ADMIN_USERNAME = import.meta.env.VITE_ADMIN_USERNAME || 'Admin';
-const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN_PASSCODE || '';
-const ADMIN_PASSCODE = import.meta.env.VITE_ADMIN_PASSCODE || '';
+const SUPER_ADMIN_USERNAME = import.meta.env.VITE_SUPER_ADMIN_USERNAME || import.meta.env.VITE_ADMIN_USERNAME || 'Admin';
+const SUPER_ADMIN_PASSWORD = import.meta.env.VITE_SUPER_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN_PASSCODE || 'P@ssW0rd2026';
+const SUPER_ADMIN_PASSCODE = import.meta.env.VITE_ADMIN_PASSCODE || 'P@ssW0rd2026';
+
+const LIMITED_ADMIN_USERNAME = import.meta.env.VITE_LIMITED_ADMIN_USERNAME || import.meta.env.VITE_ADMIN1_USERNAME || 'Admin1';
+const LIMITED_ADMIN_PASSWORD = import.meta.env.VITE_LIMITED_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN1_PASSWORD || 'Admin@2026';
+
+const ADMIN_USERNAME = SUPER_ADMIN_USERNAME;
+const ADMIN_PASSWORD = SUPER_ADMIN_PASSWORD;
+const ADMIN_PASSCODE = SUPER_ADMIN_PASSCODE;
 
 export default function App() {
   const isGASHost = typeof window !== 'undefined' && (
@@ -153,7 +160,7 @@ export default function App() {
   const runBackendFunction = async (functionName, args = []) => {
     const targetBase = API_BASE_URL || CF_WORKER_BASE_URL;
     const targetUrl = `${targetBase}/api/run`;
-    const apiKey = ADMIN_API_KEY || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
+    const apiKey = getAdminApiKey();
     const headers = {
       'Content-Type': 'application/json',
       'x-admin-key': apiKey,
@@ -164,7 +171,7 @@ export default function App() {
       const res = await fetch(targetUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ functionName, args, adminKey: apiKey, apiKey }),
+        body: JSON.stringify({ functionName, args, adminKey: apiKey, apiKey, adminRole }),
       });
 
       const contentType = res.headers.get('content-type') || '';
@@ -186,7 +193,7 @@ export default function App() {
           if (typeof runner[functionName] === 'function') {
             runner[functionName](...args);
           } else if (typeof runner.executeAdminAction === 'function') {
-            runner.executeAdminAction(functionName, args);
+            runner.executeAdminAction(functionName, args, apiKey);
           } else {
             reject(new Error(`ไม่พบฟังก์ชัน ${functionName}`));
           }
@@ -213,6 +220,16 @@ export default function App() {
     }
     return false;
   });
+  const [adminRole, setAdminRole] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const storedRole = sessionStorage.getItem('rocket_admin_role');
+      if (storedRole) return storedRole;
+      const storedUser = sessionStorage.getItem('rocket_admin_user');
+      if (storedUser && storedUser.toLowerCase() === 'admin1') return 'admin';
+      if (storedUser && storedUser.toLowerCase() === 'admin') return 'superadmin';
+    }
+    return 'superadmin';
+  });
   const [usernameInput, setUsernameInput] = useState(() => {
     if (typeof window !== 'undefined') {
       return sessionStorage.getItem('rocket_admin_user') || '';
@@ -228,8 +245,10 @@ export default function App() {
         sessionStorage.removeItem('rocket_admin_auth');
         sessionStorage.removeItem('rocket_admin_user');
         sessionStorage.removeItem('rocket_admin_key');
+        sessionStorage.removeItem('rocket_admin_role');
       }
       setAdminAuthenticated(false);
+      setAdminRole('admin');
       setPasswordInput('');
       addToast('🔒 ออกจากระบบเรียบร้อย', 'info');
     }
@@ -522,7 +541,12 @@ export default function App() {
 
   // Expose reset state for debug button (preventing reference error)
   const resetConsoleState = async () => {
-    if (!window.confirm("⚠️ คุณต้องการล้างระเบียนข้อมูลระบบทั้งหมดใช่หรือไม่?\n\nการกระทำนี้จะล้างข้อมูลผู้เล่น ธุรกรรม ประวัติการเดิมพัน และบันทึกแชททั้งหมดในฐานข้อมูล ให้กลับสู่ค่าเริ่มต้น")) {
+    if (adminRole !== 'superadmin') {
+      addToast('⛔ สิทธิ์ไม่เพียงพอ: บัญชีผู้ดูแลนี้ไม่มีสิทธิ์ล้างระเบียนข้อมูลระบบ (เฉพาะ Super Admin เท่านั้น)', 'danger');
+      return;
+    }
+
+    if (!window.confirm("⚠️ คุณต้องการล้างระเบียนข้อมูลระบบทั้งหมดใช่หรือไม่?\n\nการกระทำนี้จะล้างข้อมูลผู้เล่น ธุรกรรม ประวัติการเดิมพัน และบันทึกแชททั้งหมดในฐานข้อมูล ให้กลับสู่ค่าเริ่มต้น\n(การกระทำนี้ต้องได้รับสิทธิ์จาก Super Admin)")) {
       return;
     }
     
@@ -919,9 +943,12 @@ export default function App() {
         loginError={loginError}
         setLoginError={setLoginError}
         setAdminAuthenticated={setAdminAuthenticated}
-        adminUsername={ADMIN_USERNAME}
-        adminPassword={ADMIN_PASSWORD}
-        adminPasscode={ADMIN_PASSCODE}
+        setAdminRole={setAdminRole}
+        adminUsername={SUPER_ADMIN_USERNAME}
+        adminPassword={SUPER_ADMIN_PASSWORD}
+        adminPasscode={SUPER_ADMIN_PASSCODE}
+        admin1Username={LIMITED_ADMIN_USERNAME}
+        admin1Password={LIMITED_ADMIN_PASSWORD}
         runBackendFunction={runBackendFunction}
       />
     );
@@ -968,6 +995,17 @@ export default function App() {
               }`}>
                 {(window.isNodeJS || isGAS) ? '🟢 Cloud Connected' : '🧪 Sandbox Mode'}
               </span>
+              {adminRole === 'superadmin' ? (
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-50 border border-purple-300 text-purple-700 flex items-center gap-1 shadow-xs" title="Super Admin: สิทธิ์เต็มรูปแบบทุกฟังก์ชัน">
+                  <span>🛡️ Super Admin</span>
+                  <span className="font-semibold text-purple-600/80">({usernameInput || 'Admin'})</span>
+                </span>
+              ) : (
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-sky-50 border border-sky-300 text-sky-700 flex items-center gap-1 shadow-xs" title="Admin: สิทธิ์ปฏิบัติการภาคสนาม (ไม่สามารถรีเซ็ตระบบได้)">
+                  <span>👤 Admin</span>
+                  <span className="font-semibold text-sky-600/80">({usernameInput || 'Admin1'})</span>
+                </span>
+              )}
             </div>
             <p className="text-[11px] text-slate-500 mt-0.5 font-sans">
               ระบบบริหารจัดการธุรกรรมเครดิตและการแข่งขันบั้งไฟสดภาคสนาม
@@ -991,14 +1029,16 @@ export default function App() {
             <RefreshCw size={13} className="text-white" />
             <span>ซิงค์ข้อมูลสด</span>
           </button>
-          <button 
-            onClick={resetConsoleState}
-            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-slate-700 hover:text-rose-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
-            title="ล้างข้อมูลระบบทั้งหมดกลับสู่ค่าเริ่มต้นโรงงาน"
-          >
-            <RotateCcw size={13} className="text-rose-600" />
-            <span>รีเซ็ตระบบ</span>
-          </button>
+          {adminRole === 'superadmin' && (
+            <button 
+              onClick={resetConsoleState}
+              className="px-3.5 py-2 rounded-lg text-xs font-bold bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-slate-700 hover:text-rose-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+              title="ล้างข้อมูลระบบทั้งหมดกลับสู่ค่าเริ่มต้นโรงงาน (เฉพาะ Super Admin)"
+            >
+              <RotateCcw size={13} className="text-rose-600" />
+              <span>รีเซ็ตระบบ</span>
+            </button>
+          )}
           <button 
             onClick={handleAdminLogout}
             className="px-3.5 py-2 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"

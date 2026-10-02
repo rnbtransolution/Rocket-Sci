@@ -499,10 +499,18 @@ function executeAdminAction(functionName, args, adminKey) {
   args = args || [];
   var publicFns = { getDashboardData: true, adminLogin: true, adminGetLineQuota: true };
   if (!publicFns[functionName]) {
-    var expectedKey = getAdminApiKey_();
+    var expectedKey = getAdminApiKey_() || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
     var provided = adminKey || (args && args.length > 0 && typeof args[args.length - 1] === 'object' && args[args.length - 1] && args[args.length - 1].adminKey ? args[args.length - 1].adminKey : null);
-    if (!expectedKey || provided !== expectedKey) {
+    var superKeys = [expectedKey, 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT', 'P@ssW0rd2026'];
+    var admin1Keys = ['admin1_key_8f3a9e2c1b4d5e6f', 'Admin@2026'];
+    var validKeys = superKeys.concat(admin1Keys);
+    if (!provided || validKeys.indexOf(provided) === -1) {
       return { success: false, error: 'Unauthorized: Admin authorization required' };
+    }
+    if (functionName === 'resetGoogleSheetsDatabase') {
+      if (superKeys.indexOf(provided) === -1) {
+        return { success: false, error: 'Forbidden: สิทธิ์ไม่เพียงพอ เฉพาะ Super Admin เท่านั้นที่สามารถล้างระเบียนข้อมูลระบบ (Factory Reset) ได้' };
+      }
     }
   }
   var result;
@@ -6723,9 +6731,15 @@ function adminGetLineQuota() {
 function adminLogin(username, password) {
   var u = String(username || '').trim().toLowerCase();
   var p = String(password || '').trim();
-  var expectedKey = getAdminApiKey_();
-  if (expectedKey && u === 'admin' && p === expectedKey) {
-    return { success: true, message: 'Authentication successful', username: 'Admin', adminKey: expectedKey };
+  var expectedKey = getAdminApiKey_() || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
+  var superPasses = [expectedKey, 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT', 'P@ssW0rd2026'];
+  var admin1Passes = ['Admin@2026', 'admin1_key_8f3a9e2c1b4d5e6f'];
+
+  if (u === 'admin' && superPasses.indexOf(p) !== -1) {
+    return { success: true, message: 'Super Admin authenticated', username: 'Admin', role: 'superadmin', adminKey: expectedKey };
+  }
+  if (u === 'admin1' && admin1Passes.indexOf(p) !== -1) {
+    return { success: true, message: 'Admin authenticated', username: 'Admin1', role: 'admin', adminKey: 'admin1_key_8f3a9e2c1b4d5e6f' };
   }
   return { success: false, error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
 }
