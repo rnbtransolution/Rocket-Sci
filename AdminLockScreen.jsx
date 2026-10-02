@@ -714,7 +714,8 @@ export default function AdminLockScreen({
               CORE OPERATIONAL VALUES
             </span>
             <h3 className="text-lg font-extrabold text-slate-900 leading-snug">
-              มาตรฐานความแม่นยำและความปลอดภัยระดับมืออาชีพ
+              <span>มาตรฐานความแม่นยำและความปลอดภัย</span>
+              <span className="block">ระดับมืออาชีพ</span>
             </h3>
             <p className="text-xs text-slate-500 mt-1">
               ออกแบบเพื่อยกระดับการปฏิบัติงานภาคสนามให้ราบรื่น โปร่งใส และรวดเร็ว
