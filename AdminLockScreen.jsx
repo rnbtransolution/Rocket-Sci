@@ -249,13 +249,11 @@ export default function AdminLockScreen({
         className="relative w-full min-h-[calc(100vh-68px)] flex items-center bg-[#030712] bg-cover bg-right lg:bg-center overflow-hidden"
         style={{ backgroundImage: `url(${HERO_FULL_BACKGROUND})` }}
       >
-        {/* Rich Multi-Layered Atmospheric Gradient Overlay */}
-        <div className="absolute inset-0 bg-gradient-to-r from-[#030712]/90 via-[#030712]/60 to-[#030712]/35 pointer-events-none" />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#071324]/90 via-transparent to-[#081528] pointer-events-none" />
-        {/* Smooth Top Transition from Header */}
-        <div className="absolute top-0 inset-x-0 h-24 bg-gradient-to-b from-[#071324] to-transparent pointer-events-none" />
-        {/* Smooth Bottom Transition to Next Section */}
-        <div className="absolute bottom-0 inset-x-0 h-32 bg-gradient-to-t from-[#081528] via-[#081528]/80 to-transparent pointer-events-none" />
+        {/* Subtle, Soft Gradient Overlay to Keep Background Image Bright & Visible */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/45 via-black/15 to-transparent pointer-events-none" />
+        {/* Soft Edge Blends */}
+        <div className="absolute top-0 inset-x-0 h-16 bg-gradient-to-b from-[#071324]/70 to-transparent pointer-events-none" />
+        <div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-[#081528] to-transparent pointer-events-none" />
 
         <div className="relative z-10 w-full max-w-[1720px] mx-auto px-4 sm:px-8 lg:px-12 py-10 sm:py-16 flex-1 flex flex-col justify-center">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
