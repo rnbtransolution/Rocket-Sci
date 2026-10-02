@@ -9,16 +9,10 @@ import {
   ShieldCheck, 
   AlertTriangle, 
   BookOpen, 
-  Code, 
   FileCheck, 
-  Server, 
-  Activity, 
-  Globe, 
-  Terminal, 
   ArrowUp, 
   Menu, 
-  X,
-  Zap
+  X
 } from 'lucide-react';
 
 // -------------------------------------------------------------
@@ -60,16 +54,6 @@ function AdminHeroIllustration() {
           <linearGradient id="chartWaveGrad" x1="300" y1="160" x2="500" y2="220" gradientUnits="userSpaceOnUse">
             <stop offset="0%" stopColor="#47b2e4" stopOpacity="0.7" />
             <stop offset="100%" stopColor="#0ea5e9" stopOpacity="0.05" />
-          </linearGradient>
-
-          <linearGradient id="cyanPillGrad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#47b2e4" />
-            <stop offset="100%" stopColor="#0284c7" />
-          </linearGradient>
-
-          <linearGradient id="serverGrad1" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#2c3e5e" />
-            <stop offset="100%" stopColor="#1b283d" />
           </linearGradient>
 
           <linearGradient id="beaconBeamGrad" x1="530" y1="310" x2="530" y2="150" gradientUnits="userSpaceOnUse">
@@ -401,79 +385,67 @@ export default function AdminLockScreen({
   return (
     <div className="min-h-screen w-full bg-[#37517e] text-white font-sans flex flex-col selection:bg-[#47b2e4] selection:text-white">
       {/* -------------------------------------------------------------
-          TOP NAVIGATION BAR (Inspired by Reference Brand & Header)
+          TOP NAVIGATION BAR (Rescaled for Professional Alignment)
          ------------------------------------------------------------- */}
-      <header className="sticky top-0 z-50 w-full bg-[#37517e]/95 backdrop-blur-md border-b border-white/10 px-4 sm:px-8 py-3.5 transition-all">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+      <header className="sticky top-0 z-50 w-full bg-[#37517e]/95 backdrop-blur-md border-b border-white/10 px-4 sm:px-6 lg:px-8 py-3 transition-all">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 lg:gap-8">
+          
           {/* Brand Logo & Title */}
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-            <div className="w-10 h-10 rounded-xl bg-[#47b2e4] flex items-center justify-center text-white border border-white/20">
-              <Rocket size={22} className="transform -rotate-45" />
+          <div 
+            className="flex items-center gap-3 cursor-pointer shrink-0" 
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          >
+            <div className="w-9 h-9 rounded-xl bg-[#47b2e4] flex items-center justify-center text-white border border-white/20 shrink-0">
+              <Rocket size={20} className="transform -rotate-45" />
             </div>
-            <div>
+            <div className="flex flex-col">
               <div className="flex items-center gap-2">
-                <span className="text-lg sm:text-xl font-black font-heading tracking-tight text-white uppercase">
+                <span className="text-base sm:text-lg font-black font-heading tracking-tight text-white uppercase whitespace-nowrap">
                   Bang Fai Commander
                 </span>
-                <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-white/10 text-[#47b2e4] rounded border border-[#47b2e4]/30">
+                <span className="hidden md:inline-block px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider bg-white/10 text-[#47b2e4] rounded border border-[#47b2e4]/30 whitespace-nowrap">
                   Cloud Portal
                 </span>
               </div>
-              <p className="text-[11px] text-[#c5d5e8] font-medium hidden sm:block">
+              <p className="text-[11px] text-[#c5d5e8] font-normal hidden lg:block whitespace-nowrap">
                 ระบบบริหารจัดการธุรกรรมและการแข่งขันภาคสนาม
               </p>
             </div>
           </div>
 
-          {/* Desktop Navigation Links */}
-          <nav className="hidden lg:flex items-center gap-6 text-sm font-medium text-[#c5d5e8]">
+          {/* Desktop Navigation Links (Clean Single-Line Alignment) */}
+          <nav className="hidden md:flex items-center gap-6 lg:gap-8 text-sm font-medium text-[#c5d5e8] shrink-0">
             <button 
               type="button"
               onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-              className="hover:text-white transition-colors cursor-pointer"
+              className="hover:text-white transition-colors cursor-pointer whitespace-nowrap py-1 font-medium"
             >
-              หน้าหลัก (Home)
+              หน้าหลัก
             </button>
             <button 
               type="button"
               onClick={() => handleNavClick('usage')}
-              className={`hover:text-white transition-colors cursor-pointer flex items-center gap-1.5 ${activeTab === 'usage' ? 'text-[#47b2e4] font-bold' : ''}`}
+              className={`hover:text-white transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 py-1 ${activeTab === 'usage' ? 'text-[#47b2e4] font-bold' : ''}`}
             >
               <BookOpen size={15} />
               <span>คู่มือการใช้งาน</span>
             </button>
             <button 
               type="button"
-              onClick={() => handleNavClick('developer')}
-              className={`hover:text-white transition-colors cursor-pointer flex items-center gap-1.5 ${activeTab === 'developer' ? 'text-[#47b2e4] font-bold' : ''}`}
-            >
-              <Code size={15} />
-              <span>ข้อมูลนักพัฒนา</span>
-            </button>
-            <button 
-              type="button"
               onClick={() => handleNavClick('terms')}
-              className={`hover:text-white transition-colors cursor-pointer flex items-center gap-1.5 ${activeTab === 'terms' ? 'text-[#47b2e4] font-bold' : ''}`}
+              className={`hover:text-white transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 py-1 ${activeTab === 'terms' ? 'text-[#47b2e4] font-bold' : ''}`}
             >
               <FileCheck size={15} />
               <span>ข้อกำหนดและเงื่อนไข</span>
             </button>
-            <button 
-              type="button"
-              onClick={() => handleNavClick('specs')}
-              className={`hover:text-white transition-colors cursor-pointer flex items-center gap-1.5 ${activeTab === 'specs' ? 'text-[#47b2e4] font-bold' : ''}`}
-            >
-              <Activity size={15} />
-              <span>สเปกระบบ & SLA</span>
-            </button>
           </nav>
 
           {/* Action CTA: Sign In Button */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             <button
               type="button"
               onClick={handleScrollToLogin}
-              className="px-5 py-2 rounded-full bg-[#47b2e4] hover:bg-[#38a3d6] active:bg-[#2c91c3] text-white text-xs sm:text-sm font-bold tracking-wide transition-all flex items-center gap-2 cursor-pointer border border-[#68c6f3]/40"
+              className="px-4 sm:px-5 py-2 rounded-full bg-[#47b2e4] hover:bg-[#38a3d6] active:bg-[#2c91c3] text-white text-xs sm:text-sm font-bold tracking-wide transition-all flex items-center gap-2 cursor-pointer border border-[#68c6f3]/40 whitespace-nowrap shrink-0 shadow-none"
             >
               <LogIn size={15} />
               <span>เข้าสู่ระบบ (Sign In)</span>
@@ -483,7 +455,7 @@ export default function AdminLockScreen({
             <button
               type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="lg:hidden p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors"
+              className="md:hidden p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors shrink-0"
               aria-label="Toggle Navigation Menu"
             >
               {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
@@ -493,7 +465,7 @@ export default function AdminLockScreen({
 
         {/* Mobile Dropdown Menu */}
         {mobileMenuOpen && (
-          <div className="lg:hidden mt-3 pt-3 border-t border-white/10 flex flex-col gap-2 pb-2">
+          <div className="md:hidden mt-3 pt-3 border-t border-white/10 flex flex-col gap-2 pb-2">
             <button
               type="button"
               onClick={() => { setMobileMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
@@ -511,27 +483,11 @@ export default function AdminLockScreen({
             </button>
             <button
               type="button"
-              onClick={() => handleNavClick('developer')}
-              className="text-left px-3 py-2 rounded-lg text-sm text-[#c5d5e8] hover:bg-white/10 hover:text-white flex items-center gap-2"
-            >
-              <Code size={16} className="text-[#47b2e4]" />
-              <span>ข้อมูลนักพัฒนา (Developer Information)</span>
-            </button>
-            <button
-              type="button"
               onClick={() => handleNavClick('terms')}
               className="text-left px-3 py-2 rounded-lg text-sm text-[#c5d5e8] hover:bg-white/10 hover:text-white flex items-center gap-2"
             >
               <FileCheck size={16} className="text-[#47b2e4]" />
               <span>ข้อกำหนดและเงื่อนไข (Terms of Use)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleNavClick('specs')}
-              className="text-left px-3 py-2 rounded-lg text-sm text-[#c5d5e8] hover:bg-white/10 hover:text-white flex items-center gap-2"
-            >
-              <Activity size={16} className="text-[#47b2e4]" />
-              <span>สเปกระบบ & สถานะเชื่อมต่อ (System Specs & SLA)</span>
             </button>
           </div>
         )}
@@ -782,7 +738,7 @@ export default function AdminLockScreen({
         ref={docsSectionRef}
         className="w-full bg-[#f8fafc] text-slate-800 py-16 px-4 sm:px-8 border-b border-slate-200"
       >
-        <div className="max-w-6xl mx-auto space-y-8">
+        <div className="max-w-5xl mx-auto space-y-8">
           
           {/* Section Header */}
           <div className="text-center space-y-2.5 max-w-2xl mx-auto">
@@ -793,62 +749,36 @@ export default function AdminLockScreen({
               ศูนย์ข้อมูลและคู่มือการปฏิบัติงานภาคสนาม
             </h2>
             <p className="text-sm text-slate-600">
-              คำแนะนำขั้นตอนการทำงานสำหรับเจ้าหน้าที่, สเปกทางเทคนิคสำหรับนักพัฒนา และนโยบายความปลอดภัย
+              คำแนะนำขั้นตอนการทำงานสำหรับเจ้าหน้าที่และนโยบายความปลอดภัยของระบบ
             </p>
           </div>
 
-          {/* Segmented Tabs Navigation */}
-          <div className="flex flex-wrap items-center justify-center gap-2 p-1.5 bg-slate-200/80 rounded-2xl max-w-3xl mx-auto border border-slate-300">
+          {/* Segmented Tabs Navigation (2 Clean Balanced Tabs) */}
+          <div className="grid grid-cols-2 gap-2 p-1.5 bg-slate-200/80 rounded-2xl max-w-md mx-auto border border-slate-300">
             <button
               type="button"
               onClick={() => setActiveTab('usage')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
                 activeTab === 'usage' 
                   ? 'bg-[#37517e] text-white border border-[#37517e]' 
                   : 'text-slate-700 hover:text-slate-900 hover:bg-white/60'
               }`}
             >
               <BookOpen size={16} className={activeTab === 'usage' ? 'text-[#47b2e4]' : 'text-slate-500'} />
-              <span>คู่มือการใช้งาน (Usage)</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('developer')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-                activeTab === 'developer' 
-                  ? 'bg-[#37517e] text-white border border-[#37517e]' 
-                  : 'text-slate-700 hover:text-slate-900 hover:bg-white/60'
-              }`}
-            >
-              <Code size={16} className={activeTab === 'developer' ? 'text-[#47b2e4]' : 'text-slate-500'} />
-              <span>ข้อมูลนักพัฒนา (Developer)</span>
+              <span className="whitespace-nowrap">คู่มือการใช้งาน (Usage)</span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('terms')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
                 activeTab === 'terms' 
                   ? 'bg-[#37517e] text-white border border-[#37517e]' 
                   : 'text-slate-700 hover:text-slate-900 hover:bg-white/60'
               }`}
             >
               <FileCheck size={16} className={activeTab === 'terms' ? 'text-[#47b2e4]' : 'text-slate-500'} />
-              <span>เงื่อนไขและข้อกำหนด (Terms)</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('specs')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-                activeTab === 'specs' 
-                  ? 'bg-[#37517e] text-white border border-[#37517e]' 
-                  : 'text-slate-700 hover:text-slate-900 hover:bg-white/60'
-              }`}
-            >
-              <Activity size={16} className={activeTab === 'specs' ? 'text-[#47b2e4]' : 'text-slate-500'} />
-              <span>สเปกระบบ & SLA (Specs)</span>
+              <span className="whitespace-nowrap">ข้อกำหนดและเงื่อนไข (Terms)</span>
             </button>
           </div>
 
@@ -944,81 +874,7 @@ export default function AdminLockScreen({
             </div>
           )}
 
-          {/* TAB 2: DEVELOPER INFORMATION */}
-          {activeTab === 'developer' && (
-            <div className="space-y-6 animate-fadeIn">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {/* Dev Card 1 */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-3">
-                  <div className="flex items-center gap-2.5 text-[#37517e]">
-                    <Server size={20} className="text-[#47b2e4]" />
-                    <h3 className="text-base font-bold text-slate-900">
-                      Cloudflare Workers KV Edge Architecture
-                    </h3>
-                  </div>
-                  <p className="text-xs text-slate-600 leading-relaxed font-thai">
-                    Backend ทำงานบน Cloudflare Workers Edge Isolate โดยข้อมูลสถานะคำสั่งซื้อและยอดเงินผู้เล่นจัดเก็บใน Cloudflare KV พร้อมคำนึงถึง <strong>Strict Prohibition of KV.list on Hot Paths</strong> เพื่อรักษาความเร็วระดับ Sub-25ms
-                  </p>
-                  <div className="p-2.5 bg-slate-900 text-slate-200 rounded-lg font-mono text-[11px] overflow-x-auto">
-                    <code>// Dedicated O(1) Index Arrays in KV_CACHE<br/>KV.get('PENDING_ORDERS_LIST')<br/>KV.get('USER_${'{userId}'}')</code>
-                  </div>
-                </div>
-
-                {/* Dev Card 2 */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-3">
-                  <div className="flex items-center gap-2.5 text-[#37517e]">
-                    <Zap size={20} className="text-[#47b2e4]" />
-                    <h3 className="text-base font-bold text-slate-900">
-                      LINE Webhook 1,000ms SLA Decoupling
-                    </h3>
-                  </div>
-                  <p className="text-xs text-slate-600 leading-relaxed font-thai">
-                    LINE Messaging API Webhook บังคับ Timeout ที่ 1,000ms อย่างเข้มงวด ตัว Worker จึงตอบรับ <code className="bg-slate-100 px-1 py-0.5 rounded text-emerald-700">HTTP 200 OK (&lt;20ms)</code> ทันที และส่งต่องานประมวลผลการสแกนสลิปและบันทึกลง KV ด้วย <code className="bg-slate-100 px-1 py-0.5 rounded text-sky-700">ctx.waitUntil()</code>
-                  </p>
-                  <div className="p-2.5 bg-slate-900 text-slate-200 rounded-lg font-mono text-[11px] overflow-x-auto">
-                    <code>ctx.waitUntil(handleLineWebhookAsync(req));<br/>return new Response('&#123;"status":"ok"&#125;', &#123;status: 200&#125;);</code>
-                  </div>
-                </div>
-
-                {/* Dev Card 3 */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-3">
-                  <div className="flex items-center gap-2.5 text-[#37517e]">
-                    <Globe size={20} className="text-[#47b2e4]" />
-                    <h3 className="text-base font-bold text-slate-900">
-                      Multi-Origin API Base URL Resolution
-                    </h3>
-                  </div>
-                  <p className="text-xs text-slate-600 leading-relaxed font-thai">
-                    Frontend ตรวจจับสภาพแวดล้อมอัตโนมัติเพื่อชี้ไปยัง Worker API ปลายทาง:
-                  </p>
-                  <ul className="text-xs text-slate-600 space-y-1 list-disc pl-5">
-                    <li><strong>Custom Domain:</strong> <code className="text-sky-700">bangfai-rocket.cloud</code> &rarr; CF Worker API</li>
-                    <li><strong>GitHub Pages:</strong> Direct Worker Endpoint Integration</li>
-                    <li><strong>Localhost:</strong> Proxy ไปยัง <code className="text-sky-700">http://localhost:3001</code></li>
-                    <li><strong>Google Apps Script:</strong> Native Container-bound script.run</li>
-                  </ul>
-                </div>
-
-                {/* Dev Card 4 */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-3">
-                  <div className="flex items-center gap-2.5 text-[#37517e]">
-                    <Terminal size={20} className="text-[#47b2e4]" />
-                    <h3 className="text-base font-bold text-slate-900">
-                      Zero-Blocking Adaptive Admin Polling
-                    </h3>
-                  </div>
-                  <p className="text-xs text-slate-600 leading-relaxed font-thai">
-                    แดชบอร์ดแอดมินใช้ลูป Awaited While Loop ความถี่ <strong>600-800ms</strong> เมื่อแท็บเปิดอยู่ และลดลงเป็น <strong>3,000ms</strong> เมื่อแท็บถูกย่อ พร้อมตรวจจับ <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">visibilitychange</code> เพื่อดึงข้อมูลทันที 0ms เมื่อกลับมาโฟกัส
-                  </p>
-                  <div className="text-xs text-slate-500 pt-1">
-                    <strong>Stack:</strong> React 19, Tailwind CSS v4, Vite 8, Lucide React, Python GAS Bundler
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: TERMS OF USE & SECURITY */}
+          {/* TAB 2: TERMS OF USE & SECURITY */}
           {activeTab === 'terms' && (
             <div className="space-y-6 animate-fadeIn">
               <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 space-y-6">
@@ -1085,106 +941,12 @@ export default function AdminLockScreen({
             </div>
           )}
 
-          {/* TAB 4: SYSTEM SPECS & SLA */}
-          {activeTab === 'specs' && (
-            <div className="space-y-6 animate-fadeIn">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                {/* Metric 1 */}
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-1.5">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block">EDGE DISPATCH LATENCY</span>
-                  <div className="text-2xl font-black text-[#37517e] font-mono">&lt; 25 ms</div>
-                  <p className="text-xs text-slate-500">ตอบสนองการอ่านข้อมูลคำสั่งซื้อผ่าน Cloudflare Edge ทั่วโลก</p>
-                </div>
-
-                {/* Metric 2 */}
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-1.5">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block">WEBHOOK RESPONSE SLA</span>
-                  <div className="text-2xl font-black text-emerald-600 font-mono">&lt; 20 ms</div>
-                  <p className="text-xs text-slate-500">ตอบกลับ LINE API ทันที ป้องกันปัญหา Webhook Redelivery</p>
-                </div>
-
-                {/* Metric 3 */}
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-1.5">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block">SYSTEM AVAILABILITY</span>
-                  <div className="text-2xl font-black text-sky-600 font-mono">99.95 %</div>
-                  <p className="text-xs text-slate-500">เป้าหมายความพร้อมใช้งานระดับองค์กร รองรับการแข่งขันตลอดทั้งวัน</p>
-                </div>
-
-                {/* Metric 4 */}
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-1.5">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block">TRANSACTION CONCURRENCY</span>
-                  <div className="text-2xl font-black text-indigo-600 font-mono">1,000+ Req/s</div>
-                  <p className="text-xs text-slate-500">รองรับผู้เล่นส่งสลิปและสั่งซื้อพร้อมกันในกลุ่ม LINE ขนาดใหญ่</p>
-                </div>
-
-                {/* Metric 5 */}
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-1.5">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block">DATA STORAGE MODEL</span>
-                  <div className="text-2xl font-black text-slate-800 font-mono">Distributed KV</div>
-                  <p className="text-xs text-slate-500">แคชความเร็วสูงระดับ RAM Memory พร้อม Index แบบ O(1)</p>
-                </div>
-
-                {/* Metric 6 */}
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-1.5">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block">SECURITY ENCRYPTION</span>
-                  <div className="text-2xl font-black text-emerald-600 font-mono">256-Bit SSL</div>
-                  <p className="text-xs text-slate-500">เข้ารหัสข้อมูลระหว่างเบราว์เซอร์และ Edge Isolate อย่างสมบูรณ์</p>
-                </div>
-              </div>
-
-              {/* Server Nodes Architecture Table */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-3">
-                <h4 className="text-sm font-bold text-slate-900">
-                  โครงสร้างการกระจายตัวของระบบ (Edge Isolate Topology)
-                </h4>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs text-left">
-                    <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                      <tr>
-                        <th className="py-2.5 px-3 font-bold">คอมโพเนนต์ (Component)</th>
-                        <th className="py-2.5 px-3 font-bold">รันไทม์ (Runtime)</th>
-                        <th className="py-2.5 px-3 font-bold">ฟังก์ชันหลัก (Core Role)</th>
-                        <th className="py-2.5 px-3 font-bold">สถานะ (Status)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-700">
-                      <tr>
-                        <td className="py-2.5 px-3 font-semibold text-slate-900">Cloudflare Worker</td>
-                        <td className="py-2.5 px-3 font-mono text-[11px]">V8 Edge Isolate</td>
-                        <td className="py-2.5 px-3">Webhook, Order Matching, RPC API</td>
-                        <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">ACTIVE</span></td>
-                      </tr>
-                      <tr>
-                        <td className="py-2.5 px-3 font-semibold text-slate-900">Cloudflare KV</td>
-                        <td className="py-2.5 px-3 font-mono text-[11px]">Global Storage</td>
-                        <td className="py-2.5 px-3">Ledger State, Index Arrays, Quota Cache</td>
-                        <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">ACTIVE</span></td>
-                      </tr>
-                      <tr>
-                        <td className="py-2.5 px-3 font-semibold text-slate-900">LINE Messaging API</td>
-                        <td className="py-2.5 px-3 font-mono text-[11px]">LINE Platform v2</td>
-                        <td className="py-2.5 px-3">Flex Message Cards, Rich Menu, Quick Reply</td>
-                        <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">ACTIVE</span></td>
-                      </tr>
-                      <tr>
-                        <td className="py-2.5 px-3 font-semibold text-slate-900">Google Apps Script</td>
-                        <td className="py-2.5 px-3 font-mono text-[11px]">V8 GAS Engine</td>
-                        <td className="py-2.5 px-3">Sheets Backup, Drive Slip Archive</td>
-                        <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-sky-100 text-sky-800 font-bold">MIRRORING</span></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Action to Jump Back to Login */}
           <div className="pt-4 text-center">
             <button
               type="button"
               onClick={handleScrollToLogin}
-              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-[#37517e] hover:bg-[#2b4167] text-white text-xs sm:text-sm font-bold tracking-wide transition-all cursor-pointer shadow-none"
+              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-[#37517e] hover:bg-[#2b4167] text-white text-xs sm:text-sm font-bold tracking-wide transition-all cursor-pointer shadow-none whitespace-nowrap"
             >
               <LogIn size={15} className="text-[#47b2e4]" />
               <span>กลับไปที่แบบฟอร์มเข้าสู่ระบบ (Sign In)</span>
@@ -1195,12 +957,12 @@ export default function AdminLockScreen({
       </section>
 
       {/* -------------------------------------------------------------
-          FOOTER (Navy #1c2c47 with Cyan Accents)
+          FOOTER (Navy #1e2d45 with Cyan Accents)
          ------------------------------------------------------------- */}
-      <footer className="w-full bg-[#1e2d45] text-[#a5c5e8] py-10 px-4 sm:px-8 border-t border-white/10 mt-auto">
+      <footer className="w-full bg-[#1e2d45] text-[#a5c5e8] py-8 px-4 sm:px-8 border-t border-white/10 mt-auto">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-3 text-center md:text-left">
-            <div className="w-8 h-8 rounded-lg bg-[#47b2e4] flex items-center justify-center text-white">
+            <div className="w-8 h-8 rounded-lg bg-[#47b2e4] flex items-center justify-center text-white shrink-0">
               <Rocket size={18} className="transform -rotate-45" />
             </div>
             <div>
@@ -1217,33 +979,17 @@ export default function AdminLockScreen({
             <button 
               type="button" 
               onClick={() => handleNavClick('usage')} 
-              className="hover:text-white transition-colors cursor-pointer"
+              className="hover:text-white transition-colors cursor-pointer whitespace-nowrap"
             >
               คู่มือการใช้งาน
             </button>
             <span className="text-white/20">&bull;</span>
             <button 
               type="button" 
-              onClick={() => handleNavClick('developer')} 
-              className="hover:text-white transition-colors cursor-pointer"
-            >
-              ข้อมูลนักพัฒนา
-            </button>
-            <span className="text-white/20">&bull;</span>
-            <button 
-              type="button" 
               onClick={() => handleNavClick('terms')} 
-              className="hover:text-white transition-colors cursor-pointer"
+              className="hover:text-white transition-colors cursor-pointer whitespace-nowrap"
             >
               ข้อกำหนดและเงื่อนไข
-            </button>
-            <span className="text-white/20">&bull;</span>
-            <button 
-              type="button" 
-              onClick={() => handleNavClick('specs')} 
-              className="hover:text-white transition-colors cursor-pointer"
-            >
-              สเปกระบบ
             </button>
           </div>
 
