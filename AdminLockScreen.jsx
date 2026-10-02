@@ -242,28 +242,28 @@ export default function AdminLockScreen({
       </header>
 
       {/* -------------------------------------------------------------
-          HERO SECTION: FULL HOMEPAGE STYLE WITH GRADIENT COLOR COVERAGE
+          HERO SECTION: FULL HOMEPAGE STYLE WITH REDUCED GRADIENT DARKNESS
          ------------------------------------------------------------- */}
       <section 
-        className="relative w-full min-h-[calc(100vh-68px)] flex items-center bg-[#071324] bg-cover bg-[center_right_15%] sm:bg-[center_right_10%] overflow-hidden"
+        className="relative w-full min-h-[calc(100vh-68px)] flex items-center bg-[#071324] bg-cover bg-[position:75%_center] sm:bg-[position:70%_center] lg:bg-[position:78%_center] overflow-hidden"
         style={{ backgroundImage: `url(${HERO_FULL_BACKGROUND})` }}
       >
-        {/* Full Homepage Style Covered Up with Corporate Gradient Color */}
-        {/* Left-to-Right Corporate Navy/Slate Gradient Coverage for Ultra-Crisp Legibility */}
-        <div className="absolute inset-0 bg-gradient-to-r from-[#071324] via-[#071324]/90 to-[#071324]/40 sm:via-[#071324]/80 pointer-events-none" />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#071324] via-transparent to-[#071324]/50 pointer-events-none" />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#071324]/90 via-transparent to-transparent pointer-events-none" />
-        {/* Atmospheric Corporate Blue Multiply Tint */}
-        <div className="absolute inset-0 bg-[#071324]/20 mix-blend-multiply pointer-events-none" />
+        {/* Soft, Transparent Gradients for Maximum Image Visibility & Text Contrast */}
+        {/* Left-to-Right Soft Gradient: Darker on Left for Text, Clear & Visible on Right for Rocket */}
+        <div className="absolute inset-0 bg-gradient-to-r from-[#071324]/85 via-[#071324]/45 to-transparent pointer-events-none" />
+        {/* Smooth Top Transition from Header */}
+        <div className="absolute top-0 inset-x-0 h-24 bg-gradient-to-b from-[#071324]/70 to-transparent pointer-events-none" />
+        {/* Smooth Bottom Transition to Next Section */}
+        <div className="absolute bottom-0 inset-x-0 h-32 bg-gradient-to-t from-[#071324] via-[#071324]/30 to-transparent pointer-events-none" />
 
         <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-8 py-12 sm:py-20 flex-1 flex flex-col justify-center">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
             
-            {/* LEFT COLUMN: Headings & Dark Frosted Glass Sign-In Card */}
-            <div className="lg:col-span-6 space-y-6">
+            {/* LEFT COLUMN: Headings, Value Propositions & Trust Indicators */}
+            <div className="lg:col-span-7 space-y-6">
               
               {/* Status Overline Badge (Zero Emojis - Lucide ShieldCheck) */}
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#0a192f]/85 border border-sky-400/30 text-sky-200 text-xs font-semibold shadow-sm backdrop-blur-md">
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#0a192f]/80 border border-sky-400/30 text-sky-200 text-xs font-semibold shadow-sm backdrop-blur-md">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 <ShieldCheck size={14} className="text-sky-400" />
                 <span>Enterprise Operations Management Platform</span>
@@ -271,23 +271,42 @@ export default function AdminLockScreen({
 
               {/* Main Headline (2-Line Restyle: Bold + Thin Italic) */}
               <div className="space-y-3">
-                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-heading text-white tracking-tight leading-tight">
+                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-heading text-white tracking-tight leading-tight drop-shadow-sm">
                   <span className="font-extrabold block">Better Solutions</span>
                   <span className="font-light italic text-[#38bdf8] block text-2xl sm:text-3xl lg:text-4xl mt-1.5">For Your Operations</span>
                 </h1>
-                <h2 className="text-lg sm:text-xl font-medium text-sky-200 font-thai">
+                <h2 className="text-lg sm:text-xl font-medium text-sky-200 font-thai drop-shadow-sm">
                   ระบบบริหารจัดการธุรกรรมและการแข่งขันภาคสนามระดับองค์กร
                 </h2>
-                <p className="text-sm sm:text-base text-slate-300 leading-relaxed max-w-xl font-thai font-normal">
+                <p className="text-sm sm:text-base text-slate-200 leading-relaxed max-w-xl font-thai font-normal drop-shadow-sm">
                   ศูนย์กลางประมวลผลคำสั่งซื้อและตรวจสลิปเงินโอนอัตโนมัติ พร้อมแดชบอร์ดควบคุมรอบการแข่งขัน 
                   และระบบประมวลผลเวลาภาคสนามความเร็วสูงแบบเรียลไทม์
                 </p>
               </div>
 
-              {/* ADMIN SIGN-IN CARD (Ultra-Sleek Corporate Frosted Glass) */}
+              {/* Core Feature Highlights */}
+              <div className="pt-2 flex flex-wrap items-center gap-2.5 sm:gap-3 text-xs text-sky-100 font-medium">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#071324]/75 backdrop-blur-md border border-white/10 shadow-sm">
+                  <Zap size={14} className="text-amber-400" />
+                  <span>แม่นยำระดับเสี้ยววินาที</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#071324]/75 backdrop-blur-md border border-white/10 shadow-sm">
+                  <ShieldCheck size={14} className="text-emerald-400" />
+                  <span>ตรวจสลิปอัตโนมัติ 1:1</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#071324]/75 backdrop-blur-md border border-white/10 shadow-sm">
+                  <BarChart3 size={14} className="text-sky-400" />
+                  <span>ซิงก์ข้อมูลเรียลไทม์</span>
+                </span>
+              </div>
+
+            </div>
+
+            {/* RIGHT COLUMN: RELOCATED ADMIN SIGN-IN CARD */}
+            <div className="lg:col-span-5 w-full flex justify-center lg:justify-end">
               <div 
                 ref={loginCardRef}
-                className="bg-[#0c1e36]/85 border border-sky-400/25 rounded-2xl p-6 sm:p-7 backdrop-blur-xl shadow-2xl shadow-[#040c18]/80 space-y-5"
+                className="w-full max-w-md bg-[#0a192f]/90 sm:bg-[#0c1e36]/90 border border-sky-400/30 rounded-2xl p-6 sm:p-7 backdrop-blur-xl shadow-2xl shadow-[#040c18]/80 space-y-5"
               >
                 <div className="flex items-center justify-between pb-3 border-b border-white/10">
                   <div className="flex items-center gap-2.5">
@@ -417,25 +436,6 @@ export default function AdminLockScreen({
                     <span>อ่านคู่มือการใช้งาน</span>
                   </button>
                 </div>
-              </div>
-
-            </div>
-
-            {/* RIGHT COLUMN: Open Aerospace Launch Space with Floating Telemetry Chips */}
-            <div className="lg:col-span-6 hidden lg:flex flex-col items-end justify-between min-h-[460px] pointer-events-none select-none">
-              {/* Active Telemetry Chip (Top Right) */}
-              <div className="flex items-center gap-2.5 px-4 py-2 rounded-full bg-[#071324]/85 backdrop-blur-md border border-sky-400/30 shadow-2xl text-white pointer-events-auto">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-                </span>
-                <span className="text-xs font-bold tracking-wider font-sans text-sky-200">ACTIVE MISSION TELEMETRY</span>
-              </div>
-
-              {/* Protocol Badge (Bottom Right) */}
-              <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#071324]/85 backdrop-blur-md border border-amber-500/30 shadow-2xl text-white pointer-events-auto">
-                <ShieldCheck size={15} className="text-amber-400" />
-                <span className="text-xs font-bold tracking-wider font-sans text-amber-200">ENTERPRISE FLIGHT PROTOCOL</span>
               </div>
             </div>
 
