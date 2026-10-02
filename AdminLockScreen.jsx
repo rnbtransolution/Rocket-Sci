@@ -260,31 +260,31 @@ export default function AdminLockScreen({
         <div className="relative z-10 w-full max-w-[1720px] mx-auto px-4 sm:px-8 lg:px-12 py-10 sm:py-16 flex-1 flex flex-col justify-center">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
             
-            {/* LEFT COLUMN: APPLE STYLE LIQUID GLASS LOGIN CARD */}
-            <div className="order-2 lg:order-1 lg:col-span-4 xl:col-span-3 w-full flex justify-center lg:justify-start">
+            {/* LEFT COLUMN: APPLE STYLE LIQUID GLASS LOGIN CARD (Wider & Offset to Right) */}
+            <div className="order-2 lg:order-1 lg:col-span-5 xl:col-span-5 w-full flex justify-center lg:justify-start lg:pl-4 xl:pl-8 min-w-0">
               <div 
                 ref={loginCardRef}
-                className="relative w-full max-w-[340px] sm:max-w-[350px] bg-[#071324]/55 backdrop-blur-2xl border border-white/20 border-t-white/40 rounded-3xl p-5 sm:p-6 shadow-[0_24px_50px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.2)] space-y-4 overflow-hidden ring-1 ring-inset ring-white/10"
+                className="relative w-full max-w-[390px] sm:max-w-[420px] bg-[#071324]/55 backdrop-blur-2xl border border-white/20 border-t-white/40 rounded-3xl p-6 sm:p-7 shadow-[0_24px_50px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.2)] space-y-4 overflow-hidden ring-1 ring-inset ring-white/10"
               >
                 {/* Upper Specular Glass Sheen Highlight */}
                 <div className="absolute top-0 inset-x-0 h-28 bg-gradient-to-b from-white/15 to-transparent pointer-events-none rounded-t-3xl" />
 
                 {/* Card Header */}
-                <div className="relative z-10 flex items-center justify-between pb-2.5 border-b border-white/15 gap-2">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-9 h-9 rounded-2xl bg-white/15 border border-white/25 backdrop-blur-xl flex items-center justify-center text-sky-300 shadow-[inset_0_1px_1px_rgba(255,255,255,0.3)] shrink-0">
-                      <Lock size={17} />
+                <div className="relative z-10 flex items-center justify-between pb-3 border-b border-white/15 gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-2xl bg-white/15 border border-white/25 backdrop-blur-xl flex items-center justify-center text-sky-300 shadow-[inset_0_1px_1px_rgba(255,255,255,0.3)] shrink-0">
+                      <Lock size={18} />
                     </div>
                     <div className="min-w-0">
-                      <h3 className="text-sm sm:text-base font-bold text-white tracking-tight drop-shadow-sm whitespace-nowrap">
+                      <h3 className="text-base sm:text-lg font-bold text-white tracking-tight drop-shadow-sm whitespace-nowrap">
                         เข้าสู่ระบบผู้ดูแล (Admin)
                       </h3>
-                      <p className="text-[10px] sm:text-[11px] text-sky-200/90 font-medium whitespace-nowrap">
+                      <p className="text-[11px] sm:text-xs text-sky-200/90 font-medium whitespace-nowrap">
                         ยินดีต้อนรับสู่ระบบควบคุมภาคสนาม
                       </p>
                     </div>
                   </div>
-                  <span className="text-[9px] px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 rounded-full font-sans font-semibold tracking-wide backdrop-blur-md shadow-sm shrink-0 whitespace-nowrap">
+                  <span className="text-[10px] px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 rounded-full font-sans font-bold tracking-wider backdrop-blur-md shadow-sm shrink-0 whitespace-nowrap ml-2">
                     SECURED
                   </span>
                 </div>
@@ -402,7 +402,7 @@ export default function AdminLockScreen({
             </div>
 
             {/* CENTER COLUMN: Buffer between card and welcome block */}
-            <div className="hidden lg:block lg:order-2 lg:col-span-2 xl:col-span-2 pointer-events-none select-none" />
+            <div className="hidden lg:block lg:order-2 lg:col-span-1 xl:col-span-1 pointer-events-none select-none" />
 
             {/* RIGHT COLUMN: WELCOME HEADINGS, VALUE PROPOSITIONS & TRUST INDICATORS */}
             <div className="order-1 lg:order-3 lg:col-span-6 xl:col-span-6 w-full flex justify-center lg:justify-end min-w-0">
