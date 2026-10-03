@@ -497,7 +497,7 @@ export default function AdminLockScreen({
                 {/* Step 1 */}
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-3">
                   <div className="flex items-center gap-3">
-                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
+                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm shrink-0">
                       1
                     </span>
                     <h3 className="text-base font-bold text-slate-900">
@@ -516,7 +516,7 @@ export default function AdminLockScreen({
                 {/* Step 2 */}
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-3">
                   <div className="flex items-center gap-3">
-                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
+                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm shrink-0">
                       2
                     </span>
                     <h3 className="text-base font-bold text-slate-900">
@@ -535,7 +535,7 @@ export default function AdminLockScreen({
                 {/* Step 3 */}
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-3">
                   <div className="flex items-center gap-3">
-                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
+                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm shrink-0">
                       3
                     </span>
                     <h3 className="text-base font-bold text-slate-900">
@@ -554,7 +554,7 @@ export default function AdminLockScreen({
                 {/* Step 4 */}
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-3">
                   <div className="flex items-center gap-3">
-                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
+                    <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm shrink-0">
                       4
                     </span>
                     <h3 className="text-base font-bold text-slate-900">
@@ -599,7 +599,7 @@ export default function AdminLockScreen({
                   {/* Term 1 */}
                   <div className="space-y-2">
                     <h4 className="text-sm font-bold text-sky-800 flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 border border-sky-200 text-[11px] flex items-center justify-center font-bold">1</span>
+                      <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 border border-sky-200 text-[11px] flex items-center justify-center font-bold shrink-0">1</span>
                       การแบ่งระดับสิทธิ์และการรักษาความลับของบัญชี (Two-Tier Role Access &amp; Security)
                     </h4>
                     <p className="text-xs text-slate-600 leading-relaxed font-thai">
@@ -610,7 +610,7 @@ export default function AdminLockScreen({
                   {/* Term 2 */}
                   <div className="space-y-2">
                     <h4 className="text-sm font-bold text-sky-800 flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 border border-sky-200 text-[11px] flex items-center justify-center font-bold">2</span>
+                      <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 border border-sky-200 text-[11px] flex items-center justify-center font-bold shrink-0">2</span>
                       นโยบายป้องกันสลิปซ้ำซ้อน (Anti-Fraud Slip Quarantine)
                     </h4>
                     <p className="text-xs text-slate-600 leading-relaxed font-thai">
@@ -621,7 +621,7 @@ export default function AdminLockScreen({
                   {/* Term 3 */}
                   <div className="space-y-2">
                     <h4 className="text-sm font-bold text-sky-800 flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 border border-sky-200 text-[11px] flex items-center justify-center font-bold">3</span>
+                      <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 border border-sky-200 text-[11px] flex items-center justify-center font-bold shrink-0">3</span>
                       การบันทึกประวัติการกระทำและความรับผิดชอบ (Audit Trail Logging)
                     </h4>
                     <p className="text-xs text-slate-600 leading-relaxed font-thai">
@@ -632,7 +632,7 @@ export default function AdminLockScreen({
                   {/* Term 4 */}
                   <div className="space-y-2">
                     <h4 className="text-sm font-bold text-sky-800 flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 border border-sky-200 text-[11px] flex items-center justify-center font-bold">4</span>
+                      <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 border border-sky-200 text-[11px] flex items-center justify-center font-bold shrink-0">4</span>
                       มาตรการยกเลิกรอบและคืนเงินสองขั้นตอน (Two-Phase Idempotent Round Voiding)
                     </h4>
                     <p className="text-xs text-slate-600 leading-relaxed font-thai">
