@@ -454,7 +454,7 @@ export default function App() {
 
     const fetchFromBackend = async () => {
       try {
-        const apiKey = ADMIN_API_KEY;
+        const apiKey = getAdminApiKey();
         const res = await fetch(`${targetUrl}/api/run`, {
           method: 'POST',
           headers: {
@@ -483,12 +483,12 @@ export default function App() {
     };
 
     // ── Sub-Second Responsive Polling Loop ──
-    // 600ms when tab is active (instant real-time sync with LINE Group orders).
-    // 3000ms when tab is hidden.
+    // 500ms when tab is active (instant real-time sync with LINE Group orders).
+    // 2000ms when tab is hidden.
     const pollLoop = async () => {
       while (!cancelled) {
         await fetchFromBackend();
-        const delay = (typeof document !== 'undefined' && document.hidden) ? 3000 : 600;
+        const delay = (typeof document !== 'undefined' && document.hidden) ? 2000 : 500;
         await new Promise((r) => setTimeout(r, delay));
       }
     };
@@ -614,32 +614,22 @@ export default function App() {
 
   // Cancel Bet Request
   const handleRequestCancelBet = (betId) => {
-    if (isGAS) {
-      window.google.script.run
-        .withSuccessHandler(() => {
-          addToast('ขอยกเลิกแผลสดในฐานข้อมูลสำเร็จ รอคู่ตอบรับ...', 'info');
-        })
-        .adminRequestCancelBet(betId);
-    } else {
-      // Sandbox cancel
-      const bet = bets.find(b => b.id === betId);
-      if (bet) {
-        setBets(prev => prev.map(b => b.id === betId ? { ...b, status: 'pending_cancel' } : b));
-        
-        // Auto approve cancel after 3s
-        setTimeout(() => {
-          const refundAmount = bet.amount;
-          setPlayers(prev => prev.map(p => {
-            if (p.id === bet.playerLowId || p.id === bet.playerHighId) {
-              return { ...p, balance: p.balance + refundAmount };
-            }
-            return p;
-          }));
-          setBets(prev => prev.map(b => b.id === betId ? { ...b, status: 'cancelled' } : b));
-          addToast(`ขอยกเลิกแผลสำเร็จ! คืนเครดิตเข้ายอดเรียบร้อย (Order #${bet.orderNumber})`, 'info');
-        }, 3000);
-      }
-    }
+    runBackendFunction('adminRequestCancelBet', [betId])
+      .then(() => {
+        addToast('ขอยกเลิกแผลสดในฐานข้อมูลสำเร็จ รอคู่ตอบรับ...', 'info');
+        if (typeof window !== 'undefined' && typeof window.forceSyncFreshData === 'function') {
+          window.forceSyncFreshData();
+        }
+      })
+      .catch((err) => {
+        console.error('[Cancel Bet Error]:', err);
+        // Local state rollback/toast
+        const bet = bets.find(b => b.id === betId);
+        if (bet) {
+          setBets(prev => prev.map(b => b.id === betId ? { ...b, status: 'pending_cancel' } : b));
+        }
+        addToast('❌ เกิดข้อผิดพลาดในการยกเลิกแผลสด: ' + (err.message || err), 'error');
+      });
   };
 
   // Admin Manual Slip Reviews
@@ -658,30 +648,22 @@ export default function App() {
     }
     addToast(txId.startsWith('WD') ? `แอดมินอนุมัติคำขอถอนเงินยอด ${targetTx.requestedAmount} THB โอนเงินแล้วเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)` : `แอดมินอนุมัติเครดิตเติมเงินยอด ${approvedAmount} THB แมนนวลเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)`, 'success');
 
-    // Run backend in background
-    if (isGAS) {
-      window.google.script.run
-        .withFailureHandler((err) => {
-          console.error('[GAS Approve Error]:', err);
-          // Rollback on failure
-          setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
-          if (!txId.startsWith('WD')) {
-            setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) - approvedAmount } : p));
-          }
-          addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
-        })
-        .adminApproveTransaction(txId);
-    } else {
-      runBackendFunction('adminApproveTransaction', [txId]).catch(err => {
+    // Run backend via Cloudflare Worker Edge API
+    runBackendFunction('adminApproveTransaction', [txId])
+      .then(() => {
+        if (typeof window !== 'undefined' && typeof window.forceSyncFreshData === 'function') {
+          window.forceSyncFreshData();
+        }
+      })
+      .catch((err) => {
         console.error('[Background Approve Error]:', err);
         // Rollback on failure
         setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
         if (!txId.startsWith('WD')) {
           setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) - approvedAmount } : p));
         }
-        addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
+        addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน: ' + (err.message || err), 'error');
       });
-    }
   };
 
   const handleAdminRejectReview = (txId, reason) => {
@@ -700,30 +682,22 @@ export default function App() {
       addToast('ปฏิเสธการโอนสลิปเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)', 'info');
     }
 
-    // Run backend in background
-    if (isGAS) {
-      window.google.script.run
-        .withFailureHandler((err) => {
-          console.error('[GAS Reject Error]:', err);
-          // Rollback on failure
-          setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
-          if (txId.startsWith('WD')) {
-            setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) - targetTx.requestedAmount } : p));
-          }
-          addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
-        })
-        .adminRejectTransaction(txId, reason);
-    } else {
-      runBackendFunction('adminRejectTransaction', [txId, reason]).catch(err => {
+    // Run backend via Cloudflare Worker Edge API
+    runBackendFunction('adminRejectTransaction', [txId, reason])
+      .then(() => {
+        if (typeof window !== 'undefined' && typeof window.forceSyncFreshData === 'function') {
+          window.forceSyncFreshData();
+        }
+      })
+      .catch((err) => {
         console.error('[Background Reject Error]:', err);
         // Rollback on failure
         setTransactions(prev => prev.map(t => t.id === txId ? targetTx : t));
         if (txId.startsWith('WD')) {
           setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) - targetTx.requestedAmount } : p));
         }
-        addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน กรุณาลองใหม่อีกครั้ง', 'error');
+        addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน: ' + (err.message || err), 'error');
       });
-    }
   };
 
   // Submit manual telemetry flight result (No flight animation, resolve immediately)

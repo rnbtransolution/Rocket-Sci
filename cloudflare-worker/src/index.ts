@@ -18,6 +18,7 @@ import {
   getSettledOrdersList,
   addToSettledOrdersList,
   removeFromMatchedOrdersList,
+  removeFromPendingOrdersList,
   refundPlayerPoints,
   deduplicatePlayers,
 } from './queueHandler.js';
@@ -495,36 +496,100 @@ export default {
               await env.KV_CACHE.put('TRANSACTIONS_LIST', JSON.stringify(txs));
 
               const isWithdrawal = String(txId).startsWith('WD') || targetTx.type === 'withdraw';
-              const players = await getPlayersList(env);
-              const player = players.find(p => p.id === targetTx.playerId || p.lineUserId === targetTx.playerId);
-              if (player) {
-                const rawLine = player.lineUserId || await env.KV_CACHE.get(`RAW_LINE_${player.id}`) || player.id;
-                if (isWithdrawal) {
-                  // Withdrawal: balance was already deducted upon request. Notify player of success.
-                  if (rawLine) {
-                    ctx?.waitUntil(pushToLine(rawLine, `💸 [ถอนเงินสำเร็จ]: ยอด ${targetTx.requestedAmount.toLocaleString()} บาท แอดมินได้โอนเข้าบัญชีของคุณเรียบร้อยแล้วครับ 🚀`, env).catch(e => console.error(e)));
-                  }
-                } else {
-                  // Deposit: credit player balance
-                  player.balance = (Number(player.balance) || 0) + targetTx.requestedAmount;
-                  await savePlayerProfile({
-                    shortId: player.id,
-                    lineUserId: rawLine,
-                    displayName: player.name,
-                    balance: player.balance,
-                    bankName: player.bankName,
-                    accountNumber: player.bankAccount,
-                    accountName: player.accountName,
-                    registeredAt: Date.now(),
-                    updatedAt: Date.now(),
-                  }, env, ctx);
+              const playerId = targetTx.playerId;
+              const txLine = targetTx.lineUserId;
 
-                  // Push notice to player
-                  if (rawLine) {
-                    ctx?.waitUntil(pushToLine(rawLine, `✅ อนุมัติยอดเงินฝาก ${targetTx.requestedAmount.toLocaleString()} บาท เรียบร้อยแล้วครับ!\nแต้มคงเหลือปัจจุบัน: ${player.balance.toLocaleString()} pt 🚀`, env).catch(e => console.error(e)));
-                  }
+              // 1. Authoritative resolution of LINE user ID and Short ID
+              const rawLine = (txLine && txLine.startsWith('U'))
+                ? txLine
+                : (playerId && playerId.startsWith('U'))
+                  ? playerId
+                  : ((await env.KV_CACHE.get(`RAW_LINE_${playerId}`)) || '');
+              const shortId = (playerId && playerId.startsWith('PL'))
+                ? playerId
+                : (rawLine ? `PL${rawLine.slice(-6).toUpperCase()}` : playerId);
+
+              // 2. Fetch authoritative profile directly from entity keys (Single Source of Truth)
+              let existingProfile: PlayerProfile | null = null;
+              if (rawLine) {
+                const raw = await env.KV_CACHE.get(`USER_${rawLine}`);
+                if (raw) {
+                  try { existingProfile = JSON.parse(raw); } catch (_) {}
                 }
               }
+              if (!existingProfile && shortId) {
+                const raw = await env.KV_CACHE.get(`USER_${shortId}`);
+                if (raw) {
+                  try { existingProfile = JSON.parse(raw); } catch (_) {}
+                }
+              }
+              if (!existingProfile) {
+                const players = await getPlayersList(env);
+                const p = players.find(x => x.id === playerId || x.shortId === shortId || (rawLine && x.lineUserId === rawLine));
+                if (p) {
+                  existingProfile = {
+                    shortId: p.shortId || shortId,
+                    lineUserId: p.lineUserId || rawLine,
+                    displayName: p.displayName || p.name || targetTx.playerName || 'ผู้เล่น',
+                    balance: Number(p.balance) || 0,
+                    bankName: p.bankName || '',
+                    accountNumber: p.bankAccount || p.accountNumber || '',
+                    accountName: p.accountName || p.displayName || '',
+                    registeredAt: Date.now(),
+                    updatedAt: Date.now(),
+                  };
+                }
+              }
+
+              if (!existingProfile) {
+                existingProfile = {
+                  shortId,
+                  lineUserId: rawLine,
+                  displayName: targetTx.playerName || 'ผู้เล่น',
+                  balance: 0,
+                  registeredAt: Date.now(),
+                  updatedAt: Date.now(),
+                };
+              }
+
+              const effectiveLine = rawLine || existingProfile.lineUserId;
+              const effectiveShort = shortId || existingProfile.shortId;
+
+              if (isWithdrawal) {
+                // Withdrawal: balance was already deducted upon request. Notify player of success.
+                if (effectiveLine && effectiveLine.startsWith('U')) {
+                  ctx?.waitUntil(pushToLine(effectiveLine, `💸 [ถอนเงินสำเร็จ]: ยอด ${targetTx.requestedAmount.toLocaleString()} บาท แอดมินได้โอนเข้าบัญชีของคุณเรียบร้อยแล้วครับ 🚀`, env).catch(e => console.error(e)));
+                }
+              } else {
+                // Deposit: credit player balance directly on authoritative entity keys
+                const oldBal = Number(existingProfile.balance) || 0;
+                const newBal = oldBal + (Number(targetTx.requestedAmount) || 0);
+                const updatedProfile: PlayerProfile = {
+                  ...existingProfile,
+                  shortId: effectiveShort,
+                  lineUserId: effectiveLine,
+                  displayName: targetTx.playerName || existingProfile.displayName || 'ผู้เล่น',
+                  balance: newBal,
+                  updatedAt: Date.now(),
+                };
+
+                const profileJson = JSON.stringify(updatedProfile);
+                const primaryPuts: Promise<any>[] = [
+                  env.KV_CACHE.put(`USER_${effectiveShort}`, profileJson),
+                ];
+                if (effectiveLine && effectiveLine.startsWith('U')) {
+                  primaryPuts.push(env.KV_CACHE.put(`USER_${effectiveLine}`, profileJson));
+                  primaryPuts.push(env.KV_CACHE.put(`RAW_LINE_${effectiveShort}`, effectiveLine));
+                }
+                await Promise.all(primaryPuts);
+                await savePlayerProfile(updatedProfile, env, ctx);
+
+                // Push notice to player
+                if (effectiveLine && effectiveLine.startsWith('U')) {
+                  ctx?.waitUntil(pushToLine(effectiveLine, `✅ อนุมัติยอดเงินฝาก ${targetTx.requestedAmount.toLocaleString()} บาท เรียบร้อยแล้วครับ!\nแต้มคงเหลือปัจจุบัน: ${newBal.toLocaleString()} pt 🚀`, env).catch(e => console.error(e)));
+                }
+              }
+
               result = { success: true, txId };
             }
           } else {
@@ -544,38 +609,124 @@ export default {
               await env.KV_CACHE.put('TRANSACTIONS_LIST', JSON.stringify(txs));
 
               const isWithdrawal = String(txId).startsWith('WD') || targetTx.type === 'withdraw';
-              const players = await getPlayersList(env);
-              const player = players.find(p => p.id === targetTx.playerId || p.lineUserId === targetTx.playerId);
-              if (player) {
-                const rawLine = player.lineUserId || await env.KV_CACHE.get(`RAW_LINE_${player.id}`) || player.id;
-                if (isWithdrawal) {
-                  // Refund locked withdrawal points back to player profile
-                  player.balance = (Number(player.balance) || 0) + targetTx.requestedAmount;
-                  await savePlayerProfile({
-                    shortId: player.id,
-                    lineUserId: rawLine,
-                    displayName: player.name,
-                    balance: player.balance,
-                    bankName: player.bankName,
-                    accountNumber: player.bankAccount,
-                    accountName: player.accountName,
+              const playerId = targetTx.playerId;
+              const txLine = targetTx.lineUserId;
+
+              // 1. Authoritative resolution of LINE user ID and Short ID
+              const rawLine = (txLine && txLine.startsWith('U'))
+                ? txLine
+                : (playerId && playerId.startsWith('U'))
+                  ? playerId
+                  : ((await env.KV_CACHE.get(`RAW_LINE_${playerId}`)) || '');
+              const shortId = (playerId && playerId.startsWith('PL'))
+                ? playerId
+                : (rawLine ? `PL${rawLine.slice(-6).toUpperCase()}` : playerId);
+
+              let existingProfile: PlayerProfile | null = null;
+              if (rawLine) {
+                const raw = await env.KV_CACHE.get(`USER_${rawLine}`);
+                if (raw) {
+                  try { existingProfile = JSON.parse(raw); } catch (_) {}
+                }
+              }
+              if (!existingProfile && shortId) {
+                const raw = await env.KV_CACHE.get(`USER_${shortId}`);
+                if (raw) {
+                  try { existingProfile = JSON.parse(raw); } catch (_) {}
+                }
+              }
+              if (!existingProfile) {
+                const players = await getPlayersList(env);
+                const p = players.find(x => x.id === playerId || x.shortId === shortId || (rawLine && x.lineUserId === rawLine));
+                if (p) {
+                  existingProfile = {
+                    shortId: p.shortId || shortId,
+                    lineUserId: p.lineUserId || rawLine,
+                    displayName: p.displayName || p.name || targetTx.playerName || 'ผู้เล่น',
+                    balance: Number(p.balance) || 0,
+                    bankName: p.bankName || '',
+                    accountNumber: p.bankAccount || p.accountNumber || '',
+                    accountName: p.accountName || p.displayName || '',
                     registeredAt: Date.now(),
                     updatedAt: Date.now(),
-                  }, env, ctx);
+                  };
+                }
+              }
 
-                  if (rawLine) {
-                    ctx?.waitUntil(pushToLine(rawLine, `❌ [ปฏิเสธการถอนเงิน]: ยอด ${targetTx.requestedAmount.toLocaleString()} pt (สาเหตุ: ${reason})\nระบบได้คืนแต้มเข้ากระเป๋าเรียบร้อย แต้มคงเหลือ: ${player.balance.toLocaleString()} pt 🚀`, env).catch(e => console.error(e)));
+              if (existingProfile) {
+                const effectiveLine = rawLine || existingProfile.lineUserId;
+                const effectiveShort = shortId || existingProfile.shortId;
+
+                if (isWithdrawal) {
+                  // Refund locked withdrawal points back to player profile across authoritative keys
+                  const oldBal = Number(existingProfile.balance) || 0;
+                  const newBal = oldBal + (Number(targetTx.requestedAmount) || 0);
+                  const updatedProfile: PlayerProfile = {
+                    ...existingProfile,
+                    shortId: effectiveShort,
+                    lineUserId: effectiveLine,
+                    balance: newBal,
+                    updatedAt: Date.now(),
+                  };
+
+                  const profileJson = JSON.stringify(updatedProfile);
+                  const primaryPuts: Promise<any>[] = [
+                    env.KV_CACHE.put(`USER_${effectiveShort}`, profileJson),
+                  ];
+                  if (effectiveLine && effectiveLine.startsWith('U')) {
+                    primaryPuts.push(env.KV_CACHE.put(`USER_${effectiveLine}`, profileJson));
+                    primaryPuts.push(env.KV_CACHE.put(`RAW_LINE_${effectiveShort}`, effectiveLine));
+                  }
+                  await Promise.all(primaryPuts);
+                  await savePlayerProfile(updatedProfile, env, ctx);
+
+                  if (effectiveLine && effectiveLine.startsWith('U')) {
+                    ctx?.waitUntil(pushToLine(effectiveLine, `❌ [ปฏิเสธการถอนเงิน]: ยอด ${targetTx.requestedAmount.toLocaleString()} pt (สาเหตุ: ${reason})\nระบบได้คืนแต้มเข้ากระเป๋าเรียบร้อย แต้มคงเหลือ: ${newBal.toLocaleString()} pt 🚀`, env).catch(e => console.error(e)));
                   }
                 } else {
-                  if (rawLine) {
-                    ctx?.waitUntil(pushToLine(rawLine, `❌ [ปฏิเสธการฝากเงิน]: ยอด ${targetTx.requestedAmount.toLocaleString()} บาท (สาเหตุ: ${reason})`, env).catch(e => console.error(e)));
+                  if (effectiveLine && effectiveLine.startsWith('U')) {
+                    ctx?.waitUntil(pushToLine(effectiveLine, `❌ [ปฏิเสธการฝากเงิน]: ยอด ${targetTx.requestedAmount.toLocaleString()} บาท (สาเหตุ: ${reason})`, env).catch(e => console.error(e)));
                   }
                 }
               }
+
               result = { success: true, txId };
             }
           } else {
             result = { success: false, error: 'Transaction not found', txId };
+          }
+        } else if (functionName === 'adminRequestCancelBet') {
+          const rawId = args[0] ? String(args[0]).trim() : '';
+          const orderNo = rawId.replace(/^bet_/, '');
+          const rawOrder = await env.KV_ORDERS.get(`ORDER_${orderNo}`);
+          if (rawOrder) {
+            const order = JSON.parse(rawOrder) as Order;
+            if (order.status === 'cancelled' || order.status === 'resolved') {
+              result = { success: false, error: `แผล Order #${orderNo} อยู่ในสถานะ ${order.status} แล้ว` };
+            } else {
+              order.status = 'refunding';
+              await env.KV_ORDERS.put(`ORDER_${orderNo}`, JSON.stringify(order));
+
+              // Refund creator
+              if (order.creatorId && Number(order.amount) > 0) {
+                await refundPlayerPoints(order.creatorId, order.creatorLineUserId || undefined, Number(order.amount), env, ctx);
+              }
+              // Refund matcher if matched
+              if (order.matcherId && Number(order.amount) > 0) {
+                await refundPlayerPoints(order.matcherId, order.matcherLineUserId || undefined, Number(order.amount), env, ctx);
+              }
+
+              order.status = 'cancelled';
+              await Promise.all([
+                env.KV_ORDERS.put(`ORDER_${orderNo}`, JSON.stringify(order)),
+                removeFromPendingOrdersList(orderNo, env),
+                removeFromMatchedOrdersList(orderNo, env),
+              ]);
+
+              result = { success: true, orderNumber: orderNo };
+            }
+          } else {
+            result = { success: false, error: `ไม่พบข้อมูลแผล Order #${orderNo}` };
           }
         } else if (functionName === 'adminSetPlayerBalance') {
           const userId = args[0];

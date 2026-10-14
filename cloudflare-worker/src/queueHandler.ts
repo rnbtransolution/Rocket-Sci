@@ -194,6 +194,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       const newTx: Transaction = {
         id: txId,
         playerId: profile.shortId,
+        lineUserId: profile.lineUserId,
         playerName: profile.displayName,
         requestedAmount: depositAmt,
         actualAmount: 0,
@@ -276,6 +277,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       const newTx: Transaction = {
         id: txId,
         playerId: profile.shortId,
+        lineUserId: profile.lineUserId,
         playerName: profile.displayName,
         requestedAmount: withdrawAmt,
         actualAmount: withdrawAmt,
@@ -533,6 +535,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     const newTx: Transaction = {
       id: txId,
       playerId: profile.shortId,
+      lineUserId: profile.lineUserId,
       playerName: profile.displayName,
       requestedAmount: 1000,
       actualAmount: 0,
@@ -1373,7 +1376,7 @@ export async function addToPendingOrdersList(order: Order, env: Env): Promise<vo
   }
 }
 
-async function removeFromPendingOrdersList(orderNo: string, env: Env): Promise<void> {
+export async function removeFromPendingOrdersList(orderNo: string, env: Env): Promise<void> {
   try {
     const cleanNo = orderNo.trim().replace(/^#/, '');
     const list = await getPendingOrdersList(env);
@@ -1561,19 +1564,21 @@ export async function getPlayersList(env: Env): Promise<any[]> {
 export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: ExecutionContext): Promise<void> {
   try {
     profile.updatedAt = Date.now();
-    const cacheKey = `USER_${profile.lineUserId}`;
     const profileJson = JSON.stringify(profile);
 
-    const primaryPuts: Promise<any>[] = [
-      env.KV_CACHE.put(cacheKey, profileJson),
-    ];
+    const primaryPuts: Promise<any>[] = [];
+    if (profile.lineUserId && profile.lineUserId.startsWith('U')) {
+      primaryPuts.push(env.KV_CACHE.put(`USER_${profile.lineUserId}`, profileJson));
+    }
     if (profile.shortId) {
-      primaryPuts.push(env.KV_CACHE.put(`RAW_LINE_${profile.shortId}`, profile.lineUserId));
       primaryPuts.push(env.KV_CACHE.put(`USER_${profile.shortId}`, profileJson));
+      if (profile.lineUserId && profile.lineUserId.startsWith('U')) {
+        primaryPuts.push(env.KV_CACHE.put(`RAW_LINE_${profile.shortId}`, profile.lineUserId));
+      }
     }
     await Promise.all(primaryPuts);
 
-    // Update directory array PLAYERS_LIST in background (read-only listing view, non-blocking)
+    // Update directory array PLAYERS_LIST synchronously so dashboard & RPC reads see new balance instantly
     const updateDirectory = async () => {
       try {
         let list: any[] = [];
@@ -1602,14 +1607,10 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
       }
     };
 
-    if (ctx) {
-      ctx.waitUntil(updateDirectory());
-    } else {
-      updateDirectory().catch(() => {});
-    }
+    await updateDirectory();
 
     // Offload sync to Google Sheets in background — throttled to 1 write/min/user
-    if (env.GAS_FALLBACK_URL) {
+    if (env.GAS_FALLBACK_URL && profile.lineUserId) {
       const gasUrl = env.GAS_FALLBACK_URL;
       const runGasSync = async () => {
         if (!(await isGasSyncThrottled('SAVE', profile.lineUserId, env))) {
@@ -1721,28 +1722,44 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
   const cacheKey = `USER_${userId}`;
   const shortId = `PL${userId.slice(-6).toUpperCase()}`;
 
-  // 1. Check direct user key
-  const cached = await env.KV_CACHE.get(cacheKey);
-  let profile = cached ? (JSON.parse(cached) as PlayerProfile) : null;
+  // 1. Check direct user key and shortId key in parallel
+  const [cachedUser, cachedShort] = await Promise.all([
+    env.KV_CACHE.get(cacheKey),
+    env.KV_CACHE.get(`USER_${shortId}`),
+  ]);
 
-  // 2. Also check shortId key if direct profile not found
-  if (!profile) {
-    try {
-      const shortCached = await env.KV_CACHE.get(`USER_${shortId}`);
-      if (shortCached) {
-        profile = JSON.parse(shortCached) as PlayerProfile;
+  let profile = cachedUser ? (JSON.parse(cachedUser) as PlayerProfile) : null;
+  let shortProfile = cachedShort ? (JSON.parse(cachedShort) as PlayerProfile) : null;
+
+  // Cross-reconcile direct user key and shortId key:
+  // If one key has a newer updatedAt or higher balance, prioritize the authoritative update
+  if (profile || shortProfile) {
+    if (!profile) {
+      profile = shortProfile!;
+    } else if (shortProfile) {
+      const shortUpdated = Number(shortProfile.updatedAt) || 0;
+      const userUpdated = Number(profile.updatedAt) || 0;
+      const shortBal = Number(shortProfile.balance) || 0;
+      const userBal = Number(profile.balance) || 0;
+
+      if (shortBal > userBal || shortUpdated > userUpdated) {
+        profile = { ...profile, ...shortProfile, lineUserId: userId, shortId, balance: Math.max(shortBal, userBal) };
+        // Self-heal direct user cache key immediately
+        const healedJson = JSON.stringify(profile);
+        if (ctx) {
+          ctx.waitUntil(env.KV_CACHE.put(cacheKey, healedJson).catch(() => {}));
+        } else {
+          env.KV_CACHE.put(cacheKey, healedJson).catch(() => {});
+        }
       }
-    } catch (_) {}
-  }
+    }
 
-  // If found in direct KV keys, ensure canonical links and return authoritative profile
-  if (profile) {
     if (!profile.shortId) profile.shortId = shortId;
     if (!profile.lineUserId) profile.lineUserId = userId;
     return profile;
   }
 
-  // 3. Fallback to PLAYERS_LIST only if profile not yet in direct KV
+  // 2. Fallback to PLAYERS_LIST only if profile not yet in direct KV
   let playersListEntry: any = null;
   try {
     const listRaw = await env.KV_CACHE.get('PLAYERS_LIST');
@@ -1770,18 +1787,8 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
     return restoredProfile;
   }
 
-  // 4. Truly new player: fetch LINE user display name via Messaging API
-  let displayName = 'ผู้เล่น';
-  try {
-    const res = await fetch(`https://api.line.me/v2/bot/profile/${userId}`, {
-      headers: { Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}` },
-    });
-    if (res.ok) {
-      const data = (await res.json()) as any;
-      if (data?.displayName) displayName = data.displayName;
-    }
-  } catch (_) {}
-
+  // 3. Truly new player: initialize immediately with fast fallback name (0ms blocking latency!)
+  const displayName = `ผู้เล่น #${shortId.slice(-4)}`;
   const newProfile: PlayerProfile = {
     shortId,
     lineUserId: userId,
@@ -1792,6 +1799,30 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
   };
 
   await savePlayerProfile(newProfile, env, ctx);
+
+  // Background fetch of real LINE profile name so user is not blocked on 1500ms HTTP call
+  if (env.LINE_CHANNEL_ACCESS_TOKEN) {
+    const fetchLineProfileTask = async () => {
+      try {
+        const res = await fetch(`https://api.line.me/v2/bot/profile/${userId}`, {
+          headers: { Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}` },
+        });
+        if (res.ok) {
+          const data = (await res.json()) as any;
+          if (data?.displayName && data.displayName !== displayName) {
+            newProfile.displayName = data.displayName;
+            await savePlayerProfile(newProfile, env, ctx);
+          }
+        }
+      } catch (_) {}
+    };
+    if (ctx) {
+      ctx.waitUntil(fetchLineProfileTask());
+    } else {
+      fetchLineProfileTask().catch(() => {});
+    }
+  }
+
   return newProfile;
 }
 

@@ -116,6 +116,7 @@ export interface PlayerProfile {
 export interface Transaction {
   id: string;
   playerId: string;
+  lineUserId?: string;
   playerName: string;
   requestedAmount: number;
   actualAmount: number;
