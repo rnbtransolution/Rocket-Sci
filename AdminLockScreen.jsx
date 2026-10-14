@@ -32,11 +32,11 @@ export default function AdminLockScreen({
   setLoginError, 
   setAdminAuthenticated, 
   setAdminRole,
-  adminUsername = 'Admin', 
-  adminPassword = 'P@ssW0rd2026', 
-  adminPasscode = 'P@ssW0rd2026',
-  admin1Username = 'Admin1',
-  admin1Password = 'Admin@2026',
+  adminUsername = '', 
+  adminPassword = '', 
+  adminPasscode = '',
+  admin1Username = '',
+  admin1Password = '',
   runBackendFunction 
 }) {
   const [showPassword, setShowPassword] = useState(false);
@@ -104,27 +104,27 @@ export default function AdminLockScreen({
 
     setIsSubmitting(true);
 
-    const isSuperUser = (adminUsername ? userClean.toLowerCase() === adminUsername.toLowerCase() : userClean.toLowerCase() === 'admin');
-    const isSuperPass = Boolean((adminPassword && passClean === adminPassword) || (adminPasscode && passClean === adminPasscode) || passClean === 'P@ssW0rd2026');
+    const isSuperUser = (adminUsername ? userClean.toLowerCase() === adminUsername.toLowerCase() : false);
+    const isSuperPass = Boolean(adminPassword && passClean === adminPassword) || Boolean(adminPasscode && passClean === adminPasscode);
 
-    const isLimitedUser = (admin1Username ? userClean.toLowerCase() === admin1Username.toLowerCase() : userClean.toLowerCase() === 'admin1');
-    const isLimitedPass = Boolean((admin1Password && passClean === admin1Password) || passClean === 'Admin@2026');
+    const isLimitedUser = (admin1Username ? userClean.toLowerCase() === admin1Username.toLowerCase() : false);
+    const isLimitedPass = Boolean(admin1Password && passClean === admin1Password);
 
     let loginSuccess = false;
     let resolvedRole = 'admin'; // 'superadmin' | 'admin'
     let resolvedUser = userClean;
-    let resolvedAdminKey = 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
+    let resolvedAdminKey = ''; // Will be populated from backend RPC response
 
     if (isSuperUser && isSuperPass) {
       loginSuccess = true;
       resolvedRole = 'superadmin';
-      resolvedUser = 'Admin';
-      resolvedAdminKey = 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
+      resolvedUser = adminUsername || 'Admin';
+      // Key will be overridden by backend RPC response; leave empty until then
     } else if (isLimitedUser && isLimitedPass) {
       loginSuccess = true;
       resolvedRole = 'admin';
-      resolvedUser = 'Admin1';
-      resolvedAdminKey = 'admin1_key_8f3a9e2c1b4d5e6f';
+      resolvedUser = admin1Username || 'Admin1';
+      // Key will be overridden by backend RPC response; leave empty until then
     }
 
     // Try backend RPC login

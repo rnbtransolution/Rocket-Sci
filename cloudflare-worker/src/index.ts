@@ -237,17 +237,11 @@ export default {
         const { functionName, args = [] } = body;
 
         const authHeader = request.headers.get('x-admin-key') || request.headers.get('x-admin-api-key') || body?.adminKey || body?.apiKey;
-        const superAdminKeys = [
-          env.ADMIN_API_KEY,
-          'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT',
-          'P@ssW0rd2026',
-        ].filter(Boolean);
-        const admin1Keys = [
-          'admin1_key_8f3a9e2c1b4d5e6f',
-          'Admin@2026',
-        ];
+        // Auth: sourced from Wrangler secrets (env vars) only — no literal key fallbacks in source.
+        const superAdminKeys = [env.ADMIN_API_KEY].filter(Boolean);
+        const admin1Keys = [env.ADMIN1_API_KEY].filter(Boolean);
         const validAdminKeys = [...superAdminKeys, ...admin1Keys];
-        const isAdmin = Boolean(authHeader && validAdminKeys.includes(authHeader));
+        const isAdmin = Boolean(authHeader && validAdminKeys.length > 0 && validAdminKeys.includes(authHeader));
         const isPublicAllowed = functionName === 'getDashboardData' || functionName === 'adminLogin' || functionName === 'getP2PResults';
         if (!isPublicAllowed && !isAdmin) {
           return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -465,27 +459,23 @@ export default {
         } else if (functionName === 'adminLogin') {
           const username = (args[0] || '').toString().trim().toLowerCase();
           const password = (args[1] || '').toString().trim();
-          const superPasses = [
-            env.ADMIN_API_KEY,
-            'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT',
-            'P@ssW0rd2026',
-          ].filter(Boolean);
-          const admin1Passes = [
-            'Admin@2026',
-            'admin1_key_8f3a9e2c1b4d5e6f',
-          ];
+          // Passwords validated against Wrangler secrets only — no literals in source.
+          const superPass = env.ADMIN_API_KEY; // Admin logs in with their API key as password
+          const superUsername = (env.ADMIN_USERNAME || 'admin').toLowerCase();
+          const admin1Pass = env.ADMIN1_API_KEY;
+          const admin1Username = (env.ADMIN1_USERNAME || 'admin1').toLowerCase();
 
-          if (username === 'admin' && superPasses.includes(password)) {
+          if (username === superUsername && superPass && password === superPass) {
             result = { 
               success: true, 
-              adminKey: env.ADMIN_API_KEY || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT', 
+              adminKey: env.ADMIN_API_KEY, 
               username: 'Admin', 
               role: 'superadmin' 
             };
-          } else if (username === 'admin1' && admin1Passes.includes(password)) {
+          } else if (username === admin1Username && admin1Pass && password === admin1Pass) {
             result = { 
               success: true, 
-              adminKey: 'admin1_key_8f3a9e2c1b4d5e6f', 
+              adminKey: env.ADMIN1_API_KEY, 
               username: 'Admin1', 
               role: 'admin' 
             };

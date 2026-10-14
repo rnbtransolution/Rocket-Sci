@@ -104,16 +104,14 @@ const SLIP_PRESETS = [
   }
 ];
 
-const SUPER_ADMIN_USERNAME = import.meta.env.VITE_SUPER_ADMIN_USERNAME || import.meta.env.VITE_ADMIN_USERNAME || 'Admin';
-const SUPER_ADMIN_PASSWORD = import.meta.env.VITE_SUPER_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN_PASSCODE || 'P@ssW0rd2026';
-const SUPER_ADMIN_PASSCODE = import.meta.env.VITE_ADMIN_PASSCODE || 'P@ssW0rd2026';
+// Admin credentials — must be set via environment variables (.env / deployment config).
+// No literal fallbacks: missing env vars result in authentication failure (secure by default).
+const SUPER_ADMIN_USERNAME = import.meta.env.VITE_SUPER_ADMIN_USERNAME || import.meta.env.VITE_ADMIN_USERNAME || '';
+const SUPER_ADMIN_PASSWORD = import.meta.env.VITE_SUPER_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN_PASSCODE || '';
+const SUPER_ADMIN_PASSCODE = import.meta.env.VITE_ADMIN_PASSCODE || import.meta.env.VITE_SUPER_ADMIN_PASSWORD || '';
 
-const LIMITED_ADMIN_USERNAME = import.meta.env.VITE_LIMITED_ADMIN_USERNAME || import.meta.env.VITE_ADMIN1_USERNAME || 'Admin1';
-const LIMITED_ADMIN_PASSWORD = import.meta.env.VITE_LIMITED_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN1_PASSWORD || 'Admin@2026';
-
-const ADMIN_USERNAME = SUPER_ADMIN_USERNAME;
-const ADMIN_PASSWORD = SUPER_ADMIN_PASSWORD;
-const ADMIN_PASSCODE = SUPER_ADMIN_PASSCODE;
+const LIMITED_ADMIN_USERNAME = import.meta.env.VITE_LIMITED_ADMIN_USERNAME || import.meta.env.VITE_ADMIN1_USERNAME || '';
+const LIMITED_ADMIN_PASSWORD = import.meta.env.VITE_LIMITED_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN1_PASSWORD || '';
 
 export default function App() {
   const isGASHost = typeof window !== 'undefined' && (
@@ -154,7 +152,8 @@ export default function App() {
       const stored = sessionStorage.getItem('rocket_admin_key') || localStorage.getItem('rocket_admin_key');
       if (stored) return stored;
     }
-    return 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
+    // Fallback to build-time env var only — no literal key embedded in source
+    return import.meta.env.VITE_ADMIN_API_KEY || '';
   };
   const ADMIN_API_KEY = getAdminApiKey();
 
@@ -455,7 +454,7 @@ export default function App() {
 
     const fetchFromBackend = async () => {
       try {
-        const apiKey = ADMIN_API_KEY || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
+        const apiKey = ADMIN_API_KEY;
         const res = await fetch(`${targetUrl}/api/run`, {
           method: 'POST',
           headers: {

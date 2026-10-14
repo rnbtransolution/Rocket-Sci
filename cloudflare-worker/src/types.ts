@@ -8,6 +8,9 @@ export interface Env {
   LINE_CHANNEL_SECRET: string;
   LINE_CHANNEL_ACCESS_TOKEN: string;
   ADMIN_API_KEY: string;
+  ADMIN1_API_KEY?: string;        // Limited Admin key (optional — Wrangler secret)
+  ADMIN_USERNAME?: string;        // Super Admin username override (optional)
+  ADMIN1_USERNAME?: string;       // Limited Admin username override (optional)
   GOOGLE_SERVICE_ACCOUNT_JSON?: string;
 
   // Configuration vars

@@ -499,11 +499,15 @@ function executeAdminAction(functionName, args, adminKey) {
   args = args || [];
   var publicFns = { getDashboardData: true, adminLogin: true, adminGetLineQuota: true };
   if (!publicFns[functionName]) {
-    var expectedKey = getAdminApiKey_() || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
+    // Strict: keys must be configured in Script Properties — no literal fallbacks.
+    var superAdminKey = getAdminApiKey_();
+    var admin1Key = getScriptSecret_('ADMIN1_API_KEY');
+    if (!superAdminKey) {
+      return { success: false, error: 'Server misconfiguration: ADMIN_API_KEY Script Property is not set' };
+    }
     var provided = adminKey || (args && args.length > 0 && typeof args[args.length - 1] === 'object' && args[args.length - 1] && args[args.length - 1].adminKey ? args[args.length - 1].adminKey : null);
-    var superKeys = [expectedKey, 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT', 'P@ssW0rd2026'];
-    var admin1Keys = ['admin1_key_8f3a9e2c1b4d5e6f', 'Admin@2026'];
-    var validKeys = superKeys.concat(admin1Keys);
+    var superKeys = [superAdminKey];
+    var validKeys = admin1Key ? superKeys.concat([admin1Key]) : superKeys;
     if (!provided || validKeys.indexOf(provided) === -1) {
       return { success: false, error: 'Unauthorized: Admin authorization required' };
     }
@@ -6731,15 +6735,20 @@ function adminGetLineQuota() {
 function adminLogin(username, password) {
   var u = String(username || '').trim().toLowerCase();
   var p = String(password || '').trim();
-  var expectedKey = getAdminApiKey_() || 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT';
-  var superPasses = [expectedKey, 'urkDQHE2Mm8Q4oqhS_1ftZV0EqWT-cAT', 'P@ssW0rd2026'];
-  var admin1Passes = ['Admin@2026', 'admin1_key_8f3a9e2c1b4d5e6f'];
-
-  if (u === 'admin' && superPasses.indexOf(p) !== -1) {
-    return { success: true, message: 'Super Admin authenticated', username: 'Admin', role: 'superadmin', adminKey: expectedKey };
+  // Keys must be set in Script Properties — no literal fallbacks.
+  var superAdminKey = getAdminApiKey_();
+  var admin1Key = getScriptSecret_('ADMIN1_API_KEY');
+  if (!superAdminKey) {
+    return { success: false, error: 'Server misconfiguration: ADMIN_API_KEY Script Property is not set' };
   }
-  if (u === 'admin1' && admin1Passes.indexOf(p) !== -1) {
-    return { success: true, message: 'Admin authenticated', username: 'Admin1', role: 'admin', adminKey: 'admin1_key_8f3a9e2c1b4d5e6f' };
+  var superUsername = (getScriptSecret_('ADMIN_USERNAME') || 'admin').toLowerCase();
+  var admin1Username = (getScriptSecret_('ADMIN1_USERNAME') || 'admin1').toLowerCase();
+
+  if (u === superUsername && p === superAdminKey) {
+    return { success: true, message: 'Super Admin authenticated', username: 'Admin', role: 'superadmin', adminKey: superAdminKey };
+  }
+  if (admin1Key && u === admin1Username && p === admin1Key) {
+    return { success: true, message: 'Admin authenticated', username: 'Admin1', role: 'admin', adminKey: admin1Key };
   }
   return { success: false, error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
 }
