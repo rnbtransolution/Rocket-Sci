@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import AdminLockScreen from './AdminLockScreen.jsx';
+import PasswordPanel from './PasswordPanel.jsx';
 import { 
   Send, 
   CheckCircle, 
@@ -251,6 +252,14 @@ export default function App() {
   });
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
+
+  // ── Password lifecycle ──
+  // Set when login reports an expired/forced-change password. While true the
+  // console is locked to the change-password screen — the server also refuses
+  // to mint a normal session, so this is convenience, not the enforcement.
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [passwordStatus, setPasswordStatus] = useState(null);
+  const [resetMode, setResetMode] = useState(false);
 
   const handleAdminLogout = () => {
     if (window.confirm('🔒 คุณต้องการออกจากระบบแอดมินใช่หรือไม่?')) {
@@ -953,21 +962,60 @@ export default function App() {
     );
   }
 
+  // Password expired / forced rotation — the console is unreachable until the
+  // admin sets a new one. The server enforces this too; this is the UI half.
+  if (mustChangePassword) {
+    return (
+      <PasswordPanel
+        mode="change"
+        username={usernameInput || sessionStorage.getItem('rocket_admin_user') || ''}
+        forced
+        status={passwordStatus}
+        runBackendFunction={runBackendFunction}
+        onDone={() => {
+          setMustChangePassword(false);
+          setPasswordStatus(null);
+          addToast('🔐 เปลี่ยนรหัสผ่านเรียบร้อย', 'success');
+        }}
+      />
+    );
+  }
+
   if (!adminAuthenticated) {
     return (
-      <AdminLockScreen 
-        usernameInput={usernameInput}
-        setUsernameInput={setUsernameInput}
-        passwordInput={passwordInput}
-        setPasswordInput={setPasswordInput}
-        loginError={loginError}
-        setLoginError={setLoginError}
-        setAdminAuthenticated={setAdminAuthenticated}
-        setAdminRole={setAdminRole}
-        adminUsername={SUPER_ADMIN_USERNAME}
-        admin1Username={LIMITED_ADMIN_USERNAME}
-        runBackendFunction={runBackendFunction}
-      />
+      <>
+        {resetMode ? (
+          <PasswordPanel
+            mode="reset"
+            runBackendFunction={runBackendFunction}
+            onCancel={() => setResetMode(false)}
+            onDone={() => {
+              setResetMode(false);
+              addToast('🔓 รีเซ็ตรหัสผ่านเรียบร้อย กรุณาเข้าสู่ระบบใหม่', 'success');
+            }}
+          />
+        ) : (
+          <AdminLockScreen 
+            usernameInput={usernameInput}
+            setUsernameInput={setUsernameInput}
+            passwordInput={passwordInput}
+            setPasswordInput={setPasswordInput}
+            loginError={loginError}
+            setLoginError={setLoginError}
+            setAdminAuthenticated={setAdminAuthenticated}
+            setAdminRole={setAdminRole}
+            adminUsername={SUPER_ADMIN_USERNAME}
+            admin1Username={LIMITED_ADMIN_USERNAME}
+            runBackendFunction={runBackendFunction}
+            onForgotPassword={() => { setResetMode(true); setLoginError(''); }}
+            onLoginResult={(res) => {
+              // Surface expiry/forced-change and first-run recovery codes.
+              if (res && res.status) setPasswordStatus(res.status);
+              if (res && res.requiresPasswordChange) setMustChangePassword(true);
+            }}
+          />
+        )}
+      </>
     );
   }
 

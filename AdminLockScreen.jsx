@@ -15,7 +15,8 @@ import {
   Zap,
   BarChart3,
   Smartphone,
-  Lightbulb
+  Lightbulb,
+  KeyRound
 } from 'lucide-react';
 
 import { HERO_FULL_BACKGROUND } from './hero_image_b64';
@@ -38,7 +39,9 @@ export default function AdminLockScreen({
   // locally, which meant the admin passwords shipped inside the JS bundle.
   // Authentication is now decided solely by the backend adminLogin RPC.
   admin1Username = '',
-  runBackendFunction 
+  runBackendFunction,
+  onForgotPassword,
+  onLoginResult
 }) {
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -115,10 +118,14 @@ export default function AdminLockScreen({
     let resolvedRole = 'admin'; // 'superadmin' | 'admin'
     let resolvedUser = userClean;
     let resolvedSession = '';
+    let serverError = '';
+    let serverResult = null;
 
     if (typeof runBackendFunction === 'function') {
       try {
         const res = await runBackendFunction('adminLogin', [userClean, passClean]);
+        serverResult = res || null;
+        if (res && res.success === false && res.error) serverError = res.error;
         if (res && res.success && res.session) {
           loginSuccess = true;
           resolvedRole = res.role || 'admin';
@@ -128,6 +135,11 @@ export default function AdminLockScreen({
       } catch {
         // ignore RPC login exception
       }
+    }
+
+    // Let the parent surface expiry / forced-change / first-run recovery codes.
+    if (typeof onLoginResult === 'function' && serverResult) {
+      onLoginResult(serverResult);
     }
 
     setIsSubmitting(false);
@@ -146,7 +158,7 @@ export default function AdminLockScreen({
       setAdminAuthenticated(true);
       setLoginError('');
     } else {
-      setLoginError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
+      setLoginError(serverError || 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
       setPasswordInput('');
     }
   };
@@ -814,6 +826,20 @@ export default function AdminLockScreen({
                 <LogIn size={15} />
                 <span>{isSubmitting ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบ (Sign In)'}</span>
               </button>
+
+              {/* Forgotten-password path. Uses a single-use recovery code, so no
+                  email provider is required and the account stays recoverable
+                  even if email is down. */}
+              {typeof onForgotPassword === 'function' && (
+                <button
+                  type="button"
+                  onClick={onForgotPassword}
+                  className="w-full py-2 text-[11px] text-sky-600 hover:text-sky-800 hover:underline transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <KeyRound size={12} />
+                  <span>ลืมรหัสผ่าน? ใช้ Recovery Code รีเซ็ต</span>
+                </button>
+              )}
             </form>
 
             {/* Card Footer Info */}

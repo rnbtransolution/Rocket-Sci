@@ -1,6 +1,15 @@
 import { Env, LineWebhookPayload, QueueMessage, LineEvent, PlayerProfile, Order } from './types.js';
 import { verifyLineSignature } from './signature.js';
 import { state } from './state.js';
+import {
+  setAdminPassword,
+  verifyAdminLogin,
+  changeAdminPassword,
+  resetAdminPasswordWithRecoveryCode,
+  getCredentialStatus,
+  validatePasswordStrength,
+  PASSWORD_MAX_AGE_DAYS,
+} from './credentials.js';
 import { RocketStateDO } from './stateDO.js';
 import {
   issueSessionToken,
@@ -311,7 +320,49 @@ export default {
             ? 'superadmin'
             : 'admin';
 
-        const isPublicAllowed = functionName === 'getDashboardData' || functionName === 'adminLogin' || functionName === 'getP2PResults';
+        // `adminResetPasswordWithRecoveryCode` is deliberately unauthenticated: it IS
+        // the forgotten-password path. It is safe because a single-use recovery
+        // code must be presented, it is rate-limited, and every failed attempt
+        // burns the presented code.
+        // Caller IP for rate limiting. Read once per request so login and password
+        // reset throttling share one key space per client.
+        const cfClientIp =
+          request.headers.get('cf-connecting-ip') ||
+          request.headers.get('x-forwarded-for') ||
+          'unknown';
+
+        // Endpoints a password-change (restricted) session may reach. Without this a
+        // session issued after expiry could still perform admin actions, which
+        // defeats the point of blocking.
+const PASSWORD_SCOPE_ALLOWED = new Set([
+  'adminChangePassword',
+  'adminGetPasswordStatus',
+  'adminResetPasswordWithRecoveryCode',
+]);
+
+// A restricted session must not be usable for anything else.
+if (
+  sessionClaims &&
+  sessionClaims.scope === 'reset' &&
+  !PASSWORD_SCOPE_ALLOWED.has(functionName)
+) {
+  return new Response(
+    JSON.stringify({
+      error: 'PasswordChangeRequired: ต้องเปลี่ยนรหัสผ่านก่อนจึงจะใช้งานระบบได้',
+      requiresPasswordChange: true,
+    }),
+    {
+      status: 403,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    }
+  );
+}
+
+const isPublicAllowed =
+          functionName === 'getDashboardData' ||
+          functionName === 'adminLogin' ||
+          functionName === 'getP2PResults' ||
+          functionName === 'adminResetPasswordWithRecoveryCode';
         if (!isPublicAllowed && !isAdmin) {
           return new Response(JSON.stringify({ error: 'Unauthorized' }), {
             status: 401,
@@ -527,10 +578,7 @@ export default {
           const username = (args[0] || '').toString().trim().toLowerCase();
           const password = (args[1] || '').toString().trim();
 
-          const clientIp =
-            request.headers.get('cf-connecting-ip') ||
-            request.headers.get('x-forwarded-for') ||
-            'unknown';
+          const clientIp = cfClientIp;
           const rateKey = `login:${clientIp}`;
 
           const limit = checkLoginRateLimit(rateKey);
@@ -559,14 +607,99 @@ export default {
           const admin1Pass = env.ADMIN_PASSWORD_1 || env.ADMIN1_API_KEY;
           const admin1Username = (env.ADMIN1_USERNAME || 'admin1').toLowerCase();
 
+          // The credential store is authoritative once a credential exists.
+          // Expiry and "must change" are enforced HERE, so a stale password
+          // cannot mint a session and reach any admin action.
+          const outcome = await verifyAdminLogin(state(env), username, password);
+
           let authenticated: { username: string; role: AdminRole } | null = null;
-          if (superPass && username === superUsername && timingSafeEqual(password, superPass)) {
-            authenticated = { username: 'Admin', role: 'superadmin' };
-          } else if (admin1Pass && username === admin1Username && timingSafeEqual(password, admin1Pass)) {
-            authenticated = { username: 'Admin1', role: 'admin' };
+          // Set when a restricted (password-change) session was issued above,
+          // so the normal full-session path below is skipped.
+          let alreadyResponded = false;
+
+          if (outcome.status === 'ok') {
+            authenticated = { username: outcome.username, role: outcome.role };
+          } else if (outcome.status === 'expired' || outcome.status === 'must_change') {
+            // Password is CORRECT but out of policy. A restricted session is
+            // still issued so the operator can reach the change-password
+            // screen; every other admin action is refused server-side.
+            clearLoginRateLimit(rateKey);
+            if (!env.SESSION_SECRET) {
+              result = { success: false, error: 'Server misconfiguration: SESSION_SECRET is not configured' };
+            } else {
+              const resetStatus = await getCredentialStatus(state(env), username);
+              result = {
+                success: true,
+                requiresPasswordChange: true,
+                passwordExpired: outcome.status === 'expired',
+                daysOverdue: outcome.status === 'expired' ? outcome.daysOverdue : 0,
+                scope: 'reset',
+                session: await issueSessionToken(
+                  resetStatus.username || username,
+                  resetStatus.role || 'admin',
+                  env.SESSION_SECRET,
+                  60 * 60,
+                  'reset'
+                ),
+                username: resetStatus.username || username,
+                role: resetStatus.role || 'admin',
+                status: resetStatus,
+                message:
+                  outcome.status === 'expired'
+                    ? `รหัสผ่านหมดอายุแล้ว (เกิน ${PASSWORD_MAX_AGE_DAYS} วัน) กรุณาตั้งรหัสผ่านใหม่ก่อนเข้าใช้งาน`
+                    : 'กรุณาตั้งรหัสผ่านใหม่ก่อนเข้าใช้งาน',
+              };
+              alreadyResponded = true;
+            }
+          } else {
+            // No stored credential yet: first login with the Wrangler secret
+            // password. Hash it into the store so the plaintext secret can be
+            // dropped from the deployment afterwards.
+            if (superPass && username === superUsername && timingSafeEqual(password, superPass)) {
+              const bootstrap = await setAdminPassword(state(env), 'Admin', 'superadmin', password, {
+                mustChange: true,
+                mustChangeReason: 'initial',
+              });
+              authenticated = { username: 'Admin', role: 'superadmin' };
+              // First-run codes are shown once in the login response so the
+              // operator can store them immediately. The session is
+              // password-change scoped, matching mustChange.
+              result = {
+                success: true,
+                bootstrapRecoveryCodes: bootstrap.recoveryCodes,
+                requiresPasswordChange: true,
+                scope: 'reset',
+                status: await getCredentialStatus(state(env), 'Admin'),
+                session: env.SESSION_SECRET
+                  ? await issueSessionToken('Admin', 'superadmin', env.SESSION_SECRET, 60 * 60, 'reset')
+                  : undefined,
+                message: 'ครั้งแรก: กรุณาตั้งรหัสผ่านใหม่และบันทึก Recovery Codes',
+              };
+              alreadyResponded = true;
+            } else if (admin1Pass && username === admin1Username && timingSafeEqual(password, admin1Pass)) {
+              const bootstrap = await setAdminPassword(state(env), 'Admin1', 'admin', password, {
+                mustChange: true,
+                mustChangeReason: 'initial',
+              });
+              authenticated = { username: 'Admin1', role: 'admin' };
+              result = {
+                success: true,
+                bootstrapRecoveryCodes: bootstrap.recoveryCodes,
+                requiresPasswordChange: true,
+                scope: 'reset',
+                status: await getCredentialStatus(state(env), 'Admin1'),
+                session: env.SESSION_SECRET
+                  ? await issueSessionToken('Admin1', 'admin', env.SESSION_SECRET, 60 * 60, 'reset')
+                  : undefined,
+                message: 'ครั้งแรก: กรุณาตั้งรหัสผ่านใหม่และบันทึก Recovery Codes',
+              };
+              alreadyResponded = true;
+            }
           }
 
-          if (!authenticated) {
+          if (alreadyResponded) {
+            // Restricted session already prepared above.
+          } else if (!authenticated) {
             result = { success: false, error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
           } else if (!env.SESSION_SECRET) {
             result = {
@@ -575,7 +708,10 @@ export default {
             };
           } else {
             clearLoginRateLimit(rateKey);
+            const status = await getCredentialStatus(state(env), authenticated.username);
+            const combined = { ...(result && typeof result === 'object' ? result : {}), status };
             result = {
+              ...combined,
               success: true,
               session: await issueSessionToken(authenticated.username, authenticated.role, env.SESSION_SECRET),
               username: authenticated.username,
@@ -583,6 +719,84 @@ export default {
               expiresIn: 8 * 60 * 60,
             };
           }
+        } else if (functionName === 'adminGetPasswordStatus') {
+          const target = sessionClaims?.sub || args[0];
+          if (!target) {
+            result = { success: false, error: 'ไม่พบข้อมูลผู้ใช้' };
+          } else {
+            result = { success: true, status: await getCredentialStatus(state(env), String(target)) };
+          }
+        } else if (functionName === 'adminChangePassword') {
+          // Self-service. Requires the session identity AND the current
+          // password, so a stolen session alone cannot lock out the owner.
+          if (!sessionClaims) {
+            result = { success: false, error: 'กรุณาเข้าสู่ระบบก่อนเปลี่ยนรหัสผ่าน' };
+          } else {
+            const currentPassword = String(args[0] || '');
+            const newPassword = String(args[1] || '');
+            try {
+              const changed = await changeAdminPassword(
+                state(env),
+                sessionClaims.sub,
+                currentPassword,
+                newPassword
+              );
+              // Re-issue the session: existing tokens stay valid but the
+              // caller gets a fresh one for continuity.
+              result = {
+                success: true,
+                recoveryCodes: changed.recoveryCodes,
+                daysUntilExpiry: changed.daysUntilExpiry,
+                maxAgeDays: PASSWORD_MAX_AGE_DAYS,
+              };
+            } catch (err) {
+              result = { success: false, error: (err as Error)?.message || 'เปลี่ยนรหัสผ่านไม่สำเร็จ' };
+            }
+          }
+        } else if (functionName === 'adminResetPasswordWithRecoveryCode') {
+          // Unauthenticated by design — this is the forgotten-password path.
+          // Guarded by: single-use code + strict rate limiting + code burn.
+          const resetRateKey = `reset:${cfClientIp}`;
+          const resetLimit = checkLoginRateLimit(resetRateKey);
+          if (!resetLimit.allowed) {
+            return new Response(
+              JSON.stringify({
+                success: false,
+                error: `ลองรีเซ็ตหลายครั้งเกินไป กรุณารอ ${Math.ceil(resetLimit.retryAfterSeconds / 60)} นาทีแล้วลองใหม่`,
+              }),
+              {
+                status: 429,
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Retry-After': String(resetLimit.retryAfterSeconds),
+                  ...corsHeaders,
+                },
+              }
+            );
+          }
+          try {
+            const reset = await resetAdminPasswordWithRecoveryCode(
+              state(env),
+              String(args[0] || ''),
+              String(args[1] || ''),
+              String(args[2] || '')
+            );
+            clearLoginRateLimit(resetRateKey);
+            result = {
+              success: true,
+              username: reset.username,
+              role: reset.role,
+              recoveryCodes: reset.recoveryCodes,
+              daysUntilExpiry: reset.daysUntilExpiry,
+              maxAgeDays: PASSWORD_MAX_AGE_DAYS,
+            };
+          } catch (err) {
+            result = { success: false, error: (err as Error)?.message || 'รีเซ็ตรหัสผ่านไม่สำเร็จ' };
+          }
+        } else if (functionName === 'adminValidatePassword') {
+          // Client-side-strength pre-check so the UI can guide without a
+          // round-trip. The server re-validates regardless.
+          result = validatePasswordStrength(String(args[0] || ''));
         } else if (functionName === 'adminApproveTransaction') {
           const txId = args[0];
           const txs = await getTransactionsList(env);

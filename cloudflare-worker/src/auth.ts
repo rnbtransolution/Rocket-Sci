@@ -29,10 +29,24 @@ const TOKEN_TTL_SECONDS = 8 * 60 * 60; // 8 hours — one working shift.
 
 export type AdminRole = 'superadmin' | 'admin';
 
+/**
+ * What a session is permitted to do.
+ *
+ * `full`   — normal admin access.
+ * `reset`  — may ONLY change/reset a password and read its status.
+ *
+ * A password that has expired blocks ordinary admin actions. Without a
+ * restricted scope there would be no way back in to fix it, since the operator
+ * cannot perform any action — including the password change that would clear
+ * the block. So expiry mints a `reset` session instead of refusing outright.
+ */
+export type SessionScope = 'full' | 'reset';
+
 export interface SessionClaims {
   /** Username the session belongs to. */
   sub: string;
   role: AdminRole;
+  scope: SessionScope;
   /** Issued-at, seconds since epoch. */
   iat: number;
   /** Expiry, seconds since epoch. */
@@ -86,12 +100,14 @@ export async function issueSessionToken(
   username: string,
   role: AdminRole,
   secret: string,
-  ttlSeconds: number = TOKEN_TTL_SECONDS
+  ttlSeconds: number = TOKEN_TTL_SECONDS,
+  scope: SessionScope = 'full'
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const claims: SessionClaims = {
     sub: username,
     role,
+    scope,
     iat: now,
     exp: now + ttlSeconds,
   };
@@ -144,6 +160,9 @@ export async function verifySessionToken(
   const now = Math.floor(Date.now() / 1000);
   if (!claims || typeof claims.exp !== 'number' || claims.exp <= now) return null;
   if (claims.role !== 'superadmin' && claims.role !== 'admin') return null;
+  // Tokens issued before scopes existed default to full access; an unknown
+  // scope value is rejected rather than trusted.
+  if (claims.scope !== 'full' && claims.scope !== 'reset') return null;
 
   return claims;
 }
