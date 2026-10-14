@@ -6610,6 +6610,22 @@ function setRocketRoundStatus(status) {
 }
 
 /**
+ * Read the current round status.
+ *
+ * The getter was missing while the setter existed, so every caller of this
+ * threw `ReferenceError: getRocketRoundStatus is not defined`. That broke the
+ * public GET dashboard API (doGet) outright — it returned an error page instead
+ * of JSON, which is why the Sheets mirror looked unreachable: the script WAS
+ * being invoked anonymously all along, it just crashed on this line.
+ *
+ * @returns {string} ACTIVE | CLOSED | RESOLVED | VOID (defaults to ACTIVE)
+ */
+function getRocketRoundStatus() {
+  var status = (PropertiesService.getScriptProperties().getProperty('ROUND_STATUS') || '').toString().trim();
+  return status || 'ACTIVE';
+}
+
+/**
  * Returns true when the ราคาช่าง (target band) has been officially broadcast/released.
  * Opening a round alone does NOT release the quote — only adminBroadcastQuote or the
  * inline `ราคา330-380` command marks it released.
