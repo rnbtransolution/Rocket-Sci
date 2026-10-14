@@ -34,13 +34,22 @@ try {
   console.warn("Using default SPREADSHEET_ID: " + SHEET_ID);
 }
 
-/** One-time helper: run from GAS editor after clasp push to load secrets into Script Properties */
-function bootstrapScriptSecrets(lineToken, slipKey, adminKey, lineSecret) {
+/**
+ * One-time helper: run from GAS editor after clasp push to load secrets into Script Properties.
+ *
+ * ADMIN_API_KEY MUST match the Cloudflare Worker's ADMIN_API_KEY secret. If the
+ * Worker reports "ADMIN_API_KEY Script Property is not configured", run this once
+ * from the GAS editor with that same value. It is intentionally not automated:
+ * writing a shared secret from a network-reachable endpoint would let anyone who
+ * learned the key overwrite the mirror's configuration.
+ */
+function bootstrapScriptSecrets(lineToken, slipKey, adminKey, lineSecret, admin1Key) {
   var props = PropertiesService.getScriptProperties();
   if (lineToken) props.setProperty('LINE_CHANNEL_ACCESS_TOKEN', String(lineToken));
   if (slipKey) props.setProperty('SLIP_API_KEY', String(slipKey));
   if (adminKey) props.setProperty('ADMIN_API_KEY', String(adminKey));
   if (lineSecret) props.setProperty('LINE_CHANNEL_SECRET', String(lineSecret));
+  if (admin1Key) props.setProperty('ADMIN1_API_KEY', String(admin1Key));
   props.setProperty('ALLOW_LINE_WEBHOOK', 'false'); // Node is the single LINE writer
   return { ok: true, keys: Object.keys(props.getProperties()) };
 }

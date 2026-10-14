@@ -452,6 +452,8 @@ export default function App() {
     let cancelled = false;
     const targetUrl = API_BASE_URL || CF_WORKER_BASE_URL;
 
+    let lastEtagRef = null;
+
     const fetchFromBackend = async () => {
       try {
         const apiKey = getAdminApiKey();
@@ -460,18 +462,29 @@ export default function App() {
           headers: {
             'Content-Type': 'application/json',
             ...(apiKey ? { 'x-admin-key': apiKey, 'x-admin-api-key': apiKey } : {}),
+            // Ask the edge to skip the response body entirely when nothing changed.
+            ...(lastEtagRef ? { 'If-None-Match': lastEtagRef } : {}),
           },
           body: JSON.stringify({ functionName: 'getDashboardData', adminKey: apiKey, apiKey }),
         });
+
+        // 304 = state unchanged. Keep the previous data, skip the parse entirely.
+        if (res.status === 304) return 'unchanged';
+
         if (res.ok) {
+          const etag = res.headers.get('ETag');
+          if (etag) lastEtagRef = etag;
           const json = await res.json();
           const payload = json?.data || json?.result || json;
           if (payload && (payload.players || payload.activeRound || payload.bets)) {
             applyData(payload);
-            return;
+            return 'changed';
           }
         }
+        return 'unchanged';
       } catch {
+        // Network failure invalidates the cached ETag — the state may have moved on.
+        lastEtagRef = null;
         // Fallback to GAS RPC only if network fetch to Worker fails and in GAS
         if (isGAS && typeof window !== 'undefined' && window.google?.script?.run) {
           const gas = window.google.script.run;
@@ -479,25 +492,43 @@ export default function App() {
             gas.withSuccessHandler(applyData).getDashboardData();
           }
         }
+        return 'unchanged';
       }
     };
 
-    // ── Sub-Second Responsive Polling Loop ──
-    // 500ms when tab is active (instant real-time sync with LINE Group orders).
-    // 2000ms when tab is hidden.
+    // ── Adaptive Polling Loop ──
+    // Fast while state is actually moving (a LINE OA deposit or an admin action
+    // lands within ~500ms, which is what makes the two platforms feel instant),
+    // then backs off to 3s once things have been quiet for a while.
+    //
+    // A flat 500ms loop costs ~173k requests/day — past the Workers Free cap of
+    // 100k on its own — so backing off when idle is what keeps a console left
+    // open all day from exhausting the quota. Any real change resets to fast,
+    // so responsiveness during active play is unchanged.
+    let quietPolls = 0;
+    const FAST_DELAY = 500;
+    const MAX_DELAY = 3000;
+
     const pollLoop = async () => {
       while (!cancelled) {
-        await fetchFromBackend();
-        const delay = (typeof document !== 'undefined' && document.hidden) ? 2000 : 500;
+        const outcome = await fetchFromBackend();
+        quietPolls = outcome === 'changed' ? 0 : quietPolls + 1;
+        const hidden = typeof document !== 'undefined' && document.hidden;
+        // Ramp 500ms -> 1s -> 2s -> 3s across three idle polls.
+        const delay = hidden
+          ? 3000
+          : Math.min(MAX_DELAY, FAST_DELAY * Math.pow(2, Math.min(quietPolls, 3)));
         await new Promise((r) => setTimeout(r, delay));
       }
     };
 
     pollLoop();
 
-    // Trigger immediate poll when admin refocuses tab or becomes visible
+    // Return to full speed the moment the admin looks at the console again, so
+    // backing off never costs perceived responsiveness.
     const onVisibilityChange = () => {
       if (typeof document !== 'undefined' && !document.hidden && !cancelled) {
+        quietPolls = 0;
         fetchFromBackend();
       }
     };

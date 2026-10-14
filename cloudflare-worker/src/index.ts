@@ -97,6 +97,30 @@ async function resolveTargetGroupIds(target: string | undefined, env: Env): Prom
   return Array.from(targetSet);
 }
 
+/**
+ * Stable hash of a dashboard payload, used for ETag / If-None-Match.
+ * JSON.stringify preserves key insertion order, and the payload is built the
+ * same way every time, so this is stable across identical states.
+ */
+async function hashPayload(payload: unknown): Promise<string> {
+  const json = JSON.stringify(payload);
+  const digest = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(json));
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 24);
+}
+
+/** Parse JSON without throwing — used on data that may be absent or corrupt. */
+function safeJson<T = any>(raw: string | null | undefined): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function appendChatLog(
   env: Env,
   log: { timestamp: string; userId: string; displayName: string; sender: string; text: string; type: string }
@@ -880,20 +904,67 @@ export default {
           }
           result = { success: true };
         } else if (functionName === 'adminDeletePlayer') {
-          const userId = args[0];
-          const rawLine = await state(env).get(`RAW_LINE_${userId}`) || userId;
-          await state(env).delete(`USER_${rawLine}`);
-          await state(env).delete(`RAW_LINE_${userId}`);
-          if (userId && userId.startsWith('PL')) {
-            await state(env).delete(`USER_${userId}`);
+          // Accepts any identifier an admin is likely to hold: the Short ID
+          // (PLxxxxxx), the LINE user ID (Uxxxxx), or a full storage key
+          // ("USER_..." / "RAW_LINE_...").
+          //
+          // Previously this only deleted `USER_<rawLine>` plus, for PL ids,
+          // `USER_<id>` — so passing a Short ID left `USER_<lineUserId>` and
+          // `RAW_LINE_<shortId>` behind. getPlayersList() rebuilds the directory
+          // by scanning USER_*, so the player silently reappeared in the Admin
+          // Console right after being deleted. Every alias is now resolved and
+          // removed together.
+          const input = String(args[0] || '').trim();
+          if (!input) {
+            result = { success: false, error: 'กรุณาระบุรหัสผู้เล่นที่ต้องการลบ' };
+          } else {
+            const bare = input.replace(/^(?:USER_|RAW_LINE_)/, '').trim();
+
+            // Gather every identifier this player is known by.
+            const [byShortId, byLineId, rawLine] = await Promise.all([
+              state(env).get(`RAW_LINE_${bare}`),
+              state(env).get(`USER_${bare}`),
+              state(env).get(`USER_${bare}`),
+            ]);
+            const lineUserId = byShortId || (byLineId ? safeJson<any>(byLineId)?.lineUserId : undefined) || '';
+            const shortId = byLineId ? safeJson<any>(byLineId)?.shortId : undefined;
+
+            const idsToDelete = new Set<string>();
+            if (bare) idsToDelete.add(bare);
+            if (lineUserId) idsToDelete.add(lineUserId);
+            if (shortId) idsToDelete.add(shortId);
+
+            const keysToDelete: string[] = [];
+            for (const id of idsToDelete) {
+              keysToDelete.push(`USER_${id}`);
+              keysToDelete.push(`RAW_LINE_${id}`);
+            }
+
+            await Promise.all(keysToDelete.map((k) => state(env).delete(k)));
+
+            // Drop the directory entry, matching on any known identifier.
+            const listRaw = await state(env).get('PLAYERS_LIST');
+            let removedFromList = 0;
+            if (listRaw) {
+              const list = JSON.parse(listRaw);
+              const filtered = list.filter(
+                (p: any) =>
+                  p &&
+                  !idsToDelete.has(p.shortId) &&
+                  !idsToDelete.has(p.id) &&
+                  !idsToDelete.has(p.lineUserId)
+              );
+              removedFromList = list.length - filtered.length;
+              await state(env).put('PLAYERS_LIST', JSON.stringify(filtered));
+            }
+
+            result = {
+              success: true,
+              deletedIds: Array.from(idsToDelete),
+              deletedKeys: keysToDelete,
+              removedFromDirectory: removedFromList,
+            };
           }
-          const listRaw = await state(env).get('PLAYERS_LIST');
-          if (listRaw) {
-            const list = JSON.parse(listRaw);
-            const filtered = list.filter((p: any) => p.shortId !== userId && p.id !== userId && p.lineUserId !== rawLine && p.lineUserId !== userId);
-            await state(env).put('PLAYERS_LIST', JSON.stringify(filtered));
-          }
-          result = { success: true };
         } else if (functionName === 'adminSetActiveGroupId') {
           const gid = args[0];
           await state(env).put('ACTIVE_GROUP_ID', gid);
@@ -947,8 +1018,18 @@ export default {
             }
           } catch (_) {}
 
-          // 4. Forward database reset to Google Apps Script / Google Sheets
+          // 4. Forward database reset to Google Apps Script / Google Sheets.
+          //
+          // GAS is a REPORTING MIRROR only — the Durable Object is the system
+          // of record, so steps 1-3 above have already completed the reset.
+          // A mirror failure must therefore never mask that success.
+          //
+          // Previously any GAS problem (missing ADMIN_API_KEY script property,
+          // an unreachable or signed-in-only deployment) either threw or
+          // silently replaced the response with the mirror's error, leaving
+          // admins thinking the reset had failed when it had not.
           let sheetsResetResult: any = null;
+          let sheetsWarning: string | null = null;
           if (env.GAS_FALLBACK_URL) {
             try {
               const res = await fetch(env.GAS_FALLBACK_URL, {
@@ -960,14 +1041,41 @@ export default {
                   apiKey: env.ADMIN_API_KEY,
                 }),
               });
-              const json: any = await res.json();
-              sheetsResetResult = json?.data || json;
+
+              // A GAS deployment that requires sign-in answers with a 302 to a
+              // Google login page; treating that as success hid a real outage.
+              const contentType = res.headers.get('content-type') || '';
+              if (!contentType.includes('application/json')) {
+                sheetsWarning = res.status === 302 || res.status === 301
+                  ? 'Google Apps Script deployment requires sign-in (anonymous access is off). Re-deploy GAS with "Execute as: Me" and "Who has access: Anyone".'
+                  : `Google Apps Script returned ${res.status} with a non-JSON body.`;
+                console.warn('[Worker] GAS reset: unexpected response', res.status, contentType);
+              } else {
+                const json: any = await res.json();
+                const payload = json?.data || json;
+                if (payload && payload.success === false) {
+                  // e.g. ADMIN_API_KEY Script Property is not configured.
+                  sheetsWarning = `Google Sheets mirror not cleared: ${payload.error || 'unknown error'}`;
+                  console.warn('[Worker] GAS reset rejected:', payload.error);
+                } else {
+                  sheetsResetResult = payload;
+                }
+              }
             } catch (err) {
+              sheetsWarning = `Could not reach Google Apps Script mirror: ${(err as Error)?.message || err}`;
               console.warn('[Worker] GAS reset database error:', err);
             }
+          } else {
+            sheetsWarning = 'GAS_FALLBACK_URL is not configured.';
           }
 
-          result = sheetsResetResult || {
+          result = {
+            success: true,
+            scope: 'live-state',
+            message: 'Live state (Durable Object + KV) cleared successfully.',
+            sheetsMirrorCleared: sheetsResetResult !== null,
+            ...(sheetsWarning ? { sheetsWarning } : {}),
+            ...(sheetsResetResult ? { sheets: sheetsResetResult } : {}),
             players: [],
             transactions: [],
             bets: [],
@@ -1781,7 +1889,37 @@ export default {
           result = { success: true, restoredBalance: 1900, pendingCleared: true };
         }
 
-        return new Response(JSON.stringify({ success: true, data: result }), {
+        // Conditional-request support for the dashboard poll.
+        //
+        // The Admin Console polls several times per second. The payload
+        // includes `serverTime`, so every response differs byte-for-byte and a
+        // naive client can never tell "nothing changed" from "something
+        // changed" — it re-downloads and re-parses the full state each time.
+        //
+        // We hash the payload with serverTime factored out. When the client
+        // sends back a matching If-None-Match we answer 304 with an empty
+        // body, so an idle console costs almost no bandwidth and the client
+        // skips its JSON parse entirely.
+        const responseBody = JSON.stringify({ success: true, data: result });
+        if (functionName === 'getDashboardData' && result) {
+          const { serverTime: _ignored, ...stable } = result as any;
+          const etag = `"${await hashPayload(stable)}"`;
+          const ifNoneMatch = request.headers.get('if-none-match');
+          if (ifNoneMatch === etag) {
+            return new Response(null, { status: 304, headers: { ETag: etag, ...corsHeaders } });
+          }
+          return new Response(responseBody, {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+              'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+              ETag: etag,
+              ...corsHeaders,
+            },
+          });
+        }
+
+        return new Response(responseBody, {
           status: 200,
           headers: {
             'Content-Type': 'application/json',
