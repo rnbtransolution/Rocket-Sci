@@ -1,4 +1,5 @@
 import { Env, LineEvent, Order, PlayerProfile, RocketRound, Transaction } from './types.js';
+import { state } from './state.js';
 import {
   generateOrderFlex,
   generateMatchNotificationFlex,
@@ -62,7 +63,7 @@ async function isSenderLineAdmin(userId: string | undefined, env: Env): Promise<
   const envAdmins = (env.ADMIN_LINE_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
   if (envAdmins.includes(userId)) return true;
   try {
-    const cachedAdminsStr = await env.KV_CACHE.get('ADMIN_LINE_USER_IDS');
+    const cachedAdminsStr = await state(env).get('ADMIN_LINE_USER_IDS');
     if (cachedAdminsStr) {
       const cachedAdmins = cachedAdminsStr.split(',').map(s => s.trim()).filter(Boolean);
       if (cachedAdmins.includes(userId)) return true;
@@ -98,7 +99,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     const logTask = async () => {
       let displayName = 'ผู้เล่น';
       try {
-        const cached = await env.KV_CACHE.get(`USER_${userId}`);
+        const cached = await state(env).get(`USER_${userId}`);
         if (cached) displayName = JSON.parse(cached).displayName || displayName;
       } catch (_) {}
       await logUserMessage(env, {
@@ -452,7 +453,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       }
       const match = text.match(openRoundRegex);
       const roundName = match ? match[2].trim() : 'รอบดวลสด';
-      await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify({
+      await state(env).put('ACTIVE_ROUND', JSON.stringify({
         name: roundName,
         targetMin: 330,
         targetMax: 380,
@@ -478,13 +479,13 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         if (replyToken) await replyToLine(replyToken, unauthFlex, env, !isGroup);
         return;
       }
-      const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
+      const roundStr = await state(env).get('ACTIVE_ROUND');
       let roundName = 'รอบดวลสด';
       if (roundStr) {
         const round = JSON.parse(roundStr) as RocketRound;
         round.status = 'CLOSED';
         roundName = round.name;
-        await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round));
+        await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
       }
       // Also clear pending unmatched orders so board resets cleanly for next round
       await clearAllPendingOrders(env);
@@ -586,7 +587,7 @@ async function handleCreateOrder(
   let offsetDelta = 0;
 
   // Resolve target group for broadcasting order cards
-  const activeGroupId = await env.KV_CACHE.get('ACTIVE_GROUP_ID');
+  const activeGroupId = await state(env).get('ACTIVE_GROUP_ID');
   const targetGroupId = groupId || activeGroupId || null;
 
   if (!targetGroupId) {
@@ -609,7 +610,7 @@ async function handleCreateOrder(
 
   // 1. Parallel fetch of ACTIVE_ROUND & PENDING_ORDERS_LIST (1 roundtrip instead of 2+)
   const [roundStr, pendingList] = await Promise.all([
-    env.KV_CACHE.get('ACTIVE_ROUND'),
+    state(env).get('ACTIVE_ROUND'),
     getPendingOrdersList(env),
   ]);
   let round = roundStr ? (JSON.parse(roundStr) as RocketRound) : null;
@@ -626,9 +627,9 @@ async function handleCreateOrder(
       updatedAt: Date.now(),
     };
     if (ctx) {
-      ctx.waitUntil(env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round)).catch(() => {}));
+      ctx.waitUntil(state(env).put('ACTIVE_ROUND', JSON.stringify(round)).catch(() => {}));
     } else {
-      env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round)).catch(() => {});
+      state(env).put('ACTIVE_ROUND', JSON.stringify(round)).catch(() => {});
     }
   }
 
@@ -759,7 +760,7 @@ async function handleCreateOrder(
   const persistenceTask = Promise.all([
     env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder)),
     savePlayerProfile(profile, env, ctx),
-    env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updatedPendingList), { expirationTtl: 86400 }),
+    state(env).put('PENDING_ORDERS_LIST', JSON.stringify(updatedPendingList), { expirationTtl: 86400 }),
   ]);
 
   let cardDispatched = false;
@@ -815,7 +816,7 @@ async function handleCreateOrder(
 
   if (ctx) {
     ctx.waitUntil(
-      env.KV_CACHE.put(
+      state(env).put(
         'LAST_ORDER_CREATE_DEBUG',
         JSON.stringify({
           orderNumber,
@@ -911,7 +912,7 @@ async function handleMatchOrder(
   const matchFlex = generateMatchNotificationFlex(order);
 
   // Match notification: send match card to group without floating quick reply, and push to DM of both players
-  const creatorLineId = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId;
+  const creatorLineId = (await state(env).get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId;
   const matchPromises: Promise<any>[] = [updatePersistence];
   
   if (groupId) {
@@ -999,7 +1000,7 @@ export async function clearAllPendingOrders(env: Env, ctx?: ExecutionContext): P
     const pendingOrders = await getPendingOrdersList(env);
 
     // 1. Immediately reset PENDING_ORDERS_LIST with empty array in KV_CACHE
-    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 });
+    await state(env).put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 });
 
     // 2. Cancel and refund ONLY pending_match + pending_hold (pre_quote) orders
     for (const item of pendingOrders) {
@@ -1044,13 +1045,13 @@ export async function refundPlayerPoints(
 ): Promise<boolean> {
   if (amount <= 0) return true;
   try {
-    const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${shortId}`)) || lineUserId || shortId;
-    let profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+    const rawLine = (await state(env).get(`RAW_LINE_${shortId}`)) || lineUserId || shortId;
+    let profileRaw = await state(env).get(`USER_${rawLine}`);
     if (!profileRaw && lineUserId) {
-      profileRaw = await env.KV_CACHE.get(`USER_${lineUserId}`);
+      profileRaw = await state(env).get(`USER_${lineUserId}`);
     }
     if (!profileRaw && shortId) {
-      profileRaw = await env.KV_CACHE.get(`USER_${shortId}`);
+      profileRaw = await state(env).get(`USER_${shortId}`);
     }
     if (profileRaw) {
       const p = JSON.parse(profileRaw) as PlayerProfile;
@@ -1060,20 +1061,20 @@ export async function refundPlayerPoints(
     }
 
     // Fallback: search in PLAYERS_LIST
-    const listRaw = await env.KV_CACHE.get('PLAYERS_LIST');
+    const listRaw = await state(env).get('PLAYERS_LIST');
     if (listRaw) {
       const list = JSON.parse(listRaw) as any[];
       const p = list.find((x: any) => x.id === shortId || x.shortId === shortId || (lineUserId && (x.lineUserId === lineUserId || x.id === lineUserId)));
       if (p) {
         p.balance = (Number(p.balance) || 0) + amount;
         p.updatedAt = Date.now();
-        await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(list));
+        await state(env).put('PLAYERS_LIST', JSON.stringify(list));
         const effectiveLine = p.lineUserId || rawLine;
         if (effectiveLine) {
-          await env.KV_CACHE.put(`USER_${effectiveLine}`, JSON.stringify(p));
+          await state(env).put(`USER_${effectiveLine}`, JSON.stringify(p));
         }
         if (shortId) {
-          await env.KV_CACHE.put(`USER_${shortId}`, JSON.stringify(p));
+          await state(env).put(`USER_${shortId}`, JSON.stringify(p));
         }
         return true;
       }
@@ -1107,7 +1108,7 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
           await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
           cancelledCount++;
           const amt = Number(order.amount) || 0;
-          const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
+          const rawLine = (await state(env).get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
           const cancelPreQuoteFlex = generateNoticeFlex(
             `🚫 ยกเลิก Order #${order.orderNumber} อัตโนมัติ`,
             `จบรอบดวลโดยไม่มีการประกาศราคาช่างอย่างเป็นทางการ\nระบบคืนแต้ม: +${amt.toLocaleString()} pt เรียบร้อยครับ ✅`,
@@ -1129,7 +1130,7 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
       } catch (_) {}
     }
 
-    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(remainingOrders), { expirationTtl: 1800 });
+    await state(env).put('PENDING_ORDERS_LIST', JSON.stringify(remainingOrders), { expirationTtl: 1800 });
     console.log(`[Worker] cancelHeldPreQuoteOrders: Cancelled + refunded ${cancelledCount} held pre-quote orders.`);
   } catch (err) {
     console.error('[Worker] cancelHeldPreQuoteOrders error:', err);
@@ -1174,14 +1175,14 @@ export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, 
 
   // Update PENDING_ORDERS_LIST with newly converted pending_match orders
   const updatedPending = [...convertedOrders, ...nonHeld].slice(0, 300);
-  await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updatedPending), { expirationTtl: 1800 });
+  await state(env).put('PENDING_ORDERS_LIST', JSON.stringify(updatedPending), { expirationTtl: 1800 });
 
   // Auto-match same-amount opposite-side pairs
   const matched = await autoMatchPendingPairs(env, ctx);
 
   // Notify each converted player that their pre-quote order is now active
   const notifyPromises = convertedOrders.map(async (o) => {
-    const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${o.creatorId}`)) || o.creatorLineUserId || o.creatorId;
+    const rawLine = (await state(env).get(`RAW_LINE_${o.creatorId}`)) || o.creatorLineUserId || o.creatorId;
     const releaseFlex = generateNoticeFlex(
       `🚀 ราคาช่างเปิดแล้ว: ${bandMin}-${bandMax}s`,
       `Order #${o.orderNumber} (${o.amount.toLocaleString()} pt ${o.side === 'low' ? 'ชถ/ต่ำ' : 'ชล/สูง'})\nเปิดลงกระดานรอคู่เรียบร้อย พร้อมจับคู่แล้วครับ 🚀`,
@@ -1231,8 +1232,8 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
         const low = lows[i];
         const high = highs[i];
         const matchFlex = generateMatchNotificationFlex(low);
-        const lowNotify = (await env.KV_CACHE.get(`RAW_LINE_${low.creatorId}`)) || low.creatorLineUserId || low.creatorId;
-        const highNotify = (await env.KV_CACHE.get(`RAW_LINE_${high.creatorId}`)) || high.creatorLineUserId || high.creatorId;
+        const lowNotify = (await state(env).get(`RAW_LINE_${low.creatorId}`)) || low.creatorLineUserId || low.creatorId;
+        const highNotify = (await state(env).get(`RAW_LINE_${high.creatorId}`)) || high.creatorLineUserId || high.creatorId;
 
         // Mark low as the primary matched order, high is the matcher
         low.status = 'matched';
@@ -1290,8 +1291,8 @@ export async function voidAllRoundOrders(env: Env, ctx?: ExecutionContext): Prom
     ]);
 
     await Promise.all([
-      env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 }),
-      env.KV_CACHE.put('MATCHED_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 }),
+      state(env).put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 }),
+      state(env).put('MATCHED_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 }),
     ]);
 
     const allRoundOrders = [...pendingList, ...matchedList];
@@ -1316,8 +1317,8 @@ export async function voidAllRoundOrders(env: Env, ctx?: ExecutionContext): Prom
 
           // Refund creator
           if (order.creatorId && amt > 0) {
-            const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
-            const cpRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+            const rawLine = (await state(env).get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
+            const cpRaw = await state(env).get(`USER_${rawLine}`);
             if (cpRaw) {
               const cp = JSON.parse(cpRaw) as PlayerProfile;
               cp.balance = (Number(cp.balance) || 0) + amt;
@@ -1327,8 +1328,8 @@ export async function voidAllRoundOrders(env: Env, ctx?: ExecutionContext): Prom
 
           // Refund matcher if matched
           if (wasMatched && order.matcherId && amt > 0) {
-            const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${order.matcherId}`)) || order.matcherId;
-            const mpRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+            const rawLine = (await state(env).get(`RAW_LINE_${order.matcherId}`)) || order.matcherId;
+            const mpRaw = await state(env).get(`USER_${rawLine}`);
             if (mpRaw) {
               const mp = JSON.parse(mpRaw) as PlayerProfile;
               mp.balance = (Number(mp.balance) || 0) + amt;
@@ -1352,7 +1353,7 @@ export async function voidAllRoundOrders(env: Env, ctx?: ExecutionContext): Prom
 
 export async function getPendingOrdersList(env: Env): Promise<Order[]> {
   try {
-    const cached = await env.KV_CACHE.get('PENDING_ORDERS_LIST');
+    const cached = await state(env).get('PENDING_ORDERS_LIST');
     if (cached !== null) {
       const list = JSON.parse(cached) as Order[];
       return list.filter((o) => o && (o.status === 'pending_match' || o.status === 'pending_hold'));
@@ -1370,7 +1371,7 @@ export async function addToPendingOrdersList(order: Order, env: Env): Promise<vo
   try {
     const list = await getPendingOrdersList(env);
     const updated = [order, ...list.filter((o) => o.orderNumber !== order.orderNumber)].slice(0, 300);
-    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
+    await state(env).put('PENDING_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
   } catch (err) {
     console.error('[Worker] addToPendingOrdersList error:', err);
   }
@@ -1381,7 +1382,7 @@ export async function removeFromPendingOrdersList(orderNo: string, env: Env): Pr
     const cleanNo = orderNo.trim().replace(/^#/, '');
     const list = await getPendingOrdersList(env);
     const updated = list.filter((o) => o.orderNumber !== cleanNo);
-    await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
+    await state(env).put('PENDING_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
   } catch (err) {
     console.error('[Worker] removeFromPendingOrdersList error:', err);
   }
@@ -1391,7 +1392,7 @@ export async function addToMatchedOrdersList(order: Order, env: Env): Promise<vo
   try {
     const list = await getMatchedOrdersList(env);
     const updated = [order, ...list.filter((o) => o.orderNumber !== order.orderNumber)].slice(0, 300);
-    await env.KV_CACHE.put('MATCHED_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
+    await state(env).put('MATCHED_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
   } catch (err) {
     console.error('[Worker] addToMatchedOrdersList error:', err);
   }
@@ -1402,7 +1403,7 @@ export async function removeFromMatchedOrdersList(orderNo: string, env: Env): Pr
     const cleanNo = orderNo.trim().replace(/^#/, '');
     const list = await getMatchedOrdersList(env);
     const updated = list.filter((o) => o.orderNumber !== cleanNo);
-    await env.KV_CACHE.put('MATCHED_ORDERS_LIST', JSON.stringify(updated));
+    await state(env).put('MATCHED_ORDERS_LIST', JSON.stringify(updated));
   } catch (err) {
     console.error('[Worker] removeFromMatchedOrdersList error:', err);
   }
@@ -1410,7 +1411,7 @@ export async function removeFromMatchedOrdersList(orderNo: string, env: Env): Pr
 
 export async function getMatchedOrdersList(env: Env): Promise<Order[]> {
   try {
-    const cached = await env.KV_CACHE.get('MATCHED_ORDERS_LIST');
+    const cached = await state(env).get('MATCHED_ORDERS_LIST');
     return cached ? JSON.parse(cached) : [];
   } catch (err) {
     console.error('[Worker] getMatchedOrdersList error:', err);
@@ -1450,6 +1451,24 @@ async function resolveOrderNumber(
 
 // ── User Profile, Transactions & Group Helpers ──
 
+/**
+ * Choose which of two duplicate player records supplies the balance.
+ * Prefers the record with the newer `updatedAt`; falls back to the existing
+ * value when timestamps are missing or equal.
+ */
+function pickNewerBalance(existing: any, incoming: any): number {
+  const existingBal = Number(existing?.balance) || 0;
+  const incomingBal = Number(incoming?.balance) || 0;
+  const hasIncoming = incoming?.balance !== undefined && !Number.isNaN(Number(incoming.balance));
+  if (!hasIncoming) return existingBal;
+
+  const existingAt = Number(existing?.updatedAt) || 0;
+  const incomingAt = Number(incoming?.updatedAt) || 0;
+  // No comparable timestamps on either side: keep prior behaviour (incoming wins).
+  if (!existingAt || !incomingAt || incomingAt >= existingAt) return incomingBal;
+  return existingBal;
+}
+
 export function deduplicatePlayers(list: any[]): any[] {
   if (!Array.isArray(list)) return [];
   const map = new Map<string, any>();
@@ -1486,7 +1505,12 @@ export function deduplicatePlayers(list: any[]): any[] {
         lineUserId: lineId || existing.lineUserId || '',
         name: p.displayName || p.name || existing.displayName || existing.name || 'ผู้เล่น',
         displayName: p.displayName || p.name || existing.displayName || existing.name || 'ผู้เล่น',
-        balance: (p.balance !== undefined && !isNaN(Number(p.balance))) ? Number(p.balance) : (Number(existing.balance) || 0),
+        // Balance: the NEWER record wins, not merely the later one in the array.
+        // syncWithSheets appends Google Sheets rows after the live KV rows, and
+        // that Sheets mirror is written on a throttle, so "last in array" used
+        // to let a stale sheet row overwrite the authoritative live balance —
+        // making the Admin Console briefly show an old number after an approval.
+        balance: pickNewerBalance(existing, p),
         bankName: p.bankName || existing.bankName || '',
         accountNumber: p.accountNumber || p.bankAccount || existing.accountNumber || existing.bankAccount || '',
         bankAccount: p.bankAccount || p.accountNumber || existing.bankAccount || existing.accountNumber || '',
@@ -1518,7 +1542,7 @@ export function deduplicatePlayers(list: any[]): any[] {
 
 export async function getPlayersList(env: Env): Promise<any[]> {
   try {
-    const cached = await env.KV_CACHE.get('PLAYERS_LIST');
+    const cached = await state(env).get('PLAYERS_LIST');
     let list: any[] = [];
     if (cached) {
       try { list = JSON.parse(cached); } catch (_) {}
@@ -1526,9 +1550,9 @@ export async function getPlayersList(env: Env): Promise<any[]> {
 
     let needsWriteBack = false;
     if (!list || list.length === 0) {
-      const scanRes = await env.KV_CACHE.list({ prefix: 'USER_' });
+      const scanRes = await state(env).list({ prefix: 'USER_' });
       if (scanRes.keys && scanRes.keys.length > 0) {
-        const promises = scanRes.keys.map(k => env.KV_CACHE.get(k.name));
+        const promises = scanRes.keys.map(k => state(env).get(k.name));
         const raws = await Promise.all(promises);
         list = raws.filter(Boolean).map(r => JSON.parse(r!) as PlayerProfile);
         needsWriteBack = true;
@@ -1537,7 +1561,7 @@ export async function getPlayersList(env: Env): Promise<any[]> {
 
     const dedupedList = deduplicatePlayers(list);
     if (needsWriteBack || dedupedList.length !== list.length) {
-      await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(dedupedList.slice(-500)));
+      await state(env).put('PLAYERS_LIST', JSON.stringify(dedupedList.slice(-500)));
     }
 
     const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
@@ -1566,48 +1590,51 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
     profile.updatedAt = Date.now();
     const profileJson = JSON.stringify(profile);
 
-    const primaryPuts: Promise<any>[] = [];
-    if (profile.lineUserId && profile.lineUserId.startsWith('U')) {
-      primaryPuts.push(env.KV_CACHE.put(`USER_${profile.lineUserId}`, profileJson));
-    }
-    if (profile.shortId) {
-      primaryPuts.push(env.KV_CACHE.put(`USER_${profile.shortId}`, profileJson));
-      if (profile.lineUserId && profile.lineUserId.startsWith('U')) {
-        primaryPuts.push(env.KV_CACHE.put(`RAW_LINE_${profile.shortId}`, profile.lineUserId));
-      }
-    }
-    await Promise.all(primaryPuts);
-
-    // Update directory array PLAYERS_LIST synchronously so dashboard & RPC reads see new balance instantly
-    const updateDirectory = async () => {
-      try {
-        let list: any[] = [];
-        const cached = await env.KV_CACHE.get('PLAYERS_LIST');
-        if (cached) {
-          try { list = JSON.parse(cached); } catch (_) {}
-        }
-        const entry = {
-          id: profile.shortId || profile.lineUserId,
-          name: profile.displayName || 'ผู้เล่น',
-          displayName: profile.displayName || 'ผู้เล่น',
-          shortId: profile.shortId,
-          lineUserId: profile.lineUserId,
-          balance: Number(profile.balance) || 0,
-          bankName: profile.bankName || '',
-          accountNumber: profile.accountNumber || '',
-          bankAccount: profile.accountNumber || '',
-          accountName: profile.accountName || profile.displayName || '',
-          registeredAt: profile.registeredAt || Date.now(),
-          updatedAt: profile.updatedAt,
-        };
-        const updatedList = deduplicatePlayers([...list, entry]);
-        await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(updatedList.slice(-500)));
-      } catch (err) {
-        console.error('[Worker] updateDirectory in savePlayerProfile error:', err);
-      }
+    const entry = {
+      id: profile.shortId || profile.lineUserId,
+      name: profile.displayName || 'ผู้เล่น',
+      displayName: profile.displayName || 'ผู้เล่น',
+      shortId: profile.shortId,
+      lineUserId: profile.lineUserId,
+      balance: Number(profile.balance) || 0,
+      bankName: profile.bankName || '',
+      accountNumber: profile.accountNumber || '',
+      bankAccount: profile.accountNumber || '',
+      accountName: profile.accountName || profile.displayName || '',
+      registeredAt: profile.registeredAt || Date.now(),
+      updatedAt: profile.updatedAt,
     };
 
-    await updateDirectory();
+    // Preferred path: commit USER_* + RAW_LINE_* + PLAYERS_LIST together.
+    //
+    // This single atomic step is the fix for the two platforms disagreeing.
+    // It used to be four separate read-modify-write rounds, so a deposit from
+    // LINE OA and an approval from the Admin Console could interleave: the
+    // Admin Console read PLAYERS_LIST mid-flight and cached a stale balance,
+    // leaving the console and the OA showing different numbers.
+    const savedAtomically = await state(env).saveProfile(profile, entry);
+    if (!savedAtomically) {
+      // Fallback (Durable Object unavailable): original best-effort behaviour.
+      const primaryPuts: Promise<any>[] = [];
+      if (profile.lineUserId && profile.lineUserId.startsWith('U')) {
+        primaryPuts.push(state(env).put(`USER_${profile.lineUserId}`, profileJson));
+      }
+      if (profile.shortId) {
+        primaryPuts.push(state(env).put(`USER_${profile.shortId}`, profileJson));
+        if (profile.lineUserId && profile.lineUserId.startsWith('U')) {
+          primaryPuts.push(state(env).put(`RAW_LINE_${profile.shortId}`, profile.lineUserId));
+        }
+      }
+      await Promise.all(primaryPuts);
+
+      let list: any[] = [];
+      const cached = await state(env).get('PLAYERS_LIST');
+      if (cached) {
+        try { list = JSON.parse(cached); } catch (_) {}
+      }
+      const updatedList = deduplicatePlayers([...list, entry]);
+      await state(env).put('PLAYERS_LIST', JSON.stringify(updatedList.slice(-500)));
+    }
 
     // Offload sync to Google Sheets in background — throttled to 1 write/min/user
     if (env.GAS_FALLBACK_URL && profile.lineUserId) {
@@ -1637,16 +1664,25 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
 }
 
 /**
- * Per-user GAS sync throttle (60s window). Google Sheets is a reporting mirror,
- * not the live ledger — during bet storms this keeps the hot path completely off
- * slow (1-6s) GAS round-trips, capping Sheets load at 1 call/user/minute.
+ * Per-user GAS sync throttle. Google Sheets is a reporting mirror, not the live
+ * ledger — the Live platform never reads it for authoritative state, so the hot
+ * path is kept off slow (1-6s) GAS round-trips.
+ *
+ * Window reduced from 60s to 10s. Sheets was previously up to a full minute
+ * behind, and `syncWithSheets` merges those rows into the dashboard, so an admin
+ * reading the console shortly after an approval could see the pre-approval
+ * figure. 10s keeps the mirror current enough to be a faithful audit trail
+ * while still absorbing the burst traffic of a betting round.
+ *
  * Fail-open by design: if the throttle check itself errors, prefer syncing.
  */
+const GAS_SYNC_THROTTLE_SECONDS = 10;
+
 async function isGasSyncThrottled(scope: string, userId: string, env: Env): Promise<boolean> {
   try {
     const key = `GAS_SYNC_${scope}_${userId}`;
-    if (await env.KV_CACHE.get(key)) return true;
-    await env.KV_CACHE.put(key, '1', { expirationTtl: 60 });
+    if (await state(env).get(key)) return true;
+    await state(env).put(key, '1', { expirationTtl: GAS_SYNC_THROTTLE_SECONDS });
     return false;
   } catch (_) {
     return false;
@@ -1655,7 +1691,7 @@ async function isGasSyncThrottled(scope: string, userId: string, env: Env): Prom
 
 export async function getTransactionsList(env: Env): Promise<Transaction[]> {
   try {
-    const cached = await env.KV_CACHE.get('TRANSACTIONS_LIST');
+    const cached = await state(env).get('TRANSACTIONS_LIST');
     if (cached) {
       return JSON.parse(cached);
     }
@@ -1678,10 +1714,13 @@ export async function logUserMessage(
   log: { timestamp: string; userId: string; displayName: string; sender: string; text: string; type: string }
 ): Promise<void> {
   try {
-    const raw = await env.KV_CACHE.get('CHAT_LOGS');
-    const logs = raw ? JSON.parse(raw) : [];
-    logs.push(log);
-    await env.KV_CACHE.put('CHAT_LOGS', JSON.stringify(logs.slice(-100)));
+    const stored = await state(env).appendChatLog(log);
+    if (!stored) {
+      const raw = await state(env).get('CHAT_LOGS');
+      const logs = raw ? JSON.parse(raw) : [];
+      logs.push(log);
+      await state(env).put('CHAT_LOGS', JSON.stringify(logs.slice(-100)));
+    }
   } catch (err) {
     console.warn('[logUserMessage Error]:', err);
   }
@@ -1689,9 +1728,14 @@ export async function logUserMessage(
 
 export async function addTransaction(tx: Transaction, env: Env, ctx?: ExecutionContext): Promise<void> {
   try {
-    const list = await getTransactionsList(env);
-    const updated = [tx, ...list.filter(t => t.id !== tx.id)].slice(0, 100);
-    await env.KV_CACHE.put('TRANSACTIONS_LIST', JSON.stringify(updated));
+    // Atomic upsert — a deposit/withdrawal arriving from LINE OA can never be
+    // clobbered by a concurrent Admin Console approval on the same ledger.
+    const stored = await state(env).upsertTransaction(tx);
+    if (!stored) {
+      const list = await getTransactionsList(env);
+      const updated = [tx, ...list.filter(t => t.id !== tx.id)].slice(0, 100);
+      await state(env).put('TRANSACTIONS_LIST', JSON.stringify(updated));
+    }
 
     if (env.GAS_FALLBACK_URL) {
       const syncPromise = fetch(env.GAS_FALLBACK_URL, {
@@ -1724,8 +1768,8 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
 
   // 1. Check direct user key and shortId key in parallel
   const [cachedUser, cachedShort] = await Promise.all([
-    env.KV_CACHE.get(cacheKey),
-    env.KV_CACHE.get(`USER_${shortId}`),
+    state(env).get(cacheKey),
+    state(env).get(`USER_${shortId}`),
   ]);
 
   let profile = cachedUser ? (JSON.parse(cachedUser) as PlayerProfile) : null;
@@ -1747,9 +1791,9 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
         // Self-heal direct user cache key immediately
         const healedJson = JSON.stringify(profile);
         if (ctx) {
-          ctx.waitUntil(env.KV_CACHE.put(cacheKey, healedJson).catch(() => {}));
+          ctx.waitUntil(state(env).put(cacheKey, healedJson).catch(() => {}));
         } else {
-          env.KV_CACHE.put(cacheKey, healedJson).catch(() => {});
+          state(env).put(cacheKey, healedJson).catch(() => {});
         }
       }
     }
@@ -1762,7 +1806,7 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
   // 2. Fallback to PLAYERS_LIST only if profile not yet in direct KV
   let playersListEntry: any = null;
   try {
-    const listRaw = await env.KV_CACHE.get('PLAYERS_LIST');
+    const listRaw = await state(env).get('PLAYERS_LIST');
     if (listRaw) {
       const list = JSON.parse(listRaw) as any[];
       playersListEntry = list.find((p: any) => p.lineUserId === userId || p.shortId === shortId || p.id === shortId || p.id === userId) || null;
@@ -1781,9 +1825,9 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
       updatedAt: Number(playersListEntry.updatedAt) || Date.now(),
       registeredAt: Number(playersListEntry.registeredAt) || Date.now(),
     };
-    await env.KV_CACHE.put(cacheKey, JSON.stringify(restoredProfile));
-    await env.KV_CACHE.put(`USER_${shortId}`, JSON.stringify(restoredProfile));
-    await env.KV_CACHE.put(`RAW_LINE_${shortId}`, userId);
+    await state(env).put(cacheKey, JSON.stringify(restoredProfile));
+    await state(env).put(`USER_${shortId}`, JSON.stringify(restoredProfile));
+    await state(env).put(`RAW_LINE_${shortId}`, userId);
     return restoredProfile;
   }
 
@@ -1833,10 +1877,10 @@ async function recordActiveGroup(groupId: string, env: Env): Promise<void> {
   // Valid LINE Group ID starts with 'C' (or room 'R') followed by 32 hex characters
   if (!/^[CR][0-9a-f]{32}$/i.test(gid)) return;
 
-  await env.KV_CACHE.put('ACTIVE_GROUP_ID', gid);
-  const existing = await env.KV_CACHE.get(`GROUP_${gid}`);
+  await state(env).put('ACTIVE_GROUP_ID', gid);
+  const existing = await state(env).get(`GROUP_${gid}`);
   if (!existing) {
-    await env.KV_CACHE.put(`GROUP_${gid}`, JSON.stringify({
+    await state(env).put(`GROUP_${gid}`, JSON.stringify({
       id: gid,
       firstSeen: Date.now(),
       lastActive: Date.now(),
@@ -1845,7 +1889,7 @@ async function recordActiveGroup(groupId: string, env: Env): Promise<void> {
 
   // Ensure group is listed in LINE_GROUPS for discovery and multi-group broadcast
   try {
-    const lineGroupsRaw = await env.KV_CACHE.get('LINE_GROUPS');
+    const lineGroupsRaw = await state(env).get('LINE_GROUPS');
     let lineGroups = lineGroupsRaw ? JSON.parse(lineGroupsRaw) : [];
     if (!Array.isArray(lineGroups)) lineGroups = [];
     if (!lineGroups.some((g: any) => g.id === groupId)) {
@@ -1855,7 +1899,7 @@ async function recordActiveGroup(groupId: string, env: Env): Promise<void> {
         lastMessage: '',
         timestamp: 'Live',
       });
-      await env.KV_CACHE.put('LINE_GROUPS', JSON.stringify(lineGroups));
+      await state(env).put('LINE_GROUPS', JSON.stringify(lineGroups));
     }
   } catch (_) {}
 }
@@ -1901,7 +1945,7 @@ async function replyToLine(replyToken: string, payload: any, env: Env, attachQui
       const errBody = await res.text();
       console.error(`[LINE Reply Error] status=${res.status}: ${errBody}`);
       try {
-        await env.KV_CACHE.put('LAST_LINE_ERROR', JSON.stringify({
+        await state(env).put('LAST_LINE_ERROR', JSON.stringify({
           action: 'replyToLine',
           status: res.status,
           error: errBody,
@@ -1912,7 +1956,7 @@ async function replyToLine(replyToken: string, payload: any, env: Env, attachQui
       return false;
     }
     try {
-      env.KV_CACHE.put('LAST_LINE_SUCCESS', JSON.stringify({
+      state(env).put('LAST_LINE_SUCCESS', JSON.stringify({
         action: 'replyToLine',
         status: res.status,
         time: new Date().toISOString()
@@ -1922,7 +1966,7 @@ async function replyToLine(replyToken: string, payload: any, env: Env, attachQui
   } catch (err: any) {
     console.error('[LINE Reply Exception]:', err?.message || err);
     try {
-      await env.KV_CACHE.put('LAST_LINE_ERROR', JSON.stringify({
+      await state(env).put('LAST_LINE_ERROR', JSON.stringify({
         action: 'replyToLine',
         status: 'exception',
         error: err?.message || String(err),
@@ -1973,7 +2017,7 @@ export async function pushToLine(to: string, payload: any, env: Env): Promise<{ 
       const errBody = await res.text();
       console.error(`[LINE Push Error] to=${to} status=${res.status}: ${errBody}`);
       try {
-        await env.KV_CACHE.put('LAST_LINE_ERROR', JSON.stringify({
+        await state(env).put('LAST_LINE_ERROR', JSON.stringify({
           action: 'pushToLine',
           to,
           status: res.status,
@@ -2002,7 +2046,7 @@ export async function pushToLine(to: string, payload: any, env: Env): Promise<{ 
       };
     }
     try {
-      await env.KV_CACHE.put('LAST_LINE_SUCCESS', JSON.stringify({
+      await state(env).put('LAST_LINE_SUCCESS', JSON.stringify({
         action: 'pushToLine',
         to,
         status: res.status,
@@ -2013,7 +2057,7 @@ export async function pushToLine(to: string, payload: any, env: Env): Promise<{ 
   } catch (err: any) {
     console.error(`[LINE Push Exception] to=${to}:`, err?.message || err);
     try {
-      await env.KV_CACHE.put('LAST_LINE_ERROR', JSON.stringify({
+      await state(env).put('LAST_LINE_ERROR', JSON.stringify({
         action: 'pushToLine',
         to,
         status: 'exception',
@@ -2037,7 +2081,7 @@ async function deliverPrivateNotice(
   // Resolve raw LINE userId if PL-shortId was passed
   let targetLineId = userId;
   if (userId && userId.startsWith('PL')) {
-    const raw = await env.KV_CACHE.get(`RAW_LINE_${userId}`);
+    const raw = await state(env).get(`RAW_LINE_${userId}`);
     if (raw) targetLineId = raw;
   }
 
@@ -2053,7 +2097,7 @@ async function deliverPrivateNotice(
       replyOk = !!(res && res.success);
     }
     try {
-      await env.KV_CACHE.put('LAST_DELIVERY_DEBUG', JSON.stringify({
+      await state(env).put('LAST_DELIVERY_DEBUG', JSON.stringify({
         userId,
         targetLineId,
         hasReplyToken: !!replyToken,
@@ -2085,7 +2129,7 @@ export async function addToSettledOrdersList(order: Order, env: Env): Promise<vo
   try {
     const list = await getSettledOrdersList(env);
     const updated = [order, ...list.filter((o) => o.orderNumber !== order.orderNumber)].slice(0, 100);
-    await env.KV_CACHE.put('SETTLED_ORDERS_LIST', JSON.stringify(updated));
+    await state(env).put('SETTLED_ORDERS_LIST', JSON.stringify(updated));
   } catch (err) {
     console.error('[Worker] addToSettledOrdersList error:', err);
   }
@@ -2093,7 +2137,7 @@ export async function addToSettledOrdersList(order: Order, env: Env): Promise<vo
 
 export async function getSettledOrdersList(env: Env): Promise<Order[]> {
   try {
-    const cached = await env.KV_CACHE.get('SETTLED_ORDERS_LIST');
+    const cached = await state(env).get('SETTLED_ORDERS_LIST');
     return cached ? JSON.parse(cached) : [];
   } catch (err) {
     console.error('[Worker] getSettledOrdersList error:', err);

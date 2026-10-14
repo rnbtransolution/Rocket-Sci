@@ -1,5 +1,7 @@
 import { Env, LineWebhookPayload, QueueMessage, LineEvent, PlayerProfile, Order } from './types.js';
 import { verifyLineSignature } from './signature.js';
+import { state } from './state.js';
+import { RocketStateDO } from './stateDO.js';
 import {
   processLineEvent,
   clearAllPendingOrders,
@@ -66,19 +68,19 @@ function formatOrderForDashboard(b: Order): any {
 async function resolveTargetGroupIds(target: string | undefined, env: Env): Promise<string[]> {
   if (target && target !== 'ALL' && target !== 'GROUP_STREAM') {
     if (target.startsWith('PL')) {
-      const rawLine = await env.KV_CACHE.get(`RAW_LINE_${target}`);
+      const rawLine = await state(env).get(`RAW_LINE_${target}`);
       if (rawLine) return [rawLine];
     }
     return [target];
   }
 
   const targetSet = new Set<string>();
-  const activeGroupId = await env.KV_CACHE.get('ACTIVE_GROUP_ID');
+  const activeGroupId = await state(env).get('ACTIVE_GROUP_ID');
   if (activeGroupId && /^[CR][0-9a-f]{32}$/i.test(activeGroupId.trim())) {
     targetSet.add(activeGroupId.trim());
   }
 
-  const lineGroupsRaw = await env.KV_CACHE.get('LINE_GROUPS');
+  const lineGroupsRaw = await state(env).get('LINE_GROUPS');
   if (lineGroupsRaw) {
     try {
       const groups = JSON.parse(lineGroupsRaw);
@@ -100,11 +102,14 @@ async function appendChatLog(
   log: { timestamp: string; userId: string; displayName: string; sender: string; text: string; type: string }
 ): Promise<void> {
   try {
-    const raw = await env.KV_CACHE.get('CHAT_LOGS');
-    const logs = raw ? JSON.parse(raw) : [];
-    logs.push(log);
-    const trimmed = logs.slice(-100);
-    await env.KV_CACHE.put('CHAT_LOGS', JSON.stringify(trimmed));
+    const stored = await state(env).appendChatLog(log);
+    if (!stored) {
+      const raw = await state(env).get('CHAT_LOGS');
+      const logs = raw ? JSON.parse(raw) : [];
+      logs.push(log);
+      const trimmed = logs.slice(-100);
+      await state(env).put('CHAT_LOGS', JSON.stringify(trimmed));
+    }
   } catch (err) {
     console.warn('[appendChatLog Error]:', err);
   }
@@ -189,15 +194,15 @@ export default {
               if (!isVerifyProbe) {
                 // Deduplicate redelivered webhook events if LINE provides webhookEventId
                 if (event.webhookEventId) {
-                  const seen = await env.KV_CACHE.get(`SEEN_EVENT_${event.webhookEventId}`);
+                  const seen = await state(env).get(`SEEN_EVENT_${event.webhookEventId}`);
                   if (seen) {
                     console.log(`[Worker] Duplicate webhookEventId ${event.webhookEventId} dropped.`);
                     return;
                   }
                   if (ctx) {
-                    ctx.waitUntil(env.KV_CACHE.put(`SEEN_EVENT_${event.webhookEventId}`, '1', { expirationTtl: 600 }).catch(() => {}));
+                    ctx.waitUntil(state(env).put(`SEEN_EVENT_${event.webhookEventId}`, '1', { expirationTtl: 600 }).catch(() => {}));
                   } else {
-                    env.KV_CACHE.put(`SEEN_EVENT_${event.webhookEventId}`, '1', { expirationTtl: 600 }).catch(() => {});
+                    state(env).put(`SEEN_EVENT_${event.webhookEventId}`, '1', { expirationTtl: 600 }).catch(() => {});
                   }
                 }
                 await processLineEvent(event, env, ctx);
@@ -205,7 +210,7 @@ export default {
             } catch (err: any) {
               console.error('[Worker] Event processing error:', err);
               try {
-                await env.KV_CACHE.put('LAST_WEBHOOK_ERROR', JSON.stringify({
+                await state(env).put('LAST_WEBHOOK_ERROR', JSON.stringify({
                   error: err?.message || String(err),
                   stack: err?.stack,
                   event,
@@ -254,27 +259,22 @@ export default {
         let result: any = null;
 
         if (functionName === 'getDashboardData') {
-          const [
-            roundStr,
-            activeGroupId,
-            pendingBets,
-            matchedBets,
-            players,
-            transactions,
-            lineGroupsRaw,
-            chatLogsRaw,
-            cachedQuotaRaw,
-          ] = await Promise.all([
-            env.KV_CACHE.get('ACTIVE_ROUND'),
-            env.KV_CACHE.get('ACTIVE_GROUP_ID'),
+          // One batched RPC for the scalar keys (instead of five separate round-trips),
+          // with the list-shaped aggregates fetched in parallel alongside it.
+          const [scalars, pendingBets, matchedBets, players, transactions] = await Promise.all([
+            state(env).multi([
+              'ACTIVE_ROUND',
+              'ACTIVE_GROUP_ID',
+              'LINE_GROUPS',
+              'CHAT_LOGS',
+              'CACHED_LINE_QUOTA',
+            ]),
             getPendingOrdersList(env),
             getMatchedOrdersList(env),
             getPlayersList(env),
             getTransactionsList(env),
-            env.KV_CACHE.get('LINE_GROUPS'),
-            env.KV_CACHE.get('CHAT_LOGS'),
-            env.KV_CACHE.get('CACHED_LINE_QUOTA'),
           ]);
+          const [roundStr, activeGroupId, lineGroupsRaw, chatLogsRaw, cachedQuotaRaw] = scalars;
 
           const allOrders = [...pendingBets, ...matchedBets];
           const formattedBets = allOrders.map(formatOrderForDashboard);
@@ -320,7 +320,7 @@ export default {
                       isExhausted: totalLimit > 0 && used >= totalLimit,
                       cachedAt: Date.now(),
                     };
-                    await env.KV_CACHE.put('CACHED_LINE_QUOTA', JSON.stringify(freshQuota), { expirationTtl: 300 });
+                    await state(env).put('CACHED_LINE_QUOTA', JSON.stringify(freshQuota), { expirationTtl: 300 });
                   }
                 } catch (_) {}
               })();
@@ -493,7 +493,13 @@ export default {
             } else {
               targetTx.status = 'success';
               targetTx.actualAmount = targetTx.requestedAmount;
-              await env.KV_CACHE.put('TRANSACTIONS_LIST', JSON.stringify(txs));
+              // Atomic status flip so a concurrent LINE OA deposit is preserved.
+              const approvedAtomic = await state(env).patchTransactionStatus(
+                txId, 'success', '', targetTx.requestedAmount
+              );
+              if (!approvedAtomic) {
+                await state(env).put('TRANSACTIONS_LIST', JSON.stringify(txs));
+              }
 
               const isWithdrawal = String(txId).startsWith('WD') || targetTx.type === 'withdraw';
               const playerId = targetTx.playerId;
@@ -504,7 +510,7 @@ export default {
                 ? txLine
                 : (playerId && playerId.startsWith('U'))
                   ? playerId
-                  : ((await env.KV_CACHE.get(`RAW_LINE_${playerId}`)) || '');
+                  : ((await state(env).get(`RAW_LINE_${playerId}`)) || '');
               const shortId = (playerId && playerId.startsWith('PL'))
                 ? playerId
                 : (rawLine ? `PL${rawLine.slice(-6).toUpperCase()}` : playerId);
@@ -512,13 +518,13 @@ export default {
               // 2. Fetch authoritative profile directly from entity keys (Single Source of Truth)
               let existingProfile: PlayerProfile | null = null;
               if (rawLine) {
-                const raw = await env.KV_CACHE.get(`USER_${rawLine}`);
+                const raw = await state(env).get(`USER_${rawLine}`);
                 if (raw) {
                   try { existingProfile = JSON.parse(raw); } catch (_) {}
                 }
               }
               if (!existingProfile && shortId) {
-                const raw = await env.KV_CACHE.get(`USER_${shortId}`);
+                const raw = await state(env).get(`USER_${shortId}`);
                 if (raw) {
                   try { existingProfile = JSON.parse(raw); } catch (_) {}
                 }
@@ -574,14 +580,16 @@ export default {
                 };
 
                 const profileJson = JSON.stringify(updatedProfile);
-                const primaryPuts: Promise<any>[] = [
-                  env.KV_CACHE.put(`USER_${effectiveShort}`, profileJson),
-                ];
+                // Atomic fan-out so no reader can see a partially-credited profile.
+                const entries: Array<[string, string]> = [[`USER_${effectiveShort}`, profileJson]];
                 if (effectiveLine && effectiveLine.startsWith('U')) {
-                  primaryPuts.push(env.KV_CACHE.put(`USER_${effectiveLine}`, profileJson));
-                  primaryPuts.push(env.KV_CACHE.put(`RAW_LINE_${effectiveShort}`, effectiveLine));
+                  entries.push([`USER_${effectiveLine}`, profileJson]);
+                  entries.push([`RAW_LINE_${effectiveShort}`, effectiveLine]);
                 }
-                await Promise.all(primaryPuts);
+                const profileWritten = await state(env).writeMany(entries);
+                if (!profileWritten) {
+                  await Promise.all(entries.map(([k, v]) => state(env).put(k, v)));
+                }
                 await savePlayerProfile(updatedProfile, env, ctx);
 
                 // Push notice to player
@@ -606,7 +614,11 @@ export default {
             } else {
               targetTx.status = 'rejected';
               targetTx.reviewReason = reason;
-              await env.KV_CACHE.put('TRANSACTIONS_LIST', JSON.stringify(txs));
+              // Atomic status flip so a concurrent LINE OA deposit is preserved.
+              const rejectedAtomic = await state(env).patchTransactionStatus(txId, 'rejected', reason);
+              if (!rejectedAtomic) {
+                await state(env).put('TRANSACTIONS_LIST', JSON.stringify(txs));
+              }
 
               const isWithdrawal = String(txId).startsWith('WD') || targetTx.type === 'withdraw';
               const playerId = targetTx.playerId;
@@ -617,20 +629,20 @@ export default {
                 ? txLine
                 : (playerId && playerId.startsWith('U'))
                   ? playerId
-                  : ((await env.KV_CACHE.get(`RAW_LINE_${playerId}`)) || '');
+                  : ((await state(env).get(`RAW_LINE_${playerId}`)) || '');
               const shortId = (playerId && playerId.startsWith('PL'))
                 ? playerId
                 : (rawLine ? `PL${rawLine.slice(-6).toUpperCase()}` : playerId);
 
               let existingProfile: PlayerProfile | null = null;
               if (rawLine) {
-                const raw = await env.KV_CACHE.get(`USER_${rawLine}`);
+                const raw = await state(env).get(`USER_${rawLine}`);
                 if (raw) {
                   try { existingProfile = JSON.parse(raw); } catch (_) {}
                 }
               }
               if (!existingProfile && shortId) {
-                const raw = await env.KV_CACHE.get(`USER_${shortId}`);
+                const raw = await state(env).get(`USER_${shortId}`);
                 if (raw) {
                   try { existingProfile = JSON.parse(raw); } catch (_) {}
                 }
@@ -670,14 +682,15 @@ export default {
                   };
 
                   const profileJson = JSON.stringify(updatedProfile);
-                  const primaryPuts: Promise<any>[] = [
-                    env.KV_CACHE.put(`USER_${effectiveShort}`, profileJson),
-                  ];
+                  const entries: Array<[string, string]> = [[`USER_${effectiveShort}`, profileJson]];
                   if (effectiveLine && effectiveLine.startsWith('U')) {
-                    primaryPuts.push(env.KV_CACHE.put(`USER_${effectiveLine}`, profileJson));
-                    primaryPuts.push(env.KV_CACHE.put(`RAW_LINE_${effectiveShort}`, effectiveLine));
+                    entries.push([`USER_${effectiveLine}`, profileJson]);
+                    entries.push([`RAW_LINE_${effectiveShort}`, effectiveLine]);
                   }
-                  await Promise.all(primaryPuts);
+                  const profileWritten = await state(env).writeMany(entries);
+                  if (!profileWritten) {
+                    await Promise.all(entries.map(([k, v]) => state(env).put(k, v)));
+                  }
                   await savePlayerProfile(updatedProfile, env, ctx);
 
                   if (effectiveLine && effectiveLine.startsWith('U')) {
@@ -735,7 +748,7 @@ export default {
 
           const players = await getPlayersList(env);
           const player = players.find(p => p.id === userId || p.lineUserId === userId || (p.shortId && p.shortId === userId));
-          const targetLineUserId = player?.lineUserId || (await env.KV_CACHE.get(`RAW_LINE_${userId}`)) || (userId.startsWith('U') ? userId : '');
+          const targetLineUserId = player?.lineUserId || (await state(env).get(`RAW_LINE_${userId}`)) || (userId.startsWith('U') ? userId : '');
           const shortId = player?.shortId || (userId.startsWith('PL') ? userId : `PL${(targetLineUserId || userId).slice(-6).toUpperCase()}`);
           const displayName = player?.name || player?.displayName || passedName || 'ผู้เล่น';
           let oldBal = player ? (Number(player.balance) || 0) : 0;
@@ -743,13 +756,13 @@ export default {
           // Check if direct profile exists under targetLineUserId or shortId
           let existingProfile: PlayerProfile | null = null;
           if (targetLineUserId) {
-            const raw = await env.KV_CACHE.get(`USER_${targetLineUserId}`);
+            const raw = await state(env).get(`USER_${targetLineUserId}`);
             if (raw) {
               try { existingProfile = JSON.parse(raw); } catch (_) {}
             }
           }
           if (!existingProfile && shortId) {
-            const raw = await env.KV_CACHE.get(`USER_${shortId}`);
+            const raw = await state(env).get(`USER_${shortId}`);
             if (raw) {
               try { existingProfile = JSON.parse(raw); } catch (_) {}
             }
@@ -788,10 +801,10 @@ export default {
 
           // Save synchronously to both USER_${targetLineUserId} and USER_${shortId}
           if (targetLineUserId && targetLineUserId.startsWith('U')) {
-            await env.KV_CACHE.put(`USER_${targetLineUserId}`, JSON.stringify(updatedProfile));
-            await env.KV_CACHE.put(`RAW_LINE_${shortId}`, targetLineUserId);
+            await state(env).put(`USER_${targetLineUserId}`, JSON.stringify(updatedProfile));
+            await state(env).put(`RAW_LINE_${shortId}`, targetLineUserId);
           }
-          await env.KV_CACHE.put(`USER_${shortId}`, JSON.stringify(updatedProfile));
+          await state(env).put(`USER_${shortId}`, JSON.stringify(updatedProfile));
 
           // Save to PLAYERS_LIST and Sheets
           await savePlayerProfile(updatedProfile, env, ctx);
@@ -858,8 +871,8 @@ export default {
         } else if (functionName === 'adminUpdatePlayerName') {
           const userId = args[0];
           const newName = args[1];
-          const rawLine = await env.KV_CACHE.get(`RAW_LINE_${userId}`) || userId;
-          const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+          const rawLine = await state(env).get(`RAW_LINE_${userId}`) || userId;
+          const profileRaw = await state(env).get(`USER_${rawLine}`);
           if (profileRaw) {
             const p = JSON.parse(profileRaw);
             p.displayName = newName;
@@ -868,26 +881,26 @@ export default {
           result = { success: true };
         } else if (functionName === 'adminDeletePlayer') {
           const userId = args[0];
-          const rawLine = await env.KV_CACHE.get(`RAW_LINE_${userId}`) || userId;
-          await env.KV_CACHE.delete(`USER_${rawLine}`);
-          await env.KV_CACHE.delete(`RAW_LINE_${userId}`);
+          const rawLine = await state(env).get(`RAW_LINE_${userId}`) || userId;
+          await state(env).delete(`USER_${rawLine}`);
+          await state(env).delete(`RAW_LINE_${userId}`);
           if (userId && userId.startsWith('PL')) {
-            await env.KV_CACHE.delete(`USER_${userId}`);
+            await state(env).delete(`USER_${userId}`);
           }
-          const listRaw = await env.KV_CACHE.get('PLAYERS_LIST');
+          const listRaw = await state(env).get('PLAYERS_LIST');
           if (listRaw) {
             const list = JSON.parse(listRaw);
             const filtered = list.filter((p: any) => p.shortId !== userId && p.id !== userId && p.lineUserId !== rawLine && p.lineUserId !== userId);
-            await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(filtered));
+            await state(env).put('PLAYERS_LIST', JSON.stringify(filtered));
           }
           result = { success: true };
         } else if (functionName === 'adminSetActiveGroupId') {
           const gid = args[0];
-          await env.KV_CACHE.put('ACTIVE_GROUP_ID', gid);
+          await state(env).put('ACTIVE_GROUP_ID', gid);
           result = { success: true, activeGroupId: gid };
         } else if (functionName === 'adminOpenRound') {
           const roundName = args[0] || 'บั้งไฟสด';
-          await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify({
+          await state(env).put('ACTIVE_ROUND', JSON.stringify({
             name: roundName,
             targetMin: 330,
             targetMax: 380,
@@ -919,18 +932,18 @@ export default {
           // 1. Clear atomic order state in KV
           await clearAllPendingOrders(env);
           // 2. Clear players, transactions, and logs in KV
-          await env.KV_CACHE.delete('PLAYERS_LIST');
-          await env.KV_CACHE.delete('TRANSACTIONS_LIST');
-          await env.KV_CACHE.delete('CHAT_LOGS');
+          await state(env).delete('PLAYERS_LIST');
+          await state(env).delete('TRANSACTIONS_LIST');
+          await state(env).delete('CHAT_LOGS');
           // 3. Clear all cached player profiles and raw LINE mappings
           try {
-            const userScan = await env.KV_CACHE.list({ prefix: 'USER_' });
+            const userScan = await state(env).list({ prefix: 'USER_' });
             if (userScan.keys && userScan.keys.length > 0) {
-              await Promise.all(userScan.keys.map((k) => env.KV_CACHE.delete(k.name)));
+              await Promise.all(userScan.keys.map((k) => state(env).delete(k.name)));
             }
-            const rawScan = await env.KV_CACHE.list({ prefix: 'RAW_LINE_' });
+            const rawScan = await state(env).list({ prefix: 'RAW_LINE_' });
             if (rawScan.keys && rawScan.keys.length > 0) {
-              await Promise.all(rawScan.keys.map((k) => env.KV_CACHE.delete(k.name)));
+              await Promise.all(rawScan.keys.map((k) => state(env).delete(k.name)));
             }
           } catch (_) {}
 
@@ -959,7 +972,7 @@ export default {
             transactions: [],
             bets: [],
             chatLogs: [],
-            activeGroupId: (await env.KV_CACHE.get('ACTIVE_GROUP_ID')) || '',
+            activeGroupId: (await state(env).get('ACTIVE_GROUP_ID')) || '',
             roundStatus: 'ACTIVE',
           };
         } else if (functionName === 'syncWithSheets') {
@@ -1017,14 +1030,14 @@ export default {
                 ? [...kvTx, ...sheetsData.transactions].slice(0, 100)
                 : kvTx,
               bets: kvBets.map(formatOrderForDashboard),
-              activeGroupId: (await env.KV_CACHE.get('ACTIVE_GROUP_ID')) || '',
+              activeGroupId: (await state(env).get('ACTIVE_GROUP_ID')) || '',
             };
           } else {
             result = {
               players: kvPlayers,
               transactions: kvTx,
               bets: kvBets.map(formatOrderForDashboard),
-              activeGroupId: (await env.KV_CACHE.get('ACTIVE_GROUP_ID')) || '',
+              activeGroupId: (await state(env).get('ACTIVE_GROUP_ID')) || '',
             };
           }
         } else if (functionName === 'sendAdminMessageToLine') {
@@ -1042,20 +1055,20 @@ export default {
             if (!isObj) {
               const rangeMatch = String(messageText).match(/(\d{3})\s*[-/]\s*(\d{3})/);
               if (rangeMatch) {
-                const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
+                const roundStr = await state(env).get('ACTIVE_ROUND');
                 const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', status: 'ACTIVE' };
                 round.targetMin = Number(rangeMatch[1]);
                 round.targetMax = Number(rangeMatch[2]);
                 round.updatedAt = Date.now();
-                await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round));
+                await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
               }
 
               if (clean === 'กติกา' || clean === 'rule' || clean === 'rules' || clean === 'วิธีเล่น' || clean === 'คู่มือ') {
                 payload = generateRuleGuideFlex();
               } else if (clean === 'เช็คยอด' || clean === 'คงเหลือ' || clean === 'balance') {
                 const primaryTarget = targets[0];
-                const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${primaryTarget}`)) || primaryTarget;
-                const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+                const rawLine = (await state(env).get(`RAW_LINE_${primaryTarget}`)) || primaryTarget;
+                const profileRaw = await state(env).get(`USER_${rawLine}`);
                 const profile = profileRaw ? JSON.parse(profileRaw) : null;
                 payload = generateBalanceFlex(profile?.displayName || 'ผู้เล่น', profile?.balance || 0);
               } else if (clean === 'บั้งไฟออก' || clean === 'rocketout') {
@@ -1066,17 +1079,17 @@ export default {
                 const pending = await getPendingOrdersList(env);
                 payload = generatePendingBoardFlex(pending);
               } else if (clean.includes('ปิดรับดวล') || clean.startsWith('ปิดรอบ') || clean.startsWith('ล็อครอบ')) {
-                const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
+                const roundStr = await state(env).get('ACTIVE_ROUND');
                 const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
                 round.status = 'CLOSED';
                 round.updatedAt = Date.now();
-                await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round));
+                await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
               } else if (clean.startsWith('เปิดรอบ') || clean.startsWith('เปิดรับดวล')) {
-                const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
+                const roundStr = await state(env).get('ACTIVE_ROUND');
                 const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
                 round.status = 'ACTIVE';
                 round.updatedAt = Date.now();
-                await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round));
+                await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
               }
             }
 
@@ -1151,7 +1164,7 @@ export default {
             quoteReleased: true,
             updatedAt: Date.now(),
           };
-          await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(roundData));
+          await state(env).put('ACTIVE_ROUND', JSON.stringify(roundData));
 
           await releaseHeldPreQuoteOrders(min, max, env, ctx);
 
@@ -1212,11 +1225,11 @@ export default {
           }
         } else if (functionName === 'adminBroadcastFinalCall') {
           const target = args[0];
-          const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
+          const roundStr = await state(env).get('ACTIVE_ROUND');
           const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
           round.status = 'CLOSED';
           round.updatedAt = Date.now();
-          await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round));
+          await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
 
           if (round.quoteReleased !== true) {
             await cancelHeldPreQuoteOrders(env, ctx);
@@ -1280,11 +1293,11 @@ export default {
           }
         } else if (functionName === 'adminBroadcastVoidRound') {
           const target = args[0];
-          const roundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
+          const roundStr = await state(env).get('ACTIVE_ROUND');
           const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
           round.status = 'VOID';
           round.updatedAt = Date.now();
-          await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(round));
+          await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
 
           const voidFlex = {
             type: 'flex',
@@ -1454,9 +1467,9 @@ export default {
             },
           };
           await processLineEvent(mockEvent, env, ctx);
-          const lastDelivery = await env.KV_CACHE.get('LAST_DELIVERY_DEBUG');
-          const lastError = await env.KV_CACHE.get('LAST_LINE_ERROR');
-          const lastSuccess = await env.KV_CACHE.get('LAST_LINE_SUCCESS');
+          const lastDelivery = await state(env).get('LAST_DELIVERY_DEBUG');
+          const lastError = await state(env).get('LAST_LINE_ERROR');
+          const lastSuccess = await state(env).get('LAST_LINE_SUCCESS');
           result = {
             success: true,
             simulatedText: text,
@@ -1465,8 +1478,8 @@ export default {
             lastSuccess: lastSuccess ? JSON.parse(lastSuccess) : null,
           };
         } else if (functionName === 'adminDiscoverGroupIds') {
-          const activeGroupId = await env.KV_CACHE.get('ACTIVE_GROUP_ID');
-          const lineGroupsRaw = await env.KV_CACHE.get('LINE_GROUPS');
+          const activeGroupId = await state(env).get('ACTIVE_GROUP_ID');
+          const lineGroupsRaw = await state(env).get('LINE_GROUPS');
           const lineGroups = lineGroupsRaw ? JSON.parse(lineGroupsRaw) : [];
           const discovered: { id: string; source: string }[] = [];
           if (activeGroupId) {
@@ -1485,8 +1498,8 @@ export default {
           const bankName = args[1] || '';
           const bankAccount = args[2] || '';
           const accountName = args[3] || '';
-          const rawLine = (await env.KV_CACHE.get(`RAW_LINE_${userId}`)) || userId;
-          const profileRaw = await env.KV_CACHE.get(`USER_${rawLine}`);
+          const rawLine = (await state(env).get(`RAW_LINE_${userId}`)) || userId;
+          const profileRaw = await state(env).get(`USER_${rawLine}`);
           if (profileRaw) {
             const p = JSON.parse(profileRaw);
             p.bankName = bankName;
@@ -1503,7 +1516,7 @@ export default {
 
           const matchedOrders = await getMatchedOrdersList(env);
           const resolvedOrders: any[] = [];
-          const activeRoundStr = await env.KV_CACHE.get('ACTIVE_ROUND');
+          const activeRoundStr = await state(env).get('ACTIVE_ROUND');
           const activeRound = activeRoundStr ? JSON.parse(activeRoundStr) : { name: 'บั้งไฟสด' };
 
           // Any orders still held as pre_quote (price never released this round) must be
@@ -1558,7 +1571,7 @@ export default {
           activeRound.status = 'CLOSED';
           activeRound.finalTime = finalSeconds;
           activeRound.updatedAt = Date.now();
-          await env.KV_CACHE.put('ACTIVE_ROUND', JSON.stringify(activeRound));
+          await state(env).put('ACTIVE_ROUND', JSON.stringify(activeRound));
 
           const targets = await resolveTargetGroupIds('ALL', env);
           if (targets.length > 0) {
@@ -1646,7 +1659,7 @@ export default {
         } else if (functionName === 'simulateTextMessageFromDashboard') {
           const text = args[0];
           const userId = args[1] || 'user';
-          const activeGroupId = await env.KV_CACHE.get('ACTIVE_GROUP_ID');
+          const activeGroupId = await state(env).get('ACTIVE_GROUP_ID');
           const targetGroup = args[3] || activeGroupId || 'C_SIMULATED_GROUP';
 
           const mockEvent: LineEvent = {
@@ -1677,7 +1690,7 @@ export default {
           const isChotoy = Boolean(args[7]);
           const rocketName = args[8] || 'บั้งไฟสด';
 
-          const activeGroupId = await env.KV_CACHE.get('ACTIVE_GROUP_ID');
+          const activeGroupId = await state(env).get('ACTIVE_GROUP_ID');
           const newOrder = {
             orderNumber: String(orderNo),
             creatorId,
@@ -1701,11 +1714,11 @@ export default {
           result = { success: true, order: newOrder };
         } else if (functionName === 'adminGetDebugLogs') {
           const [lastOrderDebug, lastLineError, lastLineSuccess, lastWebhookError, lastDelivery] = await Promise.all([
-            env.KV_CACHE.get('LAST_ORDER_CREATE_DEBUG'),
-            env.KV_CACHE.get('LAST_LINE_ERROR'),
-            env.KV_CACHE.get('LAST_LINE_SUCCESS'),
-            env.KV_CACHE.get('LAST_WEBHOOK_ERROR'),
-            env.KV_CACHE.get('LAST_DELIVERY_DEBUG'),
+            state(env).get('LAST_ORDER_CREATE_DEBUG'),
+            state(env).get('LAST_LINE_ERROR'),
+            state(env).get('LAST_LINE_SUCCESS'),
+            state(env).get('LAST_WEBHOOK_ERROR'),
+            state(env).get('LAST_DELIVERY_DEBUG'),
           ]);
           result = {
             lastOrderDebug: lastOrderDebug ? JSON.parse(lastOrderDebug) : null,
@@ -1714,9 +1727,19 @@ export default {
             lastWebhookError: lastWebhookError ? JSON.parse(lastWebhookError) : null,
             lastDelivery: lastDelivery ? JSON.parse(lastDelivery) : null,
           };
+        } else if (functionName === 'adminStateStats') {
+          // Operational introspection for the strongly-consistent state store.
+          // Super Admin only, same as the destructive actions it sits beside.
+          const isSuperAdmin = Boolean(authHeader && superAdminKeys.includes(authHeader));
+          if (!isSuperAdmin) {
+            result = { error: 'Forbidden: เฉพาะ Super Admin เท่านั้นที่สามารถดูสถานะระบบจัดเก็บข้อมูลได้' };
+          } else {
+            const stats = await state(env).stats();
+            result = { stats, usingDurableObject: Boolean((env as any).ROCKET_STATE) };
+          }
         } else if (functionName === 'adminResetTestData') {
           // 1. Clean pending bets list
-          await env.KV_CACHE.put('PENDING_ORDERS_LIST', JSON.stringify([]));
+          await state(env).put('PENDING_ORDERS_LIST', JSON.stringify([]));
 
           // 2. Fix player balance to 1900 and deduplicate PLAYERS_LIST
           const targetUserId = 'Ua34bcbb1d365c657cc1a7f3576c76e26';
@@ -1732,11 +1755,11 @@ export default {
             registeredAt: 1790662664117,
             updatedAt: Date.now(),
           };
-          await env.KV_CACHE.put(`USER_${targetUserId}`, JSON.stringify(cleanProfile));
-          await env.KV_CACHE.put(`USER_${targetShortId}`, JSON.stringify(cleanProfile));
-          await env.KV_CACHE.put(`RAW_LINE_${targetShortId}`, targetUserId);
+          await state(env).put(`USER_${targetUserId}`, JSON.stringify(cleanProfile));
+          await state(env).put(`USER_${targetShortId}`, JSON.stringify(cleanProfile));
+          await state(env).put(`RAW_LINE_${targetShortId}`, targetUserId);
 
-          const listRaw = await env.KV_CACHE.get('PLAYERS_LIST');
+          const listRaw = await state(env).get('PLAYERS_LIST');
           let list = listRaw ? JSON.parse(listRaw) : [];
           if (!Array.isArray(list)) list = [];
           const deduped = list.filter((p: any) => p.lineUserId !== targetUserId && p.shortId !== targetShortId && p.id !== targetShortId);
@@ -1754,7 +1777,7 @@ export default {
             registeredAt: cleanProfile.registeredAt,
             updatedAt: cleanProfile.updatedAt,
           });
-          await env.KV_CACHE.put('PLAYERS_LIST', JSON.stringify(deduped));
+          await state(env).put('PLAYERS_LIST', JSON.stringify(deduped));
           result = { success: true, restoredBalance: 1900, pendingCleared: true };
         }
 
@@ -1794,3 +1817,9 @@ export default {
     }
   },
 };
+
+// Re-export the Durable Object class so Wrangler registers it as a DO entrypoint.
+// A single instance (`rocket-global-state`) owns every read/write of live business
+// state, making LINE OA <-> Admin Console updates immediately visible worldwide
+// instead of inheriting Workers KV's up-to-60s cross-region propagation delay.
+export { RocketStateDO };

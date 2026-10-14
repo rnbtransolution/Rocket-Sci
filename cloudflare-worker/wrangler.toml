@@ -11,6 +11,22 @@ new_sqlite_classes = ["FinancialCoordinator"]
 tag = "v2"
 deleted_classes = ["FinancialCoordinator"]
 
+# v3 — Authoritative strongly-consistent state store.
+# Workers KV is eventually consistent: writes are only immediately visible at
+# the location that served them, and other locations (LINE's region vs the
+# operator's region) can keep serving the previous value for up to ~60s. That
+# is what made Deposit/Withdraw appear late in the Admin Console.
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["RocketStateDO"]
+
+# ── Durable Object Bindings ──
+# One instance, named `rocket-global-state`, is the single writer and reader for
+# all live business state. Writes are immediately visible to every reader.
+[[durable_objects.bindings]]
+name = "ROCKET_STATE"
+class_name = "RocketStateDO"
+
 # ── Cloudflare KV Namespace Bindings ──
 [[kv_namespaces]]
 binding = "KV_CACHE"

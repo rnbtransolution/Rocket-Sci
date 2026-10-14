@@ -1,7 +1,9 @@
 // ── Environment Bindings & KV ──
 export interface Env {
-  KV_CACHE: KVNamespace;
-  KV_ORDERS: KVNamespace;
+  /** Strongly-consistent authoritative state store (single global instance) */
+  ROCKET_STATE: DurableObjectNamespace;
+  KV_CACHE: KVNamespace;   // legacy cold mirror / migration fallback
+  KV_ORDERS: KVNamespace;   // immutable per-order records (KV_ORDERS is write-once, read-later)
   LINE_EVENTS_QUEUE?: Queue<QueueMessage>;
   
   // Secrets
