@@ -104,14 +104,14 @@ const SLIP_PRESETS = [
   }
 ];
 
-// Admin credentials — must be set via environment variables (.env / deployment config).
-// No literal fallbacks: missing env vars result in authentication failure (secure by default).
+// Admin credentials are NEVER read from the frontend environment.
+//
+// Vite inlines every VITE_* value into the JavaScript bundle at build time, so
+// reading passwords or the admin API key here published them to every visitor
+// in the page source. Usernames remain as harmless UI hints; all passwords and
+// role decisions are resolved server-side during login.
 const SUPER_ADMIN_USERNAME = import.meta.env.VITE_SUPER_ADMIN_USERNAME || import.meta.env.VITE_ADMIN_USERNAME || '';
-const SUPER_ADMIN_PASSWORD = import.meta.env.VITE_SUPER_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN_PASSCODE || '';
-const SUPER_ADMIN_PASSCODE = import.meta.env.VITE_ADMIN_PASSCODE || import.meta.env.VITE_SUPER_ADMIN_PASSWORD || '';
-
 const LIMITED_ADMIN_USERNAME = import.meta.env.VITE_LIMITED_ADMIN_USERNAME || import.meta.env.VITE_ADMIN1_USERNAME || '';
-const LIMITED_ADMIN_PASSWORD = import.meta.env.VITE_LIMITED_ADMIN_PASSWORD || import.meta.env.VITE_ADMIN1_PASSWORD || '';
 
 export default function App() {
   const isGASHost = typeof window !== 'undefined' && (
@@ -147,31 +147,39 @@ export default function App() {
     return import.meta.env.VITE_API_BASE_URL || CF_WORKER_BASE_URL;
   };
   const API_BASE_URL = getApiBaseUrl();
-  const getAdminApiKey = () => {
-    if (typeof window !== 'undefined') {
-      const stored = sessionStorage.getItem('rocket_admin_key') || localStorage.getItem('rocket_admin_key');
-      if (stored) return stored;
-    }
-    // Fallback to build-time env var only — no literal key embedded in source
-    return import.meta.env.VITE_ADMIN_API_KEY || '';
+
+  // ── Admin session ──
+  // The browser holds a short-lived signed session token, NOT the admin API key.
+  // The key used to be read from VITE_ADMIN_API_KEY, which Vite inlines into the
+  // bundle at build time — publishing the admin credential to every visitor.
+  // sessionStorage (not localStorage) keeps it out of persistent disk storage and
+  // clears on tab close.
+  const getAdminSession = () => {
+    if (typeof window === 'undefined') return '';
+    return sessionStorage.getItem('rocket_admin_session') || '';
   };
-  const ADMIN_API_KEY = getAdminApiKey();
+  const clearAdminSession = () => {
+    if (typeof window === 'undefined') return;
+    sessionStorage.removeItem('rocket_admin_session');
+    sessionStorage.removeItem('rocket_admin_auth');
+    sessionStorage.removeItem('rocket_admin_role');
+    sessionStorage.removeItem('rocket_admin_user');
+  };
 
   const runBackendFunction = async (functionName, args = []) => {
     const targetBase = API_BASE_URL || CF_WORKER_BASE_URL;
     const targetUrl = `${targetBase}/api/run`;
-    const apiKey = getAdminApiKey();
+    const session = getAdminSession();
     const headers = {
       'Content-Type': 'application/json',
-      'x-admin-key': apiKey,
-      'x-admin-api-key': apiKey,
+      ...(session ? { 'x-admin-session': session } : {}),
     };
 
     try {
       const res = await fetch(targetUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ functionName, args, adminKey: apiKey, apiKey, adminRole }),
+        body: JSON.stringify({ functionName, args, adminSession: session || undefined, adminRole }),
       });
 
       const contentType = res.headers.get('content-type') || '';
@@ -180,6 +188,11 @@ export default function App() {
       }
 
       const json = await res.json();
+      if (res.status === 401) {
+        // Session missing, expired or revoked — drop it and bounce to login.
+        clearAdminSession();
+        setAdminAuthenticated(false);
+      }
       if (!res.ok) throw new Error(json.error || 'เกิดข้อผิดพลาด');
       return json.data;
     } catch (fetchErr) {
@@ -241,12 +254,8 @@ export default function App() {
 
   const handleAdminLogout = () => {
     if (window.confirm('🔒 คุณต้องการออกจากระบบแอดมินใช่หรือไม่?')) {
-      if (typeof window !== 'undefined') {
-        sessionStorage.removeItem('rocket_admin_auth');
-        sessionStorage.removeItem('rocket_admin_user');
-        sessionStorage.removeItem('rocket_admin_key');
-        sessionStorage.removeItem('rocket_admin_role');
-      }
+      // Drops the session token too, so a shared machine keeps nothing usable.
+      clearAdminSession();
       setAdminAuthenticated(false);
       setAdminRole('admin');
       setPasswordInput('');
@@ -456,17 +465,23 @@ export default function App() {
 
     const fetchFromBackend = async () => {
       try {
-        const apiKey = getAdminApiKey();
+        const session = getAdminSession();
         const res = await fetch(`${targetUrl}/api/run`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...(apiKey ? { 'x-admin-key': apiKey, 'x-admin-api-key': apiKey } : {}),
+            ...(session ? { 'x-admin-session': session } : {}),
             // Ask the edge to skip the response body entirely when nothing changed.
             ...(lastEtagRef ? { 'If-None-Match': lastEtagRef } : {}),
           },
-          body: JSON.stringify({ functionName: 'getDashboardData', adminKey: apiKey, apiKey }),
+          body: JSON.stringify({ functionName: 'getDashboardData', adminSession: session || undefined }),
         });
+
+        if (res.status === 401) {
+          clearAdminSession();
+          setAdminAuthenticated(false);
+          return 'unchanged';
+        }
 
         // 304 = state unchanged. Keep the previous data, skip the parse entirely.
         if (res.status === 304) return 'unchanged';
@@ -542,7 +557,7 @@ export default function App() {
         document.removeEventListener('visibilitychange', onVisibilityChange);
       }
     };
-  }, [isGAS, isLiveBackend, isGitHubPages, ADMIN_API_KEY, API_BASE_URL, adminAuthenticated, playerUserId]);
+  }, [isGAS, isLiveBackend, isGitHubPages, API_BASE_URL, adminAuthenticated, playerUserId]);
 
   // Toast Notification manager
   const addToast = (msg, type = 'info') => {
@@ -950,10 +965,7 @@ export default function App() {
         setAdminAuthenticated={setAdminAuthenticated}
         setAdminRole={setAdminRole}
         adminUsername={SUPER_ADMIN_USERNAME}
-        adminPassword={SUPER_ADMIN_PASSWORD}
-        adminPasscode={SUPER_ADMIN_PASSCODE}
         admin1Username={LIMITED_ADMIN_USERNAME}
-        admin1Password={LIMITED_ADMIN_PASSWORD}
         runBackendFunction={runBackendFunction}
       />
     );

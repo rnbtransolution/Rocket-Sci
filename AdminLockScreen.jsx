@@ -33,10 +33,11 @@ export default function AdminLockScreen({
   setAdminAuthenticated, 
   setAdminRole,
   adminUsername = '', 
-  adminPassword = '', 
-  adminPasscode = '',
+  // Passwords are intentionally NOT passed to the client. This component
+  // previously received build-time VITE_*_PASSWORD values and compared them
+  // locally, which meant the admin passwords shipped inside the JS bundle.
+  // Authentication is now decided solely by the backend adminLogin RPC.
   admin1Username = '',
-  admin1Password = '',
   runBackendFunction 
 }) {
   const [showPassword, setShowPassword] = useState(false);
@@ -104,38 +105,25 @@ export default function AdminLockScreen({
 
     setIsSubmitting(true);
 
-    const isSuperUser = (adminUsername ? userClean.toLowerCase() === adminUsername.toLowerCase() : false);
-    const isSuperPass = Boolean(adminPassword && passClean === adminPassword) || Boolean(adminPasscode && passClean === adminPasscode);
-
-    const isLimitedUser = (admin1Username ? userClean.toLowerCase() === admin1Username.toLowerCase() : false);
-    const isLimitedPass = Boolean(admin1Password && passClean === admin1Password);
-
+    // Authentication happens ENTIRELY on the server.
+    //
+    // This previously also compared the typed password against build-time
+    // VITE_SUPER_ADMIN_PASSWORD values compiled into the bundle, which meant the
+    // admin passwords were readable in the page source by anyone. Only the
+    // backend may decide whether a login is valid.
     let loginSuccess = false;
     let resolvedRole = 'admin'; // 'superadmin' | 'admin'
     let resolvedUser = userClean;
-    let resolvedAdminKey = ''; // Will be populated from backend RPC response
+    let resolvedSession = '';
 
-    if (isSuperUser && isSuperPass) {
-      loginSuccess = true;
-      resolvedRole = 'superadmin';
-      resolvedUser = adminUsername || 'Admin';
-      // Key will be overridden by backend RPC response; leave empty until then
-    } else if (isLimitedUser && isLimitedPass) {
-      loginSuccess = true;
-      resolvedRole = 'admin';
-      resolvedUser = admin1Username || 'Admin1';
-      // Key will be overridden by backend RPC response; leave empty until then
-    }
-
-    // Try backend RPC login
     if (typeof runBackendFunction === 'function') {
       try {
         const res = await runBackendFunction('adminLogin', [userClean, passClean]);
-        if (res && res.success) {
+        if (res && res.success && res.session) {
           loginSuccess = true;
-          if (res.role) resolvedRole = res.role;
-          if (res.username) resolvedUser = res.username;
-          if (res.adminKey) resolvedAdminKey = res.adminKey;
+          resolvedRole = res.role || 'admin';
+          resolvedUser = res.username || userClean;
+          resolvedSession = res.session;
         }
       } catch {
         // ignore RPC login exception
@@ -149,7 +137,8 @@ export default function AdminLockScreen({
         sessionStorage.setItem('rocket_admin_auth', 'true');
         sessionStorage.setItem('rocket_admin_user', resolvedUser);
         sessionStorage.setItem('rocket_admin_role', resolvedRole);
-        sessionStorage.setItem('rocket_admin_key', resolvedAdminKey);
+        // Short-lived signed token — never the admin API key.
+        sessionStorage.setItem('rocket_admin_session', resolvedSession);
       }
       if (typeof setAdminRole === 'function') {
         setAdminRole(resolvedRole);

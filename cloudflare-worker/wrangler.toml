@@ -54,4 +54,4 @@ dead_letter_queue = "rocket-science-dlq"
 [vars]
 ENVIRONMENT = "production"
 SPREADSHEET_ID = "1NaQbaUz8fcgd32sCAfxxKNBnpmFA5vu0_YVSehhdCEQ"
-GAS_FALLBACK_URL = "https://script.google.com/macros/s/AKfycbzzzrz0KDdYOwZ7nK7SxYbFMf7OT39mR8lAw4xeGUT_48Ju3tfafkiZzdrrqrRbvIzqyg/exec"
+GAS_FALLBACK_URL = "https://script.google.com/macros/s/AKfycbxn8ezLFwK2f4F_T0p1FbDJmRARnvA_pXUIXWsIla0l5XIJmNZV86weEZw65HstzqCj9g/exec"

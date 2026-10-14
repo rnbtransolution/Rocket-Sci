@@ -3,6 +3,15 @@ import { verifyLineSignature } from './signature.js';
 import { state } from './state.js';
 import { RocketStateDO } from './stateDO.js';
 import {
+  issueSessionToken,
+  verifySessionToken,
+  timingSafeEqual,
+  checkLoginRateLimit,
+  clearLoginRateLimit,
+  SessionClaims,
+  AdminRole,
+} from './auth.js';
+import {
   processLineEvent,
   clearAllPendingOrders,
   cancelHeldPreQuoteOrders,
@@ -266,12 +275,42 @@ export default {
         const body = (await request.json()) as any;
         const { functionName, args = [] } = body;
 
-        const authHeader = request.headers.get('x-admin-key') || request.headers.get('x-admin-api-key') || body?.adminKey || body?.apiKey;
-        // Auth: sourced from Wrangler secrets (env vars) only — no literal key fallbacks in source.
+        // ── Admin authentication ──
+        // The browser authenticates with a short-lived signed session token
+        // (x-admin-session). The raw ADMIN_API_KEY is accepted ONLY from
+        // server-to-server callers (the GAS mirror, scripts) and is never
+        // issued to the frontend — previously it was embedded in the bundle by
+        // Vite, which published the admin credential to every visitor.
         const superAdminKeys = [env.ADMIN_API_KEY].filter(Boolean);
         const admin1Keys = [env.ADMIN1_API_KEY].filter(Boolean);
         const validAdminKeys = [...superAdminKeys, ...admin1Keys];
-        const isAdmin = Boolean(authHeader && validAdminKeys.length > 0 && validAdminKeys.includes(authHeader));
+
+        const sessionHeader = request.headers.get('x-admin-session') || body?.adminSession;
+        let sessionClaims: SessionClaims | null = null;
+        if (sessionHeader && env.SESSION_SECRET) {
+          sessionClaims = await verifySessionToken(sessionHeader, env.SESSION_SECRET);
+        }
+
+        const apiKeyHeader: string | null | undefined =
+          request.headers.get('x-admin-key') ||
+          request.headers.get('x-admin-api-key') ||
+          body?.adminKey ||
+          body?.apiKey;
+        // Timing-safe comparison so a wrong key cannot be discovered by timing.
+        const isAdminKeyAuth = Boolean(
+          apiKeyHeader && validAdminKeys.some((k) => timingSafeEqual(k, apiKeyHeader))
+        );
+        const isSuperAdminKeyAuth = Boolean(
+          apiKeyHeader && superAdminKeys.some((k) => timingSafeEqual(k, apiKeyHeader))
+        );
+
+        const isAdmin = Boolean(sessionClaims || isAdminKeyAuth);
+        const adminRole: AdminRole = sessionClaims
+          ? sessionClaims.role
+          : isSuperAdminKeyAuth
+            ? 'superadmin'
+            : 'admin';
+
         const isPublicAllowed = functionName === 'getDashboardData' || functionName === 'adminLogin' || functionName === 'getP2PResults';
         if (!isPublicAllowed && !isAdmin) {
           return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -482,30 +521,67 @@ export default {
             result = { error: e?.message || 'Failed to fetch quota' };
           }
         } else if (functionName === 'adminLogin') {
+          // Password authentication happens here and ONLY here. The response
+          // carries a signed, expiring session token — never the API key, which
+          // would reintroduce the bundle-embedded credential exposure.
           const username = (args[0] || '').toString().trim().toLowerCase();
           const password = (args[1] || '').toString().trim();
-          // Passwords validated against Wrangler secrets only — no literals in source.
-          const superPass = env.ADMIN_API_KEY; // Admin logs in with their API key as password
+
+          const clientIp =
+            request.headers.get('cf-connecting-ip') ||
+            request.headers.get('x-forwarded-for') ||
+            'unknown';
+          const rateKey = `login:${clientIp}`;
+
+          const limit = checkLoginRateLimit(rateKey);
+          if (!limit.allowed) {
+            return new Response(
+              JSON.stringify({
+                success: false,
+                error: `ลองเข้าสู่ระบบหลายครั้งเกินไป กรุณารอ ${Math.ceil(limit.retryAfterSeconds / 60)} นาทีแล้วลองใหม่`,
+              }),
+              {
+                status: 429,
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Retry-After': String(limit.retryAfterSeconds),
+                  ...corsHeaders,
+                },
+              }
+            );
+          }
+
+          // Dedicated login passwords take precedence over the API key, so an
+          // operator can change the console password without touching the
+          // server-to-server secret.
+          const superPass = env.ADMIN_PASSWORD || env.ADMIN_API_KEY;
           const superUsername = (env.ADMIN_USERNAME || 'admin').toLowerCase();
-          const admin1Pass = env.ADMIN1_API_KEY;
+          const admin1Pass = env.ADMIN_PASSWORD_1 || env.ADMIN1_API_KEY;
           const admin1Username = (env.ADMIN1_USERNAME || 'admin1').toLowerCase();
 
-          if (username === superUsername && superPass && password === superPass) {
-            result = { 
-              success: true, 
-              adminKey: env.ADMIN_API_KEY, 
-              username: 'Admin', 
-              role: 'superadmin' 
-            };
-          } else if (username === admin1Username && admin1Pass && password === admin1Pass) {
-            result = { 
-              success: true, 
-              adminKey: env.ADMIN1_API_KEY, 
-              username: 'Admin1', 
-              role: 'admin' 
+          let authenticated: { username: string; role: AdminRole } | null = null;
+          if (superPass && username === superUsername && timingSafeEqual(password, superPass)) {
+            authenticated = { username: 'Admin', role: 'superadmin' };
+          } else if (admin1Pass && username === admin1Username && timingSafeEqual(password, admin1Pass)) {
+            authenticated = { username: 'Admin1', role: 'admin' };
+          }
+
+          if (!authenticated) {
+            result = { success: false, error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
+          } else if (!env.SESSION_SECRET) {
+            result = {
+              success: false,
+              error: 'Server misconfiguration: SESSION_SECRET is not configured',
             };
           } else {
-            result = { success: false, error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
+            clearLoginRateLimit(rateKey);
+            result = {
+              success: true,
+              session: await issueSessionToken(authenticated.username, authenticated.role, env.SESSION_SECRET),
+              username: authenticated.username,
+              role: authenticated.role,
+              expiresIn: 8 * 60 * 60,
+            };
           }
         } else if (functionName === 'adminApproveTransaction') {
           const txId = args[0];
@@ -991,7 +1067,7 @@ export default {
           result = { success: true, message: 'Cleared pending orders and board cache', cleared: res.cleared };
         } else if (functionName === 'resetGoogleSheetsDatabase') {
           // Strict privilege check: Super Admin only
-          const isSuperAdmin = Boolean(authHeader && superAdminKeys.includes(authHeader));
+          const isSuperAdmin = adminRole === 'superadmin';
           if (!isSuperAdmin) {
             return new Response(JSON.stringify({ 
               error: 'Forbidden: สิทธิ์ไม่เพียงพอ เฉพาะ Super Admin เท่านั้นที่สามารถล้างระเบียนข้อมูลระบบ (Factory Reset) ได้' 
@@ -1838,7 +1914,7 @@ export default {
         } else if (functionName === 'adminStateStats') {
           // Operational introspection for the strongly-consistent state store.
           // Super Admin only, same as the destructive actions it sits beside.
-          const isSuperAdmin = Boolean(authHeader && superAdminKeys.includes(authHeader));
+          const isSuperAdmin = adminRole === 'superadmin';
           if (!isSuperAdmin) {
             result = { error: 'Forbidden: เฉพาะ Super Admin เท่านั้นที่สามารถดูสถานะระบบจัดเก็บข้อมูลได้' };
           } else {

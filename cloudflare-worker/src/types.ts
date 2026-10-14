@@ -9,8 +9,22 @@ export interface Env {
   // Secrets
   LINE_CHANNEL_SECRET: string;
   LINE_CHANNEL_ACCESS_TOKEN: string;
+
+  /** Server-to-server admin secret. NEVER sent to the browser. */
   ADMIN_API_KEY: string;
-  ADMIN1_API_KEY?: string;        // Limited Admin key (optional — Wrangler secret)
+  /** Limited-admin server-to-server secret (optional — Wrangler secret). */
+  ADMIN1_API_KEY?: string;
+
+  /**
+   * HMAC key used to sign admin session tokens. Deliberately independent of
+   * ADMIN_API_KEY so the two can be rotated separately.
+   */
+  SESSION_SECRET: string;
+
+  /** Console login passwords. Distinct from the API keys above. */
+  ADMIN_PASSWORD?: string;
+  ADMIN_PASSWORD_1?: string;
+
   ADMIN_USERNAME?: string;        // Super Admin username override (optional)
   ADMIN1_USERNAME?: string;       // Limited Admin username override (optional)
   GOOGLE_SERVICE_ACCOUNT_JSON?: string;
