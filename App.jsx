@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import AdminLockScreen from './AdminLockScreen.jsx';
 import PasswordPanel from './PasswordPanel.jsx';
 import { 
@@ -26,6 +26,7 @@ import {
   Radio,
   Megaphone,
   LogOut,
+  KeyRound,
   Cloud
 } from 'lucide-react';
 
@@ -260,6 +261,21 @@ export default function App() {
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [passwordStatus, setPasswordStatus] = useState(null);
   const [resetMode, setResetMode] = useState(false);
+  // Voluntary password change opened from the header. Without this the
+  // change-password screen was only reachable when a password had already
+  // expired, so a normal admin had no way to rotate on their own schedule.
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
+
+  // Fetch expiry/counts so the header can warn before the 30-day hard block.
+  const refreshPasswordStatus = useCallback(async () => {
+    if (!getAdminSession()) return;
+    try {
+      const res = await runBackendFunction('adminGetPasswordStatus', []);
+      if (res && res.status) setPasswordStatus(res.status);
+    } catch {
+      // Non-fatal — the header simply omits the expiry hint.
+    }
+  }, [runBackendFunction]);
 
   const handleAdminLogout = () => {
     if (window.confirm('🔒 คุณต้องการออกจากระบบแอดมินใช่หรือไม่?')) {
@@ -962,6 +978,24 @@ export default function App() {
     );
   }
 
+  // Voluntary rotation from the header. Back navigates to the console.
+  if (showPasswordChange && !mustChangePassword) {
+    return (
+      <PasswordPanel
+        mode="change"
+        username={sessionStorage.getItem('rocket_admin_user') || ''}
+        status={passwordStatus}
+        runBackendFunction={runBackendFunction}
+        onCancel={() => setShowPasswordChange(false)}
+        onDone={() => {
+          setShowPasswordChange(false);
+          refreshPasswordStatus();
+          addToast('🔐 เปลี่ยนรหัสผ่านเรียบร้อย', 'success');
+        }}
+      />
+    );
+  }
+
   // Password expired / forced rotation — the console is unreachable until the
   // admin sets a new one. The server enforces this too; this is the UI half.
   if (mustChangePassword) {
@@ -1105,6 +1139,27 @@ export default function App() {
               <span>รีเซ็ตระบบ</span>
             </button>
           )}
+          <button
+            onClick={() => { refreshPasswordStatus(); setShowPasswordChange(true); }}
+            className={`px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold border flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap ${
+              passwordStatus && passwordStatus.daysUntilExpiry !== undefined && passwordStatus.daysUntilExpiry <= 7
+                ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-800'
+                : 'bg-white hover:bg-sky-50 border-slate-200 hover:border-sky-300 text-slate-700'
+            }`}
+            title={
+              passwordStatus?.daysUntilExpiry !== undefined
+                ? `เปลี่ยนรหัสผ่าน (หมดอายุใน ${passwordStatus.daysUntilExpiry} วัน · Recovery Codes คงเหลือ ${passwordStatus.recoveryCodesRemaining ?? '-'})`
+                : 'เปลี่ยนรหัสผ่าน'
+            }
+          >
+            <KeyRound size={13} className="text-sky-600" />
+            <span>เปลี่ยนรหัสผ่าน</span>
+            {passwordStatus?.daysUntilExpiry !== undefined && passwordStatus.daysUntilExpiry <= 7 && (
+              <span className="px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 text-[10px] font-black">
+                {passwordStatus.daysUntilExpiry}d
+              </span>
+            )}
+          </button>
           <button 
             onClick={handleAdminLogout}
             className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
