@@ -265,6 +265,7 @@ export default function App() {
   // change-password screen was only reachable when a password had already
   // expired, so a normal admin had no way to rotate on their own schedule.
   const [showPasswordChange, setShowPasswordChange] = useState(false);
+  const [showRecoveryCodes, setShowRecoveryCodes] = useState(false);
 
   // Fetch expiry/counts so the header can warn before the 30-day hard block.
   const refreshPasswordStatus = useCallback(async () => {
@@ -996,6 +997,24 @@ export default function App() {
     );
   }
 
+  // Regenerate recovery codes without touching the password.
+  if (showRecoveryCodes && !mustChangePassword) {
+    return (
+      <PasswordPanel
+        mode="regenerate"
+        username={sessionStorage.getItem('rocket_admin_user') || ''}
+        status={passwordStatus}
+        runBackendFunction={runBackendFunction}
+        onCancel={() => setShowRecoveryCodes(false)}
+        onDone={() => {
+          setShowRecoveryCodes(false);
+          refreshPasswordStatus();
+          addToast('🔄 สร้าง Recovery Codes ใหม่เรียบร้อย', 'success');
+        }}
+      />
+    );
+  }
+
   // Password expired / forced rotation — the console is unreachable until the
   // admin sets a new one. The server enforces this too; this is the UI half.
   if (mustChangePassword) {
@@ -1159,6 +1178,16 @@ export default function App() {
                 {passwordStatus.daysUntilExpiry}d
               </span>
             )}
+          </button>
+          {/* Recovery codes are shown only once, so a lost set needs replacing
+              without forcing a password change. */}
+          <button
+            onClick={() => { refreshPasswordStatus(); setShowRecoveryCodes(true); }}
+            className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-slate-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
+            title={`สร้าง Recovery Codes ใหม่ (คงเหลือ ${passwordStatus?.recoveryCodesRemaining ?? '-'})`}
+          >
+            <ShieldCheck size={13} className="text-emerald-600" />
+            <span>Codes ใหม่</span>
           </button>
           <button 
             onClick={handleAdminLogout}

@@ -65,6 +65,13 @@ const BOOTSTRAP_KEYS = [
   'LINE_GROUPS',
 ];
 
+/**
+ * Credential keys are adopted by PREFIX rather than by name, since one exists
+ * per admin. Losing these would lock every admin out of the console, so they
+ * must be restored from the KV mirror when the Durable Object is rebuilt.
+ */
+const BOOTSTRAP_PREFIXES = ['ADMIN_CRED_'];
+
 interface StateRow {
   v: string;
   exp: number;
@@ -170,6 +177,32 @@ export class RocketStateDO extends DurableObject<Env> {
               adopted++;
             }
           }
+          // Admin credentials: restore by prefix so admins are not locked out if the
+          // Durable Object is rebuilt. Missing these would leave the console
+          // unreachable with no way back except a deploy-time secret reset.
+          for (const prefix of BOOTSTRAP_PREFIXES) {
+            let cursor: string | undefined;
+            do {
+              const page: any = await this.env.KV_CACHE.list({
+                prefix,
+                ...(cursor ? { cursor } : {}),
+              } as any);
+              for (const k of page.keys || []) {
+                if (this.cache.has(k.name)) continue;
+                const value = await this.env.KV_CACHE.get(k.name);
+                if (value === null || value === undefined) continue;
+                this.cache.set(k.name, { v: value, exp: 0 });
+                sql.exec(
+                  'INSERT INTO state (k, v, exp) VALUES (?, ?, 0) ON CONFLICT(k) DO UPDATE SET v = excluded.v;',
+                  k.name,
+                  value
+                );
+                adopted++;
+              }
+              cursor = page.list_complete ? undefined : page.cursor;
+            } while (cursor);
+          }
+
           sql.exec("INSERT INTO meta (k, v) VALUES ('bootstrapped', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v;", String(Date.now()));
           console.log(`[RocketStateDO] bootstrapped ${adopted} keys from KV`);
         }
@@ -332,7 +365,55 @@ export class RocketStateDO extends DurableObject<Env> {
    * displayed different balances for the same player until something forced a
    * rewrite. Doing it here makes every key agree at all times.
    */
-  async saveProfile(profileJson: string, entryJson: string, limit = 500): Promise<boolean> {
+  // ── Rate limiting ──────────────────────────────────────────────────────
+
+  /**
+   * Fixed-window attempt counter for a throttling key (e.g. `login:<ip>`).
+   *
+   * Held here rather than in an isolate-scoped Map so the limit survives cold
+   * starts and deployments — otherwise an attacker resets the counter simply
+   * by waiting for a new isolate, which is free to trigger.
+   */
+  async rateLimit(key: string): Promise<{ count: number; resetAt: number }> {
+    await this.ready;
+    const row = this.cache.get(`RATELIMIT_${key}`);
+    if (!row) return { count: 0, resetAt: 0 };
+    try {
+      return JSON.parse(row.v) as { count: number; resetAt: number };
+    } catch (_) {
+      return { count: 0, resetAt: 0 };
+    }
+  }
+
+  /** Persist an attempt counter; it self-deletes once its window elapses. */
+  async setRateLimit(key: string, value: { count: number; resetAt: number }): Promise<void> {
+    await this.ready;
+    const storageKey = `RATELIMIT_${key}`;
+    if (value.resetAt <= Date.now()) {
+      this.cache.delete(storageKey);
+      this.ctx.storage.sql.exec('DELETE FROM state WHERE k = ?;', storageKey);
+      return;
+    }
+    const serialized = JSON.stringify(value);
+    this.cache.set(storageKey, { v: serialized, exp: value.resetAt });
+    this.ctx.storage.sql.exec(
+      'INSERT INTO state (k, v, exp) VALUES (?, ?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v, exp = excluded.exp;',
+      storageKey,
+      serialized,
+      value.resetAt
+    );
+  }
+
+  /** Clear a counter after a successful login or reset. */
+  async clearRateLimit(key: string): Promise<void> {
+    await this.ready;
+    const storageKey = `RATELIMIT_${key}`;
+    this.cache.delete(storageKey);
+    this.ctx.storage.sql.exec('DELETE FROM state WHERE k = ?;', storageKey);
+  }
+
+  /**
+   * Persist a player profile across ALL of its keys in one atomic commit:
     await this.ready;
     let profile: any;
     let entry: any;

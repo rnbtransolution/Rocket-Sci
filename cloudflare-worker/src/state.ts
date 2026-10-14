@@ -1,4 +1,5 @@
 import { Env } from './types.js';
+import { evaluateRateLimit, RateLimitDecision } from './auth.js';
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
@@ -88,6 +89,9 @@ interface DOStub {
   appendChatLog(logJson: string, limit?: number): Promise<void>;
   writeMany(entries: Array<[string, string]>, expiresAt?: number): Promise<void>;
   saveProfile(profileJson: string, entryJson: string, limit?: number): Promise<boolean>;
+  rateLimit(key: string): Promise<{ count: number; resetAt: number }>;
+  setRateLimit(key: string, value: { count: number; resetAt: number }): Promise<void>;
+  clearRateLimit(key: string): Promise<void>;
   stats(): Promise<{ keys: number; dbBytes: number; at: string }>;
 }
 
@@ -272,6 +276,40 @@ export class StateStore {
     } catch (err) {
       console.warn('[StateStore] atomic writeMany failed:', err);
       return false;
+    }
+  }
+
+  // ── Rate limiting (durable, in the Durable Object) ─────────────────────────
+
+  /**
+   * Count one attempt and report whether the caller is over the limit.
+   * Durable, so the window survives isolate recycling and deployments — an
+   * isolate-scoped Map is reset for free by a cold start.
+   */
+  async rateLimit(key: string): Promise<RateLimitDecision> {
+    const stub = this.stub();
+    if (!stub) return { allowed: true, retryAfterSeconds: 0 };
+    try {
+      const current = await stub.rateLimit(key);
+      const { decision, next } = evaluateRateLimit(current);
+      await stub.setRateLimit(key, next);
+      return decision;
+    } catch (err) {
+      // Fail OPEN: a throttle outage must never lock every admin out of the
+      // console mid-event. Password hashing still protects the account.
+      console.warn('[StateStore] rate limit check failed, allowing attempt:', err);
+      return { allowed: true, retryAfterSeconds: 0 };
+    }
+  }
+
+  /** Reset a counter after a successful authentication. */
+  async clearRateLimit(key: string): Promise<void> {
+    const stub = this.stub();
+    if (!stub) return;
+    try {
+      await stub.clearRateLimit(key);
+    } catch (err) {
+      console.warn('[StateStore] failed to clear rate limit:', err);
     }
   }
 

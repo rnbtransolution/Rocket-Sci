@@ -168,32 +168,37 @@ export async function verifySessionToken(
 }
 
 /**
- * Fixed-window login throttle, keyed by caller IP.
- * Stops password guessing without needing a durable store.
+ * Login throttle policy. The counters themselves live in the Durable Object
+ * (`rateLimit`) rather than in this module: an isolate-scoped Map resets on
+ * every cold start and deployment, which an attacker triggers for free by
+ * simply waiting or forcing a redeploy.
  */
-const attemptBuckets = new Map<string, { count: number; resetAt: number }>();
 const MAX_ATTEMPTS = 8;
 const WINDOW_MS = 10 * 60 * 1000;
 
-export function checkLoginRateLimit(key: string): { allowed: boolean; retryAfterSeconds: number } {
-  const now = Date.now();
-  // Opportunistically prune expired buckets so the map cannot grow unbounded.
-  if (attemptBuckets.size > 500) {
-    for (const [k, v] of attemptBuckets) if (v.resetAt <= now) attemptBuckets.delete(k);
-  }
-
-  const bucket = attemptBuckets.get(key);
-  if (!bucket || bucket.resetAt <= now) {
-    attemptBuckets.set(key, { count: 1, resetAt: now + WINDOW_MS });
-    return { allowed: true, retryAfterSeconds: 0 };
-  }
-  bucket.count++;
-  if (bucket.count > MAX_ATTEMPTS) {
-    return { allowed: false, retryAfterSeconds: Math.ceil((bucket.resetAt - now) / 1000) };
-  }
-  return { allowed: true, retryAfterSeconds: 0 };
+export interface RateLimitDecision {
+  allowed: boolean;
+  retryAfterSeconds: number;
 }
 
-export function clearLoginRateLimit(key: string): void {
-  attemptBuckets.delete(key);
+/** Compute a fixed-window decision from a stored counter. */
+export function evaluateRateLimit(
+  entry: { count: number; resetAt: number } | null | undefined,
+  now: number = Date.now()
+): { decision: RateLimitDecision; next: { count: number; resetAt: number } } {
+  if (!entry || entry.resetAt <= now) {
+    return {
+      decision: { allowed: true, retryAfterSeconds: 0 },
+      next: { count: 1, resetAt: now + WINDOW_MS },
+    };
+  }
+  const count = entry.count + 1;
+  const next = { count, resetAt: entry.resetAt };
+  if (count > MAX_ATTEMPTS) {
+    return {
+      decision: { allowed: false, retryAfterSeconds: Math.ceil((entry.resetAt - now) / 1000) },
+      next,
+    };
+  }
+  return { decision: { allowed: true, retryAfterSeconds: 0 }, next };
 }

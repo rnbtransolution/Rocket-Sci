@@ -7,6 +7,7 @@ import {
   changeAdminPassword,
   resetAdminPasswordWithRecoveryCode,
   getCredentialStatus,
+  regenerateRecoveryCodes,
   validatePasswordStrength,
   PASSWORD_MAX_AGE_DAYS,
 } from './credentials.js';
@@ -15,8 +16,7 @@ import {
   issueSessionToken,
   verifySessionToken,
   timingSafeEqual,
-  checkLoginRateLimit,
-  clearLoginRateLimit,
+  
   SessionClaims,
   AdminRole,
 } from './auth.js';
@@ -337,6 +337,7 @@ export default {
 const PASSWORD_SCOPE_ALLOWED = new Set([
   'adminChangePassword',
   'adminGetPasswordStatus',
+  'adminRegenerateRecoveryCodes',
   'adminResetPasswordWithRecoveryCode',
 ]);
 
@@ -581,7 +582,7 @@ const isPublicAllowed =
           const clientIp = cfClientIp;
           const rateKey = `login:${clientIp}`;
 
-          const limit = checkLoginRateLimit(rateKey);
+          const limit = await state(env).rateLimit(rateKey);
           if (!limit.allowed) {
             return new Response(
               JSON.stringify({
@@ -623,7 +624,7 @@ const isPublicAllowed =
             // Password is CORRECT but out of policy. A restricted session is
             // still issued so the operator can reach the change-password
             // screen; every other admin action is refused server-side.
-            clearLoginRateLimit(rateKey);
+            await state(env).clearRateLimit(rateKey);
             if (!env.SESSION_SECRET) {
               result = { success: false, error: 'Server misconfiguration: SESSION_SECRET is not configured' };
             } else {
@@ -707,7 +708,7 @@ const isPublicAllowed =
               error: 'Server misconfiguration: SESSION_SECRET is not configured',
             };
           } else {
-            clearLoginRateLimit(rateKey);
+            await state(env).clearRateLimit(rateKey);
             const status = await getCredentialStatus(state(env), authenticated.username);
             const combined = { ...(result && typeof result === 'object' ? result : {}), status };
             result = {
@@ -757,7 +758,7 @@ const isPublicAllowed =
           // Unauthenticated by design — this is the forgotten-password path.
           // Guarded by: single-use code + strict rate limiting + code burn.
           const resetRateKey = `reset:${cfClientIp}`;
-          const resetLimit = checkLoginRateLimit(resetRateKey);
+          const resetLimit = await state(env).rateLimit(resetRateKey);
           if (!resetLimit.allowed) {
             return new Response(
               JSON.stringify({
@@ -781,7 +782,7 @@ const isPublicAllowed =
               String(args[1] || ''),
               String(args[2] || '')
             );
-            clearLoginRateLimit(resetRateKey);
+            await state(env).clearRateLimit(resetRateKey);
             result = {
               success: true,
               username: reset.username,
@@ -792,6 +793,28 @@ const isPublicAllowed =
             };
           } catch (err) {
             result = { success: false, error: (err as Error)?.message || 'รีเซ็ตรหัสผ่านไม่สำเร็จ' };
+          }
+        } else if (functionName === 'adminRegenerateRecoveryCodes') {
+          // Codes are shown exactly once, so a lost set needs regenerating
+          // without forcing a full password change. Requires the current
+          // password so a stolen session cannot destroy the owner's codes.
+          if (!sessionClaims) {
+            result = { success: false, error: 'กรุณาเข้าสู่ระบบก่อนสร้าง Recovery Codes ใหม่' };
+          } else {
+            try {
+              const regen = await regenerateRecoveryCodes(
+                state(env),
+                sessionClaims.sub,
+                String(args[0] || '')
+              );
+              result = {
+                success: true,
+                recoveryCodes: regen.recoveryCodes,
+                invalidated: regen.invalidated,
+              };
+            } catch (err) {
+              result = { success: false, error: (err as Error)?.message || 'สร้าง Recovery Codes ใหม่ไม่สำเร็จ' };
+            }
           }
         } else if (functionName === 'adminValidatePassword') {
           // Client-side-strength pre-check so the UI can guide without a

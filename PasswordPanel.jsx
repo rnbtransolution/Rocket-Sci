@@ -23,7 +23,7 @@ const PASSWORD_RULES = [
 ];
 
 export default function PasswordPanel({
-  mode = 'change',              // 'change' | 'reset'
+  mode = 'change',              // 'change' | 'reset' | 'regenerate'
   username = '',
   forced = false,
   status = null,
@@ -42,6 +42,9 @@ export default function PasswordPanel({
   const [busy, setBusy] = useState(false);
 
   const isReset = mode === 'reset';
+  // Regenerating codes does not touch the password, so only the current
+  // password is needed — no new-password fields.
+  const isRegenerate = mode === 'regenerate';
   const effectiveUsername = isReset ? resetUsername : username;
 
   const localStrengthOk = (v) => PASSWORD_RULES.every((r) => r.test(v || ''));
@@ -50,6 +53,25 @@ export default function PasswordPanel({
   const submit = async (e) => {
     e.preventDefault();
     setError('');
+
+    if (isRegenerate) {
+      setBusy(true);
+      try {
+        const res = await runBackendFunction('adminRegenerateRecoveryCodes', [currentPassword]);
+        if (!res || res.success === false) {
+          setError(res?.error || 'สร้าง Recovery Codes ใหม่ไม่สำเร็จ');
+        } else {
+          setCodes(res.recoveryCodes || []);
+          setShowCodes(true);
+        }
+      } catch (err) {
+        setError(err?.message || 'เกิดข้อผิดพลาด');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     if (newPassword !== confirmPassword) {
       setError('รหัสผ่านใหม่และยืนยันรหัสผ่านไม่ตรงกัน');
       return;
@@ -123,8 +145,19 @@ export default function PasswordPanel({
           <span className="text-2xl">{isReset ? '🆘' : '🔑'}</span>
           <div>
             <h2 className="text-lg font-bold text-slate-900">
-              {isReset ? 'รีเซ็ตรหัสผ่าน' : forced ? 'ต้องเปลี่ยนรหัสผ่านก่อนใช้งาน' : 'เปลี่ยนรหัสผ่าน'}
+              {isRegenerate
+                ? 'สร้าง Recovery Codes ใหม่'
+                : isReset
+                  ? 'รีเซ็ตรหัสผ่าน'
+                  : forced
+                    ? 'ต้องเปลี่ยนรหัสผ่านก่อนใช้งาน'
+                    : 'เปลี่ยนรหัสผ่าน'}
             </h2>
+            {isRegenerate && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+                Codes เดิมทั้งหมดจะใช้ไม่ได้อีกต่อไป — กรุณาบันทึกชุดใหม่ทันที
+              </p>
+            )}
             {forced && (
               <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
                 รหัสผ่านของคุณหมดอายุ / ต้องเปลี่ยน — ทุกฟังก์ชันของระบบจะยังไม่ทำงานจนกว่าจะตั้งรหัสผ่านใหม่
@@ -180,6 +213,8 @@ export default function PasswordPanel({
           </div>
         )}
 
+        {!isRegenerate && (
+          <>
         <div className="space-y-1">
           <label className="text-xs font-bold text-slate-600 block">รหัสผ่านใหม่</label>
           <input
@@ -215,16 +250,19 @@ export default function PasswordPanel({
           />
         </div>
 
+        </>
+        )}
+
         {error && (
           <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>
         )}
 
         <button
           type="submit"
-          disabled={busy || !effectiveUsername || !newPassword}
+          disabled={busy || !effectiveUsername || (isRegenerate ? !currentPassword : !newPassword)}
           className="w-full py-3 bg-sky-600 hover:bg-sky-700 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition-all"
         >
-          {busy ? '⏳ กำลังดำเนินการ...' : isReset ? '🔓 รีเซ็ตรหัสผ่าน' : '💾 บันทึกรหัสผ่านใหม่'}
+          {busy ? '⏳ กำลังดำเนินการ...' : isRegenerate ? '🔄 สร้าง Codes ใหม่' : isReset ? '🔓 รีเซ็ตรหัสผ่าน' : '💾 บันทึกรหัสผ่านใหม่'}
         </button>
 
         {!forced && !isReset && typeof onCancel === 'function' && (
@@ -232,7 +270,7 @@ export default function PasswordPanel({
             ยกเลิก
           </button>
         )}
-        {!forced && isReset && typeof onCancel === 'function' && (
+        {!forced && (isReset || isRegenerate) && typeof onCancel === 'function' && (
           <button type="button" onClick={onCancel} className="w-full py-2 text-xs text-slate-500 hover:text-slate-700">
             ← กลับไปหน้าเข้าสู่ระบบ
           </button>

@@ -234,6 +234,45 @@ export async function setAdminPassword(
   return { recoveryCodes: plainCodes };
 }
 
+/**
+ * Issue a fresh set of recovery codes WITHOUT changing the password.
+ *
+ * Needed because codes are shown only once: if the reveal dialog is dismissed,
+ * or the codes are simply lost, the owner's next option would be a full
+ * password change — which requires knowing the current password. That is a
+ * trap when the codes themselves are what went missing.
+ *
+ * Requires the current password so a stolen session alone cannot invalidate
+ * the codes the real owner still holds. All previous codes are invalidated.
+ */
+export async function regenerateRecoveryCodes(
+  state: StateStore,
+  username: string,
+  currentPassword: string
+): Promise<{ recoveryCodes: string[]; invalidated: number }> {
+  const credential = await readCredential(state, username);
+  if (!credential) throw new Error('ไม่พบข้อมูลบัญชีผู้ดูแลระบบ');
+
+  const candidate = await pbkdf2(currentPassword, credential.salt, PBKDF2_ITERATIONS);
+  if (!timingSafeEqualHex(candidate, credential.hash)) {
+    throw new Error('รหัสผ่านปัจจุบันไม่ถูกต้อง');
+  }
+
+  const invalidated = credential.recoveryCodes.filter((c) => !c.usedAt).length;
+  const plainCodes: string[] = [];
+  const records: RecoveryCodeRecord[] = [];
+  for (let i = 0; i < RECOVERY_CODE_COUNT; i++) {
+    const code = formatRecoveryCode(randomHex(5));
+    plainCodes.push(code);
+    records.push({ hash: await hashRecoveryCode(code), usedAt: null, createdAt: Date.now() });
+  }
+
+  // Only the codes are replaced — the password and its expiry are untouched.
+  await writeCredential(state, { ...credential, recoveryCodes: records });
+
+  return { recoveryCodes: plainCodes, invalidated };
+}
+
 export type LoginOutcome =
   | { status: 'ok'; username: string; role: 'superadmin' | 'admin' }
   | { status: 'invalid' }
@@ -334,7 +373,12 @@ export async function resetAdminPasswordWithRecoveryCode(
   newPassword: string
 ): Promise<{ username: string; role: 'superadmin' | 'admin'; recoveryCodes: string[]; daysUntilExpiry: number }> {
   const credential = await readCredential(state, username);
-  if (!credential) throw new Error('ไม่พบข้อมูลบัญชีผู้ดูแลระบบ');
+  if (!credential) {
+    // Deliberately identical to the "wrong code" message: a distinct error
+    // would let an unauthenticated caller enumerate which admin accounts
+    // exist. This endpoint is unauthenticated by design.
+    throw new Error('Recovery Code ไม่ถูกต้อง หรือถูกใช้ไปแล้ว');
+  }
 
   const normalized = normalizeRecoveryCode(recoveryCode);
   let matchedIndex = -1;
