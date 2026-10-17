@@ -507,6 +507,58 @@ export class RocketStateDO extends DurableObject<Env> {
     this.ctx.storage.sql.exec('DELETE FROM state;');
   }
 
+  // ── Refund claims ─────────────────────────────────────────────────────────
+
+  /**
+   * Claim the right to refund an order. Returns true for exactly ONE caller per
+   * claim key (until the TTL lapses, if one is given).
+   *
+   * WHY THIS EXISTS
+   * ---------------
+   * An order's status lives in `KV_ORDERS`, which is eventually consistent, and
+   * every cancellation path did its own read-modify-write of that record: read
+   * status → decide "still cancellable" → refund. The Admin Console writes
+   * from the operator's PoP while LINE webhooks are served from LINE's, so the
+   * player's read could still return the pre-cancel `pending_match` for up to
+   * ~60s. Both paths then believed they owned the refund and both credited the
+   * player — and the order ends up `cancelled` either way, so nothing in the
+   * stored data reveals that the money moved twice.
+   *
+   * A Durable Object handles one request at a time, so this read-then-write is
+   * a real compare-and-set. The claim lives in the strongly consistent store
+   * rather than on the order record, so it holds regardless of which path
+   * arrived first or what the KV caches happen to be serving.
+   */
+  async claimRefund(claimKey: string, payloadJson: string, ttlMs: number = 0): Promise<boolean> {
+    await this.ready;
+    const key = `REFUND_CLAIM_${claimKey}`;
+    const now = Date.now();
+
+    const existing = this.cache.get(key);
+    if (existing && (!existing.exp || existing.exp > now)) {
+      return false; // already claimed — the loser of the race stops here
+    }
+
+    const exp = ttlMs > 0 ? now + ttlMs : 0;
+    this.cache.set(key, { v: payloadJson, exp });
+    this.ctx.storage.sql.exec(
+      'INSERT INTO state (k, v, exp) VALUES (?, ?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v, exp = excluded.exp;',
+      key,
+      payloadJson,
+      exp
+    );
+    return true;
+  }
+
+  /** Read a claim back — used for auditing a disputed refund. */
+  async getRefundClaim(claimKey: string): Promise<string | null> {
+    await this.ready;
+    const row = this.cache.get(`REFUND_CLAIM_${claimKey}`);
+    if (!row) return null;
+    if (row.exp && row.exp <= Date.now()) return null;
+    return row.v;
+  }
+
   // ── Housekeeping ──────────────────────────────────────────────────────────
 
   async alarm(): Promise<void> {

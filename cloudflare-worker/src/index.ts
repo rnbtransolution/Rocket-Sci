@@ -40,6 +40,7 @@ import {
   removeFromMatchedOrdersList,
   removeFromPendingOrdersList,
   refundPlayerPoints,
+  refundOrderOnce,
   deduplicatePlayers,
 } from './queueHandler.js';
 import {
@@ -1105,14 +1106,16 @@ const isPublicAllowed =
               order.status = 'refunding';
               await env.KV_ORDERS.put(`ORDER_${orderNo}`, JSON.stringify(order));
 
-              // Refund creator
-              if (order.creatorId && Number(order.amount) > 0) {
-                await refundPlayerPoints(order.creatorId, order.creatorLineUserId || undefined, Number(order.amount), env, ctx);
-              }
-              // Refund matcher if matched
-              if (order.matcherId && Number(order.amount) > 0) {
-                await refundPlayerPoints(order.matcherId, order.matcherLineUserId || undefined, Number(order.amount), env, ctx);
-              }
+              // Refund creator and matcher, but only through the shared claim.
+              //
+              // This path used to credit both sides unconditionally after its own
+              // status check. That check reads eventually-consistent KV, so a
+              // player cancelling from LINE a moment later could still see
+              // `pending_match`, pass their own guard, and be refunded a second
+              // time for the same order — the admin's refund being invisible to
+              // them made it worse, since they had no reason to believe the order
+              // was already settled. refundOrderOnce() arbitrates.
+              const refund = await refundOrderOnce(order, env, ctx, 'admin_cancel');
 
               order.status = 'cancelled';
               await Promise.all([
@@ -1121,7 +1124,34 @@ const isPublicAllowed =
                 removeFromMatchedOrdersList(orderNo, env),
               ]);
 
-              result = { success: true, orderNumber: orderNo };
+              // Tell the player. A silent refund is indistinguishable from a
+              // failed one, and the player has no way to know the order is gone.
+              if (refund.refunded && refund.amount > 0 && order.creatorLineUserId) {
+                const notify = pushToLine(
+                  order.creatorLineUserId,
+                  `🚫 แอดมินยกเลิก Order #${orderNo} ของคุณ\n💰 คืนแต้ม: +${refund.amount.toLocaleString()} pt เข้ากระเป๋าเรียบร้อยแล้วครับ\n(หากคุณกดยกเลิกซ้ำ ระบบจะไม่คืนแต้มซ้ำอีก) 🚀`,
+                  env
+                ).catch((e) => console.error('[Worker] admin cancel notice failed:', e));
+                if (ctx) ctx.waitUntil(notify);
+                else await notify;
+              }
+
+              if (!refund.refunded) {
+                result = {
+                  success: true,
+                  orderNumber: orderNo,
+                  alreadyRefunded: true,
+                  message: `แผล Order #${orderNo} ถูกยกเลิก/คืนแต้มไปแล้ว — ไม่ได้คืนแต้มซ้ำ`,
+                };
+              } else {
+                result = {
+                  success: true,
+                  orderNumber: orderNo,
+                  refundedAmount: refund.amount,
+                  creatorCredited: refund.creatorCredited,
+                  matcherCredited: refund.matcherCredited,
+                };
+              }
             }
           } else {
             result = { success: false, error: `ไม่พบข้อมูลแผล Order #${orderNo}` };

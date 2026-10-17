@@ -363,7 +363,9 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
 
       const cancelRes = await cancelOrder(targetNo, profile, env, ctx);
       if (cancelRes.success) {
-        const cancelFlex = generateOrderCancelFlex(targetNo, cancelRes.amount || 0, profile.balance);
+        // Use the balance cancelOrder read back from the authoritative record,
+        // not the profile snapshot this handler started with.
+        const cancelFlex = generateOrderCancelFlex(targetNo, cancelRes.amount || 0, cancelRes.balance ?? profile.balance);
         await deliverPrivateNotice(userId, replyToken, groupId, cancelFlex, env, profile.displayName, ctx);
       } else {
         const cancelErrFlex = generateNoticeFlex('⛔ ไม่สามารถยกเลิกได้', cancelRes.message, 'warning');
@@ -955,7 +957,7 @@ async function cancelOrder(
   profile: PlayerProfile,
   env: Env,
   ctx?: ExecutionContext
-): Promise<{ success: boolean; message: string; amount?: number }> {
+): Promise<{ success: boolean; message: string; amount?: number; balance?: number }> {
   const resolvedNo = await resolveOrderNumber(orderNo, null, env);
   if (!resolvedNo) return { success: false, message: `🚫 ไม่พบแผล Order #${orderNo}` };
 
@@ -970,6 +972,20 @@ async function cancelOrder(
     return { success: false, message: `⚠️ แผล Order #${resolvedNo} อยู่ในสถานะ ${order.status} ไม่สามารถยกเลิกได้ครับ` };
   }
 
+  // Claim the refund BEFORE crediting anything. The status check above reads
+  // eventually-consistent KV, so on its own it cannot tell "nobody has
+  // cancelled this yet" from "the admin cancelled it a moment ago and the
+  // write has not reached this region". The claim is strongly consistent, so it
+  // can — this is what stops a second, duplicate refund.
+  const refund = await refundOrderOnce(order, env, ctx, 'player_cancel');
+
+  if (!refund.refunded) {
+    return {
+      success: false,
+      message: `⚠️ แผล Order #${resolvedNo} ถูกยกเลิกไปแล้วครับ ไม่สามารถยกเลิกซ้ำได้ (ระบบคืนแต้มให้ครั้งแรกเรียบร้อยแล้ว)`,
+    };
+  }
+
   // 1. Mark order cancelled in KV_ORDERS & remove from pending list
   order.status = 'cancelled';
   await Promise.all([
@@ -977,14 +993,21 @@ async function cancelOrder(
     removeFromPendingOrdersList(resolvedNo, env),
   ]);
 
-  // 2. Refund balance directly to the creator's profile
-  profile.balance += order.amount;
-  await savePlayerProfile(profile, env, ctx);
+  // 2. Report the balance as it actually stands now. The old code added to the
+  // in-memory profile it was handed, which could be stale relative to the
+  // authoritative record and printed a number the player never received.
+  const freshRaw = profile.lineUserId
+    ? await state(env).get(`USER_${profile.lineUserId}`)
+    : await state(env).get(`USER_${profile.shortId}`);
+  const currentBalance = freshRaw
+    ? (Number((JSON.parse(freshRaw) as PlayerProfile).balance) || 0)
+    : profile.balance + refund.amount;
 
   return {
     success: true,
-    amount: order.amount,
-    message: `✅ ยกเลิก Order #${resolvedNo} เรียบร้อยแล้วครับ!\n💰 คืนแต้ม: +${order.amount.toLocaleString()} pt\n💎 แต้มคงเหลือปัจจุบัน: ${profile.balance.toLocaleString()} pt 🚀`,
+    amount: refund.amount,
+    balance: currentBalance,
+    message: `✅ ยกเลิก Order #${resolvedNo} เรียบร้อยแล้วครับ!\n💰 คืนแต้ม: +${refund.amount.toLocaleString()} pt\n💎 แต้มคงเหลือปัจจุบัน: ${currentBalance.toLocaleString()} pt 🚀`,
   };
 }
 
@@ -1014,14 +1037,13 @@ export async function clearAllPendingOrders(env: Env, ctx?: ExecutionContext): P
           order.status = 'refunding';
           await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
 
-          // Refund creator safely with fallback across all key stores
-          if (order.creatorId && Number(order.amount) > 0) {
-            await refundPlayerPoints(order.creatorId, order.creatorLineUserId, Number(order.amount), env, ctx);
-          }
+          // Claimed, so a cancel that already paid out (by the player, by the
+          // admin, or by an earlier sweep) is skipped instead of paid twice.
+          const refund = await refundOrderOnce(order, env, ctx, 'clear_pending');
 
           order.status = 'cancelled';
           await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-          if (!isRecovering) clearedCount++;
+          if (refund.refunded && !isRecovering) clearedCount++;
         }
       } catch (_) {}
     }
@@ -1031,6 +1053,95 @@ export async function clearAllPendingOrders(env: Env, ctx?: ExecutionContext): P
     console.error('[Worker] clearAllPendingOrders error:', err);
   }
   return { cleared: clearedCount };
+}
+
+/**
+ * Identity of an order for the purpose of "has this already been refunded?".
+ *
+ * Order numbers are random 4-digit values that get reused over time (see
+ * handleCreateOrder, which only avoids colliding with orders that are pending
+ * *right now*), so the number alone is not an identity. `createdAt` is, and
+ * every order carries one — including the ones already stored, which is what
+ * lets this guard apply to live data without a migration.
+ */
+function refundClaimKey(order: Order): string {
+  return `${order.orderNumber}@${Number(order.createdAt) || 0}`;
+}
+
+export interface RefundOutcome {
+  /** True only for the caller that actually moved the money. */
+  refunded: boolean;
+  /** Why nothing was credited. */
+  reason?: 'already_refunded' | 'claim_unavailable';
+  amount: number;
+  creatorCredited: boolean;
+  matcherCredited: boolean;
+  newCreatorBalance?: number;
+}
+
+/**
+ * Refund an order AT MOST ONCE, from any cancellation path.
+ *
+ * Every way an order can be cancelled — the player typing "ยกเลิก", the Admin
+ * Console cancel button, clearing the pending board, auto-cancelling held
+ * pre-quote orders, voiding the round — funnels through here, and only the
+ * caller that wins the Durable Object claim is allowed to credit anybody.
+ *
+ * Before this existed each path did its own `read status → refund`, against an
+ * eventually-consistent KV record. Two paths could both read a cancellable
+ * status and both refund, which is exactly how a 100pt order came to credit the
+ * player 200pt: the admin cancelled (refunding silently, no notification), and
+ * the player's own cancel then sailed through the `pending_match` guard a few
+ * seconds later because the admin's write had not propagated to LINE's region.
+ *
+ * `matcherId` decides whether the matcher is refunded too, which matches what
+ * every call site did individually: pending orders have no matcher, so
+ * creator-only is automatic, and matched/voided orders refund both sides.
+ */
+export async function refundOrderOnce(
+  order: Order,
+  env: Env,
+  ctx?: ExecutionContext,
+  source = 'unknown'
+): Promise<RefundOutcome> {
+  const amount = Number(order.amount) || 0;
+  const claimKey = refundClaimKey(order);
+
+  const claimed = await state(env).claimRefund(claimKey, {
+    orderNumber: order.orderNumber,
+    createdAt: Number(order.createdAt) || 0,
+    amount,
+    creatorId: order.creatorId || null,
+    matcherId: order.matcherId || null,
+    source,
+    claimedAt: Date.now(),
+  });
+
+  if (!claimed) {
+    // Either a previous cancellation already refunded this order, or the claim
+    // could not be taken (Durable Object unavailable) — in which case we refuse
+    // rather than risk paying twice. Either way: no credit.
+    return {
+      refunded: false,
+      reason: 'already_refunded',
+      amount,
+      creatorCredited: false,
+      matcherCredited: false,
+    };
+  }
+
+  if (!(amount > 0)) {
+    return { refunded: true, amount: 0, creatorCredited: false, matcherCredited: false };
+  }
+
+  const creatorCredited = order.creatorId
+    ? await refundPlayerPoints(order.creatorId, order.creatorLineUserId, amount, env, ctx)
+    : false;
+  const matcherCredited = order.matcherId
+    ? await refundPlayerPoints(order.matcherId, order.matcherLineUserId || undefined, amount, env, ctx)
+    : false;
+
+  return { refunded: true, amount, creatorCredited, matcherCredited };
 }
 
 /**
@@ -1104,17 +1215,24 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
       try {
         const order = JSON.parse(raw) as Order;
         if (order.status === 'pending_hold' && order.betType === 'pre_quote') {
+          const amt = Number(order.amount) || 0;
+
+          // Claim first: if the player or the admin already cancelled this
+          // order, do not notify them about a refund that is not happening.
+          const refund = await refundOrderOnce(order, env, ctx, 'cancel_held_pre_quote');
+
           order.status = 'cancelled';
           await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+          if (!refund.refunded) continue;
           cancelledCount++;
-          const amt = Number(order.amount) || 0;
+
           const rawLine = (await state(env).get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
           const cancelPreQuoteFlex = generateNoticeFlex(
             `🚫 ยกเลิก Order #${order.orderNumber} อัตโนมัติ`,
             `จบรอบดวลโดยไม่มีการประกาศราคาช่างอย่างเป็นทางการ\nระบบคืนแต้ม: +${amt.toLocaleString()} pt เรียบร้อยครับ ✅`,
             'warning'
           );
-          const notifyPromise = deliverPrivateNotice(
+          await deliverPrivateNotice(
             rawLine,
             undefined,
             order.groupId || null,
@@ -1122,10 +1240,6 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
             env,
             order.creatorName
           );
-          if (amt > 0) {
-            await refundPlayerPoints(order.creatorId, order.creatorLineUserId, amt, env, ctx);
-          }
-          await notifyPromise;
         }
       } catch (_) {}
     }
@@ -1307,39 +1421,19 @@ export async function voidAllRoundOrders(env: Env, ctx?: ExecutionContext): Prom
       try {
         const order = JSON.parse(raw) as Order;
         if (order.status === 'pending_match' || order.status === 'matched' || order.status === 'pending_hold' || order.status === 'refunding') {
-          const wasMatched = order.status === 'matched' || (order.matcherId && order.status === 'refunding');
           const isRecovering = order.status === 'refunding';
 
           order.status = 'refunding';
           await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
 
-          const amt = Number(order.amount) || 0;
-
-          // Refund creator
-          if (order.creatorId && amt > 0) {
-            const rawLine = (await state(env).get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
-            const cpRaw = await state(env).get(`USER_${rawLine}`);
-            if (cpRaw) {
-              const cp = JSON.parse(cpRaw) as PlayerProfile;
-              cp.balance = (Number(cp.balance) || 0) + amt;
-              await savePlayerProfile(cp, env, ctx);
-            }
-          }
-
-          // Refund matcher if matched
-          if (wasMatched && order.matcherId && amt > 0) {
-            const rawLine = (await state(env).get(`RAW_LINE_${order.matcherId}`)) || order.matcherId;
-            const mpRaw = await state(env).get(`USER_${rawLine}`);
-            if (mpRaw) {
-              const mp = JSON.parse(mpRaw) as PlayerProfile;
-              mp.balance = (Number(mp.balance) || 0) + amt;
-              await savePlayerProfile(mp, env, ctx);
-            }
-          }
+          // One claim covers both sides. Refunding creator and matcher inline
+          // (as this path used to) meant it could re-pay a cancellation that
+          // another path had already settled.
+          const refund = await refundOrderOnce(order, env, ctx, 'void_round');
 
           order.status = 'cancelled';
           await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-          if (!isRecovering) voidedCount++;
+          if (refund.refunded && !isRecovering) voidedCount++;
         }
       } catch (_) {}
     }
