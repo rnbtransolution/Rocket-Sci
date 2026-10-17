@@ -724,7 +724,7 @@ export function generateInsufficientBalanceFlex(currentBalance: number, neededAm
             type: 'box',
             layout: 'horizontal',
             contents: [
-              { type: 'text', text: 'แต้มที่มีอยู่:', color: '#64748B', size: 'xs', flex: 5 },
+              { type: 'text', text: 'มีอยู่', color: '#64748B', size: 'xs', flex: 5 },
               { type: 'text', text: `${currentBalance.toLocaleString()} pt`, weight: 'bold', color: '#1E293B', size: 'xs', flex: 5, align: 'end' },
             ],
           },
@@ -732,18 +732,14 @@ export function generateInsufficientBalanceFlex(currentBalance: number, neededAm
             type: 'box',
             layout: 'horizontal',
             contents: [
-              { type: 'text', text: 'ยอดที่ต้องการ:', color: '#64748B', size: 'xs', flex: 5 },
+              { type: 'text', text: 'ต้องการ', color: '#64748B', size: 'xs', flex: 5 },
               { type: 'text', text: `${neededAmount.toLocaleString()} pt`, weight: 'bold', color: '#DC2626', size: 'xs', flex: 5, align: 'end' },
             ],
           },
-          {
-            type: 'separator',
-            margin: 'xs',
-            color: '#E2E8F0',
-          },
+          { type: 'separator', margin: 'xs', color: '#E2E8F0' },
           {
             type: 'text',
-            text: `💡 ขาดอีก ${diff.toLocaleString()} pt พิมพ์ "ฝากเงิน" เพื่อเติมแต้มได้ทันทีครับ 🚀`,
+            text: `ขาดอีก ${diff.toLocaleString()} pt — พิมพ์ "ฝาก" เพื่อเติมแต้ม`,
             color: '#64748B',
             size: 'xxs',
             align: 'center',
@@ -799,18 +795,7 @@ export function generateWithdrawalSuccessFlex(
             size: 'xl',
             align: 'center',
           },
-          {
-            type: 'text',
-            text: 'ยอดที่แจ้งถอน',
-            color: '#94A3B8',
-            size: 'xxs',
-            align: 'center',
-          },
-          {
-            type: 'separator',
-            margin: 'sm',
-            color: '#F1F5F9',
-          },
+          { type: 'separator', margin: 'sm', color: '#F1F5F9' },
           {
             type: 'box',
             layout: 'horizontal',
@@ -851,7 +836,7 @@ export function generateWithdrawalSuccessFlex(
           },
           {
             type: 'text',
-            text: 'แอดมินกำลังดำเนินการตรวจสอบและโอนเงินให้ครับ 🙏',
+            text: '⏳ รอแอดมินโอนเงิน',
             size: 'xxs',
             color: '#64748B',
             align: 'center',
@@ -1979,18 +1964,7 @@ export function generateWithdrawalFlex(bankName: string, accountNumber: string, 
             size: 'xl',
             align: 'center',
           },
-          {
-            type: 'text',
-            text: 'เครดิตคงเหลือ',
-            color: '#94A3B8',
-            size: 'xxs',
-            align: 'center',
-          },
-          {
-            type: 'separator',
-            margin: 'xs',
-            color: '#F1F5F9',
-          },
+          { type: 'separator', margin: 'sm', color: '#F1F5F9' },
           {
             type: 'box',
             layout: 'vertical',
@@ -2030,7 +2004,7 @@ export function generateWithdrawalFlex(bankName: string, accountNumber: string, 
           },
           {
             type: 'text',
-            text: '💡 พิมพ์ "ถอน [จำนวน]" เช่น "ถอน 500"\n(ถอนขั้นต่ำ 100 pt)',
+            text: 'พิมพ์ "ถอน [จำนวน]"',
             size: 'xxs',
             color: '#2563EB',
             align: 'center',
@@ -2047,22 +2021,20 @@ export function generateWithdrawalFlex(bankName: string, accountNumber: string, 
 /**
  * Asked to withdraw before their bank details are on file.
  *
- * Takes the amount they asked for so the card can tell them to repeat exactly
- * that command afterwards — "send your details, then type ถอน 1,000 again" is a
- * concrete instruction, where the old version asked for bank details and left
- * the player to work out that they had to ask again. It also states plainly
- * that nothing has been deducted, because the withdrawal is abandoned at this
- * point and a player who cannot tell that will assume their points are gone.
+ * Three things only: the format they must type (which they cannot guess), the
+ * fact that nothing was deducted yet (the request is abandoned at this point,
+ * and a player who cannot tell that will assume their points are gone), and the
+ * exact command to repeat once they have sent it.
  */
 export function generateBankRegistrationFlex(pendingAmount?: number): any {
   const retry =
     pendingAmount && pendingAmount > 0
-      ? `\n\nเมื่อส่งข้อมูลบัญชีเสร็จแล้ว กรุณาพิมพ์คำสั่งเดิมซ้ำอีกครั้ง:\n"ถอน ${Number(pendingAmount).toLocaleString('th-TH')}"`
-      : '\n\nเมื่อส่งข้อมูลบัญชีเสร็จแล้ว กรุณาพิมพ์ "ถอน [จำนวน]" อีกครั้งเพื่อแจ้งความประสงค์ครับ';
+      ? ` — แล้วพิมพ์ "ถอน ${Number(pendingAmount).toLocaleString('th-TH')}" อีกครั้ง`
+      : '';
 
   return {
     type: 'flex',
-    altText: '🏦 กรุณาส่งข้อมูลบัญชีธนาคารก่อนถอนเงิน',
+    altText: '🏦 ข้อมูลบัญชีธนาคาร',
     contents: {
       type: 'bubble',
       size: 'kilo',
@@ -2072,14 +2044,7 @@ export function generateBankRegistrationFlex(pendingAmount?: number): any {
         backgroundColor: '#0284C7',
         paddingAll: 'sm',
         contents: [
-          {
-            type: 'text',
-            text: '🏦 ข้อมูลบัญชีธนาคาร',
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'xs',
-            align: 'center',
-          },
+          { type: 'text', text: '🏦 ข้อมูลบัญชีธนาคาร', weight: 'bold', color: '#FFFFFF', size: 'xs', align: 'center' },
         ],
       },
       body: {
@@ -2089,23 +2054,15 @@ export function generateBankRegistrationFlex(pendingAmount?: number): any {
         paddingAll: 'sm',
         contents: [
           {
-            type: 'text',
-            text: 'ยังไม่พบข้อมูลบัญชีธนาคารของท่านในระบบครับ\nกรุณาส่งข้อมูลบัญชีปลายทางที่ต้องการรับเงิน 1 ครั้ง แล้วระบบจะจดจำไว้ให้ทุกครั้งที่ถอน',
-            size: 'xxs',
-            color: '#475569',
-            wrap: true,
-          },
-          {
             type: 'box',
             layout: 'vertical',
             backgroundColor: '#F8FAFC',
-            paddingAll: 'xs',
+            paddingAll: 'sm',
             cornerRadius: 'sm',
-            margin: 'xs',
             contents: [
               {
                 type: 'text',
-                text: 'พิมพ์:\nบัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ-สกุล]\n\nตัวอย่าง:\nบัญชี กสิกร 0123456789 สมชาย ใจดี',
+                text: 'บัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ-สกุล]\nเช่น กสิกร 0123456789 สมชาย',
                 size: 'xxs',
                 color: '#0369A1',
                 weight: 'bold',
@@ -2115,7 +2072,7 @@ export function generateBankRegistrationFlex(pendingAmount?: number): any {
           },
           {
             type: 'text',
-            text: `ℹ️ ตอนนี้ยังไม่มีการหักแต้มของท่านครับ${retry}`,
+            text: `ยังไม่หักแต้ม — ส่งแล้วพิมพ์ "ถอน" อีกครั้ง${retry}`,
             size: 'xxs',
             color: '#EA580C',
             wrap: true,
