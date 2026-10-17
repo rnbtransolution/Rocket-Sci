@@ -207,7 +207,14 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         `   ชื่อบัญชี ${bank.accountName}\n` +
         `2. ส่งรูปสลิปมาที่แชทนี้\n\n` +
         `ระบบจะอ่านสลิปแล้วเติมเครดิตให้อัตโนมัติครับ 🙏`,
-        'info'
+        'info',
+        undefined,
+        // Centred, this seven-line block wrapped into a ragged symmetric blob
+        // with both margins stair-stepping — unreadable on a phone. Left-aligned
+        // so every line starts at a fixed edge and the numbered steps line up
+        // under their own text instead of drifting. Pure black for body text:
+        // at #1E293B on a white bubble this much copy read as soft grey.
+        { align: 'start', color: '#000000' }
       );
       await deliverPrivateNotice(userId, replyToken, groupId, hintFlex, env, profile.displayName, ctx);
       return;

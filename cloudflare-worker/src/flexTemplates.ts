@@ -553,12 +553,32 @@ export function generateCreditAdjustmentFlex(displayName: string, oldBalance: nu
 }
 
 // ── 3c. Universal Notice & Status Flex Card (เปลี่ยนข้อความธรรมดาเป็น Flex Card) ──
+/**
+ * Presentation overrides for `generateNoticeFlex`.
+ *
+ * `align` defaults to 'center' because most notices are one short line where
+ * centred reads as a title. A body of several lines must be passed 'start':
+ * centring a paragraph makes both edges ragged, the eye loses its place on the
+ * return sweep, and on a narrow phone screen it is measurably worse to read.
+ */
+export interface NoticeFlexOptions {
+  align?: 'start' | 'center';
+  /** Body text colour. Defaults to #1E293B. */
+  color?: string;
+  /** Colour of the optional trailing hint. Defaults to #64748B. */
+  hintColor?: string;
+}
+
 export function generateNoticeFlex(
   title: string,
   message: string,
   type: 'info' | 'success' | 'warning' | 'error' = 'info',
-  hint?: string
+  hint?: string,
+  options: NoticeFlexOptions = {}
 ): any {
+  const align = options.align ?? 'center';
+  const bodyColor = options.color ?? '#1E293B';
+  const hintColor = options.hintColor ?? '#64748B';
   const headerColors: Record<string, string> = {
     info: '#0A3D34',     // Deep Forest Green
     success: '#059669',  // Emerald Green
@@ -600,9 +620,9 @@ export function generateNoticeFlex(
           {
             type: 'text',
             text: message,
-            color: '#1E293B',
+            color: bodyColor,
             size: 'sm',
-            align: 'center',
+            align,
             wrap: true,
           },
           ...(hint
@@ -611,9 +631,9 @@ export function generateNoticeFlex(
                 {
                   type: 'text',
                   text: hint,
-                  color: '#64748B',
+                  color: hintColor,
                   size: 'xxs',
-                  align: 'center',
+                  align,
                   wrap: true,
                 },
               ]
