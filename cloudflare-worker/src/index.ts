@@ -166,10 +166,27 @@ export default {
     const url = new URL(request.url);
 
     // ── CORS Headers for Admin Web Portal ──
+    //
+    // `x-admin-session` MUST be listed here. It is the header the portal sends
+    // on every authenticated call (dashboard poll, approve, change password),
+    // and a custom header makes the request preflighted: if the browser's
+    // Access-Control-Request-Headers is not answered here, it rejects the
+    // response before the Worker is ever invoked and fetch() throws a bare
+    // "Failed to fetch".
+    //
+    // That is exactly what made the console look disconnected from LINE OA —
+    // login succeeded (no session header yet, so no preflight), and then every
+    // subsequent call died in the browser with no server-side error to find.
+    // It was introduced with the session-token auth refactor, which added the
+    // header without adding it to this allow-list.
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-key, x-admin-api-key',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-key, x-admin-api-key, x-admin-session',
+      // The console polls every 0.5–3s, each poll preflights, and the browser
+      // default of 5s would double the request count against the Workers daily
+      // cap for no benefit. 10 minutes collapses that to one preflight per tab.
+      'Access-Control-Max-Age': '600',
     };
 
     if (request.method === 'OPTIONS') {
