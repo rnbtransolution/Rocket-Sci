@@ -393,6 +393,10 @@ export default function App() {
   // players are actually being told without reading the source.
   const [paymentBank, setPaymentBank] = useState({ bankName: '', accountNumber: '', accountName: '', note: '' });
   const [paymentBankSaving, setPaymentBankSaving] = useState(false);
+  // Second factor for the irreversible Factory Reset. Held only long enough to
+  // save — the PIN itself is never fetched back or cached, only its existence.
+  const [dangerPin, setDangerPin] = useState('');
+  const [dangerPinSaving, setDangerPinSaving] = useState(false);
 
   // Load the deposit account once authenticated, and save changes back.
   useEffect(() => {
@@ -438,6 +442,19 @@ export default function App() {
       addToast(`❌ บันทึกไม่สำเร็จ: ${err?.message || err}`, 'danger');
     } finally {
       setPaymentBankSaving(false);
+    }
+  };
+
+  const handleSaveDangerPin = async () => {
+    setDangerPinSaving(true);
+    try {
+      await runBackendFunction('adminSetDangerPin', [dangerPin]);
+      setDangerPin('');
+      addToast('🔒 ตั้งค่า PIN สำหรับการล้างข้อมูลระบบเรียบร้อย', 'success');
+    } catch (err) {
+      addToast(`❌ บันทึกไม่สำเร็จ: ${err?.message || err}`, 'danger');
+    } finally {
+      setDangerPinSaving(false);
     }
   };
 
@@ -693,15 +710,37 @@ export default function App() {
       return;
     }
 
-    if (!window.confirm("⚠️ คุณต้องการล้างระเบียนข้อมูลระบบทั้งหมดใช่หรือไม่?\n\nการกระทำนี้จะล้างข้อมูลผู้เล่น ธุรกรรม ประวัติการเดิมพัน และบันทึกแชททั้งหมดในฐานข้อมูล ให้กลับสู่ค่าเริ่มต้น\n(การกระทำนี้ต้องได้รับสิทธิ์จาก Super Admin)")) {
+    // Previously a single window.confirm. A browser dialog is advisory only —
+    // anything able to drive this portal can dismiss it just as easily, and the
+    // reset is irreversible with no backup (the GAS mirror is unreachable).
+    // This now requires typing the phrase AND the PIN; the PIN is re-checked
+    // server-side, so the dialog is a speed bump rather than the actual lock.
+    const phrase = window.prompt(
+      "⚠️ การล้างระเบียนข้อมูลระบบ (Factory Reset)\n\n" +
+      "การกระทำนี้จะลบถาวรข้อมูลผู้เล่น ยอดเครดิต ธุรกรรม ประวัติการเดิมพัน และบันทึกแชททั้งหมด\n" +
+      "ไม่มีการสำรองข้อมูล และย้อนกลับไม่ได้\n\n" +
+      "กรุณาพิมพ์คำว่า DELETE เพื่อยืนยันการล้างข้อมูล:"
+    );
+    if (phrase === null) return;
+    if (phrase.trim().toUpperCase() !== 'DELETE') {
+      addToast('ยกเลิกการล้างข้อมูล: คำยืนยันไม่ถูกต้อง', 'warning');
       return;
     }
-    
+
+    const pin = window.prompt(
+      "🔒 กรอก PIN สำหรับการล้างข้อมูลระบบ\n\n" +
+      "PIN นี้ถูกตั้งค่าไว้ในหัวข้อ \"ความปลอดภัย\" และไม่เกี่ยวข้องกับรหัสผ่านของคุณ"
+    );
+    if (pin === null) {
+      addToast('ยกเลิกการล้างข้อมูล', 'warning');
+      return;
+    }
+
     setSettlementResult(null);
 
     try {
       addToast('⏳ กำลังล้างระเบียนข้อมูลระบบ (Factory Reset)...', 'info');
-      const data = await runBackendFunction('resetGoogleSheetsDatabase', []);
+      const data = await runBackendFunction('resetGoogleSheetsDatabase', [pin]);
       if (data) {
         if (data.players) setPlayers(deduplicatePlayersList(data.players));
         if (data.transactions) setTransactions(data.transactions);
@@ -2482,6 +2521,50 @@ export default function App() {
                 >
                   {paymentBankSaving ? <RefreshCw size={15} className="animate-spin" /> : <CheckCircle size={15} />}
                   {paymentBankSaving ? 'กำลังบันทึก...' : 'บันทึกบัญชีรับเงิน'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {adminTab === 'bank' && adminRole === 'superadmin' && (
+            <div className="glass-panel p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert size={18} className="text-rose-600" />
+                  <h3 className="text-base font-black text-slate-800">🔒 PIN สำหรับการล้างข้อมูลระบบ</h3>
+                </div>
+                <span className="text-[11px] text-slate-500">Super Admin เท่านั้น</span>
+              </div>
+
+              <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs text-rose-800 space-y-1">
+                <p className="font-bold">⚠️ การล้างระเบียนข้อมูล (Factory Reset) ไม่มีการสำรองข้อมูลและย้อนกลับไม่ได้</p>
+                <p>ระบบจะไม่อนุญาตให้ล้างข้อมูลจนกว่าจะตั้งค่า PIN นี้ ข้อมูลผู้เล่น ยอดเครดิต ธุรกรรม และบันทึกแชททั้งหมดจะถูกลบถาวร</p>
+                <p>PIN นี้ไม่เกี่ยวข้องกับรหัสผ่านของคุณ และจะถูกตรวจสอบบนเซิร์ฟเวอร์อีกครั้งก่อนดำเนินการ</p>
+              </div>
+
+              <label className="block">
+                <span className="text-xs font-bold text-slate-600">🔢 ตั้งค่า PIN (ตัวเลข 4–12 หลัก)</span>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="new-password"
+                  value={dangerPin}
+                  onChange={(e) => setDangerPin(e.target.value.replace(/[^\d]/g, ''))}
+                  placeholder="เช่น 583920"
+                  className="mt-1 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              </label>
+
+              <div className="flex justify-end">
+                <button
+                  onClick={handleSaveDangerPin}
+                  disabled={dangerPinSaving}
+                  className={`px-4 py-2.5 rounded-lg text-sm font-bold text-white transition-all flex items-center gap-2 ${
+                    dangerPinSaving ? 'bg-slate-400 cursor-not-allowed' : 'bg-rose-600 hover:bg-rose-700'
+                  }`}
+                >
+                  {dangerPinSaving ? <RefreshCw size={15} className="animate-spin" /> : <ShieldAlert size={15} />}
+                  {dangerPinSaving ? 'กำลังบันทึก...' : 'บันทึก PIN'}
                 </button>
               </div>
             </div>

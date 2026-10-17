@@ -12,6 +12,12 @@ import {
   validatePasswordStrength,
   PASSWORD_MAX_AGE_DAYS,
 } from './credentials.js';
+import {
+  setDangerPin,
+  verifyDangerPin,
+  isPinConfigured,
+  validatePinFormat,
+} from './dangerPin.js';
 import { RocketStateDO } from './stateDO.js';
 import {
   issueSessionToken,
@@ -1404,6 +1410,34 @@ const isPublicAllowed =
         ) {
           const res = await clearAllPendingOrders(env);
           result = { success: true, message: 'Cleared pending orders and board cache', cleared: res.cleared };
+        } else if (functionName === 'adminSetDangerPin') {
+          // Super Admin only, matching the action it guards. Without this any
+          // admin could set (and then satisfy) their own PIN.
+          if (adminRole !== 'superadmin') {
+            return new Response(JSON.stringify({ error: 'Forbidden: เฉพาะ Super Admin เท่านั้นที่ตั้ง PIN ได้' }), {
+              status: 403,
+              headers: { 'Content-Type': 'application/json', ...corsHeaders },
+            });
+          }
+          const format = validatePinFormat(args[0]);
+          if (!format.ok) {
+            return new Response(JSON.stringify({ error: format.error }), {
+              status: 400,
+              headers: { 'Content-Type': 'application/json', ...corsHeaders },
+            });
+          }
+          await setDangerPin(state(env), String(args[0]));
+          result = { success: true, message: 'ตั้งค่า PIN สำหรับการล้างข้อมูลเรียบร้อย' };
+
+        } else if (functionName === 'adminGetDangerPinStatus') {
+          if (adminRole !== 'superadmin') {
+            return new Response(JSON.stringify({ error: 'Forbidden' }), {
+              status: 403,
+              headers: { 'Content-Type': 'application/json', ...corsHeaders },
+            });
+          }
+          result = { success: true, configured: await isPinConfigured(state(env)) };
+
         } else if (functionName === 'resetGoogleSheetsDatabase') {
           // Strict privilege check: Super Admin only
           const isSuperAdmin = adminRole === 'superadmin';
@@ -1414,6 +1448,20 @@ const isPublicAllowed =
               status: 403,
               headers: { 'Content-Type': 'application/json', ...corsHeaders },
             });
+          }
+          // Second factor: a PIN held outside the session, verified here rather
+          // than in the dialog. This call deletes every player, balance and log
+          // irreversibly and there is no backup — the Apps Script mirror is not
+          // reachable — so the role check alone leaves one stray click standing
+          // between a session and a wiped database. Fails closed when unset.
+          const pinVerdict = await verifyDangerPin(state(env), args[0]);
+          if (!pinVerdict.ok) {
+            const status = pinVerdict.code === 'not_configured' ? 409 : 403;
+            console.warn('[Worker] Factory Reset refused:', pinVerdict.code);
+            return new Response(
+              JSON.stringify({ error: pinVerdict.error, code: pinVerdict.code }),
+              { status, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+            );
           }
           // 1. Clear atomic order state in KV
           await clearAllPendingOrders(env);
