@@ -1688,10 +1688,17 @@ export function generateMainMenuFlex(displayName: string, balance: number): any 
 /**
  * The whole deposit procedure, in one card.
  *
- * There is deliberately no amount field and no amount buttons any more. The
- * player transfers whatever they intend and the slip becomes the source of
- * truth: the scanner reads the amount off the slip and credits exactly that.
- * Asking for a number first only created a way for the two to disagree.
+ * There is deliberately no amount field and no amount buttons. The player
+ * transfers whatever they intend and the slip becomes the source of truth: the
+ * scanner reads the amount off it and credits exactly that. Asking for a number
+ * first only created a way for the two to disagree.
+ *
+ * Kept deliberately short. The first version spelled the procedure out as three
+ * numbered steps plus two footnotes; on a phone that is a wall of text for what
+ * is really two facts — where to send the money, and send the slip afterwards.
+ * The constraints that used to be stated up front (24h, real bank app, ask an
+ * admin) each have their own message at the moment they apply, which is when
+ * the player can actually act on it.
  */
 export function generateDepositFlex(bank: {
   bankName: string;
@@ -1705,27 +1712,6 @@ export function generateDepositFlex(bank: {
     contents: [
       { type: 'text', text: label, color: '#94A3B8', size: 'xxs', flex: 4 },
       { type: 'text', text: value, weight: 'bold', color: valueColor, size: 'xxs', flex: 6, align: 'end', wrap: true },
-    ],
-  });
-
-  const stepRow = (num: string, text: string) => ({
-    type: 'box',
-    layout: 'horizontal',
-    spacing: 'sm',
-    margin: 'xs',
-    contents: [
-      {
-        type: 'box',
-        layout: 'vertical',
-        width: '18px',
-        height: '18px',
-        cornerRadius: 'sm',
-        backgroundColor: '#10B981',
-        contents: [
-          { type: 'text', text: num, color: '#FFFFFF', size: 'xxs', weight: 'bold', align: 'center' },
-        ],
-      },
-      { type: 'text', text, color: '#334155', size: 'xxs', flex: 10, wrap: true },
     ],
   });
 
@@ -1776,31 +1762,11 @@ export function generateDepositFlex(bank: {
           { type: 'separator', margin: 'sm', color: '#F1F5F9' },
           {
             type: 'text',
-            text: '📋 วิธีฝาก — 3 ขั้นตอน',
-            weight: 'bold',
-            color: '#0F172A',
-            size: 'xs',
-          },
-          stepRow('1', 'โอนเงินเข้าบัญชีข้างบน จำนวนเท่าที่ต้องการฝาก'),
-          stepRow('2', 'ส่งรูปสลิปจากแอปธนาคารมาที่แชทนี้เลยครับ'),
-          stepRow('3', 'ระบบอ่านสลิปแล้วเติมเครดิตให้อัตโนมัติ ไม่ต้องพิมพ์ยอดเงิน'),
-          { type: 'separator', margin: 'sm', color: '#F1F5F9' },
-          {
-            type: 'text',
-            text: '✅ เติมเครดิตตามยอดที่ปรากฏบนสลิปจริง\n(สลิปต้องโอนภายใน 24 ชั่วโมง และต้องเป็นสลิปจากแอปธนาคารโดยตรง)',
-            color: '#059669',
+            text: 'โอนเงินแล้วส่งรูปสลิปมาที่แชทนี้\nไม่ต้องพิมพ์ยอด — ระบบเติมเครดิตตามยอดในสลิป',
+            color: '#334155',
             size: 'xxs',
             wrap: true,
             align: 'center',
-          },
-          {
-            type: 'text',
-            text: '⚠️ หากสลิปอ่านไม่ผ่าน ระบบจะส่งให้แอดมินตรวจสอบให้ครับ',
-            color: '#EA580C',
-            size: 'xxs',
-            align: 'center',
-            wrap: true,
-            margin: 'xs',
           },
         ],
       },
