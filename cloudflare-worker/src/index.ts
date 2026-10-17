@@ -1130,7 +1130,7 @@ const isPublicAllowed =
               if (refund.refunded && refund.amount > 0 && order.creatorLineUserId) {
                 const notify = pushToLine(
                   order.creatorLineUserId,
-                  `🚫 แอดมินยกเลิก Order #${orderNo} ของคุณ\n💰 คืนแต้ม: +${refund.amount.toLocaleString()} pt เข้ากระเป๋าเรียบร้อยแล้วครับ\n(หากคุณกดยกเลิกซ้ำ ระบบจะไม่คืนแต้มซ้ำอีก) 🚀`,
+                  `🚫 แอดมินยกเลิก Order #${orderNo} ของคุณ\n💰 คืนแต้ม: +${refund.amount.toLocaleString()} pt เข้ากระเป๋าเรียบร้อยแล้วครับ 🚀`,
                   env
                 ).catch((e) => console.error('[Worker] admin cancel notice failed:', e));
                 if (ctx) ctx.waitUntil(notify);
