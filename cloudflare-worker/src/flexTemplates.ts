@@ -1748,7 +1748,13 @@ export function generateDepositFlex(bank: {
           {
             type: 'text',
             text: 'โอนเงินแล้วส่งรูปสลิปมาที่แชทนี้\nไม่ต้องพิมพ์ยอด — ระบบเติมเครดิตตามยอดในสลิป',
-            color: '#334155',
+            // Brick orange rather than the slate it replaced. This is the one
+            // line the player has to act on, and at #334155 on a white bubble it
+            // rendered as grey mush in LINE on a phone. Warm orange also keeps
+            // it distinct from the account number directly above it, which is
+            // already blue and is data rather than instruction.
+            color: '#C2410C',
+            weight: 'bold',
             size: 'xs',
             wrap: true,
             align: 'center',
