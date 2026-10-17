@@ -1684,11 +1684,54 @@ export function generateMainMenuFlex(displayName: string, balance: number): any 
   };
 }
 
-// ── 7. Deposit Options Card (เลือกยอดฝาก + ข้อมูลธนาคาร) ──
-export function generateDepositFlex(): any {
+// ── 7. Deposit Instruction Card (วิธีฝาก — โอนแล้วส่งสลิป) ──
+/**
+ * The whole deposit procedure, in one card.
+ *
+ * There is deliberately no amount field and no amount buttons any more. The
+ * player transfers whatever they intend and the slip becomes the source of
+ * truth: the scanner reads the amount off the slip and credits exactly that.
+ * Asking for a number first only created a way for the two to disagree.
+ */
+export function generateDepositFlex(bank: {
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  note?: string;
+}): any {
+  const detailRow = (label: string, value: string, valueColor = '#334155') => ({
+    type: 'box',
+    layout: 'horizontal',
+    contents: [
+      { type: 'text', text: label, color: '#94A3B8', size: 'xxs', flex: 4 },
+      { type: 'text', text: value, weight: 'bold', color: valueColor, size: 'xxs', flex: 6, align: 'end', wrap: true },
+    ],
+  });
+
+  const stepRow = (num: string, text: string) => ({
+    type: 'box',
+    layout: 'horizontal',
+    spacing: 'sm',
+    margin: 'xs',
+    contents: [
+      {
+        type: 'box',
+        layout: 'vertical',
+        width: '18px',
+        height: '18px',
+        cornerRadius: 'sm',
+        backgroundColor: '#10B981',
+        contents: [
+          { type: 'text', text: num, color: '#FFFFFF', size: 'xxs', weight: 'bold', align: 'center' },
+        ],
+      },
+      { type: 'text', text, color: '#334155', size: 'xxs', flex: 10, wrap: true },
+    ],
+  });
+
   return {
     type: 'flex',
-    altText: '💰 ฝากเครดิตเข้าระบบ',
+    altText: '💰 วิธีฝากเครดิต — โอนเงินแล้วส่งสลิป',
     contents: {
       type: 'bubble',
       size: 'kilo',
@@ -1722,99 +1765,39 @@ export function generateDepositFlex(): any {
             paddingAll: 'sm',
             spacing: 'xs',
             contents: [
-              {
-                type: 'box',
-                layout: 'horizontal',
-                contents: [
-                  { type: 'text', text: '🏦 ธนาคาร', color: '#94A3B8', size: 'xxs', flex: 4 },
-                  { type: 'text', text: 'SCB (ไทยพาณิชย์)', weight: 'bold', color: '#334155', size: 'xxs', flex: 6, align: 'end' },
-                ],
-              },
-              {
-                type: 'box',
-                layout: 'horizontal',
-                contents: [
-                  { type: 'text', text: '🔢 เลขบัญชี', color: '#94A3B8', size: 'xxs', flex: 4 },
-                  { type: 'text', text: '890-1-23456-7', weight: 'bold', color: '#0369A1', size: 'xs', flex: 6, align: 'end' },
-                ],
-              },
-              {
-                type: 'box',
-                layout: 'horizontal',
-                contents: [
-                  { type: 'text', text: '👤 ชื่อบัญชี', color: '#94A3B8', size: 'xxs', flex: 4 },
-                  { type: 'text', text: 'Somchai Jongcharoen', weight: 'bold', color: '#334155', size: 'xxs', flex: 6, align: 'end' },
-                ],
-              },
+              detailRow('🏦 ธนาคาร', bank.bankName),
+              detailRow('🔢 เลขบัญชี', bank.accountNumber, '#0369A1'),
+              detailRow('👤 ชื่อบัญชี', bank.accountName),
+              ...(bank.note
+                ? [{ type: 'separator', margin: 'xs', color: '#E2E8F0' }, detailRow('📌 หมายเหตุ', bank.note, '#EA580C')]
+                : []),
             ],
           },
-          {
-            type: 'separator',
-            margin: 'xs',
-            color: '#F1F5F9',
-          },
+          { type: 'separator', margin: 'sm', color: '#F1F5F9' },
           {
             type: 'text',
-            text: 'เลือกยอดเงิน หรือพิมพ์จำนวนเงิน เช่น "1000"',
+            text: '📋 วิธีฝาก — 3 ขั้นตอน',
+            weight: 'bold',
+            color: '#0F172A',
+            size: 'xs',
+          },
+          stepRow('1', 'โอนเงินเข้าบัญชีข้างบน จำนวนเท่าที่ต้องการฝาก'),
+          stepRow('2', 'ส่งรูปสลิปจากแอปธนาคารมาที่แชทนี้เลยครับ'),
+          stepRow('3', 'ระบบอ่านสลิปแล้วเติมเครดิตให้อัตโนมัติ ไม่ต้องพิมพ์ยอดเงิน'),
+          { type: 'separator', margin: 'sm', color: '#F1F5F9' },
+          {
+            type: 'text',
+            text: '✅ เติมเครดิตตามยอดที่ปรากฏบนสลิปจริง\n(สลิปต้องโอนภายใน 24 ชั่วโมง และต้องเป็นสลิปจากแอปธนาคารโดยตรง)',
+            color: '#059669',
             size: 'xxs',
-            color: '#64748B',
-            align: 'center',
             wrap: true,
-          },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            spacing: 'xs',
-            margin: 'xs',
-            contents: [
-              {
-                type: 'button',
-                style: 'primary',
-                height: 'sm',
-                color: '#10B981',
-                action: { type: 'message', label: '100 บาท', text: '100' },
-              },
-              {
-                type: 'button',
-                style: 'primary',
-                height: 'sm',
-                color: '#10B981',
-                action: { type: 'message', label: '300 บาท', text: '300' },
-              },
-            ],
-          },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            spacing: 'xs',
-            margin: 'xs',
-            contents: [
-              {
-                type: 'button',
-                style: 'primary',
-                height: 'sm',
-                color: '#10B981',
-                action: { type: 'message', label: '500 บาท', text: '500' },
-              },
-              {
-                type: 'button',
-                style: 'primary',
-                height: 'sm',
-                color: '#10B981',
-                action: { type: 'message', label: '1,000 บาท', text: '1000' },
-              },
-            ],
-          },
-          {
-            type: 'separator',
-            margin: 'xs',
-            color: '#F1F5F9',
+            align: 'center',
           },
           {
             type: 'text',
-            text: '⚠️ โอนเสร็จแล้ว กรุณาส่ง "รูปสลิป" เข้ามาในแชทนี้ได้เลยครับ ระบบจะตรวจสอบและเติมเครดิตให้อัตโนมัติ 🙏',
-            size: 'xxs',
+            text: '⚠️ หากสลิปอ่านไม่ผ่าน ระบบจะส่งให้แอดมินตรวจสอบให้ครับ',
             color: '#EA580C',
+            size: 'xxs',
             align: 'center',
             wrap: true,
             margin: 'xs',
@@ -1825,6 +1808,69 @@ export function generateDepositFlex(): any {
   };
 }
 
+/** Slip verified and credited — the player sees the amount the slip proved. */
+export function generateSlipCreditedFlex(amount: number, newBalance: number, refCode: string): any {
+  const formattedAmt = Number(amount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const formattedBal = Number(newBalance || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return {
+    type: 'flex',
+    altText: `✅ เติมเครดิต ${formattedAmt} บาทเรียบร้อย`,
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#059669',
+        paddingAll: 'sm',
+        contents: [
+          { type: 'text', text: '✅ เติมเครดิตเรียบร้อย', weight: 'bold', color: '#FFFFFF', size: 'xs', align: 'center' },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'xs',
+        paddingAll: 'md',
+        contents: [
+          {
+            type: 'text',
+            text: `+${formattedAmt} บาท`,
+            weight: 'bold',
+            color: '#059669',
+            size: 'xl',
+            align: 'center',
+          },
+          {
+            type: 'text',
+            text: 'ระบบอ่านยอดจากสลิปของคุณแล้วครับ',
+            color: '#64748B',
+            size: 'xxs',
+            align: 'center',
+            wrap: true,
+          },
+          { type: 'separator', margin: 'sm', color: '#F1F5F9' },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: '💎 แต้มคงเหลือ', color: '#94A3B8', size: 'xxs', flex: 4 },
+              { type: 'text', text: `${formattedBal} pt`, weight: 'bold', color: '#0F172A', size: 'xxs', flex: 6, align: 'end' },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: '🔖 เลขอ้างอิง', color: '#94A3B8', size: 'xxs', flex: 4 },
+              { type: 'text', text: refCode, color: '#64748B', size: 'xxs', flex: 6, align: 'end', wrap: true },
+            ],
+          },
+        ],
+      },
+    },
+  };
+}
 // ── 8. Deposit Invoice Card (ใบแจ้งโอนเงินฝาก) ──
 export function generateDepositInvoiceFlex(depositAmt: number): any {
   const formattedAmt = Number(depositAmt || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -2032,10 +2078,25 @@ export function generateWithdrawalFlex(bankName: string, accountNumber: string, 
 }
 
 // ── 10. Bank Registration Card ──
-export function generateBankRegistrationFlex(): any {
+/**
+ * Asked to withdraw before their bank details are on file.
+ *
+ * Takes the amount they asked for so the card can tell them to repeat exactly
+ * that command afterwards — "send your details, then type ถอน 1,000 again" is a
+ * concrete instruction, where the old version asked for bank details and left
+ * the player to work out that they had to ask again. It also states plainly
+ * that nothing has been deducted, because the withdrawal is abandoned at this
+ * point and a player who cannot tell that will assume their points are gone.
+ */
+export function generateBankRegistrationFlex(pendingAmount?: number): any {
+  const retry =
+    pendingAmount && pendingAmount > 0
+      ? `\n\nเมื่อส่งข้อมูลบัญชีเสร็จแล้ว กรุณาพิมพ์คำสั่งเดิมซ้ำอีกครั้ง:\n"ถอน ${Number(pendingAmount).toLocaleString('th-TH')}"`
+      : '\n\nเมื่อส่งข้อมูลบัญชีเสร็จแล้ว กรุณาพิมพ์ "ถอน [จำนวน]" อีกครั้งเพื่อแจ้งความประสงค์ครับ';
+
   return {
     type: 'flex',
-    altText: '🏦 ลงทะเบียนบัญชีธนาคาร',
+    altText: '🏦 กรุณาส่งข้อมูลบัญชีธนาคารก่อนถอนเงิน',
     contents: {
       type: 'bubble',
       size: 'kilo',
@@ -2047,7 +2108,7 @@ export function generateBankRegistrationFlex(): any {
         contents: [
           {
             type: 'text',
-            text: '🏦 ลงทะเบียนบัญชีธนาคาร',
+            text: '🏦 ข้อมูลบัญชีธนาคาร',
             weight: 'bold',
             color: '#FFFFFF',
             size: 'xs',
@@ -2063,7 +2124,7 @@ export function generateBankRegistrationFlex(): any {
         contents: [
           {
             type: 'text',
-            text: 'เพื่อความสะดวกรวดเร็วในการถอนเงิน กรุณาพิมพ์แจ้งข้อมูลบัญชีธนาคารของท่านในรูปแบบดังนี้ครับ:',
+            text: 'ยังไม่พบข้อมูลบัญชีธนาคารของท่านในระบบครับ\nกรุณาส่งข้อมูลบัญชีปลายทางที่ต้องการรับเงิน 1 ครั้ง แล้วระบบจะจดจำไว้ให้ทุกครั้งที่ถอน',
             size: 'xxs',
             color: '#475569',
             wrap: true,
@@ -2085,6 +2146,14 @@ export function generateBankRegistrationFlex(): any {
                 wrap: true,
               },
             ],
+          },
+          {
+            type: 'text',
+            text: `ℹ️ ตอนนี้ยังไม่มีการหักแต้มของท่านครับ${retry}`,
+            size: 'xxs',
+            color: '#EA580C',
+            wrap: true,
+            margin: 'xs',
           },
         ],
       },

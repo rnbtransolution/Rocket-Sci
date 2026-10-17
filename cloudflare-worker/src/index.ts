@@ -1,6 +1,7 @@
 import { Env, LineWebhookPayload, QueueMessage, LineEvent, PlayerProfile, Order } from './types.js';
 import { verifyLineSignature } from './signature.js';
 import { state } from './state.js';
+import { getPaymentBank, setPaymentBank } from './paymentBank.js';
 import {
   setAdminPassword,
   verifyAdminLogin,
@@ -1156,6 +1157,29 @@ const isPublicAllowed =
           } else {
             result = { success: false, error: `ไม่พบข้อมูลแผล Order #${orderNo}` };
           }
+        } else if (functionName === 'adminGetBankDetails') {
+          // Readable by any admin — the deposit screen needs it and it is not
+          // a secret beyond what players already see in LINE.
+          result = { success: true, bank: await getPaymentBank(env) };
+        } else if (functionName === 'adminSetBankDetails') {
+          // Super Admin only: this is where player money is instructed to go,
+          // so a compromised limited-admin session must not be able to redirect
+          // deposits. With a stale account number, players transfer into the void.
+          if (!isSuperAdminKeyAuth && adminRole !== 'superadmin') {
+            result = { success: false, error: 'Forbidden: เฉพาะ Super Admin เท่านั้นที่แก้ไขบัญชีรับเงินได้' };
+          } else {
+            const saved = await setPaymentBank(env, {
+              bankName: args[0],
+              accountNumber: args[1],
+              accountName: args[2],
+              note: args[3],
+            });
+            if (!saved) {
+              result = { success: false, error: 'กรุณากรอก ธนาคาร / เลขบัญชี / ชื่อบัญชี ให้ครบถ้วน' };
+            } else {
+              result = { success: true, bank: saved };
+            }
+          }
         } else if (functionName === 'adminSetPlayerBalance') {
           const userId = args[0];
           const newBal = Number(args[1]) || 0;
@@ -1573,7 +1597,7 @@ const isPublicAllowed =
               } else if (clean === 'บั้งไฟออก' || clean === 'rocketout') {
                 payload = generateRocketLaunchedFlex();
               } else if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit' || clean === 'ฝาก') {
-                payload = generateDepositFlex();
+                payload = generateDepositFlex(await getPaymentBank(env));
               } else if (clean === 'กระดานดวล' || clean === 'กระดาน' || clean === 'board') {
                 const pending = await getPendingOrdersList(env);
                 payload = generatePendingBoardFlex(pending);

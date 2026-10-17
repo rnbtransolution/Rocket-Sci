@@ -52,7 +52,17 @@ async function bundle() {
     value: __shim, configurable: true, writable: true, enumerable: false,
   });
 }
-`;
+${process.env.REFUND_FIX === 'off' ? `
+{
+  // REFUND_FIX=off — stand in for the pre-fix code, where the "has this already
+  // been refunded?" decision was just a read of an eventually-consistent KV
+  // record. Every caller believing it won is exactly the old behaviour.
+  Object.defineProperty(Object.prototype, 'claimExclusive', {
+    value: async function () { return true; }, configurable: true, writable: true, enumerable: false,
+  });
+}
+` : ''}`;
+
   await build({
     entryPoints: ['src/index.ts'],
     bundle: true,
@@ -130,7 +140,24 @@ await kvCache.put(`RAW_LINE_${SHORT_ID}`, LINE_USER);
 await kvCache.put('PLAYERS_LIST', JSON.stringify([JSON.parse(profile)]));
 await kvCache.put('PENDING_ORDERS_LIST', JSON.stringify([JSON.parse(order('pending_match'))]));
 
-const balance = async () => Number((JSON.parse(await kvCache.get(`USER_${LINE_USER}`))).balance);
+/**
+ * The balance as the ADMIN CONSOLE sees it.
+ *
+ * Probing through `getDashboardData` rather than a KV key is deliberate: it is
+ * the number an operator actually looks at when a player disputes a balance,
+ * and it stays correct whichever write path is active (the Durable Object is
+ * authoritative; KV is only a cold mirror).
+ */
+const balance = async () => {
+  const res = await mf.dispatchFetch('http://localhost/api/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-key': ADMIN_KEY },
+    body: JSON.stringify({ functionName: 'getDashboardData', args: [] }),
+  });
+  const json = await res.json();
+  const player = (json?.data?.players || []).find((p) => p.shortId === SHORT_ID || p.id === SHORT_ID);
+  return player ? Number(player.balance) : NaN;
+};
 
 const rpc = async (functionName, args = [], headers = {}) => {
   const res = await mf.dispatchFetch('http://localhost/api/run', {

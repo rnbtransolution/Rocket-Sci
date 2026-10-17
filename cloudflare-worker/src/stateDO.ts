@@ -365,6 +365,7 @@ export class RocketStateDO extends DurableObject<Env> {
    * displayed different balances for the same player until something forced a
    * rewrite. Doing it here makes every key agree at all times.
    */
+
   // ── Rate limiting ──────────────────────────────────────────────────────
 
   /**
@@ -414,6 +415,17 @@ export class RocketStateDO extends DurableObject<Env> {
 
   /**
    * Persist a player profile across ALL of its keys in one atomic commit:
+   *   USER_<lineUserId>, USER_<shortId>, RAW_LINE_<shortId> and the
+   *   PLAYERS_LIST directory entry the Admin Console actually reads.
+   *
+   * These were previously four independent read-modify-write operations. Two
+   * overlapping calls (e.g. an approval in the Admin Console racing a deposit
+   * from LINE OA) could interleave so that the directory showed one balance
+   * while the canonical profile key held another — the two platforms then
+   * displayed different balances for the same player until something forced a
+   * rewrite. Doing it here makes every key agree at all times.
+   */
+  async saveProfile(profileJson: string, entryJson: string, limit = 500): Promise<boolean> {
     await this.ready;
     let profile: any;
     let entry: any;
@@ -510,28 +522,30 @@ export class RocketStateDO extends DurableObject<Env> {
   // ── Refund claims ─────────────────────────────────────────────────────────
 
   /**
-   * Claim the right to refund an order. Returns true for exactly ONE caller per
-   * claim key (until the TTL lapses, if one is given).
+   * Take an exclusive claim on a named key. Returns true for exactly ONE caller
+   * per key (until the TTL lapses, if one is given).
    *
-   * WHY THIS EXISTS
-   * ---------------
-   * An order's status lives in `KV_ORDERS`, which is eventually consistent, and
-   * every cancellation path did its own read-modify-write of that record: read
-   * status → decide "still cancellable" → refund. The Admin Console writes
-   * from the operator's PoP while LINE webhooks are served from LINE's, so the
-   * player's read could still return the pre-cancel `pending_match` for up to
-   * ~60s. Both paths then believed they owned the refund and both credited the
-   * player — and the order ends up `cancelled` either way, so nothing in the
-   * stored data reveals that the money moved twice.
+   * A Durable Object handles one request at a time, so the read-then-write below
+   * is a real compare-and-set — the only primitive in the system that can say
+   * "I am the one and only actor for this", regardless of which region the
+   * caller was served from or what the eventually-consistent KV caches hold.
    *
-   * A Durable Object handles one request at a time, so this read-then-write is
-   * a real compare-and-set. The claim lives in the strongly consistent store
-   * rather than on the order record, so it holds regardless of which path
-   * arrived first or what the KV caches happen to be serving.
+   * It exists because two separate defects needed it:
+   *
+   *   • Refunds. An order's status lives in `KV_ORDERS`. Every cancellation path
+   *     did its own read-modify-write of it — read status → "still cancellable"
+   *     → refund — so a player cancelling seconds after an admin cancel could be
+   *     served the pre-cancel `pending_match` and be refunded twice.
+   *
+   *   • Slip credits. The same slip image can arrive more than once (the player
+   *     re-sends it, LINE redelivers, or two uploads race). Crediting per
+   *     verified `transRef` must happen exactly once, ever.
+   *
+   * Callers namespace their own keys (e.g. `REFUND:2963@1750000000000`).
    */
-  async claimRefund(claimKey: string, payloadJson: string, ttlMs: number = 0): Promise<boolean> {
+  async claimExclusive(claimKey: string, payloadJson: string, ttlMs: number = 0): Promise<boolean> {
     await this.ready;
-    const key = `REFUND_CLAIM_${claimKey}`;
+    const key = `CLAIM_${claimKey}`;
     const now = Date.now();
 
     const existing = this.cache.get(key);
@@ -550,10 +564,10 @@ export class RocketStateDO extends DurableObject<Env> {
     return true;
   }
 
-  /** Read a claim back — used for auditing a disputed refund. */
-  async getRefundClaim(claimKey: string): Promise<string | null> {
+  /** Read a claim back — used to audit a disputed refund or slip credit. */
+  async getClaim(claimKey: string): Promise<string | null> {
     await this.ready;
-    const row = this.cache.get(`REFUND_CLAIM_${claimKey}`);
+    const row = this.cache.get(`CLAIM_${claimKey}`);
     if (!row) return null;
     if (row.exp && row.exp <= Date.now()) return null;
     return row.v;

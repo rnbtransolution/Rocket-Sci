@@ -85,8 +85,8 @@ interface DOStub {
   keys(prefix?: string): Promise<string[]>;
   clear(): Promise<void>;
   upsertTransaction(txJson: string, limit?: number): Promise<string>;
-  claimRefund(claimKey: string, payloadJson: string, ttlMs?: number): Promise<boolean>;
-  getRefundClaim(claimKey: string): Promise<string | null>;
+  claimExclusive(claimKey: string, payloadJson: string, ttlMs?: number): Promise<boolean>;
+  getClaim(claimKey: string): Promise<string | null>;
   patchTransactionStatus(txId: string, status: string, reviewReason: string, actualAmount?: number | null): Promise<string | null>;
   appendChatLog(logJson: string, limit?: number): Promise<void>;
   writeMany(entries: Array<[string, string]>, expiresAt?: number): Promise<void>;
@@ -237,39 +237,38 @@ export class StateStore {
   }
 
   /**
-   * Claim the exclusive right to refund an order. True for the first caller
-   * only.
+   * Take an exclusive claim on a named key. True for the first caller only.
    *
    * Unlike every other method here this one FAILS CLOSED. The others degrade to
    * "carry on with the old read-modify-write", which is an acceptable trade for
    * cached data but not for money: if the claim cannot be taken, the caller must
-   * NOT refund, because it cannot prove it is the only one doing so. A cancelled
-   * order with no refund is a visible, recoverable discrepancy; a silently
-   * doubled balance is not.
+   * NOT move money, because it cannot prove it is the only one doing so. An
+   * un-refunded cancelled order or an un-credited slip is a visible, recoverable
+   * discrepancy; a silently doubled balance is not.
    *
    * Not mirrored to KV — a claim is authoritative only in the DO, and a stale KV
    * copy would be actively misleading.
    */
-  async claimRefund(claimKey: string, payload: unknown, ttlMs: number = 0): Promise<boolean> {
+  async claimExclusive(claimKey: string, payload: unknown, ttlMs: number = 0): Promise<boolean> {
     const stub = this.stub();
     if (!stub) {
-      console.error('[StateStore] refund claim unavailable (no Durable Object) — refusing to refund');
+      console.error(`[StateStore] claim "${claimKey}" unavailable (no Durable Object) — refusing`);
       return false;
     }
     try {
-      return await stub.claimRefund(claimKey, JSON.stringify(payload), ttlMs);
+      return await stub.claimExclusive(claimKey, JSON.stringify(payload), ttlMs);
     } catch (err) {
-      console.error('[StateStore] refund claim failed — refusing to refund:', err);
+      console.error(`[StateStore] claim "${claimKey}" failed — refusing:`, err);
       return false;
     }
   }
 
-  /** Inspect a refund claim (audit / diagnostics). */
-  async getRefundClaim(claimKey: string): Promise<unknown | null> {
+  /** Inspect a claim (audit / diagnostics). */
+  async getClaim(claimKey: string): Promise<unknown | null> {
     const stub = this.stub();
     if (!stub) return null;
     try {
-      const raw = await stub.getRefundClaim(claimKey);
+      const raw = await stub.getClaim(claimKey);
       return raw ? JSON.parse(raw) : null;
     } catch {
       return null;

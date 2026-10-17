@@ -27,7 +27,8 @@ import {
   Megaphone,
   LogOut,
   KeyRound,
-  Cloud
+  Cloud,
+  Landmark
 } from 'lucide-react';
 
 const INITIAL_PLAYERS = [];
@@ -278,8 +279,7 @@ export default function App() {
     }
   }, [runBackendFunction]);
 
-  const handleAdminLogout = () => {
-    if (window.confirm('🔒 คุณต้องการออกจากระบบแอดมินใช่หรือไม่?')) {
+  const handleAdminLogout = () => {    if (window.confirm('🔒 คุณต้องการออกจากระบบแอดมินใช่หรือไม่?')) {
       // Drops the session token too, so a shared machine keeps nothing usable.
       clearAdminSession();
       setAdminAuthenticated(false);
@@ -369,7 +369,7 @@ export default function App() {
   const [flights, setFlights] = useState([]);
   
   // Dashboard & Navigation controls (default to quote setup first)
-  const [adminTab, setAdminTab] = useState('quote'); // 'quote' | 'settle' | 'bets' | 'review' | 'players' | 'logs' | 'broadcast'
+  const [adminTab, setAdminTab] = useState('quote'); // 'quote' | 'settle' | 'bets' | 'review' | 'players' | 'logs' | 'broadcast' | 'bank'
   const [customBroadcastText, setCustomBroadcastText] = useState('');
   const [isSendingBroadcast, setIsSendingBroadcast] = useState(false);
   const [betStatusFilter, setBetStatusFilter] = useState('all'); // 'all' | 'matched' | 'pending_match' | 'cancelled' | 'resolved'
@@ -386,6 +386,60 @@ export default function App() {
   const [bankEditModal, setBankEditModal] = useState(null);
   const [bankEditForm, setBankEditForm] = useState({ bankName: '', bankAccount: '', accountName: '' });
   const [bankEditSaving, setBankEditSaving] = useState(false);
+
+  // The account players are told to transfer deposits to, shown by the LINE OA
+  // deposit screen. Editable here so an account change is a form submission
+  // rather than a code change plus redeploy — and so the operator can see what
+  // players are actually being told without reading the source.
+  const [paymentBank, setPaymentBank] = useState({ bankName: '', accountNumber: '', accountName: '', note: '' });
+  const [paymentBankSaving, setPaymentBankSaving] = useState(false);
+
+  // Load the deposit account once authenticated, and save changes back.
+  useEffect(() => {
+    if (!adminAuthenticated) return;
+    let cancelled = false;
+    runBackendFunction('adminGetBankDetails', [])
+      .then((res) => {
+        if (cancelled || !res || !res.bank) return;
+        setPaymentBank({
+          bankName: res.bank.bankName || '',
+          accountNumber: res.bank.accountNumber || '',
+          accountName: res.bank.accountName || '',
+          note: res.bank.note || '',
+        });
+      })
+      .catch(() => { /* the panel simply shows empty fields */ });
+    return () => { cancelled = true; };
+  }, [adminAuthenticated]);
+
+  const handleSavePaymentBank = async () => {
+    setPaymentBankSaving(true);
+    try {
+      const res = await runBackendFunction('adminSetBankDetails', [
+        paymentBank.bankName,
+        paymentBank.accountNumber,
+        paymentBank.accountName,
+        paymentBank.note,
+      ]);
+      if (res && res.success === false) {
+        addToast(`⚠️ บันทึกไม่สำเร็จ: ${res.error || 'ข้อมูลไม่ครบถ้วน'}`, 'danger');
+        return;
+      }
+      if (res && res.bank) {
+        setPaymentBank({
+          bankName: res.bank.bankName || '',
+          accountNumber: res.bank.accountNumber || '',
+          accountName: res.bank.accountName || '',
+          note: res.bank.note || '',
+        });
+      }
+      addToast('🏦 บันทึกบัญชีรับเงินเรียบร้อย (ใช้กับข้อความฝากใน LINE ทันที)', 'success');
+    } catch (err) {
+      addToast(`❌ บันทึกไม่สำเร็จ: ${err?.message || err}`, 'danger');
+    } finally {
+      setPaymentBankSaving(false);
+    }
+  };
 
   // Player full-edit modal (rename + balance + delete)
   const [playerEditModal, setPlayerEditModal] = useState(null); // { player }
@@ -1414,6 +1468,18 @@ export default function App() {
             <Database size={15} className={adminTab === 'logs' ? 'text-white' : 'text-slate-500'} />
             <span>ทรานแซคชัน</span>
           </button>
+          <button
+            onClick={() => setAdminTab('bank')}
+            title="บัญชีรับเงินที่แสดงในข้อความฝากของ LINE OA"
+            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
+              adminTab === 'bank'
+                ? 'bg-sky-600 text-white font-bold'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <Landmark size={15} className={adminTab === 'bank' ? 'text-white' : 'text-slate-500'} />
+            <span>บัญชีรับเงิน</span>
+          </button>
         </div>
 
         {/* Tab panels contents container */}
@@ -2343,6 +2409,84 @@ export default function App() {
           )}
 
           {/* TAB 7: BROADCAST HUB & FIELD ADMIN HOTKEYS */}
+          {/* TAB: DEPOSIT ACCOUNT — where the LINE OA deposit screen points players */}
+          {adminTab === 'bank' && (
+            <div className="glass-panel p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                <div>
+                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
+                    <Landmark size={18} className="text-sky-600" />
+                    บัญชีรับเงินฝาก
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    ข้อมูลนี้คือบัญชีที่ข้อความ &ldquo;ฝาก&rdquo; ใน LINE OA แสดงให้ผู้เล่นโอนเงินเข้า
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 leading-relaxed">
+                ⚠️ ตรวจสอบเลขบัญชีให้ถูกต้องก่อนบันทึก — ผู้เล่นจะโอนเงินตามข้อมูลชุดนี้ทันที
+                และระบบจะเติมเครดิตอัตโนมัติจากยอดในสลิปที่ส่งมา
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-600">🏦 ธนาคาร</span>
+                  <input
+                    type="text"
+                    value={paymentBank.bankName}
+                    onChange={(e) => setPaymentBank(p => ({ ...p, bankName: e.target.value }))}
+                    placeholder="เช่น SCB (ไทยพาณิชย์)"
+                    className="mt-1 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-600">🔢 เลขบัญชี</span>
+                  <input
+                    type="text"
+                    value={paymentBank.accountNumber}
+                    onChange={(e) => setPaymentBank(p => ({ ...p, accountNumber: e.target.value }))}
+                    placeholder="เช่น 123-4-56789-0"
+                    className="mt-1 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-bold text-slate-600">👤 ชื่อบัญชี</span>
+                  <input
+                    type="text"
+                    value={paymentBank.accountName}
+                    onChange={(e) => setPaymentBank(p => ({ ...p, accountName: e.target.value }))}
+                    placeholder="เช่น สมชาย ใจดี"
+                    className="mt-1 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-bold text-slate-600">📌 หมายเหตุ (ถ้ามี)</span>
+                  <input
+                    type="text"
+                    value={paymentBank.note}
+                    onChange={(e) => setPaymentBank(p => ({ ...p, note: e.target.value }))}
+                    placeholder="ข้อความเสริมใต้เลขบัญชี เช่น ชำระหมดค่าส่วนนี้"
+                    className="mt-1 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                </label>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  onClick={handleSavePaymentBank}
+                  disabled={paymentBankSaving}
+                  className={`px-4 py-2.5 rounded-lg text-sm font-bold text-white transition-all flex items-center gap-2 ${
+                    paymentBankSaving ? 'bg-slate-400 cursor-not-allowed' : 'bg-sky-600 hover:bg-sky-700'
+                  }`}
+                >
+                  {paymentBankSaving ? <RefreshCw size={15} className="animate-spin" /> : <CheckCircle size={15} />}
+                  {paymentBankSaving ? 'กำลังบันทึก...' : 'บันทึกบัญชีรับเงิน'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {adminTab === 'broadcast' && (
             <div className="glass-panel p-5 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">

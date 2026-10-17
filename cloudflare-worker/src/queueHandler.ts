@@ -1,5 +1,7 @@
 import { Env, LineEvent, Order, PlayerProfile, RocketRound, Transaction } from './types.js';
 import { state } from './state.js';
+import { scanSlipImage } from './slipScanner.js';
+import { getPaymentBank } from './paymentBank.js';
 import {
   generateOrderFlex,
   generateMatchNotificationFlex,
@@ -21,6 +23,7 @@ import {
   generateInsufficientBalanceFlex,
   generateWithdrawalSuccessFlex,
   generateSlipReceivedFlex,
+  generateSlipCreditedFlex,
 } from './flexTemplates.js';
 
 export const RULE_GUIDE_TEXT = `📖 [กติกาการเล่น]
@@ -164,51 +167,49 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     }
 
     // ── 1.2 Deposit Intent ("ฝากเงิน", "เติมเงิน", "deposit", "เติมเครดิต", "ฝาก") ──
+    //
+    // No amount is requested. The player transfers whatever they want and sends
+    // the slip; the scanner reads the amount off it. Asking for a number first
+    // only created a second source of truth that could disagree with the slip.
     const depositKeywords = ['ฝากเงิน', 'เติมเงิน', 'deposit', 'เติมเครดิต', 'ฝาก'];
     if (depositKeywords.includes(clean)) {
-      const depositFlex = generateDepositFlex();
+      const bank = await getPaymentBank(env);
+      const depositFlex = generateDepositFlex(bank);
       await deliverPrivateNotice(userId, replyToken, groupId, depositFlex, env, profile.displayName, ctx);
       return;
     }
 
-    // ── 1.3 Deposit Amount Request (in 1-on-1 private chat: e.g. "1000", "1,000", "ฝาก 1000", "ฝาก 1,000 บาท") ──
+    // ── 1.3 Typed Amount ("1000", "ฝาก 1000") ──
+    //
+    // Kept only to answer the question gracefully. This used to open a deposit
+    // transaction with a requested amount, which is what the slip scanner then
+    // had to be reconciled against; now the amount is irrelevant, so the reply
+    // just re-explains the procedure instead of silently creating a record the
+    // player never asked for.
     const cleanWithoutCommas = clean.replace(/,/g, '');
     const pureNumRegex = /^(\d+)\s*(?:บาท|thb|pt)?$/i;
     const depositTextRegex = /^(?:ฝาก|ฝากเงิน|เติม|เติมเงิน)\s*(\d+)\s*(?:บาท|thb|pt)?$/i;
-    let depositAmt: number | null = null;
-    if (!isGroup && pureNumRegex.test(cleanWithoutCommas)) {
-      const match = cleanWithoutCommas.match(pureNumRegex)!;
-      depositAmt = parseInt(match[1], 10);
-    } else if (depositTextRegex.test(cleanWithoutCommas)) {
-      const match = cleanWithoutCommas.match(depositTextRegex)!;
-      depositAmt = parseInt(match[1], 10);
-    }
+    const typedAmount =
+      !isGroup && pureNumRegex.test(cleanWithoutCommas)
+        ? parseInt(cleanWithoutCommas.match(pureNumRegex)![1], 10)
+        : depositTextRegex.test(cleanWithoutCommas)
+          ? parseInt(cleanWithoutCommas.match(depositTextRegex)![1], 10)
+          : null;
 
-    if (depositAmt !== null) {
-      if (depositAmt < 100 || depositAmt > 50000) {
-        const limitFlex = generateNoticeFlex('⚠️ ยอดฝากไม่ถูกต้อง', 'ยอดฝากขั้นต่ำ 100 บาท สูงสุด 50,000 บาทครับ', 'warning');
-        await deliverPrivateNotice(userId, replyToken, groupId, limitFlex, env, profile.displayName, ctx);
-        return;
-      }
-      const txId = `TX${Math.floor(100000 + Math.random() * 900000)}`;
-      const nowStr = new Date().toLocaleTimeString('th-TH', { hour12: false });
-      const newTx: Transaction = {
-        id: txId,
-        playerId: profile.shortId,
-        lineUserId: profile.lineUserId,
-        playerName: profile.displayName,
-        requestedAmount: depositAmt,
-        actualAmount: 0,
-        slipRef: '',
-        status: 'escalated',
-        reviewReason: 'รอผู้ใช้แนบสลิปโอนเงิน',
-        timestamp: nowStr,
-        type: 'deposit',
-        createdAt: Date.now(),
-      };
-      await addTransaction(newTx, env, ctx);
-      const invoiceFlex = generateDepositInvoiceFlex(depositAmt);
-      await deliverPrivateNotice(userId, replyToken, groupId, invoiceFlex, env, profile.displayName, ctx);
+    if (typedAmount !== null) {
+      const bank = await getPaymentBank(env);
+      const hintFlex = generateNoticeFlex(
+        '💡 ไม่ต้องพิมพ์ยอดเงินครับ',
+        `ระบบเติมเครดิตตามยอดที่ปรากฏบนสลิปจริง\n\n` +
+        `วิธีทำ:\n` +
+        `1. โอนเงินเข้าบัญชี ${bank.bankName}\n` +
+        `   เลขบัญชี ${bank.accountNumber}\n` +
+        `   ชื่อบัญชี ${bank.accountName}\n` +
+        `2. ส่งรูปสลิปมาที่แชทนี้\n\n` +
+        `ระบบจะอ่านสลิปแล้วเติมเครดิตให้อัตโนมัติครับ 🙏`,
+        'info'
+      );
+      await deliverPrivateNotice(userId, replyToken, groupId, hintFlex, env, profile.displayName, ctx);
       return;
     }
 
@@ -265,7 +266,9 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         return;
       }
       if (!profile.bankName || !profile.accountNumber) {
-        const bankRegFlex = generateBankRegistrationFlex();
+        // Nothing is deducted and no request is opened — the player is told
+        // precisely what to send and that they then repeat the same command.
+        const bankRegFlex = generateBankRegistrationFlex(withdrawAmt);
         await deliverPrivateNotice(userId, replyToken, groupId, bankRegFlex, env, profile.displayName, ctx);
         return;
       }
@@ -529,29 +532,9 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     return;
   }
 
-  // ── Image Message Handler (Slip Upload) ──
+  // ── Image Message Handler (Slip Upload → auto-credit) ──
   if (event.type === 'message' && event.message?.type === 'image' && userId) {
-    const profile = await getOrCreatePlayerProfile(userId, env, ctx);
-    const replyToken = event.replyToken;
-    const txId = `TX${Math.floor(100000 + Math.random() * 900000)}`;
-    const nowStr = new Date().toLocaleTimeString('th-TH', { hour12: false });
-    const newTx: Transaction = {
-      id: txId,
-      playerId: profile.shortId,
-      lineUserId: profile.lineUserId,
-      playerName: profile.displayName,
-      requestedAmount: 1000,
-      actualAmount: 0,
-      slipRef: event.message.id,
-      status: 'escalated',
-      reviewReason: 'แนบรูปสลิปโอนเงิน - รอแอดมินตรวจสอบยอด',
-      timestamp: nowStr,
-      type: 'deposit',
-      createdAt: Date.now(),
-    };
-    await addTransaction(newTx, env, ctx);
-    const slipFlex = generateSlipReceivedFlex(txId);
-    await deliverPrivateNotice(userId, replyToken, groupId, slipFlex, env, profile.displayName, ctx);
+    await handleSlipUpload(event, userId, env, ctx);
     return;
   }
 
@@ -1011,6 +994,151 @@ async function cancelOrder(
   };
 }
 
+/**
+ * A player sent a slip image.
+ *
+ * The slip is the source of truth: the amount credited is the amount the slip
+ * proves, not anything the player typed beforehand. This replaces a stub that
+ * created a transaction with `requestedAmount: 1000` hardcoded and always
+ * escalated it to an admin.
+ *
+ * Every failure path lands in the Admin Console with the reason attached, so a
+ * slip the scanner cannot read is still a deposit the operator can settle —
+ * the player is never left with money transferred and nothing to show for it.
+ */
+async function handleSlipUpload(
+  event: LineEvent,
+  userId: string,
+  env: Env,
+  ctx?: ExecutionContext
+): Promise<void> {
+  const profile = await getOrCreatePlayerProfile(userId, env, ctx);
+  const messageId = event.message?.id || '';
+  const groupId = event.source?.groupId || null;
+  const replyToken = event.replyToken;
+
+  const nowStr = new Date().toLocaleTimeString('th-TH', { hour12: false });
+  const txId = `TX${Math.floor(100000 + Math.random() * 900000)}`;
+
+  const escalate = async (detail: string, playerMessage: string, slipRef = '') => {
+    const tx: Transaction = {
+      id: txId,
+      playerId: profile.shortId,
+      lineUserId: profile.lineUserId,
+      playerName: profile.displayName,
+      requestedAmount: 0,
+      actualAmount: 0,
+      slipRef: slipRef || messageId,
+      status: 'escalated',
+      reviewReason: detail,
+      timestamp: nowStr,
+      type: 'deposit',
+      createdAt: Date.now(),
+    };
+    await addTransaction(tx, env, ctx);
+    await deliverPrivateNotice(
+      userId,
+      replyToken,
+      groupId,
+      generateNoticeFlex('📥 ได้รับสลิปแล้ว', playerMessage, 'warning'),
+      env,
+      profile.displayName,
+      ctx
+    );
+  };
+
+  // Scanning is a network round-trip to the slip provider; acknowledge the
+  // player first so the reply token is not left to expire on a slow response.
+  await deliverPrivateNotice(
+    userId,
+    replyToken,
+    groupId,
+    generateNoticeFlex('🔍 กำลังตรวจสอบสลิป', 'ระบบกำลังอ่านสลิปของคุณอยู่ครับ\nกรุณารอสักครู่นะครับ 🙏', 'info'),
+    env,
+    profile.displayName,
+    ctx
+  );
+
+  const scan = await scanSlipImage(messageId, env);
+
+  if (!scan.ok) {
+    await escalate(scan.detail, scan.message);
+    return;
+  }
+
+  // GUARD 3 — the same slip must never credit twice.
+  //
+  // The player re-sending a slip, LINE redelivering the webhook, or two uploads
+  // racing would all otherwise credit the same reference again. The claim is
+  // taken BEFORE any money moves and fails closed, so an unavailable Durable
+  // Object means no credit rather than a possible duplicate.
+  const firstUse = await state(env).claimExclusive(
+    `SLIP:${scan.refCode}`,
+    {
+      refCode: scan.refCode,
+      amount: scan.amount,
+      playerId: profile.shortId,
+      lineUserId: profile.lineUserId,
+      messageId,
+      at: Date.now(),
+    },
+    90 * 24 * 60 * 60 * 1000 // 90 days — comfortably past any dispute window
+  );
+
+  if (!firstUse) {
+    await escalate(
+      `Duplicate slip reference ${scan.refCode} — already submitted before`,
+      `⚠️ ตรวจพบสลิปซ้ำในระบบ\nเลขอ้างอิง: ${scan.refCode}\nสลิปนี้เคยถูกใช้งานแล้ว จึงไม่ได้เติมเครดิตซ้ำครับ\n\nหากคุณคิดว่าไม่ถูกต้อง กรุณาแจ้งแอดมินครับ`,
+      scan.refCode
+    );
+    return;
+  }
+
+  // Credit the verified slip amount.
+  profile.balance = (Number(profile.balance) || 0) + scan.amount;
+  await savePlayerProfile(profile, env, ctx);
+
+  // Register the payer's bank details. These are what a later "ถอน x,xxx"
+  // reuses, so a player who has deposited never has to type them again.
+  if (scan.sender?.account && scan.sender.name) {
+    const withBank: PlayerProfile = {
+      ...profile,
+      bankName: profile.bankName || scan.sender.bank || '',
+      accountNumber: profile.accountNumber || scan.sender.account,
+      accountName: profile.accountName || scan.sender.name,
+    };
+    if (withBank.accountNumber !== profile.accountNumber || withBank.accountName !== profile.accountName) {
+      await savePlayerProfile(withBank, env, ctx);
+    }
+  }
+
+  const tx: Transaction = {
+    id: txId,
+    playerId: profile.shortId,
+    lineUserId: profile.lineUserId,
+    playerName: profile.displayName,
+    requestedAmount: scan.amount,
+    actualAmount: scan.amount,
+    slipRef: scan.refCode,
+    status: 'success',
+    reviewReason: `Auto-approved via slip scanner. Ref: ${scan.refCode}`,
+    timestamp: nowStr,
+    type: 'deposit',
+    createdAt: Date.now(),
+  };
+  await addTransaction(tx, env, ctx);
+
+  await deliverPrivateNotice(
+    userId,
+    replyToken,
+    groupId,
+    generateSlipCreditedFlex(scan.amount, profile.balance, scan.refCode),
+    env,
+    profile.displayName,
+    ctx
+  );
+}
+
 // ── Pending Orders & Lookup Helpers ──
 
 /**
@@ -1107,7 +1235,7 @@ export async function refundOrderOnce(
   const amount = Number(order.amount) || 0;
   const claimKey = refundClaimKey(order);
 
-  const claimed = await state(env).claimRefund(claimKey, {
+  const claimed = await state(env).claimExclusive(`REFUND:${claimKey}`, {
     orderNumber: order.orderNumber,
     createdAt: Number(order.createdAt) || 0,
     amount,
