@@ -15,6 +15,7 @@ import {
   stripQuickReply,
   MAIN_MENU_QUICK_REPLY_ITEMS,
   generateDepositFlex,
+  generateTypedAmountHintFlex,
   generateDepositInvoiceFlex,
   generateWithdrawalFlex,
   generateBankRegistrationFlex,
@@ -198,24 +199,10 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
 
     if (typedAmount !== null) {
       const bank = await getPaymentBank(env);
-      const hintFlex = generateNoticeFlex(
-        '💡 ไม่ต้องพิมพ์ยอดเงินครับ',
-        `ระบบเติมเครดิตตามยอดที่ปรากฏบนสลิปจริง\n\n` +
-        `วิธีทำ:\n` +
-        `1. โอนเงินเข้าบัญชี ${bank.bankName}\n` +
-        `   เลขบัญชี ${bank.accountNumber}\n` +
-        `   ชื่อบัญชี ${bank.accountName}\n` +
-        `2. ส่งรูปสลิปมาที่แชทนี้\n\n` +
-        `ระบบจะอ่านสลิปแล้วเติมเครดิตให้อัตโนมัติครับ 🙏`,
-        'info',
-        undefined,
-        // Centred, this seven-line block wrapped into a ragged symmetric blob
-        // with both margins stair-stepping — unreadable on a phone. Left-aligned
-        // so every line starts at a fixed edge and the numbered steps line up
-        // under their own text instead of drifting. Pure black for body text:
-        // at #1E293B on a white bubble this much copy read as soft grey.
-        { align: 'start', color: '#000000' }
-      );
+      // A purpose-built card rather than generateNoticeFlex. As a single text
+      // node the numbered steps could not hang their wrapped lines under the
+      // step text, so it rendered as a ragged blob on a phone.
+      const hintFlex = generateTypedAmountHintFlex(bank);
       await deliverPrivateNotice(userId, replyToken, groupId, hintFlex, env, profile.displayName, ctx);
       return;
     }

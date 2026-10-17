@@ -1705,6 +1705,148 @@ export function generateMainMenuFlex(displayName: string, balance: number): any 
  * admin) each have their own message at the moment they apply, which is when
  * the player can actually act on it.
  */
+// ── 10b. Typed-Amount Hint (typed "1000" or "ฝาก 1000") ──
+/**
+ * Answer to a player who typed a deposit amount instead of following the
+ * no-typing flow. Same facts as `generateDepositFlex`, said a different way:
+ * this one leads with "you don't have to", that one leads with the account.
+ *
+ * Built from real nested boxes rather than one string with `\n` and leading
+ * spaces. A single text node can only centre or flush-left it — it cannot make
+ * a wrapped line hang under the text it belongs to, so the numbered steps came
+ * out as a ragged blob with the continuation lines starting wherever the wrap
+ * landed. Here the marker sits in a fixed-width column and the copy sits beside
+ * it, so a wrapped line indents under the step instead of under the number.
+ */
+export function generateTypedAmountHintFlex(bank: {
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  note?: string;
+}): any {
+  /**
+   * One numbered step: marker in a fixed column, content in the rest. The fixed
+   * width is what keeps step 1 and step 2 on the same axis — sizing the column
+   * to its contents would work only while both markers are the same width.
+   */
+  const step = (marker: string, content: any[]) => ({
+    type: 'box',
+    layout: 'horizontal',
+    spacing: 'sm',
+    margin: 'xs',
+    contents: [
+      {
+        type: 'box',
+        layout: 'vertical',
+        width: '20px',
+        contents: [
+          {
+            type: 'text',
+            text: marker,
+            weight: 'bold',
+            color: '#000000',
+            size: 'sm',
+            align: 'start',
+          },
+        ],
+      },
+      {
+        type: 'box',
+        layout: 'vertical',
+        flex: 1,
+        spacing: 'xs',
+        contents: content,
+      },
+    ],
+  });
+
+  /** Label/value pair. Mirrors `detailRow` in `generateDepositFlex`. */
+  const detailRow = (label: string, value: string, valueColor = '#000000') => ({
+    type: 'box',
+    layout: 'horizontal',
+    spacing: 'sm',
+    contents: [
+      { type: 'text', text: label, color: '#64748B', size: 'xs', flex: 4, wrap: true },
+      { type: 'text', text: value, weight: 'bold', color: valueColor, size: 'xs', flex: 6, align: 'end', wrap: true },
+    ],
+  });
+
+  const bodyText = (text: string) => ({
+    type: 'text',
+    text,
+    color: '#000000',
+    size: 'sm',
+    align: 'start',
+    wrap: true,
+  });
+
+  return {
+    type: 'flex',
+    altText: '💡 ไม่ต้องพิมพ์ยอดเงิน — ระบบเติมเครดิตตามยอดในสลิป',
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#0A3D34',
+        paddingAll: 'sm',
+        contents: [
+          {
+            type: 'text',
+            text: '💡 ไม่ต้องพิมพ์ยอดเงินครับ',
+            weight: 'bold',
+            color: '#FFFFFF',
+            size: 'xs',
+            align: 'center',
+            wrap: true,
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'xs',
+        paddingAll: 'md',
+        contents: [
+          bodyText('ระบบเติมเครดิตตามยอดที่ปรากฏบนสลิปจริง'),
+          { type: 'separator', margin: 'md', color: '#E2E8F0' },
+          {
+            type: 'text',
+            text: 'วิธีทำ',
+            weight: 'bold',
+            color: '#000000',
+            size: 'sm',
+            align: 'start',
+          },
+          step('1.', [
+            bodyText('โอนเงินเข้าบัญชีด้านล่าง'),
+            {
+              type: 'box',
+              layout: 'vertical',
+              backgroundColor: '#F8FAFC',
+              cornerRadius: 'md',
+              paddingAll: 'sm',
+              spacing: 'xs',
+              contents: [
+                detailRow('🏦 ธนาคาร', bank.bankName),
+                detailRow('🔢 เลขบัญชี', bank.accountNumber),
+                detailRow('👤 ชื่อบัญชี', bank.accountName),
+                ...(bank.note
+                  ? [{ type: 'separator', margin: 'xs', color: '#E2E8F0' }, detailRow('📌 หมายเหตุ', bank.note, '#EA580C')]
+                  : []),
+              ],
+            },
+          ]),
+          step('2.', [bodyText('ส่งรูปสลิปมาที่แชทนี้')]),
+          { type: 'separator', margin: 'md', color: '#E2E8F0' },
+          bodyText('ระบบจะอ่านสลิปแล้วเติมเครดิตให้อัตโนมัติครับ 🙏'),
+        ],
+      },
+    },
+  };
+}
+
 export function generateDepositFlex(bank: {
   bankName: string;
   accountNumber: string;
