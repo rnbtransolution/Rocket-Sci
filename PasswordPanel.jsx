@@ -29,6 +29,7 @@ export default function PasswordPanel({
   status = null,
   runBackendFunction,
   onDone,
+  onSessionUpgraded,
   onCancel,
 }) {
   const [currentPassword, setCurrentPassword] = useState('');
@@ -90,6 +91,21 @@ export default function PasswordPanel({
         setError(res?.error || 'ดำเนินการไม่สำเร็จ');
         setBusy(false);
         return;
+      }
+      // Adopt the upgraded session BEFORE anything else.
+      //
+      // A forced rotation starts from a scope:'reset' token, and the server
+      // refuses every admin call (dashboard included) for that scope. The
+      // change response therefore carries a fresh full-scope token; without
+      // storing it here the console comes back to life visually but stays
+      // permanently empty, because the browser keeps presenting the restricted
+      // token. Storing it also covers the recovery-code path, where the panel is
+      // reached without ever having logged in.
+      if (res.session && typeof window !== 'undefined') {
+        sessionStorage.setItem('rocket_admin_session', res.session);
+        if (res.username) sessionStorage.setItem('rocket_admin_user', res.username);
+        if (res.role) sessionStorage.setItem('rocket_admin_role', res.role);
+        if (typeof onSessionUpgraded === 'function') onSessionUpgraded(res);
       }
       if (Array.isArray(res.recoveryCodes) && res.recoveryCodes.length) {
         setCodes(res.recoveryCodes);

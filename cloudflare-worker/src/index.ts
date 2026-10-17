@@ -742,13 +742,34 @@ const isPublicAllowed =
                 currentPassword,
                 newPassword
               );
-              // Re-issue the session: existing tokens stay valid but the
-              // caller gets a fresh one for continuity.
+              // Hand back a FULL-scope session.
+              //
+              // The session used to reach this endpoint is scope:'reset' — the
+              // one minted at login when the credential was flagged mustChange.
+              // Returning only recovery codes left the browser holding that
+              // restricted token forever: every subsequent call (getDashboardData
+              // included) was refused with 403 PasswordChangeRequired, so the
+              // console rendered permanently empty. That is what made LINE OA
+              // deposits look like they never reached the Admin Portal.
+              // The password is now rotated, so the restricted scope has done its
+              // job and must be upgraded in the same response.
               result = {
                 success: true,
                 recoveryCodes: changed.recoveryCodes,
                 daysUntilExpiry: changed.daysUntilExpiry,
                 maxAgeDays: PASSWORD_MAX_AGE_DAYS,
+                ...(env.SESSION_SECRET
+                  ? {
+                      session: await issueSessionToken(
+                        sessionClaims.sub,
+                        sessionClaims.role,
+                        env.SESSION_SECRET
+                      ),
+                      username: sessionClaims.sub,
+                      role: sessionClaims.role,
+                      expiresIn: 8 * 60 * 60,
+                    }
+                  : {}),
               };
             } catch (err) {
               result = { success: false, error: (err as Error)?.message || 'เปลี่ยนรหัสผ่านไม่สำเร็จ' };
@@ -790,6 +811,16 @@ const isPublicAllowed =
               recoveryCodes: reset.recoveryCodes,
               daysUntilExpiry: reset.daysUntilExpiry,
               maxAgeDays: PASSWORD_MAX_AGE_DAYS,
+              // A recovery code + a new password is a complete authentication,
+              // so the operator is signed straight in instead of being bounced
+              // back to the login form (which would otherwise leave any stale
+              // restricted token in session storage).
+              ...(env.SESSION_SECRET
+                ? {
+                    session: await issueSessionToken(reset.username, reset.role, env.SESSION_SECRET),
+                    expiresIn: 8 * 60 * 60,
+                  }
+                : {}),
             };
           } catch (err) {
             result = { success: false, error: (err as Error)?.message || 'รีเซ็ตรหัสผ่านไม่สำเร็จ' };

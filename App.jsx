@@ -509,6 +509,27 @@ export default function App() {
           return 'unchanged';
         }
 
+        // 403 = the session is valid but not permitted to do this — in practice
+        // a password-change (scope:'reset') token. Treating it as "unchanged"
+        // is what let the console sit there permanently blank with no clue why
+        // LINE OA deposits were not appearing; bounce the operator to the
+        // password screen instead of showing a stale, empty dashboard.
+        if (res.status === 403) {
+          let requiresPasswordChange = true;
+          try {
+            const body403 = await res.clone().json();
+            requiresPasswordChange = body403?.requiresPasswordChange !== false;
+          } catch { /* default to the password-change path */ }
+          if (requiresPasswordChange) {
+            setPasswordStatus(null);
+            setMustChangePassword(true);
+          } else {
+            clearAdminSession();
+            setAdminAuthenticated(false);
+          }
+          return 'unchanged';
+        }
+
         // 304 = state unchanged. Keep the previous data, skip the parse entirely.
         if (res.status === 304) return 'unchanged';
 
@@ -987,6 +1008,10 @@ export default function App() {
         username={sessionStorage.getItem('rocket_admin_user') || ''}
         status={passwordStatus}
         runBackendFunction={runBackendFunction}
+        onSessionUpgraded={(res) => {
+          if (res?.role) setAdminRole(res.role);
+          if (res?.username) setUsernameInput(res.username);
+        }}
         onCancel={() => setShowPasswordChange(false)}
         onDone={() => {
           setShowPasswordChange(false);
@@ -1025,6 +1050,13 @@ export default function App() {
         forced
         status={passwordStatus}
         runBackendFunction={runBackendFunction}
+        onSessionUpgraded={(res) => {
+          // The password-change session was scope:'reset'; the upgraded token
+          // is full-scope. Mirror the new identity so the header badge and the
+          // role-gated actions agree with what the server now accepts.
+          if (res?.username) setUsernameInput(res.username);
+          if (res?.role) setAdminRole(res.role);
+        }}
         onDone={() => {
           setMustChangePassword(false);
           setPasswordStatus(null);
@@ -1041,6 +1073,13 @@ export default function App() {
           <PasswordPanel
             mode="reset"
             runBackendFunction={runBackendFunction}
+            onSessionUpgraded={(res) => {
+              // A recovery-code reset authenticates the operator outright —
+              // drop them straight into the console instead of the login form.
+              if (res?.username) setUsernameInput(res.username);
+              if (res?.role) setAdminRole(res.role);
+              setAdminAuthenticated(true);
+            }}
             onCancel={() => setResetMode(false)}
             onDone={() => {
               setResetMode(false);
