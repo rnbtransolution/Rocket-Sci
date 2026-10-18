@@ -112,7 +112,7 @@ async function fresh(label, round) {
     return (d.bets || []).length;
   };
 
-  return { rpc, say, roundStatus, orderCount, dispose: () => mf.dispose() };
+  return { rpc, say, roundStatus, orderCount, kvC: () => mf.getKVNamespace('KV_CACHE'), dispose: () => mf.dispose() };
 }
 
 const ACTIVE = { name: 'R', targetMin: 350, targetMax: 400, status: 'ACTIVE', isChotoy: false, quoteReleased: true, updatedAt: CREATED_AT };
@@ -198,6 +198,45 @@ console.log('\nRESOLVED ROUND — a player bet must not resurrect it');
   check('a player order does NOT reopen a resolved round',
     (await env.roundStatus()) === 'RESOLVED', `status became ${await env.roundStatus()}`);
   check('and creates no order', (await env.orderCount()) === before);
+  await env.dispose();
+}
+
+// ── VOID round + new quote → should reopen to ACTIVE (the production bug) ──
+console.log('\nVOID ROUND + adminBroadcastQuote — must reopen to ACTIVE');
+{
+  // Pre-seed the ACTIVE_GROUP_ID so the bet can reach handleCreateOrder
+  // (without it the handler exits early with "no group" before checking round status).
+  const env = await fresh('void-requote', { ...ACTIVE, status: 'VOID' });
+  const kvC = await env.kvC();
+  await kvC.put('ACTIVE_GROUP_ID', 'Ctest001');
+
+  check('starts VOID', (await env.roundStatus()) === 'VOID');
+  await env.rpc('adminBroadcastQuote', ['ALL', 'รอบใหม่', 300, 350, false]);
+  check('broadcasting a new quote reopens VOID → ACTIVE',
+    (await env.roundStatus()) === 'ACTIVE', `status = ${await env.roundStatus()}`);
+  // The round is now ACTIVE — a player bet should not be rejected by the lock guard.
+  // (Order may still fail for other reasons like LINE push errors in test env,
+  //  but it must NOT fail because the round is locked.)
+  const countBefore = await env.orderCount();
+  await env.say('ชล500');
+  const countAfter = await env.orderCount();
+  check('player bet is accepted (order created, not rejected by round lock)',
+    countAfter > countBefore, `pending orders ${countBefore} -> ${countAfter}`);
+  await env.dispose();
+}
+
+// ── CLOSED round + new quote → must NOT reopen (Final Call lock) ──────────
+console.log('\nCLOSED ROUND + adminBroadcastQuote — must stay CLOSED (Final Call lock)');
+{
+  const env = await fresh('closed-requote', { ...ACTIVE, status: 'CLOSED' });
+  check('starts CLOSED', (await env.roundStatus()) === 'CLOSED');
+  await env.rpc('adminBroadcastQuote', ['ALL', 'ลองใหม่', 300, 350, false]);
+  check('CLOSED round stays locked even after a quote is sent',
+    (await env.roundStatus()) === 'CLOSED', `status = ${await env.roundStatus()}`);
+  const before = await env.orderCount();
+  await env.say('ชล500');
+  check('players still cannot place orders (Final Call still active)',
+    (await env.orderCount()) === before, `orders ${before} -> ${await env.orderCount()}`);
   await env.dispose();
 }
 
