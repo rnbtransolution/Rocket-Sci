@@ -1757,27 +1757,28 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
     const pending = await getPendingOrdersList(env);
     if (pending.length < 2) return 0;
 
-    // Group by amount
-    const byAmount = new Map<number, Order[]>();
+    // Group by exact amount AND rangeMin AND rangeMax so different offsets never collide
+    const byKey = new Map<string, Order[]>();
     for (const o of pending) {
-      const key = Number(o.amount);
-      if (!byAmount.has(key)) byAmount.set(key, []);
-      byAmount.get(key)!.push(o);
+      if (!o || o.status !== 'pending_match') continue;
+      const key = `${Number(o.amount)}:${o.rangeMin ?? ''}:${o.rangeMax ?? ''}`;
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key)!.push(o);
     }
 
     let paired = 0;
-    for (const [amount, group] of byAmount) {
+    const removedNumbers = new Set<string>();
+
+    for (const [, group] of byKey) {
       const lows = group.filter((o) => o.side === 'low').sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
       const highs = group.filter((o) => o.side === 'high').sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-      const pairCount = Math.min(lows.length, highs.length);
-      if (pairCount === 0) continue;
+      if (lows.length === 0 || highs.length === 0) continue;
 
-      for (let i = 0; i < pairCount; i++) {
-        const low = lows[i];
-        const high = highs[i];
-        const matchFlex = generateMatchNotificationFlex(low);
-        const lowNotify = (await state(env).get(`RAW_LINE_${low.creatorId}`)) || low.creatorLineUserId || low.creatorId;
-        const highNotify = (await state(env).get(`RAW_LINE_${high.creatorId}`)) || high.creatorLineUserId || high.creatorId;
+      const usedHighs = new Set<string>();
+      for (const low of lows) {
+        const high = highs.find((h) => !usedHighs.has(h.orderNumber) && h.creatorId !== low.creatorId);
+        if (!high) continue;
+        usedHighs.add(high.orderNumber);
 
         // Mark low as the primary matched order, high is the matcher
         low.status = 'matched';
@@ -1801,11 +1802,16 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
         high.playerHighId = high.creatorId;
         high.playerHighName = high.creatorName;
 
+        removedNumbers.add(low.orderNumber);
+        removedNumbers.add(high.orderNumber);
+
+        const matchFlex = generateMatchNotificationFlex(low);
+        const lowNotify = (await state(env).get(`RAW_LINE_${low.creatorId}`)) || low.creatorLineUserId || low.creatorId;
+        const highNotify = (await state(env).get(`RAW_LINE_${high.creatorId}`)) || high.creatorLineUserId || high.creatorId;
+
         await Promise.all([
           env.KV_ORDERS.put(`ORDER_${low.orderNumber}`, JSON.stringify(low)),
           env.KV_ORDERS.put(`ORDER_${high.orderNumber}`, JSON.stringify(high)),
-          removeFromPendingOrdersList(low.orderNumber, env),
-          removeFromPendingOrdersList(high.orderNumber, env),
           addToMatchedOrdersList(low, env),
           pushToLine(lowNotify, matchFlex, env),
           pushToLine(highNotify, matchFlex, env),
@@ -1814,6 +1820,13 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
         paired++;
       }
     }
+
+    if (removedNumbers.size > 0) {
+      const currentPending = await getPendingOrdersList(env);
+      const filteredPending = currentPending.filter((o) => o && !removedNumbers.has(o.orderNumber));
+      await state(env).put('PENDING_ORDERS_LIST', JSON.stringify(filteredPending), { expirationTtl: 1800 });
+    }
+
     console.log(`[Worker] autoMatchPendingPairs: auto-matched ${paired} pairs.`);
     return paired;
   } catch (err) {

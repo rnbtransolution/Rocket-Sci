@@ -2180,6 +2180,7 @@ const isPublicAllowed =
           // the winner on top. A player who lost was credited in full. Cancel
           // first, then read what is left to settle.
           const { cancelledOrderNumbers } = await cancelHeldPreQuoteOrders(env, ctx);
+          await clearAllPendingOrders(env, ctx);
           const voidedThisSettlement = new Set(cancelledOrderNumbers);
 
           const matchedOrders = await getMatchedOrdersList(env);
@@ -2311,7 +2312,7 @@ const isPublicAllowed =
           }
 
 
-          activeRound.status = 'CLOSED';
+          activeRound.status = 'RESOLVED';
           activeRound.finalTime = finalSeconds;
           activeRound.updatedAt = Date.now();
           await state(env).put('ACTIVE_ROUND', JSON.stringify(activeRound));
