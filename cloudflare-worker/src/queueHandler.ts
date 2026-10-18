@@ -728,8 +728,8 @@ async function handleCreateOrder(
     side,
     amount,
     betType: isPreQuote ? 'pre_quote' : (isCustom ? 'custom_range' : 'range'),
-    rangeMin: isPreQuote ? offsetDelta : (isCustom ? rangeMin : ((round?.targetMin || 330) + offsetDelta)),
-    rangeMax: isPreQuote ? offsetDelta : (isCustom ? rangeMax : ((round?.targetMax || 380) + offsetDelta)),
+    rangeMin: isPreQuote ? undefined : (isCustom ? rangeMin : ((round?.targetMin || 330) + offsetDelta)),
+    rangeMax: isPreQuote ? undefined : (isCustom ? rangeMax : ((round?.targetMax || 380) + offsetDelta)),
     status: orderStatus,
     groupId: targetGroupId,
     userTypedCmd: text,
@@ -1000,6 +1000,7 @@ async function handleMatchOrder(
     env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(order)),
     removeFromPendingOrdersList(resolvedNo, env),
     addToMatchedOrdersList(order, env),
+    savePlayerProfile(profile, env, ctx),
   ];
 
   // ── Remainder handling ──
@@ -1611,9 +1612,16 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
  *  - Auto-matches same-amount opposite-side pairs, notifying both players via DM.
  * Called from adminBroadcastQuote whenever a price tier is officially released.
  */
-export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, env: Env, ctx?: ExecutionContext): Promise<{ converted: number; matched: number; confirmedMatched: number }> {
+export async function releaseHeldPreQuoteOrders(
+  minVal: number,
+  maxVal: number,
+  env: Env,
+  ctx?: ExecutionContext,
+  rocketName?: string
+): Promise<{ converted: number; matched: number; confirmedMatched: number }> {
   const bandMin = Number(minVal) || 330;
   const bandMax = Number(maxVal) || 380;
+  const rName = (rocketName && typeof rocketName === 'string') ? rocketName : 'บั้งไฟสด';
   const pending = await getPendingOrdersList(env);
   const held = pending.filter((o) => o && o.status === 'pending_hold' && o.betType === 'pre_quote');
   const nonHeld = pending.filter((o) => !(o && o.status === 'pending_hold' && o.betType === 'pre_quote'));
@@ -1632,6 +1640,7 @@ export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, 
         order.betType = 'range';
         order.rangeMin = bandMin + offset;
         order.rangeMax = bandMax + offset;
+        order.rocketName = rName;
         order.status = 'pending_match';
         await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
         convertedOrders.push(order);
@@ -1649,6 +1658,7 @@ export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, 
   const matchedPreQuote = (await getMatchedOrdersList(env)).filter(
     (o) => o && o.betType === 'pre_quote'
   );
+  const confirmedMatchedOrders: Order[] = [];
   for (const item of matchedPreQuote) {
     const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
     if (!raw) continue;
@@ -1658,10 +1668,20 @@ export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, 
       const offset = Number(order.offset) || 0;
       order.rangeMin = bandMin + offset;
       order.rangeMax = bandMax + offset;
+      order.rocketName = rName;
       order.offsetConfirmedAt = Date.now();
       await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+      confirmedMatchedOrders.push(order);
       confirmedMatched++;
     } catch (_) {}
+  }
+
+  // Update MATCHED_ORDERS_LIST with confirmed pre-quotes so subsequent reads have range and offsetConfirmedAt
+  if (confirmedMatchedOrders.length > 0) {
+    const fullMatchedList = await getMatchedOrdersList(env);
+    const confirmedMap = new Map(confirmedMatchedOrders.map((o) => [o.orderNumber, o]));
+    const updatedMatched = fullMatchedList.map((o) => (o && confirmedMap.has(o.orderNumber) ? confirmedMap.get(o.orderNumber)! : o));
+    await state(env).put('MATCHED_ORDERS_LIST', JSON.stringify(updatedMatched), { expirationTtl: 86400 });
   }
 
   // Update PENDING_ORDERS_LIST with newly converted pending_match orders
@@ -1688,6 +1708,27 @@ export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, 
       o.creatorName
     );
   });
+
+  // Notify both players of confirmed matched pre-quote orders
+  for (const o of confirmedMatchedOrders) {
+    notifyPromises.push((async () => {
+      const confirmFlex = generateNoticeFlex(
+        `🎯 ยืนยันแผลดวล #${o.orderNumber} อย่างเป็นทางการ`,
+        `บั้งไฟ: ${o.rocketName || rName} | ช่วงราคา: ${o.rangeMin}-${o.rangeMax} วิ\nยอดดวล: ${o.amount.toLocaleString()} pt | คู่ดวล: ${o.creatorName} VS ${o.matcherName}\nแผลดวลล็อคเรียบร้อย พร้อมลุ้นผลการแข่งขันครับ 🚀`,
+        'success'
+      );
+      const tasks: Promise<any>[] = [];
+      if (o.groupId) tasks.push(pushToLine(o.groupId, confirmFlex, env));
+      const cLine = (await state(env).get(`RAW_LINE_${o.creatorId}`)) || o.creatorLineUserId;
+      if (cLine) tasks.push(pushToLine(cLine, confirmFlex, env));
+      if (o.matcherId) {
+        const mLine = (await state(env).get(`RAW_LINE_${o.matcherId}`)) || o.matcherLineUserId;
+        if (mLine && mLine !== cLine) tasks.push(pushToLine(mLine, confirmFlex, env));
+      }
+      await Promise.all(tasks);
+    })());
+  }
+
   await Promise.all(notifyPromises);
 
   console.log(`[Worker] releaseHeldPreQuoteOrders: released ${converted} held pre-quote orders, confirmed ${confirmedMatched} already-matched pre-quote orders, auto-matched ${matched} pairs.`);

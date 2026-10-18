@@ -268,26 +268,35 @@ export function generateOrderFlex(order: Order): any {
 
 // ── 2. Match Notification Card (Dispatched via Private DM to Matchers) ──
 export function generateMatchNotificationFlex(order: Order): any {
-  const { orderNumber, amount, creatorName, matcherName, side, rocketName, rangeMin, rangeMax } = order;
+  const { orderNumber, amount, creatorName, matcherName, side, rocketName, rangeMin, rangeMax, betType, offset, offsetConfirmedAt } = order as any;
   const lowName = side === 'low' ? creatorName : (matcherName || '-');
   const highName = side === 'high' ? creatorName : (matcherName || '-');
-  const rangeStr = (rangeMin && rangeMax) ? `${rangeMin}-${rangeMax}s` : 'ราคาช่าง';
+  const isPreQuoteWaiting = betType === 'pre_quote' && !offsetConfirmedAt;
+  const offsetStr = offset ? ` (${offset > 0 ? '+' : ''}${offset}s)` : '';
+  const rangeStr = (rangeMin && rangeMax)
+    ? `${rangeMin}-${rangeMax}s`
+    : (isPreQuoteWaiting ? `รอราคาช่าง${offsetStr}` : 'ราคาช่าง');
+
+  const titleText = isPreQuoteWaiting ? `🤝 รับแผลล่วงหน้า! #${orderNumber}` : `🤝 แมตช์สำเร็จ! #${orderNumber}`;
+  const rocketText = isPreQuoteWaiting
+    ? `🚀 บั้งไฟ: รอแอดมินเปิดราคา (${rangeStr})`
+    : `🚀 บั้งไฟ: ${rocketName || 'รอบดวลสด'} (${rangeStr})`;
 
   return {
     type: 'flex',
-    altText: `🤝 จับคู่ดวลสำเร็จ! Order #${orderNumber} (${amount} pt)`,
+    altText: `🤝 ${isPreQuoteWaiting ? 'รับแผลล่วงหน้า' : 'จับคู่ดวลสำเร็จ'}! Order #${orderNumber} (${amount} pt)`,
     contents: {
       type: 'bubble',
       size: 'kilo',
       header: {
         type: 'box',
         layout: 'vertical',
-        backgroundColor: '#059669',
+        backgroundColor: isPreQuoteWaiting ? '#D97706' : '#059669',
         paddingAll: 'sm',
         contents: [
           {
             type: 'text',
-            text: `🤝 แมตช์สำเร็จ! #${orderNumber}`,
+            text: titleText,
             weight: 'bold',
             color: '#FFFFFF',
             size: 'sm',
@@ -311,11 +320,21 @@ export function generateMatchNotificationFlex(order: Order): any {
           },
           {
             type: 'text',
-            text: `🚀 บั้งไฟ: ${rocketName || 'รอบดวลสด'} (${rangeStr})`,
+            text: rocketText,
             color: '#64748B',
             size: 'xs',
             align: 'center',
           },
+          ...(isPreQuoteWaiting ? [
+            {
+              type: 'text',
+              text: '⏳ จะยืนยันแผลอย่างเป็นทางการเมื่อแอดมินประกาศราคาช่าง',
+              color: '#D97706',
+              size: 'xs',
+              align: 'center',
+              wrap: true,
+            },
+          ] : []),
           { type: 'separator', margin: 'xs', color: '#E2E8F0' },
           {
             type: 'box',

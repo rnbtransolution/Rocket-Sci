@@ -96,8 +96,8 @@ export interface Order {
   side: 'low' | 'high'; // 'low' = ล/ถ/ต่ำ, 'high' = ชล/สูง
   amount: number;
   betType: 'range' | 'custom_range' | 'pre_quote';
-  rangeMin: number;
-  rangeMax: number;
+  rangeMin?: number;
+  rangeMax?: number;
   status: 'pending_match' | 'pending_hold' | 'matched' | 'matched_paired' | 'cancelled' | 'resolved' | 'settled' | 'void' | 'PRE_CHARGE' | 'refunding';
   groupId?: string | null;
   userTypedCmd?: string | null;

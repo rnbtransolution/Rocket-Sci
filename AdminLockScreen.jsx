@@ -33,12 +33,6 @@ export default function AdminLockScreen({
   setLoginError, 
   setAdminAuthenticated, 
   setAdminRole,
-  adminUsername = '', 
-  // Passwords are intentionally NOT passed to the client. This component
-  // previously received build-time VITE_*_PASSWORD values and compared them
-  // locally, which meant the admin passwords shipped inside the JS bundle.
-  // Authentication is now decided solely by the backend adminLogin RPC.
-  admin1Username = '',
   runBackendFunction,
   onForgotPassword,
   onLoginResult

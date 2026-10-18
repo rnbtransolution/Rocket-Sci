@@ -209,7 +209,7 @@ export default function App() {
           if (typeof runner[functionName] === 'function') {
             runner[functionName](...args);
           } else if (typeof runner.executeAdminAction === 'function') {
-            runner.executeAdminAction(functionName, args, apiKey);
+            runner.executeAdminAction(functionName, args);
           } else {
             reject(new Error(`ไม่พบฟังก์ชัน ${functionName}`));
           }

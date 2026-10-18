@@ -1771,7 +1771,7 @@ const isPublicAllowed =
           };
           await state(env).put('ACTIVE_ROUND', JSON.stringify(roundData));
 
-          await releaseHeldPreQuoteOrders(min, max, env, ctx);
+          await releaseHeldPreQuoteOrders(min, max, env, ctx, name);
 
           const quoteFlex = {
             type: 'flex',
@@ -2164,6 +2164,7 @@ const isPublicAllowed =
                   );
                   continue;
                 }
+                Object.assign(order, fresh);
               } catch (_) {}
             }
             const amt = Number(order.amount) || 0;
