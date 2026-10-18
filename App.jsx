@@ -716,21 +716,63 @@ export default function App() {
     }, 4000);
   };
 
-  // Safe portal close & reset function (preserves player data & transaction history)
-  const handleClosePortal = () => {
+  // Safe portal close & round-reset function (preserves player data & transaction history)
+  const handleClosePortal = async () => {
     const activeMatched = bets.filter(b => b.status === 'matched');
     if (activeMatched.length > 0) {
-      addToast(`⚠️ ไม่สามารถปิดรอบพอร์ทัลได้ เนื่องจากยังมีแผลดวลจับคู่สดค้างอยู่ ${activeMatched.length} แผล! กรุณาชำระแต้มก่อนปิดครับ`, 'danger');
-      return;
+      if (!window.confirm(
+        `⚠️ ยังมีแผลดวลจับคู่สดค้างอยู่ ${activeMatched.length} แผลที่ยังไม่ได้ตัดสินผล!\n\n` +
+        `หากดำเนินการปิดรอบ ระบบจะยกเลิกและคืนแต้ม 100% ให้ผู้เล่นทั้งสองฝ่ายทันที\n\n` +
+        `คุณแน่ใจว่าต้องการปิดรอบและคืนแต้มใช่หรือไม่?`
+      )) {
+        return;
+      }
+    } else {
+      if (!window.confirm(
+        "🔒 คุณต้องการปิดและรีเซ็ตพอร์ทัลรอบปัจจุบันใช่หรือไม่?\n\n" +
+        "ระบบจะ:\n" +
+        "  ✅ คืนแต้มแผลที่ยังค้างอยู่ให้ผู้เล่นทุกคน\n" +
+        "  ✅ ล้างกระดานดวลและสรุปผลรอบนี้\n" +
+        "  ✅ เปิดรอบใหม่พร้อมรับออเดอร์ทันที\n\n" +
+        "  ❌ ไม่ลบข้อมูลผู้เล่น ยอดเครดิต หรือประวัติธุรกรรมใดๆ"
+      )) {
+        return;
+      }
     }
 
-    if (!window.confirm("🔒 คุณต้องการปิดและรีเซ็ตพอร์ทัลรอบปัจจุบันใช่หรือไม่?\n\n(ระบบจะเคลียร์สถานะเวลาบินและสรุปผลรอบนี้ โดยจะไม่ลบข้อมูลผู้เล่น ยอดเครดิตคงเหลือ หรือประวัติธุรกรรมใดๆ ทั้งสิ้น)")) {
-      return;
+    addToast('⏳ กำลังปิดรอบและรีเซ็ตระบบ...', 'info');
+    try {
+      const data = await runBackendFunction('adminCloseRound', []);
+      if (data && data.success === false) {
+        addToast(`⚠️ ปิดรอบไม่สำเร็จ: ${data.message || data.error || 'เกิดข้อผิดพลาด'}`, 'danger');
+        return;
+      }
+
+      // Clear local UI state
+      setSettlementResult(null);
+      setRocketName('');
+      setTargetMin('');
+      setTargetMax('');
+      setQuoteBetAmount('');
+      setQuoteIsChotoy(false);
+      clearTouched();
+      setCustomRocketTime('');
+      setBets([]);
+
+      // Pull fresh data so balances & players reflect refunds immediately
+      await forceSyncFreshData();
+
+      const refunded = data?.clearedOrders ?? data?.clearedPending ?? 0;
+      addToast(
+        refunded > 0
+          ? `✅ ปิดรอบเรียบร้อย — คืนแต้ม ${refunded} แผลค้างอยู่ เปิดรอบใหม่แล้ว 🚀`
+          : '✅ ปิดรอบและเปิดรอบใหม่เรียบร้อยแล้ว 🚀',
+        'success'
+      );
+    } catch (err) {
+      console.error('handleClosePortal error:', err);
+      addToast('❌ ปิดรอบไม่สำเร็จ: ' + (err.message || err), 'danger');
     }
-    
-    setSettlementResult(null);
-    setRocketName('');
-    addToast('🔒 ปิดและรีเซ็ตพอร์ทัลรอบปัจจุบันเรียบร้อย (รักษาข้อมูลผู้เล่นและธุรกรรมครบถ้วน 100%)', 'info');
   };
 
   // Expose reset state for debug button (preventing reference error)

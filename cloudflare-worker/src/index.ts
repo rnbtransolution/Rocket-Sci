@@ -1419,6 +1419,50 @@ const isPublicAllowed =
             updatedAt: Date.now(),
           }));
           result = { success: true, round: roundName };
+
+        } else if (functionName === 'adminCloseRound') {
+          // ──────────────────────────────────────────────────────────────────
+          // "ปิดรอบพอร์ทัล" — soft round reset.
+          //
+          // Clears everything that belongs to the current round so the admin
+          // can start a fresh one cleanly:
+          //   • Cancels & refunds any remaining unmatched pending orders
+          //     AND any active matched orders that were not yet settled
+          //   • Clears PENDING_ORDERS_LIST and MATCHED_ORDERS_LIST
+          //   • Clears SETTLED_ORDERS_LIST (round-history display resets)
+          //   • Resets ACTIVE_ROUND to a blank ACTIVE state
+          //
+          // Intentionally leaves untouched:
+          //   • USER_* profile keys (player names, LINE IDs, balances)
+          //   • PLAYERS_LIST (player roster)
+          //   • TRANSACTIONS / deposit & withdrawal records
+          //   • CHAT_LOG / inbound message history
+          //   • ACTIVE_GROUP_ID, ADMIN_LINE_USER_IDS (config stays)
+          // ──────────────────────────────────────────────────────────────────
+          const { voided } = await voidAllRoundOrders(env, ctx);
+
+          await Promise.all([
+            state(env).put('MATCHED_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 }),
+            state(env).put('SETTLED_ORDERS_LIST', JSON.stringify([])),
+            state(env).put('ACTIVE_ROUND', JSON.stringify({
+              name: 'บั้งไฟสด',
+              targetMin: 330,
+              targetMax: 380,
+              status: 'ACTIVE',
+              isChotoy: false,
+              quoteReleased: false,
+              updatedAt: Date.now(),
+            })),
+          ]);
+
+          console.log(`[Worker] adminCloseRound: round reset complete (${voided} open orders refunded).`);
+          result = {
+            success: true,
+            message: `ปิดรอบเรียบร้อย — คืนแต้ม ${voided} แผลค้างอยู่ และรีเซ็ตรอบใหม่พร้อมรับออเดอร์แล้ว`,
+            clearedOrders: voided,
+            clearedPending: voided,
+          };
+
         } else if (
           functionName === 'clearPendingBets' ||
           functionName === 'adminClearOrders' ||

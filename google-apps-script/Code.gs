@@ -441,6 +441,18 @@ function adminOpenRound(name) {
   return getDashboardData();
 }
 
+function adminCloseRound() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var bSheet = ss.getSheetByName('Bets');
+  if (bSheet) {
+    bSheet.clearContents();
+    bSheet.appendRow(['Order Number', 'Player Low ID', 'Player Low Name', 'Player High ID', 'Player High Name', 'Amount', 'Type', 'Range Min', 'Range Max', 'Status', 'Winner Name', 'Timestamp']);
+  }
+  adminOpenRound('บั้งไฟสด');
+  invalidateDashboardCache();
+  return { success: true, message: 'Closed and reset round' };
+}
+
 /**
  * HTTP GET: Serves the bundled React Admin & Simulator UI, or JSON API for external clients.
  */
@@ -572,6 +584,9 @@ function executeAdminAction(functionName, args, adminKey) {
     case 'adminOpenRound': 
       invalidateDashboardCache();
       return adminOpenRound(args[0]);
+    case 'adminCloseRound':
+      invalidateDashboardCache();
+      return adminCloseRound();
     case 'adminBroadcastQuote': return adminBroadcastQuote(args[0], args[1], args[2], args[3], args[4]);
     case 'adminBroadcastFinalCall': return adminBroadcastFinalCall(args[0]);
     case 'adminBroadcastVoidRound': return adminBroadcastVoidRound(args[0]);
