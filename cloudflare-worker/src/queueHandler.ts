@@ -849,8 +849,24 @@ async function handleMatchOrder(
 
   const order = JSON.parse(orderRaw) as Order;
   if (order.status !== 'pending_match') {
-    const reason = order.status === 'matched' ? 'แผลนี้มีคู่ดวลแล้วครับ' : 'แผลนี้ถูกยกเลิกไปแล้วครับ';
-    await deliverPrivateNotice(userId, replyToken, groupId, generateMatchMismatchFlex(resolvedNo, reason, 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ'), env, profile.displayName, ctx);
+    // Each status gets its own explanation. This used to be a two-way ternary
+    // that called everything which was not `matched` "cancelled" — so an order
+    // merely WAITING for the rocket price to be announced (pending_hold) was
+    // reported as cancelled. Players were tapping a live order and being told
+    // it no longer existed.
+    let reason: string;
+    let hint: string;
+    if (order.status === 'matched') {
+      reason = 'แผลนี้มีคู่ดวลแล้วครับ';
+      hint = 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ';
+    } else if (order.status === 'pending_hold') {
+      reason = 'แผลนี้ยังไม่เปิดรับคู่ครับ — กำลังรอประกาศราคาช่างอยู่';
+      hint = 'เมื่อประกาศราคาแล้ว ระบบจะเปิดรับคู่ให้อัตโนมัติครับ 🚀';
+    } else {
+      reason = 'แผลนี้ถูกยกเลิกไปแล้วครับ';
+      hint = 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ';
+    }
+    await deliverPrivateNotice(userId, replyToken, groupId, generateMatchMismatchFlex(resolvedNo, reason, hint), env, profile.displayName, ctx);
     return;
   }
 

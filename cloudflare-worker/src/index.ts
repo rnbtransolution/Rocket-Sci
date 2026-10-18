@@ -2418,7 +2418,37 @@ const isPublicAllowed =
               } catch (_) {}
             }
             rows.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-            result = { count: rows.length, truncated: scan.list_complete === false, orders: rows };
+
+            // Cross-check the pending index against KV_ORDERS. An order the
+            // board advertises as open but whose record reads back as
+            // cancelled is exactly the state that makes a player tapping the
+            // board get told the order was cancelled.
+            let pendingRaw: string | null = null;
+            try { pendingRaw = await state(env).get('PENDING_ORDERS_LIST'); } catch (_) {}
+            const pendingIndex: any[] = pendingRaw ? JSON.parse(pendingRaw) : [];
+            const byNo = new Map(rows.map((r) => [r.orderNumber, r]));
+            const inconsistencies = pendingIndex.map((p: any) => {
+              const kv = byNo.get(p.orderNumber);
+              return {
+                orderNumber: p.orderNumber,
+                indexStatus: p.status,
+                indexAmount: p.amount,
+                kvStatus: kv ? kv.status : 'MISSING_FROM_KV',
+                kvAmount: kv ? kv.amount : null,
+                kvCreatedAt: kv ? kv.createdAt : null,
+                indexCreatedAt: p.createdAt,
+                agrees: kv && kv.status === p.status,
+              };
+            });
+
+            result = {
+              count: rows.length,
+              truncated: scan.list_complete === false,
+              orders: rows,
+              pendingIndexSize: pendingIndex.length,
+              pendingInconsistencies: inconsistencies.filter((x) => !x.agrees),
+              pendingCrossCheck: inconsistencies,
+            };
           }
         } else if (functionName === 'adminInspectOrder') {
           // Read-only single-order lookup, for investigating a disputed balance.

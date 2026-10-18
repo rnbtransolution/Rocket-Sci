@@ -81,9 +81,17 @@ export function generateRocketLaunchedFlex(): any {
 
 // ── 1. Order Creation Card (Open for Matching in Group Chat) ──
 export function generateOrderFlex(order: Order): any {
-  const { orderNumber, amount, side, userTypedCmd, isChotoy, rocketName, rangeMin, rangeMax, creatorName, betType } = order as any;
+  const { orderNumber, amount, side, userTypedCmd, isChotoy, rocketName, rangeMin, rangeMax, creatorName, betType, status } = order as any;
   const sideShort = side === 'high' ? 'ล' : 'ถ';
   const numAmount = Number(amount) || 100;
+
+  // A pre-quote order is parked as pending_hold until the rocket price is
+  // announced; only then is it released to pending_match and actually
+  // matchable. It must NOT advertise the take-up buttons: tapping one reaches
+  // handleMatchOrder, which rejects anything that is not pending_match and
+  // used to report that as "this order was cancelled" — so the card was
+  // inviting a tap that could only produce a confusing error.
+  const isAwaitingQuote = betType === 'pre_quote' || status === 'pending_hold';
 
   let cardTitle = `${sideShort}${numAmount}`;
   if (betType === 'custom_range' && rangeMin !== undefined && rangeMax !== undefined) {
@@ -166,7 +174,34 @@ export function generateOrderFlex(order: Order): any {
             color: '#F1F5F9',
           },
           // Row 1: 20%, 40%, 80% Quick Deal Buttons
-          {
+          ...(isAwaitingQuote
+            ? [{
+                type: 'box',
+                layout: 'vertical',
+                backgroundColor: '#FEF3C7',
+                cornerRadius: 'sm',
+                paddingAll: 'sm',
+                contents: [
+                  {
+                    type: 'text',
+                    text: '⏳ รอประกาศราคาช่างก่อนครับ',
+                    color: '#92400E',
+                    weight: 'bold',
+                    size: 'xs',
+                    align: 'center',
+                    wrap: true,
+                  },
+                  {
+                    type: 'text',
+                    text: 'เมื่อประกาศราคาแล้ว ระบบจะเปิดรับคู่ให้อัตโนมัติ',
+                    color: '#B45309',
+                    size: 'xs',
+                    align: 'center',
+                    wrap: true,
+                  },
+                ],
+              }]
+            : [{
             type: 'box',
             layout: 'horizontal',
             spacing: 'xs',
@@ -191,30 +226,34 @@ export function generateOrderFlex(order: Order): any {
                 { type: 'text', text: item.label, color: '#0369A1', weight: 'bold', size: 'xs', align: 'center', wrap: true },
               ],
             })),
-          },
-          // Row 2: 100% & Cancel Buttons
+          }]),
+          // Row 2: 100% & Cancel Buttons. While awaiting the quote only Cancel is shown —
+          // the creator must still be able to withdraw, but the 100% take is
+          // the one button that cannot work yet.
           {
             type: 'box',
             layout: 'horizontal',
             spacing: 'xs',
             margin: 'xs',
             contents: [
-              {
-                type: 'box',
-                layout: 'vertical',
-                flex: 1,
-                backgroundColor: '#BBF7D0',
-                cornerRadius: 'sm',
-                paddingAll: 'xs',
-                action: {
-                  type: 'message',
-                  label: `${amt100}`,
-                  text: `ต ${orderNumber} ${amt100}`,
-                },
-                contents: [
-                  { type: 'text', text: `${amt100}`, color: '#15803D', weight: 'bold', size: 'xs', align: 'center', wrap: true },
-                ],
-              },
+              ...(isAwaitingQuote
+                ? []
+                : [{
+                    type: 'box',
+                    layout: 'vertical',
+                    flex: 1,
+                    backgroundColor: '#BBF7D0',
+                    cornerRadius: 'sm',
+                    paddingAll: 'xs',
+                    action: {
+                      type: 'message',
+                      label: `${amt100}`,
+                      text: `ต ${orderNumber} ${amt100}`,
+                    },
+                    contents: [
+                      { type: 'text', text: `${amt100}`, color: '#15803D', weight: 'bold', size: 'xs', align: 'center', wrap: true },
+                    ],
+                  }]),
               {
                 type: 'box',
                 layout: 'vertical',
