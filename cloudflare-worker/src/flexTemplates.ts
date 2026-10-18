@@ -198,58 +198,57 @@ export function generateOrderFlex(order: Order): any {
             color: '#F1F5F9',
           },
           // Row 1: partial Quick Deal Buttons (20%, 40%, 80%), filtered to what can actually be matched
-          // Generous horizontal spacing ('md') and vertical touch padding prevent accidental mis-taps.
           ...(takeOptions.length > 0
             ? [{
                 type: 'box',
                 layout: 'horizontal',
                 spacing: 'md',
-                margin: 'md',
+                margin: 'sm',
                 contents: takeOptions.map((val) => ({
                   type: 'box',
                   layout: 'vertical',
                   flex: 1,
                   backgroundColor: '#BAE6FD',
-                  cornerRadius: 'md',
-                  paddingTop: '10px',
-                  paddingBottom: '10px',
-                  paddingStart: '6px',
-                  paddingEnd: '6px',
+                  cornerRadius: 'sm',
+                  paddingTop: '5px',
+                  paddingBottom: '5px',
+                  paddingStart: '4px',
+                  paddingEnd: '4px',
                   action: {
                     type: 'message',
                     label: `${val}`,
                     text: `ต ${orderNumber} ${val}`,
                   },
                   contents: [
-                    { type: 'text', text: `${val}`, color: '#0369A1', weight: 'bold', size: 'sm', align: 'center', wrap: true },
+                    { type: 'text', text: `${val}`, color: '#0369A1', weight: 'bold', size: 'xs', align: 'center', wrap: true },
                   ],
                 })),
               }]
             : []),
-          // Row 2: 100% Full Take & Cancel Buttons with wide spacing ('md')
+          // Row 2: 100% Full Take & Cancel Buttons with distinct spacing
           {
             type: 'box',
             layout: 'horizontal',
             spacing: 'md',
-            margin: 'md',
+            margin: 'sm',
             contents: [
               {
                 type: 'box',
                 layout: 'vertical',
                 flex: 1,
                 backgroundColor: '#BBF7D0',
-                cornerRadius: 'md',
-                paddingTop: '10px',
-                paddingBottom: '10px',
-                paddingStart: '8px',
-                paddingEnd: '8px',
+                cornerRadius: 'sm',
+                paddingTop: '5px',
+                paddingBottom: '5px',
+                paddingStart: '4px',
+                paddingEnd: '4px',
                 action: {
                   type: 'message',
                   label: `${amt100}`,
                   text: `ต ${orderNumber} ${amt100}`,
                 },
                 contents: [
-                  { type: 'text', text: `${amt100}`, color: '#15803D', weight: 'bold', size: 'sm', align: 'center', wrap: true },
+                  { type: 'text', text: `${amt100}`, color: '#15803D', weight: 'bold', size: 'xs', align: 'center', wrap: true },
                 ],
               },
               {
@@ -257,18 +256,18 @@ export function generateOrderFlex(order: Order): any {
                 layout: 'vertical',
                 flex: 1,
                 backgroundColor: '#FECDD3',
-                cornerRadius: 'md',
-                paddingTop: '10px',
-                paddingBottom: '10px',
-                paddingStart: '8px',
-                paddingEnd: '8px',
+                cornerRadius: 'sm',
+                paddingTop: '5px',
+                paddingBottom: '5px',
+                paddingStart: '4px',
+                paddingEnd: '4px',
                 action: {
                   type: 'message',
                   label: '⛔ ยกเลิก',
                   text: `ยกเลิก ${orderNumber}`,
                 },
                 contents: [
-                  { type: 'text', text: '⛔ ยกเลิก', color: '#9F1239', weight: 'bold', size: 'sm', align: 'center', wrap: true },
+                  { type: 'text', text: '⛔ ยกเลิก', color: '#9F1239', weight: 'bold', size: 'xs', align: 'center', wrap: true },
                 ],
               },
             ],
@@ -280,7 +279,7 @@ export function generateOrderFlex(order: Order): any {
             color: '#2563EB',
             weight: 'bold',
             align: 'center',
-            margin: 'md',
+            margin: 'sm',
             wrap: true,
           },
         ],

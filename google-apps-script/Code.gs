@@ -4922,15 +4922,15 @@ function constructBetOpenFlex(orderNo, amount, side, creatorName, rangeInfo, isC
     {
       "type": "box",
       "layout": "horizontal",
-      "spacing": "xs",
-      "margin": "xs",
+      "spacing": "md",
+      "margin": "sm",
       "contents": row1Buttons
     },
     {
       "type": "box",
       "layout": "horizontal",
-      "spacing": "xs",
-      "margin": "xs",
+      "spacing": "md",
+      "margin": "sm",
       "contents": row2Buttons
     },
     {
