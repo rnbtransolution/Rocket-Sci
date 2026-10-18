@@ -433,12 +433,22 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       return;
     }
 
-    // ── 4. Order Creation Formulas (e.g. "ล500", "ล 500", "ชล500", "300-350ล100", "300-350 ล 100") ──
+    // ── 4. Order Creation Formulas (e.g. "ล500", "ล 500", "ชล500", "+10ชล500", "300-350ล100") ──
     const betRegex = /^(?:([+-]?\d+)\s*)?(ชล|ชถ|ชย|ชต|ย|ถ|ล|สูง|ต่ำ|ยั่ง|ถอย|ไล่)\s*(\d+)?(?:\s*(?:pt|แต้ม))?$/i;
     const rangeBetRegex = /^(\d+)\s*[-/]\s*(\d+)\s*(ชล|ชถ|ชย|ชต|ย|ถ|ล|สูง|ต่ำ)\s*(\d+)?(?:\s*(?:pt|แต้ม))?$/i;
 
-    if (betRegex.test(text) || rangeBetRegex.test(text)) {
-      await handleCreateOrder(text, betRegex, rangeBetRegex, profile, userId, groupId, replyToken, env, ctx);
+    // Thousands separators are stripped before matching. Players type "ชล1,000"
+    // — it is how every other amount in this system is written, and the
+    // deposit and withdrawal paths already accept it — but these two patterns
+    // were tested against the raw text, so a comma made the whole message fall
+    // through to "no match" with no explanation. Matching the normalised form
+    // keeps one way of writing an amount across the whole OA.
+    // `handleCreateOrder` re-derives its captures from the same normalised
+    // string, so the comma can never survive into the parsed amount.
+    const betText = text.replace(/,/g, '');
+
+    if (betRegex.test(betText) || rangeBetRegex.test(betText)) {
+      await handleCreateOrder(betText, betRegex, rangeBetRegex, profile, userId, groupId, replyToken, env, ctx);
       return;
     }
 

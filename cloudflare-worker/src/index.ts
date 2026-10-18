@@ -1778,7 +1778,13 @@ const isPublicAllowed =
                 spacing: 'md',
                 contents: [
                   { type: 'text', text: `⏱️ ช่วงราคา: ${min}-${max} วิ${isChotoy ? ' (ชตย)' : ''}`, weight: 'bold', color: '#0284C7', size: 'sm', align: 'center', wrap: true },
-                  { type: 'text', text: '⚡ พิมพ์ ชล / ชถ (±5, ±10) ได้ทันที', color: '#64748B', size: 'xs', align: 'center', wrap: true },
+                  // The full syntax, not just the keywords. "พิมพ์ ชล / ชถ
+                  // (±5, ±10)" never showed that the stake goes in the same
+                  // message or where the offset sits, so the only way to learn
+                  // it was to guess. Stating the shape as three ordered parts
+                  // and giving one worked example removes the guess.
+                  { type: 'text', text: '⚡ รูปแบบ: [ปรับราคา] ชล/ชถ จำนวนแต้ม', color: '#334155', size: 'xs', align: 'center', wrap: true, weight: 'bold' },
+                  { type: 'text', text: 'เช่น  ชล500  ·  +10ชล500  ·  -5ชถ1,000', color: '#64748B', size: 'xs', align: 'center', wrap: true },
                 ],
               },
             },

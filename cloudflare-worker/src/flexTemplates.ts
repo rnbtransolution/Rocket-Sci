@@ -1330,6 +1330,19 @@ export function generateRuleGuideFlex(): any {
                 margin: 'xs',
               },
               {
+                // The keyword list and the amount list were shown separately,
+                // so nothing on screen ever showed that they combine into ONE
+                // message, or that the offset goes in front. Players had to
+                // guess the full syntax. One worked example settles it.
+                type: 'text',
+                text: '✅ รูปแบบเต็ม: [ปรับราคา] คีย์เวิร์ด จำนวนแต้ม\nเช่น +10ชล500 · -5ชถ1,000 · ชล500',
+                color: '#065F46',
+                size: 'xs',
+                weight: 'bold',
+                wrap: true,
+                margin: 'xs',
+              },
+              {
                 type: 'separator',
                 margin: 'sm',
                 color: '#A7F3D0',
@@ -1345,7 +1358,7 @@ export function generateRuleGuideFlex(): any {
               },
               {
                 type: 'text',
-                text: '• ช่างยัง / ช่างถอย / ชย\n• ชถ / ยัง / ย / ถอย / ถ\n• +5ชย / +5ชถ / +5ย / +5ถ\n• -5ชย / -5ชถ / -5ย / -5ถ\nเช่น ชถ100 , ชถ1000',
+                text: '• ช่างยัง / ช่างถอย / ชย\n• ชถ / ยัง / ย / ถอย / ถ\n• +5ชย / +5ชถ / +5ย / +5ถ\n• -5ชย / -5ชถ / -5ย / -5ถ\nเช่น ชถ100 , ชถ1000\n✅ เต็ม: +10ชย500 · -5ชถ1,000',
                 color: '#047857',
                 size: 'xs',
                 wrap: true,
