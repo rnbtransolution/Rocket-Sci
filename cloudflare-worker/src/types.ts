@@ -123,6 +123,18 @@ export interface Order {
    * on it, so reusing the parent's number would silently drop the remainder.
    */
   parentOrderNumber?: string | null;
+  /** The loser's stake on a settled order — what the winner won gross. */
+  grossWinAmount?: number;
+  /**
+   * Platform rake withheld at settlement: 10% of `grossWinAmount`.
+   * Zero on a draw, where both stakes are returned in full.
+   */
+  commission?: number;
+  /**
+   * Total credited to the winner at settlement: their own stake back plus
+   * `grossWinAmount` less `commission` — i.e. 1.9x for a decisive result.
+   */
+  payout?: number;
 }
 
 export interface PlayerProfile {

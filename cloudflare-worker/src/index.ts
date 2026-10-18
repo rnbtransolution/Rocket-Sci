@@ -128,6 +128,19 @@ async function resolveTargetGroupIds(target: string | undefined, env: Env): Prom
  * JSON.stringify preserves key insertion order, and the payload is built the
  * same way every time, so this is stable across identical states.
  */
+/**
+ * The platform's cut of a won bet.
+ *
+ * Charged on the LOSER's stake only — the winner's own stake is returned
+ * untouched. A winner on a 500pt bet therefore receives 500 + 450 = 950, and
+ * the platform keeps 50. Set to 0 to run settlement with no rake.
+ *
+ * Mirrors the GAS implementation (Code.gs ~3135). Kept as a named constant so
+ * the rate is one edit rather than a literal buried in the settlement loop,
+ * which is how it came to be missing in the first place.
+ */
+const PLATFORM_COMMISSION_RATE = 0.10;
+
 async function hashPayload(payload: unknown): Promise<string> {
   const json = JSON.stringify(payload);
   const digest = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(json));
@@ -560,6 +573,10 @@ const isPublicAllowed =
                 loserName,
                 finalTime: order.finalTime || null,
                 settleAt: order.settledAt || null,
+                // Exposed so the operator can reconcile platform revenue per
+                // round rather than inferring it from balances.
+                commission: Number(order.commission) || 0,
+                payout: Number(order.payout) || 0,
               });
             }
           }
@@ -2115,19 +2132,46 @@ const isPublicAllowed =
                   winnerLineId = order.side === 'high' ? order.creatorId : (order.matcherId || '');
                 }
 
+                // 10% rake on the loser's portion only.
+                //
+                // The winner gets their own stake back untouched, plus the
+                // opponent's stake less the platform's cut. This settlement
+                // paid `amt * 2` with no deduction, so the rake was never
+                // collected at all — the platform earned nothing on every
+                // settled round. The 1.90x multiplier is the behaviour the GAS
+                // implementation shipped with (Code.gs ~3135:
+                // `payout = amount + (winnings - commission)`).
+                //
+                // Rounded to whole points so balances stay integral: a stake of
+                // 333 would otherwise credit 299.7 of winnings and leave every
+                // downstream display showing a fraction.
+                //
+                // A draw refunds both stakes in full and takes no commission —
+                // nobody won, so there is nothing to rake.
+                const hasWinner = Boolean(winnerLineId) && winnerSide !== 'draw';
+                const commission = hasWinner ? Math.round(amt * PLATFORM_COMMISSION_RATE) : 0;
+                const payout = hasWinner ? amt + (amt - commission) : 0;
+
                 order.status = 'settled';
                 order.finalTime = finalSeconds;
                 order.winnerSide = winnerSide;
                 order.winnerName = winnerName;
                 order.settledAt = Date.now();
+                // Recorded on the order so the platform's take is auditable per
+                // round rather than having to be inferred from balances.
+                order.grossWinAmount = hasWinner ? amt : 0;
+                order.commission = commission;
+                order.payout = payout;
+                // Persisted AFTER the settlement fields so the stored order
+                // actually carries the money that moved.
                 await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
                 await addToSettledOrdersList(order, env);
                 await removeFromMatchedOrdersList(order.orderNumber, env);
                 resolvedOrders.push(order);
 
-                if (winnerLineId && winnerSide !== 'draw') {
+                if (hasWinner) {
                   const winnerLineUserId = winnerLineId === order.creatorId ? order.creatorLineUserId : (order.matcherLineUserId || undefined);
-                  await refundPlayerPoints(winnerLineId, winnerLineUserId, amt * 2, env, ctx);
+                  await refundPlayerPoints(winnerLineId, winnerLineUserId, payout, env, ctx);
                 } else if (winnerSide === 'draw') {
                   if (order.creatorId) {
                     await refundPlayerPoints(order.creatorId, order.creatorLineUserId, amt, env, ctx);
@@ -2200,7 +2244,7 @@ const isPublicAllowed =
             if (pairBodies.length > 0) {
               const p2pFlex = {
                 type: 'flex',
-                altText: `🤝 ผลดวลตัวต่อตัว ${pairBodies.length} แผล (ผู้ชนะครบ 2x)`,
+                altText: `🤝 ผลดวลตัวต่อตัว ${pairBodies.length} แผล (ผู้ชนะได้ 1.9x หักค่าคอม 10%)`,
                 contents: {
                   type: 'bubble',
                   size: 'giga',
@@ -2212,6 +2256,7 @@ const isPublicAllowed =
                     contents: [
                       { type: 'text', text: '🤝 ผลดวลตัวต่อตัว (P2P)', weight: 'bold', color: '#FDE047', size: 'sm', align: 'center' },
                       { type: 'text', text: `รอบ [${activeRound.name || 'บั้งไฟสด'}] | เวลา ${finalSeconds}s`, color: '#FFFFFF', size: 'xs', align: 'center', margin: 'xs' },
+                      { type: 'text', text: `ผู้ชนะได้ ${(1 + (1 - PLATFORM_COMMISSION_RATE)).toFixed(1)} เท่า (หักค่าคอม ${PLATFORM_COMMISSION_RATE * 100}% จากส่วนของผู้แพ้)`, color: '#A7F3D0', size: 'xs', align: 'center', margin: 'xs', wrap: true },
                     ],
                   },
                   body: {
