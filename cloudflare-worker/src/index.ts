@@ -1,4 +1,4 @@
-import { Env, LineWebhookPayload, QueueMessage, LineEvent, PlayerProfile, Order } from './types.js';
+import { Env, LineWebhookPayload, QueueMessage, LineEvent, PlayerProfile, Order, InFlightRound } from './types.js';
 import { verifyLineSignature } from './signature.js';
 import { state } from './state.js';
 import { getPaymentBank, setPaymentBank } from './paymentBank.js';
@@ -49,6 +49,10 @@ import {
   refundPlayerPoints,
   refundOrderOnce,
   deduplicatePlayers,
+  getInFlightRounds,
+  saveInFlightRounds,
+  parkCurrentRoundToInFlight,
+  voidInFlightRound,
 } from './queueHandler.js';
 import {
   generateRuleGuideFlex,
@@ -414,7 +418,7 @@ const isPublicAllowed =
         if (functionName === 'getDashboardData') {
           // One batched RPC for the scalar keys (instead of five separate round-trips),
           // with the list-shaped aggregates fetched in parallel alongside it.
-          const [scalars, pendingBets, matchedBets, players, transactions] = await Promise.all([
+          const [scalars, pendingBets, matchedBets, players, transactions, inFlightRounds] = await Promise.all([
             state(env).multi([
               'ACTIVE_ROUND',
               'ACTIVE_GROUP_ID',
@@ -426,11 +430,16 @@ const isPublicAllowed =
             getMatchedOrdersList(env),
             getPlayersList(env),
             getTransactionsList(env),
+            getInFlightRounds(env),
           ]);
           const [roundStr, activeGroupId, lineGroupsRaw, chatLogsRaw, cachedQuotaRaw] = scalars;
 
           const allOrders = [...pendingBets, ...matchedBets];
           const formattedBets = allOrders.map(formatOrderForDashboard);
+          const formattedInFlightRounds = (inFlightRounds || []).map((r: InFlightRound) => ({
+            ...r,
+            matchedOrders: (r.matchedOrders || []).map(formatOrderForDashboard),
+          }));
 
           let parsedGroups = lineGroupsRaw ? JSON.parse(lineGroupsRaw) : [];
           if (!Array.isArray(parsedGroups)) parsedGroups = [];
@@ -490,6 +499,7 @@ const isPublicAllowed =
               players,
               transactions,
               bets: formattedBets,
+              inFlightRounds: formattedInFlightRounds,
               chatLogs,
               activeGroupId: validActiveGroupId,
               lineGroups,
@@ -517,6 +527,7 @@ const isPublicAllowed =
                 players: matchedPlayer ? [matchedPlayer] : [],
                 transactions: userTransactions,
                 bets: userBets,
+                inFlightRounds: formattedInFlightRounds,
                 chatLogs: userChatLogs,
                 activeGroupId: validActiveGroupId,
                 lineGroups: [],
@@ -546,6 +557,7 @@ const isPublicAllowed =
                     timestamp: f.timestamp,
                   };
                 }),
+                inFlightRounds: formattedInFlightRounds,
                 chatLogs: [],
                 activeGroupId: validActiveGroupId,
                 lineGroups: [],
@@ -1409,16 +1421,158 @@ const isPublicAllowed =
           result = { success: true, activeGroupId: gid };
         } else if (functionName === 'adminOpenRound') {
           const roundName = args[0] || 'บั้งไฟสด';
+          const targetMin = Number(args[1]) || 330;
+          const targetMax = Number(args[2]) || 380;
+          const parked = await parkCurrentRoundToInFlight(env, ctx, false);
           await state(env).put('ACTIVE_ROUND', JSON.stringify({
             name: roundName,
-            targetMin: 330,
-            targetMax: 380,
+            targetMin,
+            targetMax,
             status: 'ACTIVE',
             isChotoy: false,
             quoteReleased: false,
             updatedAt: Date.now(),
           }));
-          result = { success: true, round: roundName };
+          result = {
+            success: true,
+            round: roundName,
+            parkedRound: parked.parkedRound,
+            refundedPending: parked.refundedPending,
+            refundedUnquoted: parked.refundedUnquoted,
+          };
+
+        } else if (functionName === 'adminOpenNextRocket') {
+          // Concurrent Rocket Rounds:
+          // Parks Rocket A (and its locked matched orders) into IN_FLIGHT_ROUNDS
+          // and immediately opens ACTIVE_ROUND for Rocket B so players can place
+          // and match orders on Rocket B while Rocket A is still flying.
+          const target = args[0] || 'ALL';
+          const nextName = (args[1] && String(args[1]).trim()) ? String(args[1]).trim() : 'บั้งไฟลำถัดไป';
+          const mode = args[2] === 'quote' ? 'quote' : 'pre_quote';
+          const min = Number(args[3]) || 330;
+          const max = Number(args[4]) || 380;
+          const isChotoy = Boolean(args[5]);
+          const broadcastLine = args[6] !== false;
+
+          const parked = await parkCurrentRoundToInFlight(env, ctx, true);
+
+          const roundData = {
+            name: nextName,
+            targetMin: min,
+            targetMax: max,
+            status: 'ACTIVE',
+            isChotoy: mode === 'quote' ? isChotoy : false,
+            quoteReleased: mode === 'quote',
+            updatedAt: Date.now(),
+          };
+          await state(env).put('ACTIVE_ROUND', JSON.stringify(roundData));
+
+          let sendResults: any[] = [];
+          let targets: string[] = [];
+          if (broadcastLine) {
+            targets = await resolveTargetGroupIds(target, env);
+            if (targets.length > 0) {
+              const payload = mode === 'quote'
+                ? {
+                    type: 'flex',
+                    altText: `🚀 บั้งไฟ [${nextName}] | ช่วงราคา ${min}-${max} วิ${isChotoy ? ' (ชตย)' : ''}`,
+                    contents: {
+                      type: 'bubble',
+                      size: 'mega',
+                      header: {
+                        type: 'box',
+                        layout: 'vertical',
+                        backgroundColor: '#0284C7',
+                        paddingAll: 'md',
+                        contents: [
+                          { type: 'text', text: '🚀 เปิดราคาดวลบั้งไฟ (ลำถัดไป) 🚀', weight: 'bold', color: '#FFFFFF', size: 'md', align: 'center', wrap: true },
+                          { type: 'text', text: nextName, color: '#FFFFFFE6', size: 'sm', align: 'center', margin: 'xs', weight: 'bold', wrap: true },
+                        ],
+                      },
+                      body: {
+                        type: 'box',
+                        layout: 'vertical',
+                        spacing: 'md',
+                        contents: [
+                          { type: 'text', text: `⏱️ ช่วงราคา: ${min}-${max} วิ${isChotoy ? ' (ชตย)' : ''}`, weight: 'bold', color: '#0284C7', size: 'sm', align: 'center', wrap: true },
+                          { type: 'text', text: '⚡ รูปแบบ: [ปรับราคา] ชล/ชถ จำนวนแต้ม', color: '#334155', size: 'xs', align: 'center', wrap: true, weight: 'bold' },
+                          { type: 'text', text: 'เช่น  ชล500  ·  +10ชล500  ·  -5ชถ1,000', color: '#64748B', size: 'xs', align: 'center', wrap: true },
+                        ],
+                      },
+                    },
+                  }
+                : `🎯 บั้งไฟ ${nextName} พร้อมแล้ว เปิดแผลเล่นได้เลยครับ 🚀`;
+              sendResults = await Promise.all(targets.map((to) => pushToLine(to, payload, env)));
+              await appendChatLog(env, {
+                timestamp: formatTime(),
+                userId: targets[0],
+                displayName: nextName,
+                sender: 'admin',
+                text: mode === 'quote'
+                  ? `[เปิดราคาบั้งไฟถัดไป: ${nextName} (${min}-${max}s)]`
+                  : `🎯 บั้งไฟ ${nextName} พร้อมแล้ว เปิดแผลเล่นได้เลยครับ 🚀`,
+                type: mode === 'quote' ? 'flex' : 'text',
+              });
+            }
+          }
+
+          const inFlightRounds = await getInFlightRounds(env);
+          result = {
+            success: true,
+            round: roundData,
+            parkedRound: parked.parkedRound,
+            refundedPending: parked.refundedPending,
+            refundedUnquoted: parked.refundedUnquoted,
+            inFlightRounds,
+            targets,
+            results: sendResults,
+          };
+
+        } else if (functionName === 'adminVoidInFlightRound') {
+          const roundId = String(args[0] || '').trim();
+          const target = args[1] || 'ALL';
+          const voidRes = await voidInFlightRound(roundId, env, ctx);
+          if (!voidRes.found) {
+            result = { success: false, error: 'ไม่พบรอบบั้งไฟที่กำลังลอยอยู่' };
+          } else {
+            const targets = await resolveTargetGroupIds(target, env);
+            if (targets.length > 0) {
+              const voidFlex = {
+                type: 'flex',
+                altText: `⛔ ช่าง ⛔ (โมฆะรอบ ${voidRes.roundName || ''})`,
+                contents: {
+                  type: 'bubble',
+                  size: 'kilo',
+                  header: {
+                    type: 'box',
+                    layout: 'vertical',
+                    backgroundColor: '#FECDD3',
+                    paddingAll: 'md',
+                    contents: [
+                      { type: 'text', text: `⛔ ช่าง ⛔ (โมฆะรอบ ${voidRes.roundName || 'บั้งไฟ'})`, weight: 'bold', color: '#9F1239', size: 'sm', align: 'center', wrap: true },
+                    ],
+                  },
+                  body: {
+                    type: 'box',
+                    layout: 'vertical',
+                    backgroundColor: '#FFF1F2',
+                    spacing: 'xs',
+                    contents: [
+                      { type: 'text', text: `ยกเลิกและคืนแต้มแผลดวลของ [${voidRes.roundName || 'บั้งไฟ'}] 100% เรียบร้อยครับ 🚀`, weight: 'bold', color: '#BE123C', size: 'xs', align: 'center', wrap: true },
+                    ],
+                  },
+                },
+              };
+              await Promise.all(targets.map((to) => pushToLine(to, voidFlex, env)));
+            }
+            result = {
+              success: true,
+              roundId,
+              roundName: voidRes.roundName,
+              voided: voidRes.voided,
+              inFlightRounds: await getInFlightRounds(env),
+            };
+          }
 
         } else if (functionName === 'adminCloseRound') {
           // ──────────────────────────────────────────────────────────────────
@@ -1428,22 +1582,23 @@ const isPublicAllowed =
           // can start a fresh one cleanly:
           //   • Cancels & refunds any remaining unmatched pending orders
           //     AND any active matched orders that were not yet settled
+          //   • Also refunds & clears any parked In-Flight rounds
           //   • Clears PENDING_ORDERS_LIST and MATCHED_ORDERS_LIST
           //   • Clears SETTLED_ORDERS_LIST (round-history display resets)
           //   • Resets ACTIVE_ROUND to a blank ACTIVE state
-          //
-          // Intentionally leaves untouched:
-          //   • USER_* profile keys (player names, LINE IDs, balances)
-          //   • PLAYERS_LIST (player roster)
-          //   • TRANSACTIONS / deposit & withdrawal records
-          //   • CHAT_LOG / inbound message history
-          //   • ACTIVE_GROUP_ID, ADMIN_LINE_USER_IDS (config stays)
           // ──────────────────────────────────────────────────────────────────
           const { voided } = await voidAllRoundOrders(env, ctx);
+          let voidedInFlight = 0;
+          const inFlightList = await getInFlightRounds(env);
+          for (const flt of inFlightList) {
+            const vr = await voidInFlightRound(flt.roundId, env, ctx);
+            voidedInFlight += vr.voided;
+          }
 
           await Promise.all([
             state(env).put('MATCHED_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 }),
             state(env).put('SETTLED_ORDERS_LIST', JSON.stringify([])),
+            state(env).put('IN_FLIGHT_ROUNDS', JSON.stringify([])),
             state(env).put('ACTIVE_ROUND', JSON.stringify({
               name: 'บั้งไฟสด',
               targetMin: 330,
@@ -1455,12 +1610,13 @@ const isPublicAllowed =
             })),
           ]);
 
-          console.log(`[Worker] adminCloseRound: round reset complete (${voided} open orders refunded).`);
+          const totalVoided = voided + voidedInFlight;
+          console.log(`[Worker] adminCloseRound: round reset complete (${totalVoided} open orders refunded).`);
           result = {
             success: true,
-            message: `ปิดรอบเรียบร้อย — คืนแต้ม ${voided} แผลค้างอยู่ และรีเซ็ตรอบใหม่พร้อมรับออเดอร์แล้ว`,
-            clearedOrders: voided,
-            clearedPending: voided,
+            message: `ปิดรอบเรียบร้อย — คืนแต้ม ${totalVoided} แผลค้างอยู่ และรีเซ็ตรอบใหม่พร้อมรับออเดอร์แล้ว`,
+            clearedOrders: totalVoided,
+            clearedPending: totalVoided,
           };
 
         } else if (
@@ -1526,6 +1682,7 @@ const isPublicAllowed =
           }
           // 1. Clear atomic order state in KV
           await clearAllPendingOrders(env);
+          await state(env).delete('IN_FLIGHT_ROUNDS');
           // 2. Clear players, transactions, and logs in KV
           await state(env).delete('PLAYERS_LIST');
           await state(env).delete('TRANSACTIONS_LIST');
@@ -1704,7 +1861,16 @@ const isPublicAllowed =
                 const profile = profileRaw ? JSON.parse(profileRaw) : null;
                 payload = generateBalanceFlex(profile?.displayName || 'ผู้เล่น', profile?.balance || 0);
               } else if (clean === 'บั้งไฟออก' || clean === 'rocketout') {
-                payload = generateRocketLaunchedFlex();
+                const roundStr = await state(env).get('ACTIVE_ROUND');
+                const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
+                round.status = 'CLOSED';
+                round.updatedAt = Date.now();
+                await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
+                if (round.quoteReleased !== true) {
+                  await cancelHeldPreQuoteOrders(env, ctx);
+                }
+                await clearAllPendingOrders(env, ctx);
+                payload = generateRocketLaunchedFlex(round.name);
               } else if (clean === 'ฝากเงิน' || clean === 'เติมเงิน' || clean === 'deposit' || clean === 'ฝาก') {
                 payload = generateDepositFlex(await getPaymentBank(env));
               } else if (clean === 'กระดานดวล' || clean === 'กระดาน' || clean === 'board') {
@@ -1716,6 +1882,10 @@ const isPublicAllowed =
                 round.status = 'CLOSED';
                 round.updatedAt = Date.now();
                 await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
+                if (round.quoteReleased !== true) {
+                  await cancelHeldPreQuoteOrders(env, ctx);
+                }
+                await clearAllPendingOrders(env, ctx);
               } else if (clean.startsWith('เปิดรอบ') || clean.startsWith('เปิดรับดวล')) {
                 const roundStr = await state(env).get('ACTIVE_ROUND');
                 const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
@@ -1750,13 +1920,24 @@ const isPublicAllowed =
               results: sendResults,
             };
           }
-        } else if (functionName === 'adminBroadcastRocketLaunched') {
+        } else if (functionName === 'adminBroadcastRocketLaunched' || functionName === 'adminBroadcastFinalCall') {
           const target = args[0];
-          const rocketLaunchFlex = generateRocketLaunchedFlex();
+          const roundStr = await state(env).get('ACTIVE_ROUND');
+          const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
+          round.status = 'CLOSED';
+          round.updatedAt = Date.now();
+          await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
+
+          if (round.quoteReleased !== true) {
+            await cancelHeldPreQuoteOrders(env, ctx);
+          }
+          await clearAllPendingOrders(env, ctx);
+
+          const rocketLaunchFlex = generateRocketLaunchedFlex(round.name);
 
           const targets = await resolveTargetGroupIds(target, env);
           if (targets.length === 0) {
-            result = { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ' };
+            result = { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ', round };
           } else {
             const sendResults = await Promise.all(targets.map((to) => pushToLine(to, rocketLaunchFlex, env)));
             const allSuccess = sendResults.every((r) => r.success);
@@ -1767,13 +1948,14 @@ const isPublicAllowed =
               userId: targets[0],
               displayName: 'ระบบ',
               sender: 'admin',
-              text: '[🚀 บั้งไฟออกแล้ว]',
+              text: `[🚀 บั้งไฟออกแล้ว · ปิดรับดวล (${round.name || 'บั้งไฟสด'})]`,
               type: 'flex',
             });
 
             result = {
               success: allSuccess,
               targets,
+              round,
               error: allSuccess ? undefined : (quotaError?.error || 'ส่งข้อความเข้าบางกลุ่มไม่สำเร็จ'),
               code: quotaError ? 429 : (allSuccess ? 200 : 400),
               isQuotaExhausted: !!quotaError,
@@ -1875,74 +2057,6 @@ const isPublicAllowed =
               targets,
               round: roundData,
               error: allSuccess ? undefined : (quotaError?.error || 'ส่งข้อความเข้าบางกลุ่มไม่สำเร็จ'),
-              code: quotaError ? 429 : (allSuccess ? 200 : 400),
-              isQuotaExhausted: !!quotaError,
-              results: sendResults,
-            };
-          }
-        } else if (functionName === 'adminBroadcastFinalCall') {
-          const target = args[0];
-          const roundStr = await state(env).get('ACTIVE_ROUND');
-          const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
-          round.status = 'CLOSED';
-          round.updatedAt = Date.now();
-          await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
-
-          if (round.quoteReleased !== true) {
-            await cancelHeldPreQuoteOrders(env, ctx);
-          }
-
-          const finalFlex = {
-            type: 'flex',
-            altText: '⛔ ปิดรับดวลรอบนี้แล้ว ⛔',
-            contents: {
-              type: 'bubble',
-              size: 'kilo',
-              header: {
-                type: 'box',
-                layout: 'vertical',
-                backgroundColor: '#BE123C',
-                paddingAll: 'md',
-                contents: [
-                  { type: 'text', text: '⛔ ปิดรับดวลรอบนี้แล้ว ⛔', weight: 'bold', color: '#FFFFFF', size: 'md', align: 'center', wrap: true },
-                ],
-              },
-              body: {
-                type: 'box',
-                layout: 'vertical',
-                backgroundColor: '#FFF1F2',
-                spacing: 'sm',
-                contents: [
-                  { type: 'text', text: '🔒 แผลเปิดที่ไม่ติดคู่ดวล ถูกยกเลิกโดยอัตโนมัติ', size: 'xs', color: '#475569', align: 'center', wrap: true },
-                  { type: 'text', text: '⚠️ หลังจากนี้ ห้ามพิมพ์รายการใดๆ ทั้งสิ้นครับ', size: 'xs', color: '#DC2626', weight: 'bold', align: 'center', wrap: true },
-                ],
-              },
-            },
-          };
-
-          await clearAllPendingOrders(env);
-
-          const targets = await resolveTargetGroupIds(target, env);
-          if (targets.length === 0) {
-            result = { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ' };
-          } else {
-            const sendResults = await Promise.all(targets.map((to) => pushToLine(to, finalFlex, env)));
-            const allSuccess = sendResults.every((r) => r.success);
-            const quotaError = sendResults.find((r) => r.code === 429);
-
-            await appendChatLog(env, {
-              timestamp: formatTime(),
-              userId: targets[0],
-              displayName: 'ระบบ',
-              sender: 'admin',
-              text: '[⛔ ปิดรับดวลรอบนี้แล้ว]',
-              type: 'flex',
-            });
-
-            result = {
-              success: allSuccess,
-              targets,
-              error: allSuccess ? undefined : (quotaError?.error || 'ส่งเข้าบางกลุ่มไม่สำเร็จ'),
               code: quotaError ? 429 : (allSuccess ? 200 : 400),
               isQuotaExhausted: !!quotaError,
               results: sendResults,
@@ -2399,6 +2513,196 @@ const isPublicAllowed =
           }
 
           result = { success: true, resolvedCount: resolvedOrders.length, finalTime: finalSeconds };
+        } else if (functionName === 'adminResolveInFlightRound') {
+          const requestedRoundId = args[0] ? String(args[0]).trim() : '';
+          const finalSeconds = Number(args[1]) || 0;
+          const inFlightList = await getInFlightRounds(env);
+          const targetRound = requestedRoundId
+            ? inFlightList.find((r) => r.roundId === requestedRoundId)
+            : inFlightList[0];
+
+          if (!targetRound) {
+            result = { success: false, error: 'ไม่พบรอบบั้งไฟที่กำลังลอยอยู่ในคิวตัดสินผล' };
+          } else {
+            const remaining = inFlightList.filter((r) => r.roundId !== targetRound.roundId);
+            await saveInFlightRounds(remaining, env);
+
+            const tMin = Number(targetRound.targetMin) || 330;
+            const tMax = Number(targetRound.targetMax) || 380;
+            const resolvedOrders: any[] = [];
+
+            for (const order of targetRound.matchedOrders || []) {
+              if (!order || !order.orderNumber) continue;
+              const freshRaw = await env.KV_ORDERS.get(`ORDER_${order.orderNumber}`);
+              if (freshRaw) {
+                try {
+                  const fresh = JSON.parse(freshRaw) as Order;
+                  if (fresh.status !== 'matched') {
+                    console.warn(
+                      `[Worker] skipping in-flight order #${order.orderNumber} at settlement: status is "${fresh.status}", not "matched"`
+                    );
+                    continue;
+                  }
+                  Object.assign(order, fresh);
+                } catch (_) {}
+              }
+
+              // If an unquoted pre-quote somehow reached in-flight, refund both sides instead of settling
+              if (order.betType === 'pre_quote' && !order.offsetConfirmedAt) {
+                order.status = 'refunding';
+                await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+                await refundOrderOnce(order, env, ctx, 'cancel_held_pre_quote');
+                order.status = 'cancelled';
+                await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+                continue;
+              }
+
+              const amt = Number(order.amount) || 0;
+              const orderMin = Number.isFinite(Number(order.rangeMin)) && Number(order.rangeMin) > 0
+                ? Number(order.rangeMin)
+                : tMin;
+              const orderMax = Number.isFinite(Number(order.rangeMax)) && Number(order.rangeMax) > 0
+                ? Number(order.rangeMax)
+                : tMax;
+
+              let winnerSide: 'low' | 'high' | 'draw' = 'draw';
+              if (finalSeconds < orderMin) {
+                winnerSide = 'low';
+              } else if (finalSeconds > orderMax) {
+                winnerSide = 'high';
+              } else {
+                winnerSide = 'draw';
+              }
+
+              let winnerName = '-';
+              let winnerLineId = '';
+              if (winnerSide === 'low') {
+                winnerName = (order.side === 'low' ? order.creatorName : order.matcherName) || '-';
+                winnerLineId = order.side === 'low' ? order.creatorId : (order.matcherId || '');
+              } else if (winnerSide === 'high') {
+                winnerName = (order.side === 'high' ? order.creatorName : order.matcherName) || '-';
+                winnerLineId = order.side === 'high' ? order.creatorId : (order.matcherId || '');
+              }
+
+              const hasWinner = Boolean(winnerLineId) && winnerSide !== 'draw';
+              const commission = hasWinner ? Math.round(amt * PLATFORM_COMMISSION_RATE) : 0;
+              const payout = hasWinner ? amt + (amt - commission) : 0;
+
+              order.status = 'settled';
+              order.finalTime = finalSeconds;
+              order.winnerSide = winnerSide;
+              order.winnerName = winnerName;
+              order.settledAt = Date.now();
+              order.grossWinAmount = hasWinner ? amt : 0;
+              order.commission = commission;
+              order.payout = payout;
+
+              await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+              await addToSettledOrdersList(order, env);
+              resolvedOrders.push(order);
+
+              if (hasWinner) {
+                const winnerLineUserId = winnerLineId === order.creatorId ? order.creatorLineUserId : (order.matcherLineUserId || undefined);
+                await refundPlayerPoints(winnerLineId, winnerLineUserId, payout, env, ctx);
+              } else if (winnerSide === 'draw') {
+                if (order.creatorId) {
+                  await refundPlayerPoints(order.creatorId, order.creatorLineUserId, amt, env, ctx);
+                }
+                if (order.matcherId) {
+                  await refundPlayerPoints(order.matcherId, order.matcherLineUserId || undefined, amt, env, ctx);
+                }
+              }
+            }
+
+            const targets = await resolveTargetGroupIds('ALL', env);
+            if (targets.length > 0) {
+              const settleFlex = {
+                type: 'flex',
+                altText: `🏁 สรุปผลเวลาบิน [${targetRound.name || 'บั้งไฟสด'}] เวลา ${finalSeconds} วินาที`,
+                contents: {
+                  type: 'bubble',
+                  size: 'mega',
+                  header: {
+                    type: 'box',
+                    layout: 'vertical',
+                    backgroundColor: '#0F172A',
+                    paddingAll: 'md',
+                    contents: [
+                      { type: 'text', text: '🏁 สรุปผลการแข่งขัน 🏁', weight: 'bold', color: '#FDE047', size: 'sm', align: 'center' },
+                      { type: 'text', text: `บั้งไฟ [${targetRound.name || 'บั้งไฟสด'}]`, color: '#FFFFFF', size: 'md', weight: 'bold', align: 'center', margin: 'xs' },
+                      { type: 'text', text: `⏱️ เวลาบินจริง: ${finalSeconds} วินาที`, color: '#38BDF8', size: 'lg', weight: 'bold', align: 'center', margin: 'xs' },
+                    ],
+                  },
+                  body: {
+                    type: 'box',
+                    layout: 'vertical',
+                    spacing: 'sm',
+                    contents: [
+                      { type: 'text', text: `ช่วงราคาเป้าหมาย: ${tMin}-${tMax} วิ`, size: 'xs', color: '#64748B', align: 'center' },
+                      { type: 'text', text: `ชำระผลตัดสินเรียบร้อย ${resolvedOrders.length} แผลดวล 🚀`, size: 'sm', color: '#059669', weight: 'bold', align: 'center' },
+                    ],
+                  },
+                },
+              };
+              await Promise.all(targets.map((to) => pushToLine(to, settleFlex, env)));
+
+              const pairBodies: any[] = resolvedOrders
+                .filter((o) => o.winnerSide && o.winnerSide !== 'draw')
+                .slice(0, 20)
+                .map((o) => {
+                  const isCreatorWinner = o.winnerSide === o.side;
+                  const winName = (isCreatorWinner ? o.creatorName : o.matcherName) || o.winnerName || '-';
+                  const loseName = (isCreatorWinner ? o.matcherName : o.creatorName) || '-';
+                  return {
+                    type: 'box',
+                    layout: 'horizontal',
+                    spacing: 'sm',
+                    contents: [
+                      { type: 'text', text: `#${o.orderNumber}`, size: 'xs', color: '#64748B', flex: 2, wrap: true },
+                      { type: 'text', text: `💰 ${Number(o.amount).toLocaleString()}`, size: 'xs', color: '#0F172A', weight: 'bold', flex: 2, align: 'end' },
+                      { type: 'text', text: `👑 ${String(winName).slice(0, 14)}`, size: 'xs', color: '#059669', weight: 'bold', flex: 4, wrap: true },
+                      { type: 'text', text: `💥 ${String(loseName).slice(0, 14)}`, size: 'xs', color: '#DC2626', flex: 4, wrap: true },
+                    ],
+                  };
+                });
+              if (pairBodies.length > 0) {
+                const p2pFlex = {
+                  type: 'flex',
+                  altText: `🤝 ผลดวลตัวต่อตัว ${pairBodies.length} แผล`,
+                  contents: {
+                    type: 'bubble',
+                    size: 'giga',
+                    header: {
+                      type: 'box',
+                      layout: 'vertical',
+                      backgroundColor: '#064E3B',
+                      paddingAll: 'md',
+                      contents: [
+                        { type: 'text', text: '🤝 ผลดวลตัวต่อตัว (P2P)', weight: 'bold', color: '#FDE047', size: 'sm', align: 'center' },
+                        { type: 'text', text: `รอบ [${targetRound.name || 'บั้งไฟสด'}] | เวลา ${finalSeconds}s`, color: '#FFFFFF', size: 'xs', align: 'center', margin: 'xs' },
+                      ],
+                    },
+                    body: {
+                      type: 'box',
+                      layout: 'vertical',
+                      spacing: 'sm',
+                      contents: pairBodies,
+                    },
+                  },
+                };
+                await Promise.all(targets.map((to) => pushToLine(to, p2pFlex, env)));
+              }
+            }
+
+            result = {
+              success: true,
+              roundId: targetRound.roundId,
+              roundName: targetRound.name,
+              resolvedCount: resolvedOrders.length,
+              finalTime: finalSeconds,
+              inFlightRounds: remaining,
+            };
+          }
         } else if (functionName === 'simulateTextMessageFromDashboard') {
           const text = args[0];
           const userId = args[1] || 'user';

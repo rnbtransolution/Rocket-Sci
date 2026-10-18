@@ -1,4 +1,4 @@
-import { Env, LineEvent, Order, PlayerProfile, RocketRound, Transaction } from './types.js';
+import { Env, InFlightRound, LineEvent, Order, PlayerProfile, RocketRound, Transaction } from './types.js';
 import { state } from './state.js';
 import { scanSlipImage } from './slipScanner.js';
 import { getPaymentBank } from './paymentBank.js';
@@ -597,10 +597,12 @@ async function handleCreateOrder(
     return;
   }
 
-  // 1. Parallel fetch of ACTIVE_ROUND & PENDING_ORDERS_LIST (1 roundtrip instead of 2+)
-  const [roundStr, pendingList] = await Promise.all([
+  // 1. Parallel fetch of ACTIVE_ROUND, PENDING_ORDERS_LIST, MATCHED_ORDERS_LIST & IN_FLIGHT_ROUNDS
+  const [roundStr, pendingList, matchedList, inFlightRounds] = await Promise.all([
     state(env).get('ACTIVE_ROUND'),
     getPendingOrdersList(env),
+    getMatchedOrdersList(env),
+    getInFlightRounds(env),
   ]);
   let round = roundStr ? (JSON.parse(roundStr) as RocketRound) : null;
 
@@ -707,10 +709,14 @@ async function handleCreateOrder(
     return;
   }
 
-  // 2. Generate unique orderNumber in-memory (0ms KV latency)
-  const existingNumbers = new Set(pendingList.map((o) => o.orderNumber));
+  // 2. Generate unique orderNumber in-memory across pending, matched, AND in-flight rounds
+  const existingNumbers = new Set<string>([
+    ...pendingList.map((o) => o.orderNumber),
+    ...matchedList.map((o) => o.orderNumber),
+    ...inFlightRounds.flatMap((r) => (r.matchedOrders || []).map((o) => o.orderNumber)),
+  ]);
   let orderNumber = Math.floor(1000 + Math.random() * 9000).toString();
-  for (let attempt = 0; attempt < 20 && existingNumbers.has(orderNumber); attempt++) {
+  for (let attempt = 0; attempt < 30 && existingNumbers.has(orderNumber); attempt++) {
     orderNumber = Math.floor(1000 + Math.random() * 9000).toString();
   }
 
@@ -1954,6 +1960,137 @@ export async function getMatchedOrdersList(env: Env): Promise<Order[]> {
     console.error('[Worker] getMatchedOrdersList error:', err);
     return [];
   }
+}
+
+export async function getInFlightRounds(env: Env): Promise<InFlightRound[]> {
+  try {
+    const cached = await state(env).get('IN_FLIGHT_ROUNDS');
+    if (!cached) return [];
+    const parsed = JSON.parse(cached);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.error('[Worker] getInFlightRounds error:', err);
+    return [];
+  }
+}
+
+export async function saveInFlightRounds(rounds: InFlightRound[], env: Env): Promise<void> {
+  try {
+    await state(env).put('IN_FLIGHT_ROUNDS', JSON.stringify(rounds));
+  } catch (err) {
+    console.error('[Worker] saveInFlightRounds error:', err);
+  }
+}
+
+/**
+ * Parks the current rocket round (Rocket A) and its locked matched orders into
+ * `IN_FLIGHT_ROUNDS` so that the active betting board (`ACTIVE_ROUND`,
+ * `PENDING_ORDERS_LIST`, `MATCHED_ORDERS_LIST`) is 100% free and isolated for
+ * the next rocket (Rocket B) while Rocket A is still in the air awaiting
+ * flight-time settlement.
+ *
+ * Unquoted pre-quote orders and unmatched pending orders of Rocket A are
+ * cancelled and refunded 100% first, so only locked matched orders travel into
+ * the in-flight settlement queue.
+ */
+export async function parkCurrentRoundToInFlight(
+  env: Env,
+  ctx?: ExecutionContext,
+  forcePark: boolean = false
+): Promise<{ parkedRound: InFlightRound | null; refundedPending: number; refundedUnquoted: number }> {
+  const roundStr = await state(env).get('ACTIVE_ROUND');
+  const round: RocketRound = roundStr
+    ? JSON.parse(roundStr)
+    : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380, status: 'ACTIVE', isChotoy: false, quoteReleased: false, updatedAt: Date.now() };
+
+  let refundedUnquoted = 0;
+  if (round.quoteReleased !== true) {
+    const unq = await cancelHeldPreQuoteOrders(env, ctx);
+    refundedUnquoted = unq.cancelled;
+  }
+
+  const pendingRes = await clearAllPendingOrders(env, ctx);
+  const refundedPending = pendingRes.cleared;
+
+  const matchedOrders = await getMatchedOrdersList(env);
+  const existingInFlight = await getInFlightRounds(env);
+
+  // Clear active board lists so Rocket B starts with an isolated, empty board
+  await Promise.all([
+    state(env).put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 86400 }),
+    state(env).put('MATCHED_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 86400 }),
+  ]);
+
+  const roundId = `FLT_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`;
+  const rocketLabel = round.name || 'บั้งไฟสด';
+
+  const stampedOrders: Order[] = [];
+  for (const item of matchedOrders) {
+    if (!item || !item.orderNumber) continue;
+    const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
+    const fresh: Order = raw ? JSON.parse(raw) : item;
+    if (fresh.status !== 'matched') continue;
+    fresh.inFlightRoundId = roundId;
+    fresh.rocketName = fresh.rocketName || rocketLabel;
+    await env.KV_ORDERS.put(`ORDER_${fresh.orderNumber}`, JSON.stringify(fresh));
+    stampedOrders.push(fresh);
+  }
+
+  if (stampedOrders.length === 0 && !forcePark) {
+    return { parkedRound: null, refundedPending, refundedUnquoted };
+  }
+
+  const inFlightEntry: InFlightRound = {
+    roundId,
+    name: rocketLabel,
+    targetMin: Number(round.targetMin) || 330,
+    targetMax: Number(round.targetMax) || 380,
+    isChotoy: Boolean(round.isChotoy),
+    quoteReleased: Boolean(round.quoteReleased),
+    launchedAt: Date.now(),
+    matchedOrders: stampedOrders,
+  };
+
+  await saveInFlightRounds([...existingInFlight, inFlightEntry], env);
+  return { parkedRound: inFlightEntry, refundedPending, refundedUnquoted };
+}
+
+/**
+ * Voids a specific parked In-Flight round (e.g., Rocket A misfired mid-flight)
+ * and refunds 100% of its matched orders without touching Rocket B's active
+ * betting board.
+ */
+export async function voidInFlightRound(
+  roundId: string,
+  env: Env,
+  ctx?: ExecutionContext
+): Promise<{ found: boolean; voided: number; roundName?: string }> {
+  const inFlightList = await getInFlightRounds(env);
+  const target = inFlightList.find((r) => r.roundId === roundId);
+  if (!target) {
+    return { found: false, voided: 0 };
+  }
+
+  const remaining = inFlightList.filter((r) => r.roundId !== roundId);
+  await saveInFlightRounds(remaining, env);
+
+  let voidedCount = 0;
+  for (const item of target.matchedOrders || []) {
+    if (!item || !item.orderNumber) continue;
+    const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
+    const order: Order = raw ? JSON.parse(raw) : item;
+    if (order.status === 'matched' || order.status === 'refunding') {
+      const isRecovering = order.status === 'refunding';
+      order.status = 'refunding';
+      await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+      const refund = await refundOrderOnce(order, env, ctx, 'void_in_flight');
+      order.status = 'cancelled';
+      await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+      if (refund.refunded && !isRecovering) voidedCount++;
+    }
+  }
+
+  return { found: true, voided: voidedCount, roundName: target.name };
 }
 
 async function resolveOrderNumber(

@@ -523,6 +523,20 @@ export default function App() {
   const [lineGroups, setLineGroups] = useState([]); // List of active connected LINE Groups
   const [broadcastTargetGroup, setBroadcastTargetGroup] = useState('ALL'); // Multi-group broadcast target
 
+  // Concurrent / In-Flight Rocket Rounds State (Rocket A in air while Rocket B opens)
+  const [inFlightRounds, setInFlightRounds] = useState([]);
+  const [roundStatus, setRoundStatus] = useState('IDLE');
+  const [activeRoundObj, setActiveRoundObj] = useState(null);
+  const [nextRocketName, setNextRocketName] = useState('');
+  const [nextRocketMode, setNextRocketMode] = useState('pre_quote'); // 'pre_quote' | 'quote'
+  const [nextRocketMin, setNextRocketMin] = useState('');
+  const [nextRocketMax, setNextRocketMax] = useState('');
+  const [nextRocketChotoy, setNextRocketChotoy] = useState(false);
+  const [nextRocketBroadcast, setNextRocketBroadcast] = useState(true);
+  const [isOpeningNextRocket, setIsOpeningNextRocket] = useState(false);
+  const [inFlightTimes, setInFlightTimes] = useState({}); // { [roundId]: '' }
+  const [settlingInFlightId, setSettlingInFlightId] = useState(null);
+
   // Detect live Node.js Express backend (localhost, Render, Vercel, Railway, or custom host)
   const isLiveBackend = typeof window !== 'undefined' && !isGAS;
 
@@ -539,6 +553,8 @@ export default function App() {
       if (Array.isArray(data.transactions)) setTransactions(data.transactions);
       if (Array.isArray(data.bets)) setBets(data.bets);
       if (Array.isArray(data.flights)) setFlights(data.flights);
+      if (Array.isArray(data.inFlightRounds)) setInFlightRounds(data.inFlightRounds);
+      if (data.roundStatus) setRoundStatus(data.roundStatus);
       if (data.activeGroupId !== undefined) setActiveGroupId(data.activeGroupId);
       if (data.lineGroups && data.lineGroups.length > 0) {
         setLineGroups(data.lineGroups);
@@ -548,6 +564,8 @@ export default function App() {
         setLineGroups([]);
       }
       if (data.activeRound) {
+        setActiveRoundObj(data.activeRound);
+        if (data.activeRound.status) setRoundStatus(data.activeRound.status);
         // Do NOT write into a field the admin is currently editing.
         //
         // The poll runs every <600ms. Previously the round was copied into the
@@ -758,6 +776,7 @@ export default function App() {
       clearTouched();
       setCustomRocketTime('');
       setBets([]);
+      setInFlightRounds([]);
 
       // Pull fresh data so balances & players reflect refunds immediately
       await forceSyncFreshData();
@@ -822,6 +841,7 @@ export default function App() {
         setTransactions([]);
         setBets([]);
       }
+      setInFlightRounds([]);
       try {
         if (typeof window !== 'undefined') {
           localStorage.removeItem('rocket_sci_dashboard_cache');
@@ -847,6 +867,9 @@ export default function App() {
         if (Array.isArray(d.players)) setPlayers(deduplicatePlayersList(d.players));
         if (Array.isArray(d.transactions)) setTransactions(d.transactions);
         if (Array.isArray(d.bets)) setBets(d.bets);
+        if (Array.isArray(d.inFlightRounds)) setInFlightRounds(d.inFlightRounds);
+        if (d.roundStatus) setRoundStatus(d.roundStatus);
+        if (d.activeRound) setActiveRoundObj(d.activeRound);
         if (d.activeGroupId !== undefined) setActiveGroupId(d.activeGroupId);
         if (d.lineGroups) setLineGroups(d.lineGroups);
         if (typeof window !== 'undefined') {
@@ -857,6 +880,125 @@ export default function App() {
     } catch (e) {
       console.error('[Force Sync Error]:', e);
       addToast('❌ ไม่สามารถดึงข้อมูลสดได้', 'error');
+    }
+  };
+
+  // ── Concurrent Round Handlers: Open Rocket B while Rocket A is in the air ──
+  const handleOpenNextRocket = async () => {
+    const cleanName = (nextRocketName || '').trim() || 'บั้งไฟชุดต่อไป';
+    if (nextRocketMode === 'quote') {
+      const minNum = Number(nextRocketMin);
+      const maxNum = Number(nextRocketMax);
+      if (!minNum || !maxNum || minNum <= 0 || maxNum <= 0) {
+        addToast('⚠️ กรุณาระบุช่วงราคาเปิด (Min - Max) ให้ถูกต้องสำหรับโหมดออกราคาช่างทันที', 'warning');
+        return;
+      }
+    }
+
+    setIsOpeningNextRocket(true);
+    try {
+      const res = await runBackendFunction('adminOpenNextRocket', [
+        broadcastTargetGroup || 'ALL',
+        cleanName,
+        nextRocketMode,
+        nextRocketMode === 'quote' ? Number(nextRocketMin) : 0,
+        nextRocketMode === 'quote' ? Number(nextRocketMax) : 0,
+        Boolean(nextRocketChotoy),
+        Boolean(nextRocketBroadcast),
+      ]);
+      if (res && res.success === false) {
+        addToast(`⚠️ เปิดรอบถัดไปไม่สำเร็จ: ${res.message || res.error || 'เกิดข้อผิดพลาด'}`, 'danger');
+        return;
+      }
+
+      // Sync active rocket form fields to the newly opened Rocket B
+      clearTouched();
+      setRocketName(cleanName);
+      if (nextRocketMode === 'quote') {
+        setTargetMin(String(nextRocketMin));
+        setTargetMax(String(nextRocketMax));
+        setQuoteIsChotoy(Boolean(nextRocketChotoy));
+      } else {
+        setTargetMin('');
+        setTargetMax('');
+        setQuoteIsChotoy(false);
+      }
+
+      setNextRocketName('');
+      setNextRocketMin('');
+      setNextRocketMax('');
+      setNextRocketChotoy(false);
+
+      await forceSyncFreshData();
+
+      if (res?.parkedRound) {
+        addToast(`🚀 พักบั้งไฟ "${res.parkedRound.name}" (${res.parkedRound.matchedCount} คู่ดวล) ไว้รอผลเวลา และเปิดรับดวล "${cleanName}" สำเร็จ!`, 'success');
+      } else {
+        addToast(`🚀 เปิดรอบบั้งไฟใหม่ "${cleanName}" พร้อมรับออเดอร์แล้ว!`, 'success');
+      }
+    } catch (err) {
+      console.error('handleOpenNextRocket error:', err);
+      addToast('❌ เปิดรอบบั้งไฟถัดไปไม่สำเร็จ: ' + (err.message || err), 'danger');
+    } finally {
+      setIsOpeningNextRocket(false);
+    }
+  };
+
+  const handleSettleInFlightRound = async (flt) => {
+    const rawTime = inFlightTimes[flt.roundId];
+    const finalSec = Number(rawTime);
+    if (!rawTime || isNaN(finalSec) || finalSec <= 0) {
+      addToast(`⚠️ กรุณากรอกเวลาบินจริง (วินาที) ของบั้งไฟ "${flt.name}" ให้ถูกต้อง`, 'warning');
+      return;
+    }
+
+    setSettlingInFlightId(flt.roundId);
+    try {
+      const res = await runBackendFunction('adminResolveInFlightRound', [flt.roundId, finalSec]);
+      if (res && res.success === false) {
+        addToast(`⚠️ ตัดสินผลไม่สำเร็จ: ${res.message || res.error || 'เกิดข้อผิดพลาด'}`, 'danger');
+        return;
+      }
+      setInFlightTimes(prev => {
+        const next = { ...prev };
+        delete next[flt.roundId];
+        return next;
+      });
+      if (res?.summary) {
+        setSettlementResult(res.summary);
+      }
+      setFlightLogs(prev => [
+        `[${new Date().toLocaleTimeString('th-TH')}] 🏆 ตัดสินบั้งไฟกลางอากาศ "${flt.name}" เวลา ${finalSec}s เคลียร์ ${res?.resolvedCount ?? 0} คู่ดวล`,
+        ...prev,
+      ]);
+      await forceSyncFreshData();
+      addToast(`🏆 ตัดสินผลบั้งไฟ "${flt.name}" (${finalSec} วินาที) และโอนแต้มเรียบร้อย! (ไม่กระทบแผลรอบปัจจุบัน)`, 'success');
+    } catch (err) {
+      console.error('handleSettleInFlightRound error:', err);
+      addToast('❌ ตัดสินผลไม่สำเร็จ: ' + (err.message || err), 'danger');
+    } finally {
+      setSettlingInFlightId(null);
+    }
+  };
+
+  const handleVoidInFlightRound = async (flt) => {
+    if (!window.confirm(`⛔ ยืนยันสั่งโมฆะเฉพาะบั้งไฟ "${flt.name}" และคืนแต้มทั้ง ${flt.matchedCount || (flt.matchedOrders || []).length} คู่ดวล 100% หรือไม่?\n\n(ออเดอร์ของบั้งไฟรอบใหม่ที่กำลังเปิดรับอยู่จะไม่ได้รับผลกระทบ)`)) {
+      return;
+    }
+    setSettlingInFlightId(flt.roundId);
+    try {
+      const res = await runBackendFunction('adminVoidInFlightRound', [flt.roundId, broadcastTargetGroup || 'ALL']);
+      if (res && res.success === false) {
+        addToast(`⚠️ โมฆะรอบไม่สำเร็จ: ${res.message || res.error || 'เกิดข้อผิดพลาด'}`, 'danger');
+        return;
+      }
+      await forceSyncFreshData();
+      addToast(`⛔ โมฆะบั้งไฟ "${flt.name}" และคืนแต้ม ${res?.voidedCount ?? 0} คู่ดวลเรียบร้อยแล้ว`, 'warning');
+    } catch (err) {
+      console.error('handleVoidInFlightRound error:', err);
+      addToast('❌ โมฆะรอบไม่สำเร็จ: ' + (err.message || err), 'danger');
+    } finally {
+      setSettlingInFlightId(null);
     }
   };
   
@@ -1279,8 +1421,95 @@ export default function App() {
     );
   }
 
+  const navItems = [
+    {
+      id: 'quote',
+      activeMatch: (t) => t === 'quote' || t === 'rocket',
+      label: 'ออกราคาช่าง',
+      sublabel: 'Quote & Round Setup',
+      icon: Layers,
+      section: 'FIELD OPERATIONS',
+    },
+    {
+      id: 'next_rocket',
+      activeMatch: (t) => t === 'next_rocket',
+      label: 'เปิดบั้งไฟถัดไป (Rocket B)',
+      sublabel: 'Concurrent In-Flight',
+      icon: Rocket,
+      section: 'FIELD OPERATIONS',
+      badge: inFlightRounds.length > 0 ? `${inFlightRounds.length} บินอยู่` : null,
+      badgeColor: 'bg-orange-500 text-white animate-pulse',
+    },
+    {
+      id: 'broadcast',
+      activeMatch: (t) => t === 'broadcast',
+      label: 'บรอดแคสต์ & คีย์ลัด',
+      sublabel: 'Live Action & Hotkeys',
+      icon: Radio,
+      section: 'FIELD OPERATIONS',
+    },
+    {
+      id: 'settle',
+      activeMatch: (t) => t === 'settle',
+      label: 'ป้อนผลเวลา',
+      sublabel: 'Flight Telemetry Settle',
+      icon: Zap,
+      section: 'FIELD OPERATIONS',
+      badge: inFlightRounds.length > 0 ? inFlightRounds.length : null,
+      badgeColor: 'bg-amber-500 text-slate-950',
+    },
+    {
+      id: 'bets',
+      activeMatch: (t) => t === 'bets',
+      label: 'กระดานดวลสด',
+      sublabel: 'Live P2P & Mechanic Board',
+      icon: Trophy,
+      section: 'MATCH & LEDGER',
+      badge: bets.filter(b => b.status === 'matched' || b.status === 'pending_match').length || null,
+      badgeColor: 'bg-sky-500 text-white',
+    },
+    {
+      id: 'review',
+      activeMatch: (t) => t === 'review',
+      onClick: () => { setAdminTab('review'); setTxStatusFilter('escalated'); },
+      label: 'สลิปค้างรีวิว',
+      sublabel: 'Escalated Slips & Withdrawals',
+      icon: FileText,
+      section: 'MATCH & LEDGER',
+      badge: transactions.filter(t => t.status === 'escalated').length || null,
+      badgeColor: 'bg-amber-500 text-slate-950 animate-pulse',
+    },
+    {
+      id: 'players',
+      activeMatch: (t) => t === 'players',
+      label: 'เครดิตผู้เล่น',
+      sublabel: 'Player Wallets & Bank',
+      icon: Users,
+      section: 'ADMINISTRATION',
+      badge: players.length || null,
+      badgeColor: 'bg-slate-700 text-slate-200',
+    },
+    {
+      id: 'logs',
+      activeMatch: (t) => t === 'logs',
+      onClick: () => { setAdminTab('logs'); setTxStatusFilter('all'); },
+      label: 'ทรานแซคชัน',
+      sublabel: 'All Financial Logs',
+      icon: Database,
+      section: 'ADMINISTRATION',
+    },
+    {
+      id: 'bank',
+      activeMatch: (t) => t === 'bank',
+      label: 'บัญชีรับเงิน',
+      sublabel: 'LINE OA Deposit Account',
+      icon: Landmark,
+      section: 'ADMINISTRATION',
+    },
+  ];
+
   return (
-    <div className="min-h-screen p-4 md:p-8 flex flex-col items-center">
+    <div className="min-h-screen bg-slate-100/80 lg:pl-[260px] flex flex-col">
       {/* Toast Manager */}
       <div className="fixed top-4 right-4 z-[999999] flex flex-col gap-2 max-w-sm w-80">
         {toasts.map(t => (
@@ -1304,300 +1533,743 @@ export default function App() {
         ))}
       </div>
 
-      {/* Header Panel - Cloud PMS Corporate Bar */}
-      <header className="w-full max-w-6xl mb-6 bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-3.5 sm:gap-4 shadow-xs">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-sky-600 flex items-center justify-center text-white shrink-0 shadow-sm">
-            <Cloud size={22} />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-lg sm:text-xl md:text-2xl font-black tracking-tight text-slate-900 uppercase font-heading whitespace-nowrap">
+      {/* ═══ LEFT SIDEBAR NAVIGATION (Hotel PMS Inspired Fixed Sidebar on Desktop) ═══ */}
+      <aside
+        className="hidden lg:flex lg:fixed lg:inset-y-0 lg:left-0 lg:w-[260px] lg:z-40 flex-col justify-between select-none shadow-2xl"
+        style={{
+          background: 'linear-gradient(180deg, #0f1a2e 0%, #0a1220 100%)',
+          borderRight: '1px solid rgba(255, 255, 255, 0.08)',
+        }}
+      >
+        {/* Brand Header */}
+        <div>
+          <div
+            className="px-5 py-5 flex items-center gap-3.5"
+            style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.07)' }}
+          >
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 font-black text-base shadow-md"
+              style={{
+                background: 'linear-gradient(135deg, #c9a961, #9b7c38)',
+                color: '#0f1a2e',
+              }}
+            >
+              🚀
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-black tracking-wider text-white uppercase font-heading truncate">
                 Bang Fai Commander
-              </h1>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap shrink-0 ${
-                (window.isNodeJS || isGAS) ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-slate-100 border border-slate-200 text-slate-600'
-              }`}>
-                {(window.isNodeJS || isGAS) ? '🟢 Cloud Connected' : '🧪 Sandbox Mode'}
+              </div>
+              <div
+                className="text-[10px] font-bold uppercase tracking-widest mt-0.5 truncate"
+                style={{ color: '#c9a961' }}
+              >
+                Field Command PMS
+              </div>
+            </div>
+          </div>
+
+          {/* Live Active & In-Flight Status Strip inside Sidebar */}
+          <div
+            className="mx-3 mt-3 p-3 rounded-xl space-y-2"
+            style={{
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid rgba(201, 169, 97, 0.22)',
+            }}
+          >
+            <div className="flex items-center justify-between text-[10px] font-bold">
+              <span className="uppercase tracking-wider text-slate-400">รอบปัจจุบัน (Active)</span>
+              <span
+                className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                  roundStatus === 'OPEN'
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    : roundStatus === 'CLOSED'
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                    : 'bg-slate-700 text-slate-300'
+                }`}
+              >
+                {roundStatus === 'OPEN'
+                  ? activeRoundObj?.quoteReleased
+                    ? '🟢 เปิดราคาแล้ว'
+                    : '🟡 รอราคาช่าง'
+                  : roundStatus === 'CLOSED'
+                  ? '🔴 ปิดรับดวล'
+                  : roundStatus}
               </span>
-              {adminRole === 'superadmin' ? (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-50 border border-purple-300 text-purple-700 flex items-center gap-1 shadow-xs whitespace-nowrap shrink-0" title="Super Admin: สิทธิ์เต็มรูปแบบทุกฟังก์ชัน">
-                  <ShieldCheck size={12} className="text-purple-600" />
-                  <span>Super Admin</span>
+            </div>
+            <div className="text-xs font-extrabold text-white truncate font-heading">
+              🎯 {activeRoundObj?.name || rocketName || 'ยังไม่ได้ตั้งชื่อบั้งไฟ'}
+            </div>
+            {inFlightRounds.length > 0 && (
+              <button
+                onClick={() => setAdminTab('next_rocket')}
+                className="w-full mt-1 px-2.5 py-1.5 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 border border-orange-400/40 text-orange-200 text-[10.5px] font-bold flex items-center justify-between transition-all cursor-pointer"
+              >
+                <span>🚀 บั้งไฟบนฟ้า ({inFlightRounds.length} ลำ)</span>
+                <span className="underline text-[9.5px]">ดูคิว ➜</span>
+              </button>
+            )}
+          </div>
+
+          {/* Navigation Menu Items Grouped by Section */}
+          <nav className="px-2.5 py-3 space-y-4 overflow-y-auto max-h-[calc(100vh-290px)]">
+            {['FIELD OPERATIONS', 'MATCH & LEDGER', 'ADMINISTRATION'].map(sectionName => (
+              <div key={sectionName} className="space-y-1">
+                <div className="px-3 py-1 text-[9.5px] font-extrabold uppercase tracking-widest text-slate-400/70">
+                  {sectionName}
+                </div>
+                {navItems
+                  .filter(item => item.section === sectionName)
+                  .map(item => {
+                    const IconComp = item.icon;
+                    const isActive = item.activeMatch(adminTab);
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => (item.onClick ? item.onClick() : setAdminTab(item.id))}
+                        className="w-full flex items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-lg text-left transition-all cursor-pointer relative group"
+                        style={
+                          isActive
+                            ? {
+                                background: 'linear-gradient(90deg, rgba(201, 169, 97, 0.20) 0%, rgba(201, 169, 97, 0.04) 100%)',
+                                color: '#e0c88a',
+                                fontWeight: 700,
+                              }
+                            : {
+                                color: 'rgba(255, 255, 255, 0.68)',
+                              }
+                        }
+                      >
+                        {isActive && (
+                          <span
+                            className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r"
+                            style={{ background: '#c9a961' }}
+                          />
+                        )}
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <IconComp
+                            size={16}
+                            className="shrink-0 transition-transform group-hover:scale-105"
+                            style={{ color: isActive ? '#e0c88a' : 'rgba(255,255,255,0.55)' }}
+                          />
+                          <div className="min-w-0">
+                            <div className="text-xs font-heading tracking-wide truncate leading-tight">
+                              {item.label}
+                            </div>
+                            <div
+                              className="text-[9.5px] truncate leading-tight mt-0.5"
+                              style={{ color: isActive ? 'rgba(224, 200, 138, 0.75)' : 'rgba(255, 255, 255, 0.38)' }}
+                            >
+                              {item.sublabel}
+                            </div>
+                          </div>
+                        </div>
+                        {item.badge !== null && item.badge !== undefined && (
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-black shrink-0 ${item.badgeColor}`}>
+                            {item.badge}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+              </div>
+            ))}
+          </nav>
+        </div>
+
+        {/* Sidebar Footer */}
+        <div
+          className="px-4 py-3.5 text-[10.5px] space-y-2"
+          style={{
+            borderTop: '1px solid rgba(255, 255, 255, 0.07)',
+            color: 'rgba(255, 255, 255, 0.45)',
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-1.5 font-semibold text-slate-300">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              Cloud Edge KV
+            </span>
+            <span className="font-mono text-[10px]" style={{ color: '#c9a961' }}>
+              {adminRole === 'superadmin' ? 'SUPER ADMIN' : 'FIELD ADMIN'}
+            </span>
+          </div>
+          <div className="text-[9.5px] text-slate-400/70 truncate">
+            LINE Group: {activeGroupId ? `#${activeGroupId.slice(-6)}` : 'Auto-Broadcast'}
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content Wrapper */}
+      <div className="w-full max-w-6xl mx-auto p-3.5 sm:p-6 space-y-5 flex-1">
+        {/* Header Panel - Cloud PMS Corporate Bar */}
+        <header className="w-full bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-3.5 sm:gap-4 shadow-xs">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-sky-600 flex items-center justify-center text-white shrink-0 shadow-sm">
+              <Cloud size={22} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-lg sm:text-xl md:text-2xl font-black tracking-tight text-slate-900 uppercase font-heading whitespace-nowrap">
+                  Bang Fai Commander
+                </h1>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap shrink-0 ${
+                  (window.isNodeJS || isGAS) ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-slate-100 border border-slate-200 text-slate-600'
+                }`}>
+                  {(window.isNodeJS || isGAS) ? '🟢 Cloud Connected' : '🧪 Sandbox Mode'}
                 </span>
-              ) : (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-sky-50 border border-sky-300 text-sky-700 flex items-center gap-1 shadow-xs whitespace-nowrap shrink-0" title="Admin: สิทธิ์ปฏิบัติการภาคสนาม (ไม่สามารถรีเซ็ตระบบได้)">
-                  <User size={12} className="text-sky-600" />
-                  <span>Admin</span>
-                  <span className="font-semibold text-sky-600/80">({usernameInput || 'Admin1'})</span>
+                {adminRole === 'superadmin' ? (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-50 border border-purple-300 text-purple-700 flex items-center gap-1 shadow-xs whitespace-nowrap shrink-0" title="Super Admin: สิทธิ์เต็มรูปแบบทุกฟังก์ชัน">
+                    <ShieldCheck size={12} className="text-purple-600" />
+                    <span>Super Admin</span>
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-sky-50 border border-sky-300 text-sky-700 flex items-center gap-1 shadow-xs whitespace-nowrap shrink-0" title="Admin: สิทธิ์ปฏิบัติการภาคสนาม (ไม่สามารถรีเซ็ตระบบได้)">
+                    <User size={12} className="text-sky-600" />
+                    <span>Admin</span>
+                    <span className="font-semibold text-sky-600/80">({usernameInput || 'Admin1'})</span>
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5 font-sans">
+                ระบบบริหารจัดการธุรกรรมเครดิตและการแข่งขันบั้งไฟสดภาคสนาม
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 sm:gap-2 justify-start xl:justify-end flex-nowrap shrink-0 overflow-x-auto">
+            <button 
+              onClick={handleClosePortal}
+              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
+              title="รีเซ็ตและปิดรอบพอร์ทัลปัจจุบัน โดยไม่ลบข้อมูลผู้เล่นหรือประวัติธุรกรรม"
+            >
+              <RotateCcw size={13} className="text-amber-700" />
+              <span>ปิดรอบพอร์ทัล</span>
+            </button>
+            <button 
+              onClick={forceSyncFreshData}
+              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap shadow-xs"
+              title="ดึงข้อมูลล่าสุดจากฐานข้อมูลและล้างแคชในเบราว์เซอร์ทันที"
+            >
+              <RefreshCw size={13} className="text-white" />
+              <span>ซิงค์ข้อมูลสด</span>
+            </button>
+            {adminRole === 'superadmin' && (
+              <button 
+                onClick={resetConsoleState}
+                className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-slate-700 hover:text-rose-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
+                title="ล้างข้อมูลระบบทั้งหมดกลับสู่ค่าเริ่มต้นโรงงาน (เฉพาะ Super Admin)"
+              >
+                <RotateCcw size={13} className="text-rose-600" />
+                <span>รีเซ็ตระบบ</span>
+              </button>
+            )}
+            <button
+              onClick={() => { refreshPasswordStatus(); setShowPasswordChange(true); }}
+              className={`px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold border flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap ${
+                passwordStatus && passwordStatus.daysUntilExpiry !== undefined && passwordStatus.daysUntilExpiry <= 7
+                  ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-800'
+                  : 'bg-white hover:bg-sky-50 border-slate-200 hover:border-sky-300 text-slate-700'
+              }`}
+              title={
+                passwordStatus?.daysUntilExpiry !== undefined
+                  ? `เปลี่ยนรหัสผ่าน (หมดอายุใน ${passwordStatus.daysUntilExpiry} วัน · Recovery Codes คงเหลือ ${passwordStatus.recoveryCodesRemaining ?? '-'})`
+                  : 'เปลี่ยนรหัสผ่าน'
+              }
+            >
+              <KeyRound size={13} className="text-sky-600" />
+              <span>เปลี่ยนรหัสผ่าน</span>
+              {passwordStatus?.daysUntilExpiry !== undefined && passwordStatus.daysUntilExpiry <= 7 && (
+                <span className="px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 text-[10px] font-black">
+                  {passwordStatus.daysUntilExpiry}d
                 </span>
               )}
-            </div>
-            <p className="text-[11px] text-slate-500 mt-0.5 font-sans">
-              ระบบบริหารจัดการธุรกรรมเครดิตและการแข่งขันบั้งไฟสดภาคสนาม
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5 sm:gap-2 justify-start xl:justify-end flex-nowrap shrink-0 overflow-x-auto">
-          <button 
-            onClick={handleClosePortal}
-            className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
-            title="รีเซ็ตและปิดรอบพอร์ทัลปัจจุบัน โดยไม่ลบข้อมูลผู้เล่นหรือประวัติธุรกรรม"
-          >
-            <RotateCcw size={13} className="text-amber-700" />
-            <span>ปิดรอบพอร์ทัล</span>
-          </button>
-          <button 
-            onClick={forceSyncFreshData}
-            className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap shadow-xs"
-            title="ดึงข้อมูลล่าสุดจากฐานข้อมูลและล้างแคชในเบราว์เซอร์ทันที"
-          >
-            <RefreshCw size={13} className="text-white" />
-            <span>ซิงค์ข้อมูลสด</span>
-          </button>
-          {adminRole === 'superadmin' && (
-            <button 
-              onClick={resetConsoleState}
-              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-slate-700 hover:text-rose-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
-              title="ล้างข้อมูลระบบทั้งหมดกลับสู่ค่าเริ่มต้นโรงงาน (เฉพาะ Super Admin)"
-            >
-              <RotateCcw size={13} className="text-rose-600" />
-              <span>รีเซ็ตระบบ</span>
             </button>
-          )}
-          <button
-            onClick={() => { refreshPasswordStatus(); setShowPasswordChange(true); }}
-            className={`px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold border flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap ${
-              passwordStatus && passwordStatus.daysUntilExpiry !== undefined && passwordStatus.daysUntilExpiry <= 7
-                ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-800'
-                : 'bg-white hover:bg-sky-50 border-slate-200 hover:border-sky-300 text-slate-700'
-            }`}
-            title={
-              passwordStatus?.daysUntilExpiry !== undefined
-                ? `เปลี่ยนรหัสผ่าน (หมดอายุใน ${passwordStatus.daysUntilExpiry} วัน · Recovery Codes คงเหลือ ${passwordStatus.recoveryCodesRemaining ?? '-'})`
-                : 'เปลี่ยนรหัสผ่าน'
-            }
-          >
-            <KeyRound size={13} className="text-sky-600" />
-            <span>เปลี่ยนรหัสผ่าน</span>
-            {passwordStatus?.daysUntilExpiry !== undefined && passwordStatus.daysUntilExpiry <= 7 && (
-              <span className="px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 text-[10px] font-black">
-                {passwordStatus.daysUntilExpiry}d
-              </span>
-            )}
-          </button>
-          {/* Recovery codes are shown only once, so a lost set needs replacing
-              without forcing a password change. */}
-          <button
-            onClick={() => { refreshPasswordStatus(); setShowRecoveryCodes(true); }}
-            className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-slate-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
-            title={`สร้าง Recovery Codes ใหม่ (คงเหลือ ${passwordStatus?.recoveryCodesRemaining ?? '-'})`}
-          >
-            <ShieldCheck size={13} className="text-emerald-600" />
-            <span>Codes ใหม่</span>
-          </button>
-          <button 
-            onClick={handleAdminLogout}
-            className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
-            title="ออกจากระบบแอดมิน"
-          >
-            <LogOut size={13} className="text-slate-500" />
-            <span>ออกจากระบบ</span>
-          </button>
-        </div>
-      </header>
-
-      {/* Main Sandbox Grid (Standardized to corporate light 100% width column) */}
-      <main className="w-full max-w-6xl space-y-5">
-        
-        {/* Top metrics bar stretching 100% width - Cloud PMS Style */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
-          <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                ยอดฝากเครดิตรวม
-              </span>
-              <span className="p-1.5 rounded-lg bg-sky-50 text-sky-600 border border-sky-100">
-                <Wallet size={15} />
-              </span>
-            </div>
-            <div className="mt-2.5 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-slate-900 font-mono tracking-tight">
-                {transactions.filter(t => t.status === 'success').reduce((acc, t) => acc + t.actualAmount, 0).toLocaleString()}
-              </span>
-              <span className="text-xs font-bold text-slate-400">THB</span>
-            </div>
+            <button
+              onClick={() => { refreshPasswordStatus(); setShowRecoveryCodes(true); }}
+              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-slate-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
+              title={`สร้าง Recovery Codes ใหม่ (คงเหลือ ${passwordStatus?.recoveryCodesRemaining ?? '-'})`}
+            >
+              <ShieldCheck size={13} className="text-emerald-600" />
+              <span>Codes ใหม่</span>
+            </button>
+            <button 
+              onClick={handleAdminLogout}
+              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
+              title="ออกจากระบบแอดมิน"
+            >
+              <LogOut size={13} className="text-slate-500" />
+              <span>ออกจากระบบ</span>
+            </button>
           </div>
+        </header>
 
-          <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors relative">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                รอตรวจหลักฐาน
-              </span>
-              <span className="p-1.5 rounded-lg bg-amber-50 text-amber-600 border border-amber-100 relative">
-                <ShieldAlert size={15} />
-                {transactions.filter(t => t.status === 'escalated').length > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+        {/* Mobile / Tablet Navigation Bar (< lg) matching Hotel PMS Dark Navy & Gold Theme */}
+        <div
+          className="lg:hidden p-1.5 flex text-xs font-semibold tracking-wide overflow-x-auto gap-1.5 rounded-xl shadow-sm"
+          style={{ background: 'linear-gradient(90deg, #0f1a2e 0%, #162440 100%)' }}
+        >
+          {navItems.map(item => {
+            const IconComp = item.icon;
+            const isActive = item.activeMatch(adminTab);
+            return (
+              <button
+                key={item.id}
+                onClick={() => (item.onClick ? item.onClick() : setAdminTab(item.id))}
+                className="py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading cursor-pointer shrink-0"
+                style={
+                  isActive
+                    ? {
+                        background: 'linear-gradient(135deg, #c9a961, #9b7c38)',
+                        color: '#0f1a2e',
+                        fontWeight: 800,
+                      }
+                    : {
+                        color: 'rgba(255,255,255,0.75)',
+                      }
+                }
+              >
+                <IconComp size={14} />
+                <span>{item.label}</span>
+                {item.badge !== null && item.badge !== undefined && (
+                  <span className={`text-[9.5px] px-1.5 py-0.2 rounded-full font-black ${item.badgeColor}`}>
+                    {item.badge}
+                  </span>
                 )}
-              </span>
-            </div>
-            <div className="mt-2.5 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-amber-600 font-mono tracking-tight">
-                {transactions.filter(t => t.status === 'escalated').length}
-              </span>
-              <span className="text-xs font-bold text-slate-400">บิลค้าง</span>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                แผลจับคู่สด
-              </span>
-              <span className="p-1.5 rounded-lg bg-sky-50 text-sky-600 border border-sky-100">
-                <Layers size={15} />
-              </span>
-            </div>
-            <div className="mt-2.5 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-sky-600 font-mono tracking-tight">
-                {bets.filter(b => b.status === 'matched').length}
-              </span>
-              <span className="text-xs font-bold text-slate-400">ดีลคู่</span>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                บัญชีผู้เล่น
-              </span>
-              <span className="p-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
-                <Users size={15} />
-              </span>
-            </div>
-            <div className="mt-2.5 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-slate-900 font-mono tracking-tight">
-                {players.length}
-              </span>
-              <span className="text-xs font-bold text-slate-400">บัญชี</span>
-            </div>
-          </div>
+              </button>
+            );
+          })}
         </div>
 
-        {/* Tab Selection Bar - Cloud PMS Segmented Tabs */}
-        <div className="bg-white p-1.5 flex text-xs md:text-sm font-semibold tracking-wide shrink-0 overflow-x-auto gap-1.5 rounded-xl border border-slate-200">
-          <button 
-            onClick={() => setAdminTab('quote')}
-            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
-              (adminTab === 'quote' || adminTab === 'rocket') 
-                ? 'bg-sky-600 text-white font-bold' 
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <Layers size={15} className={(adminTab === 'quote' || adminTab === 'rocket') ? 'text-white' : 'text-slate-500'} />
-            <span>ออกราคาช่าง</span>
-          </button>
-          <button 
-            onClick={() => setAdminTab('broadcast')}
-            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
-              adminTab === 'broadcast' 
-                ? 'bg-sky-600 text-white font-bold' 
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <Radio size={15} className={adminTab === 'broadcast' ? 'text-white' : 'text-slate-500'} />
-            <span>บรอดแคสต์ & คีย์ลัด</span>
-          </button>
-          <button 
-            onClick={() => setAdminTab('settle')}
-            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
-              adminTab === 'settle' 
-                ? 'bg-sky-600 text-white font-bold' 
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <Zap size={15} className={adminTab === 'settle' ? 'text-white' : 'text-slate-500'} />
-            <span>ป้อนผลเวลา</span>
-          </button>
-          <button 
-            onClick={() => setAdminTab('bets')}
-            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
-              adminTab === 'bets' 
-                ? 'bg-sky-600 text-white font-bold' 
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <Trophy size={15} className={adminTab === 'bets' ? 'text-white' : 'text-slate-500'} />
-            <span>กระดานดวลสด</span>
-            {bets.filter(b => b.status === 'matched' || b.status === 'pending_match').length > 0 && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
-                adminTab === 'bets' ? 'bg-white text-sky-800' : 'bg-sky-600 text-white'
-              }`}>
-                {bets.filter(b => b.status === 'matched' || b.status === 'pending_match').length}
-              </span>
-            )}
-          </button>
-          <button 
-            onClick={() => { setAdminTab('review'); setTxStatusFilter('escalated'); }}
-            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
-              adminTab === 'review' 
-                ? 'bg-sky-600 text-white font-bold' 
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <FileText size={15} className={adminTab === 'review' ? 'text-white' : 'text-slate-500'} />
-            <span>สลิปค้างรีวิว</span>
-            {transactions.filter(t => t.status === 'escalated').length > 0 && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
-                adminTab === 'review' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'
-              }`}>
-                {transactions.filter(t => t.status === 'escalated').length}
-              </span>
-            )}
-          </button>
-          <button 
-            onClick={() => setAdminTab('players')}
-            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
-              adminTab === 'players' 
-                ? 'bg-sky-600 text-white font-bold' 
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <Users size={15} className={adminTab === 'players' ? 'text-white' : 'text-slate-500'} />
-            <span>เครดิตผู้เล่น</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-              adminTab === 'players' ? 'bg-sky-800 text-white' : 'bg-slate-200 text-slate-700'
-            }`}>
-              {players.length}
-            </span>
-          </button>
-          <button 
-            onClick={() => { setAdminTab('logs'); setTxStatusFilter('all'); }}
-            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
-              adminTab === 'logs' 
-                ? 'bg-sky-600 text-white font-bold' 
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <Database size={15} className={adminTab === 'logs' ? 'text-white' : 'text-slate-500'} />
-            <span>ทรานแซคชัน</span>
-          </button>
-          <button
-            onClick={() => setAdminTab('bank')}
-            title="บัญชีรับเงินที่แสดงในข้อความฝากของ LINE OA"
-            className={`flex-1 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading tracking-wide cursor-pointer ${
-              adminTab === 'bank'
-                ? 'bg-sky-600 text-white font-bold'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <Landmark size={15} className={adminTab === 'bank' ? 'text-white' : 'text-slate-500'} />
-            <span>บัญชีรับเงิน</span>
-          </button>
-        </div>
+        {/* Main Sandbox Grid (Standardized to corporate light 100% width column) */}
+        <main className="w-full space-y-5">
+          {/* Top metrics bar stretching 100% width - Cloud PMS Style */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+            <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  ยอดฝากเครดิตรวม
+                </span>
+                <span className="p-1.5 rounded-lg bg-sky-50 text-sky-600 border border-sky-100">
+                  <Wallet size={15} />
+                </span>
+              </div>
+              <div className="mt-2.5 flex items-baseline gap-1.5">
+                <span className="text-2xl font-black text-slate-900 font-mono tracking-tight">
+                  {transactions.filter(t => t.status === 'success').reduce((acc, t) => acc + t.actualAmount, 0).toLocaleString()}
+                </span>
+                <span className="text-xs font-bold text-slate-400">THB</span>
+              </div>
+            </div>
 
-        {/* Tab panels contents container */}
-        <div className="w-full space-y-6">
+            <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors relative">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  รอตรวจหลักฐาน
+                </span>
+                <span className="p-1.5 rounded-lg bg-amber-50 text-amber-600 border border-amber-100 relative">
+                  <ShieldAlert size={15} />
+                  {transactions.filter(t => t.status === 'escalated').length > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                  )}
+                </span>
+              </div>
+              <div className="mt-2.5 flex items-baseline gap-1.5">
+                <span className="text-2xl font-black text-amber-600 font-mono tracking-tight">
+                  {transactions.filter(t => t.status === 'escalated').length}
+                </span>
+                <span className="text-xs font-bold text-slate-400">บิลค้าง</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  แผลจับคู่สด / บนฟ้า
+                </span>
+                <span className="p-1.5 rounded-lg bg-sky-50 text-sky-600 border border-sky-100">
+                  <Layers size={15} />
+                </span>
+              </div>
+              <div className="mt-2.5 flex items-baseline gap-1.5">
+                <span className="text-2xl font-black text-sky-600 font-mono tracking-tight">
+                  {bets.filter(b => b.status === 'matched').length}
+                </span>
+                <span className="text-xs font-bold text-slate-400">ดีลคู่</span>
+                {inFlightRounds.length > 0 && (
+                  <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 border border-orange-200 font-black">
+                    🚀 {inFlightRounds.length} บั้งไฟบนฟ้า
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  บัญชีผู้เล่น
+                </span>
+                <span className="p-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
+                  <Users size={15} />
+                </span>
+              </div>
+              <div className="mt-2.5 flex items-baseline gap-1.5">
+                <span className="text-2xl font-black text-slate-900 font-mono tracking-tight">
+                  {players.length}
+                </span>
+                <span className="text-xs font-bold text-slate-400">บัญชี</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Tab panels contents container */}
+          <div className="w-full space-y-6">
+
+          {/* ═══ NEW TAB: CONCURRENT ROCKET B LAUNCHER & IN-FLIGHT ROCKET A QUEUE ═══ */}
+          {adminTab === 'next_rocket' && (
+            <div className="glass-panel p-5 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                <div>
+                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
+                    <Rocket size={18} className="text-orange-600" />
+                    เปิดบั้งไฟถัดไป (Rocket B) ขณะรอผลบั้งไฟกลางอากาศ (Rocket A)
+                  </h3>
+                  <p className="text-xs text-slate-500 font-sans mt-0.5">
+                    แยกสัญญาคู่ดวลของบั้งไฟที่ปล่อยขึ้นฟ้าแล้วเข้าคิวรอผลเวลา (In-Flight Queue) และเปิดรับออเดอร์บั้งไฟลูกถัดไปได้ทันทีโดยที่เลขแผลและราคาไม่ชนกัน
+                  </p>
+                </div>
+                <span className="self-start sm:self-auto text-[10px] text-orange-800 font-extrabold bg-orange-50 px-2.5 py-1 rounded-full border border-orange-200">
+                  Concurrent Multi-Rocket Engine
+                </span>
+              </div>
+
+              {/* Current Active Rocket Status vs In-Flight Overview */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">
+                      🎯 บั้งไฟรอบปัจจุบันที่รับออเดอร์อยู่ (Active Slot)
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                        roundStatus === 'OPEN'
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                          : 'bg-rose-100 text-rose-800 border border-rose-300'
+                      }`}
+                    >
+                      {roundStatus === 'OPEN'
+                        ? activeRoundObj?.quoteReleased
+                          ? '🟢 เปิดรับดวล (มีราคาช่างแล้ว)'
+                          : '🟡 เปิดรับแผลล่วงหน้า (รอราคาช่าง)'
+                        : '🔴 ปิดรับดวล (บั้งไฟออกแล้ว)'}
+                    </span>
+                  </div>
+                  <div className="text-base font-black text-slate-900 font-heading">
+                    {activeRoundObj?.name || rocketName || 'ยังไม่ได้กำหนดชื่อบั้งไฟ'}
+                  </div>
+                  <div className="flex flex-wrap gap-3 text-xs text-slate-600 font-sans pt-1">
+                    <span>
+                      ช่วงราคาช่าง:{' '}
+                      <strong className="font-mono text-slate-900">
+                        {activeRoundObj?.quoteReleased
+                          ? `${activeRoundObj.targetMin}-${activeRoundObj.targetMax}s`
+                          : 'ยังไม่ปล่อยราคา'}
+                      </strong>
+                    </span>
+                    <span>•</span>
+                    <span>
+                      คู่ดวลติดแล้ว:{' '}
+                      <strong className="font-mono text-indigo-700">
+                        {bets.filter(b => b.status === 'matched').length} คู่
+                      </strong>
+                    </span>
+                    <span>•</span>
+                    <span>
+                      รอคู่ดวล:{' '}
+                      <strong className="font-mono text-amber-700">
+                        {bets.filter(b => b.status === 'pending_match' || b.status === 'pending_hold').length} แผล
+                      </strong>
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-orange-50/70 border border-orange-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-orange-900">
+                      🚀 บั้งไฟที่กำลังบินอยู่บนฟ้า (In-Flight Queue)
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-orange-200 text-orange-950">
+                      {inFlightRounds.length} ลำรอตัดสินผล
+                    </span>
+                  </div>
+                  <p className="text-xs text-orange-900/90 leading-relaxed">
+                    เมื่อกดเปิดบั้งไฟลูกใหม่ (Rocket B) ด้านล่าง ระบบจะล็อกและย้ายคู่ดวลของบั้งไฟลูกเดิม (Rocket A) มาเก็บในคิวรอผลเวลาบินโดยอัตโนมัติ และรันเลข Order # ไม่ให้ซ้ำกัน 100%
+                  </p>
+                </div>
+              </div>
+
+              {/* STEP 1: OPEN ROCKET B FORM */}
+              <div className="p-4 sm:p-5 rounded-xl bg-gradient-to-br from-sky-50/80 via-white to-indigo-50/50 border border-sky-200 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2 border-b border-sky-100 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-lg bg-sky-600 text-white font-black text-xs flex items-center justify-center">
+                      1
+                    </span>
+                    <h4 className="text-sm font-black text-slate-900 font-heading">
+                      เปิดรับออเดอร์บั้งไฟลูกถัดไป (Rocket B) ทันที
+                    </h4>
+                  </div>
+                  <span className="text-[10.5px] font-bold text-sky-700">
+                    บั้งไฟลูกปัจจุบันจะถูกพักไว้ในคิวรอผลเวลาอัตโนมัติ (ถ้ามีคู่ดวลค้างอยู่)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      🚀 ชื่อบั้งไฟลูกถัดไป (Rocket B Name):
+                    </label>
+                    <input
+                      type="text"
+                      value={nextRocketName}
+                      onChange={e => setNextRocketName(e.target.value)}
+                      placeholder="เช่น เทพพนม 2 / สิงห์อีสาน (ลูกที่ 2)"
+                      className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      ⚙️ โหมดการเปิดรับออเดอร์บั้งไฟลูกถัดไป:
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setNextRocketMode('pre_quote')}
+                        className={`py-2.5 px-3 rounded-xl text-xs font-bold border text-left transition-all cursor-pointer ${
+                          nextRocketMode === 'pre_quote'
+                            ? 'bg-sky-600 text-white border-sky-700 shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="font-black">🎯 เปิดรับแผลล่วงหน้า</div>
+                        <div className={`text-[10px] mt-0.5 ${nextRocketMode === 'pre_quote' ? 'text-sky-100' : 'text-slate-400'}`}>
+                          เชิญเปิดแผลก่อน (ออกราคาช่างทีหลัง)
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setNextRocketMode('quote')}
+                        className={`py-2.5 px-3 rounded-xl text-xs font-bold border text-left transition-all cursor-pointer ${
+                          nextRocketMode === 'quote'
+                            ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="font-black">🏛️ ออกราคาช่างทันที</div>
+                        <div className={`text-[10px] mt-0.5 ${nextRocketMode === 'quote' ? 'text-emerald-100' : 'text-slate-400'}`}>
+                          กำหนดช่วงเวลา Min-Max พร้อมเปิดดวล
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {nextRocketMode === 'quote' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 bg-emerald-50/60 border border-emerald-200 rounded-xl">
+                    <div>
+                      <label className="text-[11px] font-bold text-emerald-900 block mb-1">
+                        เวลาต่ำสุด (Min วินาที):
+                      </label>
+                      <input
+                        type="number"
+                        value={nextRocketMin}
+                        onChange={e => setNextRocketMin(e.target.value)}
+                        placeholder="เช่น 330"
+                        className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-lg text-sm font-mono font-black text-slate-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-emerald-900 block mb-1">
+                        เวลาสูงสุด (Max วินาที):
+                      </label>
+                      <input
+                        type="number"
+                        value={nextRocketMax}
+                        onChange={e => setNextRocketMax(e.target.value)}
+                        placeholder="เช่น 360"
+                        className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-lg text-sm font-mono font-black text-slate-900"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <label className="flex items-center gap-2 cursor-pointer p-2.5 bg-white border border-emerald-200 rounded-lg w-full">
+                        <input
+                          type="checkbox"
+                          checked={nextRocketChotoy}
+                          onChange={e => setNextRocketChotoy(e.target.checked)}
+                          className="w-4 h-4 accent-emerald-600 rounded"
+                        />
+                        <span className="text-xs font-bold text-emerald-950">
+                          🔥 โหมดช่อทอย (10 : 8)
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                  <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={nextRocketBroadcast}
+                      onChange={e => setNextRocketBroadcast(e.target.checked)}
+                      className="w-4 h-4 accent-sky-600 rounded"
+                    />
+                    <span>
+                      📢 ส่งประกาศแจ้งเปิดบั้งไฟลูกใหม่ ({nextRocketName || 'บั้งไฟชุดต่อไป'}) เข้ากลุ่ม LINE ทันที
+                    </span>
+                  </label>
+
+                  <button
+                    onClick={handleOpenNextRocket}
+                    disabled={isOpeningNextRocket}
+                    className="py-3 px-6 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Rocket size={16} />
+                    <span>
+                      {isOpeningNextRocket
+                        ? '⏳ กำลังสลับรอบและเปิดบั้งไฟถัดไป...'
+                        : `🚀 พักรอบเดิมไว้บนฟ้า & เปิดรับดวล "${nextRocketName || 'บั้งไฟชุดต่อไป'}" ทันที`}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* STEP 2: IN-FLIGHT ROCKETS QUEUE (AWAITING FLIGHT RESULT SETTLEMENT) */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-lg bg-orange-600 text-white font-black text-xs flex items-center justify-center">
+                      2
+                    </span>
+                    <h4 className="text-sm font-black text-slate-900 font-heading">
+                      คิวบั้งไฟที่กำลังบินอยู่บนฟ้า รอป้อนผลเวลา (In-Flight Rockets Queue)
+                    </h4>
+                  </div>
+                  <span className="text-[11px] font-bold text-slate-500">
+                    ตัดสินผลแยกเฉพาะลำ โดยไม่รบกวนออเดอร์ของบั้งไฟลูกใหม่
+                  </span>
+                </div>
+
+                {inFlightRounds.length === 0 ? (
+                  <div className="p-8 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-center space-y-1.5">
+                    <div className="text-2xl">🌤️</div>
+                    <div className="text-xs font-bold text-slate-700">
+                      ขณะนี้ไม่มีบั้งไฟค้างอยู่บนฟ้าในคิว In-Flight
+                    </div>
+                    <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+                      เมื่อบั้งไฟ A ปล่อยขึ้นฟ้าแล้ว และคุณกดเปิดบั้งไฟ B ด้านบน คู่ดวลของบั้งไฟ A จะย้ายมาแสดงที่นี่เพื่อให้คุณกรอกผลเวลาบินเมื่อบั้งไฟ A ตกถึงพื้น
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {inFlightRounds.map((flt, idx) => {
+                      const inputTime = inFlightTimes[flt.roundId] || '';
+                      const isSettlingThis = settlingInFlightId === flt.roundId;
+                      return (
+                        <div
+                          key={flt.roundId}
+                          className="p-4 rounded-xl bg-amber-50/70 border-2 border-amber-300 space-y-3 shadow-xs"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200 pb-2.5">
+                            <div className="flex items-center gap-2.5">
+                              <span className="px-2.5 py-1 rounded-lg bg-orange-600 text-white font-black text-xs font-mono">
+                                ลำที่ #{idx + 1} บนฟ้า
+                              </span>
+                              <div>
+                                <div className="text-sm font-black text-slate-900 font-heading flex items-center gap-2">
+                                  <span>🚀 {flt.name}</span>
+                                  {flt.isChotoy && (
+                                    <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-300 text-[10px] font-black">
+                                      ช่อทอย 10:8
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-slate-600 font-mono">
+                                  ราคาช่าง: <strong>{flt.quoteReleased ? `${flt.targetMin} - ${flt.targetMax} วินาที` : 'P2P / ไม่มีราคาช่าง'}</strong> • คู่ดวลที่ติดแล้ว: <strong className="text-indigo-700">{flt.matchedCount || (flt.matchedOrders || []).length} คู่</strong>
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => handleVoidInFlightRound(flt)}
+                              disabled={isSettlingThis}
+                              className="self-start sm:self-auto px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-300 text-xs font-bold transition-all cursor-pointer"
+                            >
+                              ⛔ โมฆะเฉพาะลำนี้ & คืนแต้ม
+                            </button>
+                          </div>
+
+                          {/* Matched Orders Preview inside this In-Flight Rocket */}
+                          {Array.isArray(flt.matchedOrders) && flt.matchedOrders.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {flt.matchedOrders.map(m => (
+                                <span
+                                  key={m.id || m.orderNumber}
+                                  className="px-2 py-1 rounded-md bg-white border border-amber-200 text-[10.5px] font-mono text-slate-700"
+                                >
+                                  <strong>#{m.orderNumber}</strong>:{' '}
+                                  <span className="text-sky-700 font-bold">{m.playerLowName || 'ฝั่งต่ำ'}</span> vs{' '}
+                                  <span className="text-rose-700 font-bold">{m.playerHighName || 'ฝั่งสูง'}</span> ({m.amount} pt)
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Settle Input Row */}
+                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
+                            <div className="flex items-center gap-2 flex-1 bg-white px-3 py-2 rounded-xl border border-amber-300">
+                              <Clock size={15} className="text-orange-600 shrink-0" />
+                              <span className="text-xs font-bold text-slate-700 whitespace-nowrap">
+                                เวลาบินจริง ({flt.name}):
+                              </span>
+                              <input
+                                type="number"
+                                step="0.1"
+                                value={inputTime}
+                                onChange={e =>
+                                  setInFlightTimes(prev => ({
+                                    ...prev,
+                                    [flt.roundId]: e.target.value,
+                                  }))
+                                }
+                                placeholder="กรอกวินาที เช่น 348"
+                                className="w-full font-mono font-black text-sm text-slate-900 focus:outline-none"
+                              />
+                              <span className="text-xs font-mono font-bold text-slate-400">วินาที (s)</span>
+                            </div>
+
+                            <button
+                              onClick={() => handleSettleInFlightRound(flt)}
+                              disabled={isSettlingThis}
+                              className="py-2.5 px-5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                            >
+                              <CheckCircle size={15} />
+                              <span>
+                                {isSettlingThis
+                                  ? '⏳ กำลังตัดสินผล...'
+                                  : `⚡ ตัดสินผลเวลาบิน "${flt.name}" (${inputTime || 0}s)`}
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* TAB 1: ONSITE TELEMETRY RECEIVER & MECHANIC QUOTE SETUP */}
           {(adminTab === 'quote' || adminTab === 'rocket') && (
@@ -1797,6 +2469,60 @@ export default function App() {
                   Telemetry Engine
                 </span>
               </div>
+
+              {/* In-Flight Rockets Queue (Rocket A in the air while Rocket B is open) */}
+              {inFlightRounds.length > 0 && (
+                <div className="p-4 rounded-xl bg-amber-50/80 border-2 border-amber-300 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-xs font-black text-amber-950 font-heading flex items-center gap-1.5">
+                      <Rocket size={15} className="text-orange-600" />
+                      <span>🚀 คิวบั้งไฟบนฟ้าที่รอตัดสินผล ({inFlightRounds.length} ลำ) — ตัดสินแยกโดยไม่กระทบแผลรอบใหม่</span>
+                    </span>
+                    <button
+                      onClick={() => setAdminTab('next_rocket')}
+                      className="text-[11px] font-bold text-orange-700 hover:text-orange-900 underline cursor-pointer"
+                    >
+                      จัดการคิวบั้งไฟถัดไป ➜
+                    </button>
+                  </div>
+                  <div className="space-y-2.5">
+                    {inFlightRounds.map((flt, idx) => {
+                      const inputTime = inFlightTimes[flt.roundId] || '';
+                      const isSettlingThis = settlingInFlightId === flt.roundId;
+                      return (
+                        <div key={flt.roundId} className="p-3 rounded-xl bg-white border border-amber-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                          <div>
+                            <div className="text-xs font-black text-slate-900 flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded bg-orange-600 text-white font-mono text-[10px]">ลำ #{idx + 1}</span>
+                              <span>🚀 {flt.name}</span>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                ({flt.quoteReleased ? `${flt.targetMin}-${flt.targetMax}s` : 'P2P'} · {flt.matchedCount || (flt.matchedOrders || []).length} คู่ดวล)
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={inputTime}
+                              onChange={e => setInFlightTimes(prev => ({ ...prev, [flt.roundId]: e.target.value }))}
+                              placeholder="เวลาบิน (วินาที)"
+                              className="w-36 px-2.5 py-1.5 bg-amber-50/50 border border-amber-300 rounded-lg text-xs font-mono font-black text-slate-900"
+                            />
+                            <button
+                              onClick={() => handleSettleInFlightRound(flt)}
+                              disabled={isSettlingThis}
+                              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold cursor-pointer whitespace-nowrap"
+                            >
+                              {isSettlingThis ? '⏳...' : `⚡ ตัดสิน "${flt.name}"`}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Settlement Form Card */}
               <div className="p-4 bg-slate-50/50 rounded-xl border border-slate-200 space-y-3.5">
@@ -2700,32 +3426,50 @@ export default function App() {
                   <span className="text-[10px] text-slate-400 font-sans">ส่งการ์ด Flex แจ้งเตือนด่วนเข้ากลุ่ม LINE ทันที</span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {/* Final Call */}
-                  <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Combined Rocket Launched + Final Call Card */}
+                  <div className="bg-gradient-to-br from-orange-50 via-amber-50/80 to-orange-100/70 border-2 border-orange-300 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between shadow-xs">
                     <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-amber-900 font-heading">⛔ ปิดรับดวล</span>
-                        <span className="text-[10px] font-bold px-2 py-0.5 bg-amber-200 text-amber-900 rounded-md">Final Call</span>
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <span className="text-xs font-black text-orange-950 font-heading flex items-center gap-1">
+                          <span>🚀 บั้งไฟออกแล้ว! (ปิดรับดวล)</span>
+                        </span>
+                        <span className="text-[10px] font-black px-2 py-0.5 bg-orange-200 text-orange-950 rounded-md">
+                          Live Action · Final Call
+                        </span>
                       </div>
-                      <p className="text-[10.5px] text-amber-800/80 font-sans leading-relaxed">
-                        ประกาศปิดรับออเดอร์ท้าดวลก่อนปล่อยบั้งไฟ บอทจะปฏิเสธทุกบิลหลังจากนี้
+                      <p className="text-[10.5px] text-orange-900/90 font-sans leading-relaxed">
+                        ล็อกรอบและประกาศ <strong>&ldquo;🚀 บั้งไฟออกแล้ว + ⛔ ปิดรับดวล&rdquo;</strong> พร้อมกันในคลิกเดียว ยกเลิกแผลเปิดที่ไม่มีคู่และคืนแต้มอัตโนมัติทันที
                       </p>
                     </div>
-                    <button
-                      onClick={async () => {
-                        try {
-                          const res = await runBackendFunction('adminBroadcastFinalCall', [broadcastTargetGroup || 'ALL']);
-                          if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
-                          else addToast('⛔ ปิดรับดวลแล้ว', 'warning');
-                        } catch {
-                          addToast('❌ ส่งไม่สำเร็จ', 'danger');
-                        }
-                      }}
-                      className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
-                    >
-                      <span>⛔ ส่งประกาศ ปิดรับดวล</span>
-                    </button>
+                    <div className="space-y-1.5">
+                      <button
+                        onClick={async () => {
+                          try {
+                            const res = await runBackendFunction('adminBroadcastRocketLaunched', [broadcastTargetGroup || 'ALL']);
+                            if (res && res.success === false) {
+                              addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
+                            } else {
+                              await forceSyncFreshData();
+                              addToast('🚀 บั้งไฟออกแล้ว & ⛔ ปิดรับดวลเรียบร้อย!', 'warning');
+                            }
+                          } catch {
+                            addToast('❌ ส่งไม่สำเร็จ', 'danger');
+                          }
+                        }}
+                        style={{ backgroundColor: '#ea580c', color: '#ffffff' }}
+                        className="w-full py-2.5 px-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-xs font-black transition-all active:scale-95 flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                      >
+                        <span className="text-white font-black">🚀 บั้งไฟออกแล้ว! (ปิดรับดวลทันที)</span>
+                      </button>
+                      <button
+                        onClick={() => setAdminTab('next_rocket')}
+                        className="w-full py-1.5 px-2.5 bg-white/90 hover:bg-white text-orange-900 border border-orange-300 rounded-lg text-[10.5px] font-extrabold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Rocket size={12} className="text-orange-600" />
+                        <span>เปิดรับบั้งไฟลูกถัดไป (Rocket B) ต่อทันที ➜</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Void Round */}
@@ -2750,7 +3494,7 @@ export default function App() {
                           addToast('❌ ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
-                      className="w-full py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                      className="w-full py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <span>⛔ สั่งโมฆะรอบ & คืนแต้ม</span>
                     </button>
@@ -2777,39 +3521,9 @@ export default function App() {
                           addToast('❌ ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
-                      className="w-full py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                      className="w-full py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <span>📖 ส่งคู่มือกติกาเข้ากลุ่ม</span>
-                    </button>
-                  </div>
-
-                  {/* Rocket Launched Broadcast Card */}
-                  <div className="bg-orange-50/80 border border-orange-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-orange-950 font-heading flex items-center gap-1">
-                          <span>🚀 บั้งไฟออกแล้ว!</span>
-                        </span>
-                        <span className="text-[10px] font-bold px-2 py-0.5 bg-orange-200 text-orange-900 rounded-md">Live Action</span>
-                      </div>
-                      <p className="text-[10.5px] text-orange-900/80 font-sans leading-relaxed">
-                        ส่ง Flex Card "🚀 บั้งไฟออกแล้ว! 🚀" แจ้งเตือนด่วนเข้ากลุ่ม LINE ทันที เมื่อบั้งไฟพุ่งขึ้นฟ้า
-                      </p>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        try {
-                          const res = await runBackendFunction('adminBroadcastRocketLaunched', [broadcastTargetGroup || 'ALL']);
-                          if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
-                          else addToast('🚀 ส่งประกาศบั้งไฟออกแล้ว!', 'info');
-                        } catch {
-                          addToast('❌ ส่งไม่สำเร็จ', 'danger');
-                        }
-                      }}
-                      style={{ backgroundColor: '#ea580c', color: '#ffffff' }}
-                      className="w-full py-2 px-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
-                    >
-                      <span className="text-white font-bold">🚀 ส่งประกาศ บั้งไฟออกแล้ว!</span>
                     </button>
                   </div>
                 </div>
@@ -2831,31 +3545,31 @@ export default function App() {
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => setCustomBroadcastText('☕ ประกาศจากสนาม: ขณะนี้อยู่ในช่วงพักเบรก 15 นาที จะเริ่มเปิดรับดวลรอบถัดไปเร็ว ๆ นี้ครับ')}
-                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95"
+                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95 cursor-pointer"
                       >
                         ☕ พักเบรก 15 นาที
                       </button>
                       <button
                         onClick={() => setCustomBroadcastText('🌧️ ประกาศจากสนาม: เนื่องจากสภาพอากาศมีฝนตก จึงขอพักการปล่อยบั้งไฟชั่วคราว เมื่อพร้อมจะแจ้งให้ทราบครับ')}
-                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95"
+                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95 cursor-pointer"
                       >
                         🌧️ ฝนตก พักการยิงชั่วคราว
                       </button>
                       <button
                         onClick={() => setCustomBroadcastText('🔥 เตรียมพร้อม! บั้งไฟกำลังขึ้นติดตั้งบนแท่นยิง โปรดเตรียมแต้มให้พร้อมสำหรับการท้าดวล')}
-                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95"
+                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95 cursor-pointer"
                       >
                         🔥 บั้งไฟกำลังขึ้นแท่นยิง
                       </button>
                       <button
-                        onClick={() => setCustomBroadcastText('🚀 บั้งไฟออกแล้ว! เปิดรับดวลรอบใหม่เร็ว ๆ นี้ ติดตามประกาศจากสนามได้เลยครับ')}
-                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95"
+                        onClick={() => setCustomBroadcastText(`🎯 บั้งไฟ ${rocketName || activeRoundObj?.name || 'รอบใหม่'} พร้อมแล้ว เปิดแผลเล่นได้เลยครับ 🚀`)}
+                        className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-300 rounded-lg text-[10.5px] font-extrabold transition-all active:scale-95 cursor-pointer"
                       >
-                        🚀 บั้งไฟออกแล้ว
+                        🎯 บั้งไฟพร้อมแล้ว เชิญเปิดแผล
                       </button>
                       <button
                         onClick={() => setCustomBroadcastText('🏁 สรุปผลการแข่งขันและการดวลประจำวันเสร็จสิ้นเรียบร้อย ขอบพระคุณสมาชิกทุกท่านที่ร่วมสนุกครับ')}
-                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95"
+                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95 cursor-pointer"
                       >
                         🏁 จบการแข่งขันประจำวัน
                       </button>
@@ -3498,8 +4212,9 @@ export default function App() {
             );
           })()}
 
-        </div>
-      </main>
+          </div>
+        </main>
+      </div>
 
       {/* Dynamic Settle Outcome Result Report Popup Overlay Modal - Cloud PMS Style */}
       {settlementResult && (

@@ -5,13 +5,14 @@ import { Order } from './types.js';
  * Avoids recursive object re-allocations and heavy serialization overhead.
  */
 
-export function generateRocketLaunchedFlex(): any {
+export function generateRocketLaunchedFlex(rocketName?: string): any {
+  const titleSuffix = rocketName ? ` [${rocketName}]` : '';
   return {
     type: 'flex',
-    altText: '🚀 บั้งไฟออกแล้ว! 🚀',
+    altText: `🚀 บั้งไฟออกแล้ว!${titleSuffix} (⛔ ปิดรับดวลรอบนี้)`,
     contents: {
       type: 'bubble',
-      size: 'kilo',
+      size: 'mega',
       header: {
         type: 'box',
         layout: 'vertical',
@@ -21,7 +22,7 @@ export function generateRocketLaunchedFlex(): any {
         contents: [
           {
             type: 'text',
-            text: '🔥 LIVE ACTION 🔥',
+            text: '🔥 LIVE ACTION · FINAL CALL 🔥',
             weight: 'bold',
             color: '#FEF08A',
             size: 'xs',
@@ -36,6 +37,17 @@ export function generateRocketLaunchedFlex(): any {
             align: 'center',
             wrap: true,
           },
+          ...(rocketName
+            ? [{
+                type: 'text',
+                text: `บั้งไฟ: ${rocketName}`,
+                weight: 'bold',
+                color: '#FEE2E2',
+                size: 'sm',
+                align: 'center',
+                wrap: true,
+              }]
+            : []),
         ],
       },
       body: {
@@ -51,12 +63,21 @@ export function generateRocketLaunchedFlex(): any {
             backgroundColor: '#FFEDD5',
             cornerRadius: 'md',
             paddingAll: 'sm',
+            spacing: 'xs',
             contents: [
               {
                 type: 'text',
-                text: '⚡ พุ่งทะยานสู่ท้องฟ้าเรียบร้อยแล้ว!',
+                text: '⚡ พุ่งทะยานสู่ท้องฟ้า · ⛔ ปิดรับดวลรอบนี้แล้ว!',
                 weight: 'bold',
                 color: '#C2410C',
+                size: 'xs',
+                align: 'center',
+                wrap: true,
+              },
+              {
+                type: 'text',
+                text: '🔒 แผลเปิดที่ไม่ติดคู่ดวล ถูกยกเลิกและคืนแต้มอัตโนมัติ',
+                color: '#475569',
                 size: 'xs',
                 align: 'center',
                 wrap: true,
@@ -69,7 +90,6 @@ export function generateRocketLaunchedFlex(): any {
                 size: 'xs',
                 align: 'center',
                 wrap: true,
-                margin: 'xs',
               },
             ],
           },
@@ -101,9 +121,11 @@ export function generateOrderFlex(order: Order): any {
   const MIN_MATCH_RATIO = 0.20;
   const matchFloor = Math.max(MIN_MATCH_POINTS, Math.round(numAmount * MIN_MATCH_RATIO));
 
-  const takeOptions = [0.20, 0.40, 0.80, 1.00]
+  // Partial options (< 100% of numAmount) go in Row 1 (up to 3 buttons: 20%, 40%, 80%).
+  // The full 100% button sits in Row 2 alongside Cancel so buttons have generous spacing.
+  const takeOptions = [0.20, 0.40, 0.80]
     .map((r) => Math.round(numAmount * r))
-    .filter((v) => v >= matchFloor)
+    .filter((v) => v >= matchFloor && v < numAmount)
     .filter((v, i, arr) => arr.indexOf(v) === i); // rounding can collide
   const amt100 = numAmount;
 
@@ -112,7 +134,7 @@ export function generateOrderFlex(order: Order): any {
     altText: `🚀 เปิดดวล #${orderNumber} [${cardTitle}] ${numAmount.toLocaleString()}pt`,
     contents: {
       type: 'bubble',
-      size: 'kilo',
+      size: 'mega',
       header: {
         type: 'box',
         layout: 'vertical',
@@ -133,7 +155,7 @@ export function generateOrderFlex(order: Order): any {
       body: {
         type: 'box',
         layout: 'vertical',
-        spacing: 'xs',
+        spacing: 'md',
         paddingAll: 'md',
         contents: [
           {
@@ -172,80 +194,81 @@ export function generateOrderFlex(order: Order): any {
           },
           {
             type: 'separator',
-            margin: 'xs',
+            margin: 'sm',
             color: '#F1F5F9',
           },
-          // Row 1: partial Quick Deal Buttons, filtered to what can actually be matched
-          //
-          // Shown on a pre-quote order too. A pre-quote order is matchable
-          // before the price is announced — it simply has no range until then,
-          // and is confirmed (or refunded) when the quote arrives or does not.
+          // Row 1: partial Quick Deal Buttons (20%, 40%, 80%), filtered to what can actually be matched
+          // Generous horizontal spacing ('md') and vertical touch padding prevent accidental mis-taps.
           ...(takeOptions.length > 0
             ? [{
                 type: 'box',
                 layout: 'horizontal',
-                spacing: 'xs',
-                margin: 'xs',
+                spacing: 'md',
+                margin: 'md',
                 contents: takeOptions.map((val) => ({
                   type: 'box',
                   layout: 'vertical',
                   flex: 1,
                   backgroundColor: '#BAE6FD',
-                  cornerRadius: 'sm',
-                  paddingAll: 'xs',
+                  cornerRadius: 'md',
+                  paddingTop: '10px',
+                  paddingBottom: '10px',
+                  paddingStart: '6px',
+                  paddingEnd: '6px',
                   action: {
                     type: 'message',
                     label: `${val}`,
                     text: `ต ${orderNumber} ${val}`,
                   },
                   contents: [
-                    { type: 'text', text: `${val}`, color: '#0369A1', weight: 'bold', size: 'xs', align: 'center', wrap: true },
+                    { type: 'text', text: `${val}`, color: '#0369A1', weight: 'bold', size: 'sm', align: 'center', wrap: true },
                   ],
                 })),
               }]
             : []),
-          // Row 2: 100% & Cancel Buttons
+          // Row 2: 100% Full Take & Cancel Buttons with wide spacing ('md')
           {
             type: 'box',
             layout: 'horizontal',
-            spacing: 'xs',
-            margin: 'xs',
+            spacing: 'md',
+            margin: 'md',
             contents: [
-              // Only when the full amount is not already offered in row 1 — on
-              // a small order the 100% option IS the full amount and would
-              // otherwise appear twice.
-              ...(takeOptions.includes(amt100)
-                ? []
-                : [{
-                    type: 'box',
-                    layout: 'vertical',
-                    flex: 1,
-                    backgroundColor: '#BBF7D0',
-                    cornerRadius: 'sm',
-                    paddingAll: 'xs',
-                    action: {
-                      type: 'message',
-                      label: `${amt100}`,
-                      text: `ต ${orderNumber} ${amt100}`,
-                    },
-                    contents: [
-                      { type: 'text', text: `${amt100}`, color: '#15803D', weight: 'bold', size: 'xs', align: 'center', wrap: true },
-                    ],
-                  }]),
+              {
+                type: 'box',
+                layout: 'vertical',
+                flex: 1,
+                backgroundColor: '#BBF7D0',
+                cornerRadius: 'md',
+                paddingTop: '10px',
+                paddingBottom: '10px',
+                paddingStart: '8px',
+                paddingEnd: '8px',
+                action: {
+                  type: 'message',
+                  label: `${amt100}`,
+                  text: `ต ${orderNumber} ${amt100}`,
+                },
+                contents: [
+                  { type: 'text', text: `${amt100}`, color: '#15803D', weight: 'bold', size: 'sm', align: 'center', wrap: true },
+                ],
+              },
               {
                 type: 'box',
                 layout: 'vertical',
                 flex: 1,
                 backgroundColor: '#FECDD3',
-                cornerRadius: 'sm',
-                paddingAll: 'xs',
+                cornerRadius: 'md',
+                paddingTop: '10px',
+                paddingBottom: '10px',
+                paddingStart: '8px',
+                paddingEnd: '8px',
                 action: {
                   type: 'message',
                   label: '⛔ ยกเลิก',
                   text: `ยกเลิก ${orderNumber}`,
                 },
                 contents: [
-                  { type: 'text', text: '⛔ ยกเลิก', color: '#9F1239', weight: 'bold', size: 'xs', align: 'center', wrap: true },
+                  { type: 'text', text: '⛔ ยกเลิก', color: '#9F1239', weight: 'bold', size: 'sm', align: 'center', wrap: true },
                 ],
               },
             ],
@@ -257,7 +280,7 @@ export function generateOrderFlex(order: Order): any {
             color: '#2563EB',
             weight: 'bold',
             align: 'center',
-            margin: 'xs',
+            margin: 'md',
             wrap: true,
           },
         ],

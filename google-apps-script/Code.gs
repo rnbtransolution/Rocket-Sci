@@ -5998,13 +5998,7 @@ function constructFinalCallFlex() {
 }
 
 function adminBroadcastFinalCall(targetId) {
-  // If the ราคาช่าง was never officially released, cancel + refund all held pre-quote bets.
-  if (!getQuoteReleased()) {
-    try { cancelHeldPreQuoteBets(); } catch (cancelErr) { Logger.log('[adminBroadcastFinalCall] cancelHeldPreQuoteBets error: ' + cancelErr.toString()); }
-  }
-  setRocketRoundStatus('CLOSED');
-  var closeFlex = constructFinalCallFlex();
-  return sendAdminMessageToLine(targetId || 'ALL', closeFlex);
+  return adminBroadcastRocketLaunched(targetId);
 }
 
 function adminBroadcastVoidRound(targetId) {
@@ -6041,6 +6035,10 @@ function adminBroadcastScamWarning(targetId) {
 }
 
 function adminBroadcastRocketLaunched(targetId) {
+  if (!getQuoteReleased()) {
+    try { cancelHeldPreQuoteBets(); } catch (cancelErr) { Logger.log('[adminBroadcastRocketLaunched] cancelHeldPreQuoteBets error: ' + cancelErr.toString()); }
+  }
+  setRocketRoundStatus('CLOSED');
   var rocketLaunchFlex = {
     "type": "bubble",
     "size": "kilo",
@@ -6051,7 +6049,7 @@ function adminBroadcastRocketLaunched(targetId) {
       "paddingAll": "lg",
       "spacing": "xs",
       "contents": [
-        { "type": "text", "text": "🔥 LIVE ACTION 🔥", "weight": "bold", "color": "#FEF08A", "size": "xxs", "align": "center" },
+        { "type": "text", "text": "🔥 LIVE ACTION · FINAL CALL 🔥", "weight": "bold", "color": "#FEF08A", "size": "xxs", "align": "center" },
         { "type": "text", "text": "🚀 บั้งไฟออกแล้ว! 🚀", "weight": "bold", "color": "#FFFFFF", "size": "xl", "align": "center", "wrap": true }
       ]
     },
@@ -6069,8 +6067,9 @@ function adminBroadcastRocketLaunched(targetId) {
           "cornerRadius": "md",
           "paddingAll": "sm",
           "contents": [
-            { "type": "text", "text": "⚡ พุ่งทะยานสู่ท้องฟ้าเรียบร้อยแล้ว!", "weight": "bold", "color": "#C2410C", "size": "xs", "align": "center", "wrap": true },
-            { "type": "text", "text": "⏱️ รอลุ้นเวลาและสรุปผลหลังบั้งไฟลง 💥", "weight": "bold", "color": "#9A3412", "size": "xxs", "align": "center", "wrap": true, "margin": "xs" }
+            { "type": "text", "text": "⚡ พุ่งทะยานสู่ท้องฟ้า · ⛔ ปิดรับดวลรอบนี้แล้ว!", "weight": "bold", "color": "#C2410C", "size": "xs", "align": "center", "wrap": true },
+            { "type": "text", "text": "🔒 แผลเปิดที่ไม่ติดคู่ดวล ถูกยกเลิกและคืนแต้มอัตโนมัติ", "weight": "bold", "color": "#9A3412", "size": "xxs", "align": "center", "wrap": true, "margin": "xs" },
+            { "type": "text", "text": "⏱️ รอลุ้นเวลาและสรุปผลหลังบั้งไฟลง 💥", "weight": "bold", "color": "#7C2D12", "size": "xxs", "align": "center", "wrap": true, "margin": "xs" }
           ]
         }
       ]

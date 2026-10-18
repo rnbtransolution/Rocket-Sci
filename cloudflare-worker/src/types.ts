@@ -141,6 +141,19 @@ export interface Order {
    * `grossWinAmount` less `commission` — i.e. 1.9x for a decisive result.
    */
   payout?: number;
+  /** ID of the in-flight round snapshot when this order is parked while Rocket B opens. */
+  inFlightRoundId?: string | null;
+}
+
+export interface InFlightRound {
+  roundId: string;
+  name: string;
+  targetMin: number;
+  targetMax: number;
+  isChotoy: boolean;
+  quoteReleased: boolean;
+  launchedAt: number;
+  matchedOrders: Order[];
 }
 
 export interface PlayerProfile {
