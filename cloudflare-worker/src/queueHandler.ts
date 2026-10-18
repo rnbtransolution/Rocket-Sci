@@ -997,76 +997,41 @@ async function handleMatchOrder(
 
   // ── Remainder handling ──
   //
-  // The creator was charged the FULL amount when the order opened, so the
-  // leftover points are already spoken for. It has to go somewhere:
+  // The creator is charged the FULL amount when the order opens, so whatever a
+  // matcher does NOT take is money already taken from them. It is returned
+  // immediately, here, at match time.
   //
-  //   * 100pt or more → a new open order for the balance, still owned by the
-  //     creator, so another player can take it.
-  //   * under 100pt  → too small to offer, so it is refunded to the creator.
-  //     Left stranded it would be money they had paid and could never recover.
+  // It is deliberately NOT re-listed as a second open order. That model needed
+  // a fresh order number (ORDER_<n> is a KV key, so reusing the parent's would
+  // overwrite the matched record), which left an order the group could not see,
+  // a leftover below the 100pt minimum that nobody was allowed to bet, and a
+  // separate class of edge cases around cancelling the remainder. Returning the
+  // money removes all of it and leaves the creator in control: they can open a
+  // new order with it or sit it out until the next round.
   //
-  // This mirrors the GAS split logic (Code.gs ~2302).
-  let remainderOrder: Order | null = null;
+  // Net effect on the creator's balance for a 500pt order taken at 200:
+  //   -500 when opened, +300 back now, so their exposure is only the 200.
   let remainderRefunded = 0;
 
   if (isPartial) {
-    if (remainingAmount >= MIN_MATCH_POINTS) {
-      // New number required: ORDER_<n> is a KV key and both order lists dedupe
-      // on orderNumber, so reusing the parent's would overwrite the matched
-      // order and drop the remainder from the board at the same time.
-      const taken = new Set<string>();
-      for (const o of await getPendingOrdersList(env)) taken.add(o.orderNumber);
-      taken.add(resolvedNo);
-      let remainderNo = '';
-      for (let attempt = 0; attempt < 20; attempt++) {
-        const candidate = Math.floor(1000 + Math.random() * 9000).toString();
-        if (!taken.has(candidate)) { remainderNo = candidate; break; }
-      }
-      if (!remainderNo) {
-        // Could not find a free number. Refund rather than risk overwriting the
-        // matched order — the creator gets the money back and can re-open.
-        remainderRefunded = remainingAmount;
-      } else {
-        remainderOrder = {
-          ...order,
-          orderNumber: remainderNo,
-          amount: remainingAmount,
-          status: 'pending_match',
-          matcherId: null,
-          matcherName: null,
-          matcherLineUserId: null,
-          matchedAt: null,
-          playerLowId: null,
-          playerLowName: null,
-          playerHighId: null,
-          playerHighName: null,
-          parentOrderNumber: resolvedNo,
-          createdAt: order.createdAt,
-        };
-        if (order.side === 'low') {
-          remainderOrder.playerLowId = order.creatorId;
-          remainderOrder.playerLowName = order.creatorName;
-        } else {
-          remainderOrder.playerHighId = order.creatorId;
-          remainderOrder.playerHighName = order.creatorName;
-        }
-        updateParts.push(
-          env.KV_ORDERS.put(`ORDER_${remainderNo}`, JSON.stringify(remainderOrder)),
-          addToPendingOrdersList(remainderOrder, env)
-        );
-      }
-    } else {
-      remainderRefunded = remainingAmount;
-    }
+    remainderRefunded = remainingAmount;
 
     if (remainderRefunded > 0) {
-      const creatorProfile = await getOrCreatePlayerProfile(
-        (await state(env).get(`RAW_LINE_${order.creatorId}`)) || order.creatorId,
-        env, ctx
-      );
+      const creatorLine = (await state(env).get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
+      const creatorProfile = await getOrCreatePlayerProfile(creatorLine, env, ctx);
       if (creatorProfile) {
         creatorProfile.balance += remainderRefunded;
         updateParts.push(savePlayerProfile(creatorProfile, env, ctx));
+      } else {
+        // No creator profile to credit. The points were taken from them at
+        // order time, so losing them here would be silent theft. Fall back to
+        // the by-id refund path, which searches the player list.
+        console.error(
+          `[Worker] partial take on #${resolvedNo}: creator profile not found for ${order.creatorId}`
+        );
+        updateParts.push(
+          refundPlayerPoints(order.creatorId, order.creatorLineUserId, remainderRefunded, env, ctx)
+        );
       }
     }
   }
@@ -1110,22 +1075,16 @@ async function handleMatchOrder(
 
   // Tell the creator what happened to the rest of their points. They were
   // charged the full amount when the order opened, so silence here leaves them
-  // thinking 500pt is still riding on this order when only the matched portion
-  // is — or, if it was refunded, that the money vanished.
+  // thinking 500pt is still riding on this order when in fact only the matched
+  // portion is — and that 300pt is already back in their balance.
   if (isPartial && creatorLineId) {
-    const remainderFlex = remainderOrder
-      ? generateNoticeFlex(
-          `ℹ️ แผล Order #${resolvedNo} ถูกรับไปบางส่วน`,
-          `รับไป ${effectiveAmt.toLocaleString()} pt จากทั้งหมด ${originalAmount.toLocaleString()} pt\n` +
-          `เหลือ ${remainingAmount.toLocaleString()} pt เปิดเป็น Order #${remainderOrder.orderNumber} รอคู่ต่อครับ`,
-          'info'
-        )
-      : generateNoticeFlex(
-          `ℹ️ แผล Order #${resolvedNo} ถูกรับไปบางส่วน`,
-          `รับไป ${effectiveAmt.toLocaleString()} pt จากทั้งหมด ${originalAmount.toLocaleString()} pt\n` +
-          `เศษที่เหลือ ${remainderRefunded.toLocaleString()} pt ต่ำกว่าขั้นต่ำ ระบบคืนแต้มให้คุณเรียบร้อยแล้วครับ ✅`,
-          'info'
-        );
+    const remainderFlex = generateNoticeFlex(
+      `ℹ️ แผล Order #${resolvedNo} ถูกรับไปบางส่วน`,
+      `รับไป ${effectiveAmt.toLocaleString()} pt จากทั้งหมด ${originalAmount.toLocaleString()} pt\n` +
+      `ส่วนที่ไม่ถูกรับ ${remainderRefunded.toLocaleString()} pt คืนเข้ากระเป๋าคุณแล้วครับ ✅\n` +
+      `(ต้องการเล่นต่อ พิมพ์คำสั่งเปิดแผลใหม่ได้เลยครับ)`,
+      'info'
+    );
     matchPromises.push(pushToLine(creatorLineId, remainderFlex, env));
   }
 

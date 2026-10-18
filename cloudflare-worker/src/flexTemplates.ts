@@ -92,9 +92,19 @@ export function generateOrderFlex(order: Order): any {
     cardTitle = userTypedCmd.trim();
   }
 
-  const amt20 = Math.max(1, Math.round(numAmount * 0.20));
-  const amt40 = Math.max(1, Math.round(numAmount * 0.40));
-  const amt80 = Math.max(1, Math.round(numAmount * 0.80));
+  // The smallest amount a player may stake in a match, and the smallest share of
+  // an order they may take. A percentage button that lands below either floor
+  // cannot succeed, so it is not rendered at all — offering a button that always
+  // errors is worse than offering one fewer button. This bites on small orders:
+  // at 100pt the 20/40/80% buttons are 20/40/80, all of them unmatchable.
+  const MIN_MATCH_POINTS = 100;
+  const MIN_MATCH_RATIO = 0.20;
+  const matchFloor = Math.max(MIN_MATCH_POINTS, Math.round(numAmount * MIN_MATCH_RATIO));
+
+  const takeOptions = [0.20, 0.40, 0.80, 1.00]
+    .map((r) => Math.round(numAmount * r))
+    .filter((v) => v >= matchFloor)
+    .filter((v, i, arr) => arr.indexOf(v) === i); // rounding can collide
   const amt100 = numAmount;
 
   return {
@@ -165,37 +175,35 @@ export function generateOrderFlex(order: Order): any {
             margin: 'xs',
             color: '#F1F5F9',
           },
-          // Row 1: 20%, 40%, 80% Quick Deal Buttons
+          // Row 1: partial Quick Deal Buttons, filtered to what can actually be matched
           //
           // Shown on a pre-quote order too. A pre-quote order is matchable
           // before the price is announced — it simply has no range until then,
           // and is confirmed (or refunded) when the quote arrives or does not.
-          {
-            type: 'box',
-            layout: 'horizontal',
-            spacing: 'xs',
-            margin: 'xs',
-            contents: [
-              { label: `${amt20}`, val: amt20 },
-              { label: `${amt40}`, val: amt40 },
-              { label: `${amt80}`, val: amt80 },
-            ].map(item => ({
-              type: 'box',
-              layout: 'vertical',
-              flex: 1,
-              backgroundColor: '#BAE6FD',
-              cornerRadius: 'sm',
-              paddingAll: 'xs',
-              action: {
-                type: 'message',
-                label: item.label,
-                text: `ต ${orderNumber} ${item.val}`,
-              },
-              contents: [
-                { type: 'text', text: item.label, color: '#0369A1', weight: 'bold', size: 'xs', align: 'center', wrap: true },
-              ],
-            })),
-          },
+          ...(takeOptions.length > 0
+            ? [{
+                type: 'box',
+                layout: 'horizontal',
+                spacing: 'xs',
+                margin: 'xs',
+                contents: takeOptions.map((val) => ({
+                  type: 'box',
+                  layout: 'vertical',
+                  flex: 1,
+                  backgroundColor: '#BAE6FD',
+                  cornerRadius: 'sm',
+                  paddingAll: 'xs',
+                  action: {
+                    type: 'message',
+                    label: `${val}`,
+                    text: `ต ${orderNumber} ${val}`,
+                  },
+                  contents: [
+                    { type: 'text', text: `${val}`, color: '#0369A1', weight: 'bold', size: 'xs', align: 'center', wrap: true },
+                  ],
+                })),
+              }]
+            : []),
           // Row 2: 100% & Cancel Buttons
           {
             type: 'box',
@@ -203,22 +211,27 @@ export function generateOrderFlex(order: Order): any {
             spacing: 'xs',
             margin: 'xs',
             contents: [
-              {
-                type: 'box',
-                layout: 'vertical',
-                flex: 1,
-                backgroundColor: '#BBF7D0',
-                cornerRadius: 'sm',
-                paddingAll: 'xs',
-                action: {
-                  type: 'message',
-                  label: `${amt100}`,
-                  text: `ต ${orderNumber} ${amt100}`,
-                },
-                contents: [
-                  { type: 'text', text: `${amt100}`, color: '#15803D', weight: 'bold', size: 'xs', align: 'center', wrap: true },
-                ],
-              },
+              // Only when the full amount is not already offered in row 1 — on
+              // a small order the 100% option IS the full amount and would
+              // otherwise appear twice.
+              ...(takeOptions.includes(amt100)
+                ? []
+                : [{
+                    type: 'box',
+                    layout: 'vertical',
+                    flex: 1,
+                    backgroundColor: '#BBF7D0',
+                    cornerRadius: 'sm',
+                    paddingAll: 'xs',
+                    action: {
+                      type: 'message',
+                      label: `${amt100}`,
+                      text: `ต ${orderNumber} ${amt100}`,
+                    },
+                    contents: [
+                      { type: 'text', text: `${amt100}`, color: '#15803D', weight: 'bold', size: 'xs', align: 'center', wrap: true },
+                    ],
+                  }]),
               {
                 type: 'box',
                 layout: 'vertical',

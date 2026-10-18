@@ -203,46 +203,44 @@ console.log('SCENARIO 1 — 500pt order, take 200pt (the reported bug)');
   check('order #7494 is matched', matched?.status === 'matched', matched?.status);
   check('matched amount is the portion taken (200)', matched?.amount === 200, String(matched?.amount));
   check('matcher recorded', matched?.matcherId === MATCHER.shortId, String(matched?.matcherId));
-  check('matched 200 + remainder 300 == original 500',
-    (matched?.amount || 0) + ((await env.orders()).pending.find((o) => o.amount === 300)?.amount || 0) === 500);
+  // Seeded at 0 (the full 500 already staked). After a 200pt take the
+  // untaken 300 is returned, so the creator lands on 300 — proof the refund
+  // actually lands on the balance rather than only being recorded.
+  check('the untaken 300 is returned to the creator',
+    (await env.balances()).creator === 300, String((await env.balances()).creator));
 
+  // The untaken remainder is returned to the creator, not re-listed. The
+  // pending board must therefore be empty: there is no second order.
   const { pending } = await env.orders();
-  const rem = pending.find((o) => o.amount === 300);
-  check('a remainder order exists for the other 300', !!rem, JSON.stringify(pending.map((o) => [o.orderNumber, o.amount])));
-  check('remainder belongs to the creator', rem?.creatorId === CREATOR.shortId);
-  check('remainder is still open', rem?.status === 'pending_match');
-  check('remainder has a different order number', rem && rem.orderNumber !== '7494', String(rem?.orderNumber));
-  check('remainder records its parent', rem?.parentOrderNumber === '7494', String(rem?.parentOrderNumber));
+  check('no remainder order is created', pending.length === 0, JSON.stringify(pending.map((o) => [o.orderNumber, o.amount])));
+  check('nothing is left open at all', pending.every((o) => o.orderNumber !== '7494'));
 
   check('points conserved', (await env.inPlay()) === before, `${before} -> ${await env.inPlay()}`);
   await env.dispose();
 }
 
-// ── Scenario 2: chained partials drain an order over several takers ──────────
-console.log('\nSCENARIO 2 — chained partial matches');
+// ── Scenario 2: an order closes on its first match, however partial ────────
+console.log('\nSCENARIO 2 — the order closes after one partial take');
 {
   const env = await freshEnv();
   await env.seed('7495', 500, 0, 5000);
   const before = await env.inPlay();
   await env.say(MATCHER, 'ต 7495 200');
-  check('conserved after 1st partial', (await env.inPlay()) === before, `${before} -> ${await env.inPlay()}`);
+  check('conserved after partial', (await env.inPlay()) === before, `${before} -> ${await env.inPlay()}`);
+  check('the order is now matched', (await env.orderByNo('7495'))?.status === 'matched');
+  check('it holds only the portion taken', (await env.orderByNo('7495'))?.amount === 200);
+  check('nothing remains open for a second taker',
+    (await env.orders()).pending.every((o) => o.orderNumber !== '7495'));
 
-  const r1 = (await env.orders()).pending.find((o) => o.parentOrderNumber === '7495');
-  check('remainder located', !!r1, JSON.stringify((await env.orders()).pending.map((o) => [o.orderNumber, o.amount])));
-  if (r1) {
-    await env.say(MATCHER, `ต ${r1.orderNumber} 100`);
-    check('conserved after 2nd partial', (await env.inPlay()) === before, `${before} -> ${await env.inPlay()}`);
-    const r2 = (await env.orders()).pending.find((o) => o.amount === 200);
-    check('200pt remainder re-listed', !!r2, JSON.stringify((await env.orders()).pending.map((o) => [o.orderNumber, o.amount])));
-    check('both matched portions recorded',
-      (await env.orderByNo('7495'))?.amount === 200 && (await env.orderByNo(r1.orderNumber))?.amount === 100);
-    check('both portions sum to the original 500',
-      ((await env.orderByNo('7495'))?.amount || 0) + ((await env.orderByNo(r1.orderNumber))?.amount || 0) + ((await env.orders()).pending.find((o) => o.amount === 200)?.amount || 0) === 500);
-  }
+  // A second attempt against the same order must be refused.
+  await env.say(MATCHER, 'ต 7495 100');
+  check('a further take on the same order changes nothing',
+    (await env.orderByNo('7495'))?.amount === 200, String((await env.orderByNo('7495'))?.amount));
+  check('still conserved', (await env.inPlay()) === before, `${before} -> ${await env.inPlay()}`);
   await env.dispose();
 }
 
-// ── Scenario 3: remainder below the floor must be refunded, not stranded ────
+// ── Scenario 3: a sub-100 remainder is no longer a special case ────────────
 console.log('\nSCENARIO 3 — 150pt order, take 100 (50pt remainder)');
 {
   const env = await freshEnv();
@@ -250,11 +248,13 @@ console.log('\nSCENARIO 3 — 150pt order, take 100 (50pt remainder)');
   const before = await env.inPlay();
   await env.say(MATCHER, 'ต 7496 100');
   check('conserved', (await env.inPlay()) === before, `${before} -> ${await env.inPlay()}`);
-  check('no sub-100 order created', !(await env.orders()).pending.some((o) => o.amount < 100),
+  // Previously the sub-100 leftover was a special branch. It is now the same
+  // path as every other remainder, so no order is created for it either.
+  check('no 50pt order was created', !(await env.orders()).pending.some((o) => o.amount === 50),
     JSON.stringify((await env.orders()).pending.map((o) => o.amount)));
-  check('50pt remainder was neither re-listed nor left on a dead order',
-    (await env.orderByNo('7496'))?.amount === 100 && (await env.orders()).pending.length === 0,
+  check('nothing left open', (await env.orders()).pending.length === 0,
     JSON.stringify((await env.orders()).pending.map((o) => o.amount)));
+  check('order settled on the matched 100', (await env.orderByNo('7496'))?.amount === 100);
   await env.dispose();
 }
 
@@ -290,9 +290,9 @@ console.log('\nSCENARIO 6 — exactly 20% is allowed');
   await env.say(MATCHER, 'ต 7499 100');
   check('order matched at the floor', (await env.orderByNo('7499'))?.status === 'matched');
   check('matched amount is 100', (await env.orderByNo('7499'))?.amount === 100);
-  check('matched 100 + remainder 400 == original 500',
-    ((await env.orderByNo('7499'))?.amount || 0) + ((await env.orders()).pending.find((o) => o.amount === 400)?.amount || 0) === 500);
-  check('400pt remainder open', (await env.orders()).pending.some((o) => o.amount === 400));
+  check('the other 400 is returned, not re-listed',
+    (await env.orders()).pending.every((o) => o.amount !== 400),
+    JSON.stringify((await env.orders()).pending.map((o) => [o.orderNumber, o.amount])));
   check('conserved', (await env.inPlay()) === before);
   await env.dispose();
 }
