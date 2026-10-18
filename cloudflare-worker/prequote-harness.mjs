@@ -112,33 +112,38 @@ console.log('LIVE ORDER — take-up buttons present');
   check('no "awaiting quote" notice', !texts(card).some((t) => t.includes('รอประกาศราคา')));
 }
 
-// ── A held order must NOT invite a match ───────────────────────────────────
-console.log('\nHELD ORDER (pending_hold) — no take-up buttons');
+// ── A held PRE-QUOTE order IS matchable before the quote exists ────────────
+//
+// Corrected rule: a pre-quote order can be matched straight away. It has no
+// range until the admin announces the price, at which point it is confirmed;
+// if no quote ever comes it is cancelled and both sides refunded. So the card
+// must offer its take-up buttons exactly like a live order.
+console.log('\nHELD PRE-QUOTE ORDER — matchable, so buttons are offered');
 {
   const card = mod.generateOrderFlex({
     ...base, orderNumber: '2222', amount: 500, side: 'low',
     betType: 'pre_quote', status: 'pending_hold',
   });
-  validate(card, 'held order card');
+  validate(card, 'held pre-quote card');
   const acts = actions(card);
   const takes = acts.filter((a) => a.text.startsWith('ต '));
-  check('offers NO take-up buttons', takes.length === 0, JSON.stringify(takes.map((t) => t.text)));
+  check('offers its take-up buttons', takes.length === 4, JSON.stringify(takes.map((t) => t.text)));
   check('cancel button still offered', acts.some((a) => a.text === 'ยกเลิก 2222'),
     JSON.stringify(acts.map((a) => a.text)));
-  check('says it is waiting for the quote', texts(card).some((t) => t.includes('รอประกาศราคา')),
-    JSON.stringify(texts(card)));
+  check('no longer shows a "waiting" notice that suppressed the buttons',
+    !texts(card).some((t) => t.includes('รอประกาศราคา')));
 }
 
-// ── The status message must not call a held order cancelled ────────────────
-console.log('\nMATCH-REJECTION MESSAGES');
+// ── The match handler must accept a held pre-quote order ──────────────────
+console.log('\nMATCH HANDLER — accepts held pre-quote, still refuses a real cancel');
 {
-  // The old code was: status === 'matched' ? 'has a partner' : 'has been cancelled'
-  const hasHoldBranch = /order\.status === 'pending_hold'/.test(qh);
-  check('handleMatchOrder handles pending_hold explicitly', hasHoldBranch);
-  check('pending_hold no longer falls into the cancelled branch',
-    /รอประกาศราคาช่าง/.test(qh));
-  // And the cancelled wording must still exist, for orders that really are.
+  check('handleMatchOrder recognises a held pre-quote order', /isPreQuoteHeld/.test(qh));
+  check('and allows it through the pending_match guard',
+    /order\.status !== 'pending_match' && !isPreQuoteHeld/.test(qh));
+  check('scoped to betType pre_quote, so any other pending_hold is still refused',
+    /order\.status === 'pending_hold' && order\.betType === 'pre_quote'/.test(qh));
   check('a genuinely cancelled order still says so', /ถูกยกเลิกไปแล้ว/.test(qh));
+  check('a matched order still says it has a partner', /มีคู่ดวลแล้ว/.test(qh));
 }
 
 console.log(`\nRESULT\n  ${pass} passed, ${fail} failed\n`);

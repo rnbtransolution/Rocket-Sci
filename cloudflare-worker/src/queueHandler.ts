@@ -848,20 +848,22 @@ async function handleMatchOrder(
   }
 
   const order = JSON.parse(orderRaw) as Order;
-  if (order.status !== 'pending_match') {
+  // A pre-quote order (pending_hold) IS matchable before the price is announced.
+  // It has no range yet; it is confirmed when the admin sends the quote, and
+  // cancelled with both sides refunded if the admin never sends one. So it must
+  // not be rejected here the way a cancelled order is.
+  const isPreQuoteHeld = order.status === 'pending_hold' && order.betType === 'pre_quote';
+  if (order.status !== 'pending_match' && !isPreQuoteHeld) {
     // Each status gets its own explanation. This used to be a two-way ternary
     // that called everything which was not `matched` "cancelled" — so an order
-    // merely WAITING for the rocket price to be announced (pending_hold) was
-    // reported as cancelled. Players were tapping a live order and being told
-    // it no longer existed.
+    // merely WAITING for the rocket price to be announced was reported as
+    // cancelled. Players were tapping a live order and being told it no longer
+    // existed.
     let reason: string;
     let hint: string;
     if (order.status === 'matched') {
       reason = 'แผลนี้มีคู่ดวลแล้วครับ';
       hint = 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ';
-    } else if (order.status === 'pending_hold') {
-      reason = 'แผลนี้ยังไม่เปิดรับคู่ครับ — กำลังรอประกาศราคาช่างอยู่';
-      hint = 'เมื่อประกาศราคาแล้ว ระบบจะเปิดรับคู่ให้อัตโนมัติครับ 🚀';
     } else {
       reason = 'แผลนี้ถูกยกเลิกไปแล้วครับ';
       hint = 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ';
@@ -1525,35 +1527,80 @@ export async function refundPlayerPoints(
 }
 
 /**
- * Cancels ONLY held pre-quote orders (pending_hold) created while ราคาช่าง was unreleased.
- * Refunds creators and notifies them via DM. Used when a round ends without an official quote.
+ * Cancels every PRE-QUOTE order when the round ends without an official quote,
+ * and refunds the stake to both parties.
+ *
+ * Pre-quote orders are matchable before the price is announced, so by the time
+ * a round closes without a quote they can be in EITHER state:
+ *
+ *   * `pending_hold` — created, nobody has taken them yet. Refund the creator.
+ *   * `matched`      — taken by another player before the quote arrived. Both
+ *                      sides have a stake held and both must be refunded.
+ *
+ * This previously only looked at the pending index and only for `pending_hold`,
+ * so a matched pre-quote order was skipped entirely: neither side was refunded
+ * and neither was the order closed. That is money held against an order that
+ * could never settle.
+ *
+ * Deliberately scoped by `betType === 'pre_quote'`, never by status alone: a
+ * self-quoted custom-range order is valid with or without an admin quote and
+ * must survive this untouched.
  */
 export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext): Promise<{ cancelled: number }> {
   let cancelledCount = 0;
   try {
-    const pendingList = await getPendingOrdersList(env);
-    const heldOrders = pendingList.filter((o) => o && o.status === 'pending_hold' && o.betType === 'pre_quote');
-    const remainingOrders = pendingList.filter((o) => !(o && o.status === 'pending_hold' && o.betType === 'pre_quote'));
+    const [pendingList, matchedList] = await Promise.all([
+      getPendingOrdersList(env),
+      getMatchedOrdersList(env),
+    ]);
 
-    for (const item of heldOrders) {
-      if (!item || !item.orderNumber) continue;
+    // Anything still carrying betType 'pre_quote' belongs to this round's
+    // un-quoted pre-orders, whichever index it happens to be sitting in.
+    const isPreQuote = (o: any) => Boolean(o) && o.betType === 'pre_quote';
+    const candidates: Order[] = [];
+    const seen = new Set<string>();
+    for (const o of [...pendingList, ...matchedList]) {
+      if (!isPreQuote(o) || !o.orderNumber || seen.has(o.orderNumber)) continue;
+      seen.add(o.orderNumber);
+      candidates.push(o);
+    }
+
+    const remainingPending = pendingList.filter((o) => !isPreQuote(o));
+    const remainingMatched = matchedList.filter((o) => !isPreQuote(o));
+
+    for (const item of candidates) {
       const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
       if (!raw) continue;
       try {
         const order = JSON.parse(raw) as Order;
-        if (order.status === 'pending_hold' && order.betType === 'pre_quote') {
-          const amt = Number(order.amount) || 0;
+        if (order.betType !== 'pre_quote') continue;
+        if (order.status !== 'pending_hold' && order.status !== 'matched') continue;
 
-          // Claim first: if the player or the admin already cancelled this
-          // order, do not notify them about a refund that is not happening.
-          const refund = await refundOrderOnce(order, env, ctx, 'cancel_held_pre_quote');
+        const amt = Number(order.amount) || 0;
+        const hadMatcher = Boolean(order.matcherId);
 
-          order.status = 'cancelled';
-          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-          if (!refund.refunded) continue;
-          cancelledCount++;
+        // Claim first: if the player or the admin already cancelled this order,
+        // do not notify them about a refund that is not happening. For a
+        // matched order this also credits BOTH sides, exactly once.
+        const refund = await refundOrderOnce(order, env, ctx, 'cancel_held_pre_quote');
 
-          const rawLine = (await state(env).get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
+        order.status = 'cancelled';
+        await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+        if (!refund.refunded) continue;
+        cancelledCount++;
+
+        // Both parties are owed a refund on a matched pre-quote order, so both
+        // hear about it.
+        const parties: Array<{ id: string; lineId?: string | null; name?: string | null }> = [
+          { id: order.creatorId, lineId: order.creatorLineUserId, name: order.creatorName },
+        ];
+        if (hadMatcher) {
+          parties.push({ id: order.matcherId!, lineId: order.matcherLineUserId, name: order.matcherName });
+        }
+
+        await Promise.all(parties.map(async (p) => {
+          if (!p.id) return;
+          const rawLine = (await state(env).get(`RAW_LINE_${p.id}`)) || p.lineId || p.id;
           const cancelPreQuoteFlex = generateNoticeFlex(
             `🚫 ยกเลิก Order #${order.orderNumber} อัตโนมัติ`,
             `จบรอบดวลโดยไม่มีการประกาศราคาช่างอย่างเป็นทางการ\nระบบคืนแต้ม: +${amt.toLocaleString()} pt เรียบร้อยครับ ✅`,
@@ -1565,14 +1612,17 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
             order.groupId || null,
             cancelPreQuoteFlex,
             env,
-            order.creatorName
+            p.name || undefined
           );
-        }
+        }));
       } catch (_) {}
     }
 
-    await state(env).put('PENDING_ORDERS_LIST', JSON.stringify(remainingOrders), { expirationTtl: 1800 });
-    console.log(`[Worker] cancelHeldPreQuoteOrders: Cancelled + refunded ${cancelledCount} held pre-quote orders.`);
+    await Promise.all([
+      state(env).put('PENDING_ORDERS_LIST', JSON.stringify(remainingPending), { expirationTtl: 1800 }),
+      state(env).put('MATCHED_ORDERS_LIST', JSON.stringify(remainingMatched), { expirationTtl: 1800 }),
+    ]);
+    console.log(`[Worker] cancelHeldPreQuoteOrders: Cancelled + refunded ${cancelledCount} pre-quote orders.`);
   } catch (err) {
     console.error('[Worker] cancelHeldPreQuoteOrders error:', err);
   }
@@ -1586,7 +1636,7 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
  *  - Auto-matches same-amount opposite-side pairs, notifying both players via DM.
  * Called from adminBroadcastQuote whenever a price tier is officially released.
  */
-export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, env: Env, ctx?: ExecutionContext): Promise<{ converted: number; matched: number }> {
+export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, env: Env, ctx?: ExecutionContext): Promise<{ converted: number; matched: number; confirmedMatched: number }> {
   const bandMin = Number(minVal) || 330;
   const bandMax = Number(maxVal) || 380;
   const pending = await getPendingOrdersList(env);
@@ -1594,6 +1644,7 @@ export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, 
   const nonHeld = pending.filter((o) => !(o && o.status === 'pending_hold' && o.betType === 'pre_quote'));
 
   let converted = 0;
+  let confirmedMatched = 0;
   const convertedOrders: Order[] = [];
 
   for (const item of held) {
@@ -1611,6 +1662,30 @@ export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, 
         convertedOrders.push(order);
         converted++;
       }
+    } catch (_) {}
+  }
+
+  // A pre-quote order can already be MATCHED when the quote arrives, because it
+  // is matchable before the price is announced. Such an order still holds only
+  // an offset — no real range — so it has to be given one now or it can never be
+  // settled. It keeps its `pre_quote` betType: that is what
+  // cancelHeldPreQuoteOrders looks for, and a matched order must never re-enter
+  // the pending board.
+  const matchedPreQuote = (await getMatchedOrdersList(env)).filter(
+    (o) => o && o.betType === 'pre_quote'
+  );
+  for (const item of matchedPreQuote) {
+    const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
+    if (!raw) continue;
+    try {
+      const order = JSON.parse(raw) as Order;
+      if (order.betType !== 'pre_quote') continue;
+      const offset = Number(order.offset) || 0;
+      order.rangeMin = bandMin + offset;
+      order.rangeMax = bandMax + offset;
+      order.offsetConfirmedAt = Date.now();
+      await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+      confirmedMatched++;
     } catch (_) {}
   }
 
@@ -1640,8 +1715,8 @@ export async function releaseHeldPreQuoteOrders(minVal: number, maxVal: number, 
   });
   await Promise.all(notifyPromises);
 
-  console.log(`[Worker] releaseHeldPreQuoteOrders: released ${converted} held pre-quote orders, auto-matched ${matched} pairs.`);
-  return { converted, matched };
+  console.log(`[Worker] releaseHeldPreQuoteOrders: released ${converted} held pre-quote orders, confirmed ${confirmedMatched} already-matched pre-quote orders, auto-matched ${matched} pairs.`);
+  return { converted, matched, confirmedMatched };
 }
 
 /**

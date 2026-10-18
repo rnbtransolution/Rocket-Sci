@@ -2119,10 +2119,37 @@ const isPublicAllowed =
 
           for (const order of matchedOrders) {
             const amt = Number(order.amount) || 0;
+                // Settle each order against ITS OWN quoted range, not the round
+                // band. A player who quotes their own rate (custom_range) is
+                // betting that specific range; judging it against the admin's
+                // band settled bets on a number the player never chose. The
+                // round band is only the fallback for an order that has no range
+                // of its own.
+                //
+                // A pre-quote order has only an offset until the admin quotes,
+                // at which point releaseHeldPreQuoteOrders writes its real
+                // range. If it is settled without one (admin quoted nothing and
+                // the order slipped through cancellation), there is no range to
+                // judge against, so the round band is used and flagged.
+                const orderMin = Number.isFinite(Number(order.rangeMin)) && Number(order.rangeMin) > 0
+                  ? Number(order.rangeMin)
+                  : tMin;
+                const orderMax = Number.isFinite(Number(order.rangeMax)) && Number(order.rangeMax) > 0
+                  ? Number(order.rangeMax)
+                  : tMax;
+                const usingRoundFallback =
+                  orderMin === tMin && orderMax === tMax &&
+                  !(Number(order.rangeMin) > 0 && Number(order.rangeMax) > 0);
+                if (usingRoundFallback && order.betType === 'pre_quote') {
+                  console.warn(
+                    `[Worker] settling pre-quote order #${order.orderNumber} with no quoted range — using round band ${tMin}-${tMax}`
+                  );
+                }
+
                 let winnerSide: 'low' | 'high' | 'draw' = 'draw';
-                if (finalSeconds < tMin) {
+                if (finalSeconds < orderMin) {
                   winnerSide = 'low';
-                } else if (finalSeconds > tMax) {
+                } else if (finalSeconds > orderMax) {
                   winnerSide = 'high';
                 } else {
                   winnerSide = 'draw';

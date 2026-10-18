@@ -123,6 +123,12 @@ export interface Order {
    * on it, so reusing the parent's number would silently drop the remainder.
    */
   parentOrderNumber?: string | null;
+  /**
+   * Set when the admin's quote assigns a real range to a pre-quote order that
+   * was already matched. Before this the order held only `offset` and had no
+   * range at all, so it could never be settled.
+   */
+  offsetConfirmedAt?: number;
   /** The loser's stake on a settled order — what the winner won gross. */
   grossWinAmount?: number;
   /**

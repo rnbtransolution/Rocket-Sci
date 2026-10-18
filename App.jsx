@@ -477,6 +477,16 @@ export default function App() {
   const [rocketName, setRocketName] = useState(''); // Technician / Rocket Team Name (entered manually by admin)
   const [targetMin, setTargetMin] = useState(''); // Range Min (entered manually by admin)
   const [targetMax, setTargetMax] = useState(''); // Range Max (entered manually by admin)
+  /**
+   * Fields the admin has typed into. A ref, not state: the poll reads it on
+   * every tick and a state update would re-run the effect that owns the poll.
+   * Set once on first edit, so live server data stops overwriting the input
+   * while it is being edited. Cleared when a quote is published, because that
+   * legitimately changes what the admin should be working from.
+   */
+  const touchedFieldsRef = useRef({ rocketName: false, targetMin: false, targetMax: false });
+  const markTouched = (field) => { touchedFieldsRef.current[field] = true; };
+  const clearTouched = () => { touchedFieldsRef.current = { rocketName: false, targetMin: false, targetMax: false }; };
   const [quoteBetAmount, setQuoteBetAmount] = useState(''); // Bet Amount (entered manually by admin)
   const [quoteIsChotoy, setQuoteIsChotoy] = useState(false);
 
@@ -496,6 +506,10 @@ export default function App() {
       if (res && res.success === false) {
         addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
       } else {
+        // Quote published: the round's authoritative values now match what is
+        // on screen, so the inputs are released and the poll may manage them
+        // again for the next round.
+        clearTouched();
         addToast(`🚀 ประกาศราคาสำเร็จ (${min}-${max}s)`, 'success');
       }
     } catch {
@@ -534,9 +548,25 @@ export default function App() {
         setLineGroups([]);
       }
       if (data.activeRound) {
-        if (data.activeRound.name) setRocketName(prev => (!prev || prev === 'ช่างบั้งไฟสด') ? data.activeRound.name : prev);
-        if (data.activeRound.targetMin) setTargetMin(prev => (!prev ? String(data.activeRound.targetMin) : prev));
-        if (data.activeRound.targetMax) setTargetMax(prev => (!prev ? String(data.activeRound.targetMax) : prev));
+        // Do NOT write into a field the admin is currently editing.
+        //
+        // The poll runs every <600ms. Previously the round was copied into the
+        // inputs whenever the local value was empty — and for the name, also
+        // whenever it equalled the default string. So backspacing to empty (or
+        // to the default) made the server value snap straight back within one
+        // poll, and deleting a character looked impossible: the old text kept
+        // reappearing. Once an admin touches a field it is theirs until the
+        // round is explicitly reloaded below.
+        const touched = touchedFieldsRef.current;
+        if (data.activeRound.name && !touched.rocketName) {
+          setRocketName(prev => (!prev || prev === 'ช่างบั้งไฟสด') ? data.activeRound.name : prev);
+        }
+        if (data.activeRound.targetMin && !touched.targetMin) {
+          setTargetMin(prev => (!prev ? String(data.activeRound.targetMin) : prev));
+        }
+        if (data.activeRound.targetMax && !touched.targetMax) {
+          setTargetMax(prev => (!prev ? String(data.activeRound.targetMax) : prev));
+        }
         if (data.activeRound.isChotoy !== undefined) setQuoteIsChotoy(Boolean(data.activeRound.isChotoy));
       }
       try {
@@ -956,6 +986,9 @@ export default function App() {
 
     try {
       const data = await runBackendFunction('adminResolveBets', [finalTime, tMin, tMax]);
+      // The round is over and a new one will be opened: release the fields so
+      // the live poll may populate them again from the next round's quote.
+      clearTouched();
       if (data) {
         if (data.bets) setBets(data.bets);
         if (data.players) setPlayers(deduplicatePlayersList(data.players));
@@ -1579,7 +1612,7 @@ export default function App() {
                     <input 
                       type="text"
                       value={rocketName}
-                      onChange={(e) => setRocketName(e.target.value)}
+                      onChange={(e) => { markTouched('rocketName'); setRocketName(e.target.value); }}
                       className="w-full bg-white border border-slate-200 text-slate-900 font-bold px-3 py-2 rounded-xl text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                       placeholder="กรอกชื่อช่าง / บั้งไฟ (เช่น โชคน้องกวาง)"
                     />
@@ -1595,7 +1628,7 @@ export default function App() {
                         type="number"
                         step="1"
                         value={targetMin}
-                        onChange={(e) => setTargetMin(e.target.value)}
+                        onChange={(e) => { markTouched('targetMin'); setTargetMin(e.target.value); }}
                         className="w-full bg-white border border-slate-200 text-slate-900 font-bold px-3 py-2 rounded-xl text-xs font-mono"
                         placeholder="เช่น 330"
                       />
@@ -1613,7 +1646,7 @@ export default function App() {
                         type="number"
                         step="1"
                         value={targetMax}
-                        onChange={(e) => setTargetMax(e.target.value)}
+                        onChange={(e) => { markTouched('targetMax'); setTargetMax(e.target.value); }}
                         className="w-full bg-white border border-slate-200 text-slate-900 font-bold px-3 py-2 rounded-xl text-xs font-mono"
                         placeholder="เช่น 380"
                       />
@@ -1755,7 +1788,7 @@ export default function App() {
                           type="number"
                           step="1"
                           value={targetMin}
-                          onChange={(e) => setTargetMin(e.target.value)}
+                          onChange={(e) => { markTouched('targetMin'); setTargetMin(e.target.value); }}
                           className="w-14 bg-slate-50 border border-slate-300 text-slate-900 font-bold px-1.5 py-0.5 rounded text-xs text-center focus:ring-1 focus:ring-sky-500 focus:outline-none"
                           placeholder="330"
                         />
@@ -1764,7 +1797,7 @@ export default function App() {
                           type="number"
                           step="1"
                           value={targetMax}
-                          onChange={(e) => setTargetMax(e.target.value)}
+                          onChange={(e) => { markTouched('targetMax'); setTargetMax(e.target.value); }}
                           className="w-14 bg-slate-50 border border-slate-300 text-slate-900 font-bold px-1.5 py-0.5 rounded text-xs text-center focus:ring-1 focus:ring-sky-500 focus:outline-none"
                           placeholder="380"
                         />
