@@ -1053,31 +1053,22 @@ async function handleMatchOrder(
   // Generate match card
   const matchFlex = generateMatchNotificationFlex(order);
 
-  // Match notification: send match card to group without floating quick reply, and push to DM of both players
+  // Match notification: NEVER send to LINE Group. Send ONLY to DM of both creator and matcher.
   const creatorLineId = (await state(env).get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId;
   const matchPromises: Promise<any>[] = [updatePersistence];
-  
-  if (groupId) {
-    if (replyToken) {
-      matchPromises.push(replyToLine(replyToken, matchFlex, env, false));
-    } else if (order.groupId) {
-      matchPromises.push(pushToLine(order.groupId, matchFlex, env));
-    }
-    // Also push match card to matcher's DM
-    if (userId && userId.startsWith('U')) {
-      matchPromises.push(pushToLine(userId, matchFlex, env));
-    }
-  } else {
-    // Matched in DM
-    if (replyToken) {
-      matchPromises.push(replyToLine(replyToken, matchFlex, env, true));
-    } else if (userId && userId.startsWith('U')) {
-      matchPromises.push(pushToLine(userId, matchFlex, env));
-    }
-    // Also broadcast match card to the group where the order originated
-    if (order.groupId) {
-      matchPromises.push(pushToLine(order.groupId, matchFlex, env));
-    }
+
+  if (!groupId && replyToken) {
+    // Matched directly inside 1-on-1 DM: reply in DM (with push fallback)
+    matchPromises.push(
+      replyToLine(replyToken, matchFlex, env, true).then((ok) => {
+        if (!ok && userId && userId.startsWith('U')) {
+          return pushToLine(userId, matchFlex, env);
+        }
+      })
+    );
+  } else if (userId && userId.startsWith('U')) {
+    // Matched from LINE Group (or DM without replyToken): push directly to matcher's DM
+    matchPromises.push(pushToLine(userId, matchFlex, env));
   }
 
   // Push match card to creator's DM
@@ -1752,7 +1743,7 @@ export async function releaseHeldPreQuoteOrders(
   // Auto-match same-amount opposite-side pairs
   const matched = await autoMatchPendingPairs(env, ctx);
 
-  // Notify each converted player that their pre-quote order is now active
+  // Notify each converted player via DM only that their pre-quote order is now active
   const notifyPromises = convertedOrders.map(async (o) => {
     const rawLine = (await state(env).get(`RAW_LINE_${o.creatorId}`)) || o.creatorLineUserId || o.creatorId;
     const releaseFlex = generateNoticeFlex(
@@ -1763,23 +1754,18 @@ export async function releaseHeldPreQuoteOrders(
     return deliverPrivateNotice(
       rawLine,
       undefined,
-      o.groupId || null,
+      null,
       releaseFlex,
       env,
       o.creatorName
     );
   });
 
-  // Notify both players of confirmed matched pre-quote orders (concise ~20% length)
+  // Notify both players via DM only (never LINE Group) using the unified green แมตช์สำเร็จ card style
   for (const o of confirmedMatchedOrders) {
     notifyPromises.push((async () => {
-      const confirmFlex = generateNoticeFlex(
-        `🎯 ล็อคแผล #${o.orderNumber}`,
-        `${o.creatorName} VS ${o.matcherName} • ${o.amount.toLocaleString()} pt (${o.rangeMin}-${o.rangeMax}s)`,
-        'success'
-      );
+      const confirmFlex = generateMatchNotificationFlex(o);
       const tasks: Promise<any>[] = [];
-      if (o.groupId) tasks.push(pushToLine(o.groupId, confirmFlex, env));
       const cLine = (await state(env).get(`RAW_LINE_${o.creatorId}`)) || o.creatorLineUserId;
       if (cLine) tasks.push(pushToLine(cLine, confirmFlex, env));
       if (o.matcherId) {

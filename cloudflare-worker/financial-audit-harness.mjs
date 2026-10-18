@@ -340,10 +340,15 @@ try {
     // 6. Admin releases official quote 400-450s for บั้งไฟสด 123
     await rpc(env, ctx, 'adminBroadcastQuote', ['ALL', 'บั้งไฟสด 123', 400, 450, false]);
 
-    // Verify shortened pre-quote confirmation message (~20% length) was sent
+    // Verify unified green แมตช์สำเร็จ card style and strict DM-only routing (never sent to LINE Group)
     const allFlexJson = JSON.stringify(sentLinePayloads);
-    assert.ok(allFlexJson.includes(`🎯 ล็อคแผล #${order1.orderNumber}`), 'Shortened lock title must appear for Order 1');
+    assert.ok(allFlexJson.includes(`🤝 แมตช์สำเร็จ! #${order1.orderNumber}`), 'Unified green แมตช์สำเร็จ title must appear for Order 1');
+    assert.ok(!allFlexJson.includes('รับแผลล่วงหน้า'), 'Confusing orange รับแผลล่วงหน้า card must NOT appear');
     assert.ok(!allFlexJson.includes('ยืนยันแผลดวล'), 'Old verbose pre-quote confirmation title must NOT appear');
+    const groupMatchSends = sentLinePayloads.filter(
+      (p) => p.body?.to === TEST_GROUP_ID && JSON.stringify(p.body).includes('แมตช์สำเร็จ')
+    );
+    assert.equal(groupMatchSends.length, 0, 'Match confirmation cards must NEVER be sent to the LINE Group');
 
     // 7. Admin settles round at finalTime = 320s (quote band 400-450s)
     //    - Order 1 (400-450s, 500pt, ITT=HIGH, A-K=LOW): 320 < 400 -> LOW (A-K) wins 950pt (comm 50)

@@ -289,32 +289,29 @@ export function generateOrderFlex(order: Order): any {
   };
 }
 
-// ── 2. Match Notification Card (Dispatched via Private DM to Matchers) ──
+// ── 2. Match Notification Card (Dispatched via Private DM to Creator & Matcher Only) ──
 export function generateMatchNotificationFlex(order: Order): any {
-  const { orderNumber, amount, creatorName, matcherName, side, rocketName, rangeMin, rangeMax, betType, offset, offsetConfirmedAt } = order as any;
+  const { orderNumber, amount, creatorName, matcherName, side, rocketName, rangeMin, rangeMax, offset } = order as any;
   const lowName = side === 'low' ? creatorName : (matcherName || '-');
   const highName = side === 'high' ? creatorName : (matcherName || '-');
-  const isPreQuoteWaiting = betType === 'pre_quote' && !offsetConfirmedAt;
-  const offsetStr = offset ? ` (${offset > 0 ? '+' : ''}${offset}s)` : '';
+  const offsetStr = offset ? ` ${offset > 0 ? '+' : ''}${offset}s` : '';
   const rangeStr = (rangeMin && rangeMax)
     ? `${rangeMin}-${rangeMax}s`
-    : (isPreQuoteWaiting ? `รอราคาช่าง${offsetStr}` : 'ราคาช่าง');
+    : `ราคาช่าง${offsetStr}`;
 
-  const titleText = isPreQuoteWaiting ? `🤝 รับแผลล่วงหน้า! #${orderNumber}` : `🤝 แมตช์สำเร็จ! #${orderNumber}`;
-  const rocketText = isPreQuoteWaiting
-    ? `🚀 บั้งไฟ: รอแอดมินเปิดราคา (${rangeStr})`
-    : `🚀 บั้งไฟ: ${rocketName || 'รอบดวลสด'} (${rangeStr})`;
+  const titleText = `🤝 แมตช์สำเร็จ! #${orderNumber}`;
+  const rocketText = `🚀 บั้งไฟ: ${rocketName || 'บั้งไฟสด'} (${rangeStr})`;
 
   return {
     type: 'flex',
-    altText: `🤝 ${isPreQuoteWaiting ? 'รับแผลล่วงหน้า' : 'จับคู่ดวลสำเร็จ'}! Order #${orderNumber} (${amount} pt)`,
+    altText: `🤝 จับคู่ดวลสำเร็จ! Order #${orderNumber} (${amount} pt)`,
     contents: {
       type: 'bubble',
       size: 'kilo',
       header: {
         type: 'box',
         layout: 'vertical',
-        backgroundColor: isPreQuoteWaiting ? '#D97706' : '#059669',
+        backgroundColor: '#059669',
         paddingAll: 'sm',
         contents: [
           {
@@ -348,16 +345,6 @@ export function generateMatchNotificationFlex(order: Order): any {
             size: 'xs',
             align: 'center',
           },
-          ...(isPreQuoteWaiting ? [
-            {
-              type: 'text',
-              text: '⏳ จะยืนยันแผลอย่างเป็นทางการเมื่อแอดมินประกาศราคาช่าง',
-              color: '#D97706',
-              size: 'xs',
-              align: 'center',
-              wrap: true,
-            },
-          ] : []),
           { type: 'separator', margin: 'xs', color: '#E2E8F0' },
           {
             type: 'box',
