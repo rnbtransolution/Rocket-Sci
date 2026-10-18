@@ -115,6 +115,14 @@ export interface Order {
   playerHighId?: string | null;
   playerHighName?: string | null;
   timestamp?: string;
+  /**
+   * Set when this order is the unfilled remainder of a partially matched order.
+   * The matched portion keeps the original number and settles on its own; this
+   * is a separate, still-open order for the balance, so it must carry a
+   * distinct orderNumber — ORDER_<n> is a KV key and both order lists dedupe
+   * on it, so reusing the parent's number would silently drop the remainder.
+   */
+  parentOrderNumber?: string | null;
 }
 
 export interface PlayerProfile {

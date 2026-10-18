@@ -849,13 +849,44 @@ async function handleMatchOrder(
     return;
   }
 
-  if (matchAmt && matchAmt !== order.amount) {
-    const msg = `การรับแผลต้องรับเต็มจำนวน ${order.amount.toLocaleString()} pt ครับ (ระบุ ${matchAmt.toLocaleString()} pt)`;
-    await deliverPrivateNotice(userId, replyToken, groupId, generateMatchMismatchFlex(resolvedNo, msg, 'กรุณาระบุยอดให้ตรงกับคำขอดวลครับ 🚀'), env, profile.displayName, ctx);
-    return;
+  // ── Partial match validation ──
+  //
+  // A matcher may take any portion of an open order, not only the whole thing.
+  // This port previously rejected anything but an exact match, which silently
+  // removed the partial-match feature the board advertises: the GAS reference
+  // enforced these rules (Code.gs ~2255):
+  //
+  //   * at least 100pt — below that the match is not worth the round trip
+  //   * at least 20% of the order — stops five 100pt players fragmenting a
+  //     500pt order into dust, and keeps the remainder worth offering
+  //   * never more than the order amount — the remainder belongs to the
+  //     creator, not the matcher
+  const MIN_MATCH_POINTS = 100;
+  const MIN_MATCH_RATIO = 0.20;
+
+  if (matchAmt !== undefined) {
+    if (matchAmt < MIN_MATCH_POINTS) {
+      const msg = `ยอดดวลขั้นต่ำคือ ${MIN_MATCH_POINTS.toLocaleString()} pt ครับ (คุณระบุ ${matchAmt.toLocaleString()} pt)`;
+      await deliverPrivateNotice(userId, replyToken, groupId, generateMatchMismatchFlex(resolvedNo, msg, `พิมพ์ "ต <เลข order> <ยอด>" โดยยอดไม่ต่ำกว่า ${MIN_MATCH_POINTS} pt ครับ`), env, profile.displayName, ctx);
+      return;
+    }
+    const minRatio = Math.max(MIN_MATCH_POINTS, Math.round(order.amount * MIN_MATCH_RATIO));
+    if (matchAmt < minRatio) {
+      const msg = `รับได้ขั้นต่ำ ${Math.round(MIN_MATCH_RATIO * 100)}% ของแผล คือ ${minRatio.toLocaleString()} pt ครับ (คุณระบุ ${matchAmt.toLocaleString()} pt)`;
+      await deliverPrivateNotice(userId, replyToken, groupId, generateMatchMismatchFlex(resolvedNo, msg, `พิมพ์ "ต ${resolvedNo} ${minRatio.toLocaleString()}" หรือมากกว่า สูงสุด ${order.amount.toLocaleString()} pt ครับ`), env, profile.displayName, ctx);
+      return;
+    }
+    if (matchAmt > order.amount) {
+      const msg = `ยอดรับดวล (${matchAmt.toLocaleString()} pt) เกินยอดของ Order #${resolvedNo} (รับได้สูงสุด ${order.amount.toLocaleString()} pt ครับ)`;
+      await deliverPrivateNotice(userId, replyToken, groupId, generateMatchMismatchFlex(resolvedNo, msg, `พิมพ์ "ต ${resolvedNo} <ยอด>" โดยยอดไม่เกิน ${order.amount.toLocaleString()} pt ครับ`), env, profile.displayName, ctx);
+      return;
+    }
   }
 
-  const effectiveAmt = order.amount;
+  // The portion this matcher actually takes. Undefined = take the whole order.
+  const effectiveAmt = matchAmt !== undefined ? matchAmt : order.amount;
+  const isPartial = effectiveAmt < order.amount;
+  const remainingAmount = order.amount - effectiveAmt;
   if (profile.balance < effectiveAmt) {
     const needed = effectiveAmt - profile.balance;
     const msg = `แต้มไม่พอรับแผลครับ (มี ${profile.balance.toLocaleString()} pt | ขาด ${needed.toLocaleString()} pt)`;
@@ -866,12 +897,23 @@ async function handleMatchOrder(
   // Deduct matcher balance BEFORE saving
   profile.balance -= effectiveAmt;
 
-  // Update order status in KV
+  // The matched portion carries the original order number and the amount that
+  // was actually taken. Downstream settlement reads `amount`, so this is what
+  // both sides get paid out on — the matcher cannot win or lose more than the
+  // portion they committed.
+  const originalAmount = order.amount;
+  order.amount = effectiveAmt;
   order.status = 'matched';
   order.matcherId = profile.shortId;
   order.matcherName = profile.displayName;
   order.matcherLineUserId = profile.lineUserId;
   order.matchedAt = Date.now();
+  // Clear the pre-match side so settlement cannot double-assign a winner. The
+  // creator's side is restored below for the remainder order only.
+  order.playerLowId = null;
+  order.playerLowName = null;
+  order.playerHighId = null;
+  order.playerHighName = null;
   if (order.side === 'low') {
     order.playerHighId = profile.shortId;
     order.playerHighName = profile.displayName;
@@ -880,12 +922,89 @@ async function handleMatchOrder(
     order.playerLowName = profile.displayName;
   }
 
-  const updatePersistence = Promise.all([
+  const updateParts: Promise<any>[] = [
     env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(order)),
     removeFromPendingOrdersList(resolvedNo, env),
     addToMatchedOrdersList(order, env),
-    savePlayerProfile(profile, env, ctx),
-  ]);
+  ];
+
+  // ── Remainder handling ──
+  //
+  // The creator was charged the FULL amount when the order opened, so the
+  // leftover points are already spoken for. It has to go somewhere:
+  //
+  //   * 100pt or more → a new open order for the balance, still owned by the
+  //     creator, so another player can take it.
+  //   * under 100pt  → too small to offer, so it is refunded to the creator.
+  //     Left stranded it would be money they had paid and could never recover.
+  //
+  // This mirrors the GAS split logic (Code.gs ~2302).
+  let remainderOrder: Order | null = null;
+  let remainderRefunded = 0;
+
+  if (isPartial) {
+    if (remainingAmount >= MIN_MATCH_POINTS) {
+      // New number required: ORDER_<n> is a KV key and both order lists dedupe
+      // on orderNumber, so reusing the parent's would overwrite the matched
+      // order and drop the remainder from the board at the same time.
+      const taken = new Set<string>();
+      for (const o of await getPendingOrdersList(env)) taken.add(o.orderNumber);
+      taken.add(resolvedNo);
+      let remainderNo = '';
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const candidate = Math.floor(1000 + Math.random() * 9000).toString();
+        if (!taken.has(candidate)) { remainderNo = candidate; break; }
+      }
+      if (!remainderNo) {
+        // Could not find a free number. Refund rather than risk overwriting the
+        // matched order — the creator gets the money back and can re-open.
+        remainderRefunded = remainingAmount;
+      } else {
+        remainderOrder = {
+          ...order,
+          orderNumber: remainderNo,
+          amount: remainingAmount,
+          status: 'pending_match',
+          matcherId: null,
+          matcherName: null,
+          matcherLineUserId: null,
+          matchedAt: null,
+          playerLowId: null,
+          playerLowName: null,
+          playerHighId: null,
+          playerHighName: null,
+          parentOrderNumber: resolvedNo,
+          createdAt: order.createdAt,
+        };
+        if (order.side === 'low') {
+          remainderOrder.playerLowId = order.creatorId;
+          remainderOrder.playerLowName = order.creatorName;
+        } else {
+          remainderOrder.playerHighId = order.creatorId;
+          remainderOrder.playerHighName = order.creatorName;
+        }
+        updateParts.push(
+          env.KV_ORDERS.put(`ORDER_${remainderNo}`, JSON.stringify(remainderOrder)),
+          addToPendingOrdersList(remainderOrder, env)
+        );
+      }
+    } else {
+      remainderRefunded = remainingAmount;
+    }
+
+    if (remainderRefunded > 0) {
+      const creatorProfile = await getOrCreatePlayerProfile(
+        (await state(env).get(`RAW_LINE_${order.creatorId}`)) || order.creatorId,
+        env, ctx
+      );
+      if (creatorProfile) {
+        creatorProfile.balance += remainderRefunded;
+        updateParts.push(savePlayerProfile(creatorProfile, env, ctx));
+      }
+    }
+  }
+
+  const updatePersistence = Promise.all(updateParts);
 
   // Generate match card
   const matchFlex = generateMatchNotificationFlex(order);
@@ -920,6 +1039,27 @@ async function handleMatchOrder(
   // Push match card to creator's DM
   if (creatorLineId && creatorLineId !== userId) {
     matchPromises.push(pushToLine(creatorLineId, matchFlex, env));
+  }
+
+  // Tell the creator what happened to the rest of their points. They were
+  // charged the full amount when the order opened, so silence here leaves them
+  // thinking 500pt is still riding on this order when only the matched portion
+  // is — or, if it was refunded, that the money vanished.
+  if (isPartial && creatorLineId) {
+    const remainderFlex = remainderOrder
+      ? generateNoticeFlex(
+          `ℹ️ แผล Order #${resolvedNo} ถูกรับไปบางส่วน`,
+          `รับไป ${effectiveAmt.toLocaleString()} pt จากทั้งหมด ${originalAmount.toLocaleString()} pt\n` +
+          `เหลือ ${remainingAmount.toLocaleString()} pt เปิดเป็น Order #${remainderOrder.orderNumber} รอคู่ต่อครับ`,
+          'info'
+        )
+      : generateNoticeFlex(
+          `ℹ️ แผล Order #${resolvedNo} ถูกรับไปบางส่วน`,
+          `รับไป ${effectiveAmt.toLocaleString()} pt จากทั้งหมด ${originalAmount.toLocaleString()} pt\n` +
+          `เศษที่เหลือ ${remainderRefunded.toLocaleString()} pt ต่ำกว่าขั้นต่ำ ระบบคืนแต้มให้คุณเรียบร้อยแล้วครับ ✅`,
+          'info'
+        );
+    matchPromises.push(pushToLine(creatorLineId, remainderFlex, env));
   }
 
   if (ctx) {
