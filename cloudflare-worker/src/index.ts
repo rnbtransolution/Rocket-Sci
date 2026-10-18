@@ -1743,11 +1743,28 @@ const isPublicAllowed =
           const max = Number(args[3]) || 380;
           const isChotoy = Boolean(args[4]);
 
+          // Preserve an existing lock. This handler used to write
+          // status:'ACTIVE' unconditionally, so publishing a quote AFTER the
+          // final call resurrected the round and players could bet again —
+          // defeating the lock the final call exists to apply. The price is
+          // still recorded, so a deliberately reopened round has its band; only
+          // the lock survives.
+          const existingRaw = await state(env).get('ACTIVE_ROUND');
+          const existing = existingRaw ? JSON.parse(existingRaw) : null;
+          const isLocked = Boolean(
+            existing && existing.status && existing.status !== 'ACTIVE'
+          );
+          if (isLocked) {
+            console.warn(
+              `[Worker] quote published while the round is "${existing.status}" — keeping it locked; open a new round to reopen`
+            );
+          }
+
           const roundData = {
             name,
             targetMin: min,
             targetMax: max,
-            status: 'ACTIVE',
+            status: isLocked ? existing.status : 'ACTIVE',
             isChotoy,
             quoteReleased: true,
             updatedAt: Date.now(),

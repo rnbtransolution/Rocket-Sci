@@ -604,12 +604,17 @@ async function handleCreateOrder(
   ]);
   let round = roundStr ? (JSON.parse(roundStr) as RocketRound) : null;
 
-  // Auto-initialize or reactivate round if null, VOID, or RESOLVED (previous round ended)
-  if (!round || round.status === 'VOID' || round.status === 'RESOLVED') {
+  // Auto-initialise ONLY when there is no round at all (fresh install, or the key
+  // was never written). This previously also revived VOID and RESOLVED rounds,
+  // which meant a PLAYER placing an order could silently reopen a round the
+  // admin had just voided — the lock undone by a bet arriving from the group.
+  // Ending a round must require an explicit admin action ("เปิดรอบ" /
+  // adminOpenRound); nothing a player does may reopen it.
+  if (!round) {
     round = {
-      name: round?.name || 'บั้งไฟสด',
-      targetMin: round?.targetMin || 330,
-      targetMax: round?.targetMax || 380,
+      name: 'ช่างบั้งไฟสด',
+      targetMin: 330,
+      targetMax: 380,
       status: 'ACTIVE',
       isChotoy: false,
       quoteReleased: false,
@@ -622,8 +627,10 @@ async function handleCreateOrder(
     }
   }
 
-  // Only reject order if round is actively CLOSED (in-flight countdown "3-2-go" / locked)
-  if (round.status === 'CLOSED') {
+  // Refuse orders on any round that is not open. Previously only 'CLOSED' was
+  // checked, so VOID and RESOLVED rounds accepted bets until the block above
+  // quietly revived them.
+  if (round.status !== 'ACTIVE') {
     const closedFlex = generateNoticeFlex(
       '⛔ ปิดรับออเดอร์รอบนี้แล้ว',
       'ปิดรับออเดอร์รอบนี้แล้วครับ (ล็อครอบระหว่างการแข่งขัน)\nกรุณารอรอบถัดไปครับ 🙏',
