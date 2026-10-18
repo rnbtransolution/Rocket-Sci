@@ -1014,55 +1014,41 @@ async function handleMatchOrder(
     order.playerLowName = profile.displayName;
   }
 
-  const updateParts: Promise<any>[] = [
-    env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(order)),
-    removeFromPendingOrdersList(resolvedNo, env),
-    addToMatchedOrdersList(order, env),
-    savePlayerProfile(profile, env, ctx),
-  ];
+  // Persist the matcher's deducted balance first so that when a partial match
+  // also refunds the creator's remainder below, the two savePlayerProfile calls
+  // never race on PLAYERS_LIST in KV fallback mode.
+  await savePlayerProfile(profile, env, ctx);
 
-  // ── Remainder handling ──
-  //
-  // The creator is charged the FULL amount when the order opens, so whatever a
-  // matcher does NOT take is money already taken from them. It is returned
-  // immediately, here, at match time.
-  //
-  // It is deliberately NOT re-listed as a second open order. That model needed
-  // a fresh order number (ORDER_<n> is a KV key, so reusing the parent's would
-  // overwrite the matched record), which left an order the group could not see,
-  // a leftover below the 100pt minimum that nobody was allowed to bet, and a
-  // separate class of edge cases around cancelling the remainder. Returning the
-  // money removes all of it and leaves the creator in control: they can open a
-  // new order with it or sit it out until the next round.
-  //
-  // Net effect on the creator's balance for a 500pt order taken at 200:
-  //   -500 when opened, +300 back now, so their exposure is only the 200.
   let remainderRefunded = 0;
 
   if (isPartial) {
     remainderRefunded = remainingAmount;
 
     if (remainderRefunded > 0) {
-      const creatorLine = (await state(env).get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId || order.creatorId;
-      const creatorProfile = await getOrCreatePlayerProfile(creatorLine, env, ctx);
+      const creatorLineIdForRefund =
+        order.creatorLineUserId || (await state(env).get(`RAW_LINE_${order.creatorId}`));
+      const creatorProfile = creatorLineIdForRefund
+        ? await getOrCreatePlayerProfile(creatorLineIdForRefund, env, ctx)
+        : null;
       if (creatorProfile) {
         creatorProfile.balance += remainderRefunded;
-        updateParts.push(savePlayerProfile(creatorProfile, env, ctx));
+        await savePlayerProfile(creatorProfile, env, ctx);
       } else {
-        // No creator profile to credit. The points were taken from them at
-        // order time, so losing them here would be silent theft. Fall back to
-        // the by-id refund path, which searches the player list.
-        console.error(
-          `[Worker] partial take on #${resolvedNo}: creator profile not found for ${order.creatorId}`
-        );
-        updateParts.push(
-          refundPlayerPoints(order.creatorId, order.creatorLineUserId, remainderRefunded, env, ctx)
-        );
+        const refundedOk = await refundPlayerPoints(order.creatorId, order.creatorLineUserId, remainderRefunded, env, ctx);
+        if (!refundedOk) {
+          console.error(
+            `[Worker] partial take on #${resolvedNo}: failed to refund remainder ${remainderRefunded} to ${order.creatorId}`
+          );
+        }
       }
     }
   }
 
-  const updatePersistence = Promise.all(updateParts);
+  const updatePersistence = Promise.all([
+    env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(order)),
+    removeFromPendingOrdersList(resolvedNo, env),
+    addToMatchedOrdersList(order, env),
+  ]);
 
   // Generate match card
   const matchFlex = generateMatchNotificationFlex(order);
@@ -1470,41 +1456,98 @@ export async function refundPlayerPoints(
 ): Promise<boolean> {
   if (amount <= 0) return true;
   try {
-    const rawLine = (await state(env).get(`RAW_LINE_${shortId}`)) || lineUserId || shortId;
-    let profileRaw = await state(env).get(`USER_${rawLine}`);
-    if (!profileRaw && lineUserId) {
-      profileRaw = await state(env).get(`USER_${lineUserId}`);
-    }
-    if (!profileRaw && shortId) {
-      profileRaw = await state(env).get(`USER_${shortId}`);
-    }
-    if (profileRaw) {
-      const p = JSON.parse(profileRaw) as PlayerProfile;
-      p.balance = (Number(p.balance) || 0) + amount;
-      await savePlayerProfile(p, env, ctx);
-      return true;
+    const rawLine = (await state(env).get(`RAW_LINE_${shortId}`)) || lineUserId || (shortId.startsWith('U') ? shortId : '');
+    const effectiveShort = shortId.startsWith('PL') ? shortId : (rawLine ? `PL${rawLine.slice(-6).toUpperCase()}` : shortId);
+
+    const [rawByLine, rawByPassedLine, rawByShort, listRaw] = await Promise.all([
+      rawLine ? state(env).get(`USER_${rawLine}`) : Promise.resolve(null),
+      lineUserId && lineUserId !== rawLine ? state(env).get(`USER_${lineUserId}`) : Promise.resolve(null),
+      effectiveShort ? state(env).get(`USER_${effectiveShort}`) : Promise.resolve(null),
+      state(env).get('PLAYERS_LIST'),
+    ]);
+
+    const candidates: PlayerProfile[] = [];
+    for (const raw of [rawByLine, rawByPassedLine, rawByShort]) {
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw) as PlayerProfile;
+        if (parsed && typeof parsed === 'object') candidates.push(parsed);
+      } catch (_) {}
     }
 
-    // Fallback: search in PLAYERS_LIST
-    const listRaw = await state(env).get('PLAYERS_LIST');
     if (listRaw) {
-      const list = JSON.parse(listRaw) as any[];
-      const p = list.find((x: any) => x.id === shortId || x.shortId === shortId || (lineUserId && (x.lineUserId === lineUserId || x.id === lineUserId)));
-      if (p) {
-        p.balance = (Number(p.balance) || 0) + amount;
-        p.updatedAt = Date.now();
-        await state(env).put('PLAYERS_LIST', JSON.stringify(list));
-        const effectiveLine = p.lineUserId || rawLine;
-        if (effectiveLine) {
-          await state(env).put(`USER_${effectiveLine}`, JSON.stringify(p));
+      try {
+        const list = JSON.parse(listRaw) as any[];
+        const matches = list.filter(
+          (x: any) =>
+            x &&
+            (x.id === effectiveShort ||
+              x.shortId === effectiveShort ||
+              x.id === shortId ||
+              x.shortId === shortId ||
+              (rawLine && (x.lineUserId === rawLine || x.id === rawLine)) ||
+              (lineUserId && (x.lineUserId === lineUserId || x.id === lineUserId)))
+        );
+        for (const m of matches) {
+          candidates.push({
+            shortId: m.shortId || effectiveShort,
+            lineUserId: m.lineUserId || rawLine || lineUserId || effectiveShort,
+            displayName: m.displayName || m.name || 'ผู้เล่น',
+            balance: Number(m.balance) || 0,
+            bankName: m.bankName || '',
+            accountNumber: m.accountNumber || m.bankAccount || '',
+            accountName: m.accountName || m.displayName || m.name || '',
+            registeredAt: Number(m.registeredAt) || 0,
+            updatedAt: Number(m.updatedAt) || 0,
+          });
         }
-        if (shortId) {
-          await state(env).put(`USER_${shortId}`, JSON.stringify(p));
-        }
-        return true;
+      } catch (_) {}
+    }
+
+    if (candidates.length === 0) return false;
+
+    // Select the authoritative candidate with the newest updatedAt timestamp
+    let best = candidates[0];
+    for (let i = 1; i < candidates.length; i++) {
+      const c = candidates[i];
+      const bestAt = Number(best.updatedAt) || 0;
+      const cAt = Number(c.updatedAt) || 0;
+      if (cAt > bestAt) {
+        best = {
+          ...c,
+          ...best,
+          balance: Number(c.balance) || 0,
+          updatedAt: cAt,
+          shortId: c.shortId || best.shortId || effectiveShort,
+          lineUserId: (c.lineUserId && c.lineUserId.startsWith('U')) ? c.lineUserId : ((best.lineUserId && best.lineUserId.startsWith('U')) ? best.lineUserId : (rawLine || lineUserId || effectiveShort)),
+          displayName: c.displayName || best.displayName || 'ผู้เล่น',
+          bankName: c.bankName || best.bankName || '',
+          accountNumber: c.accountNumber || best.accountNumber || '',
+          accountName: c.accountName || best.accountName || '',
+        };
+      } else {
+        best = {
+          ...c,
+          ...best,
+          balance: Number(best.balance) || 0,
+          updatedAt: bestAt,
+          shortId: best.shortId || c.shortId || effectiveShort,
+          lineUserId: (best.lineUserId && best.lineUserId.startsWith('U')) ? best.lineUserId : ((c.lineUserId && c.lineUserId.startsWith('U')) ? c.lineUserId : (rawLine || lineUserId || effectiveShort)),
+          displayName: best.displayName || c.displayName || 'ผู้เล่น',
+          bankName: best.bankName || c.bankName || '',
+          accountNumber: best.accountNumber || c.accountNumber || '',
+          accountName: best.accountName || c.accountName || '',
+        };
       }
     }
-    return false;
+
+    best.shortId = best.shortId || effectiveShort;
+    best.lineUserId = (best.lineUserId && best.lineUserId.startsWith('U'))
+      ? best.lineUserId
+      : (rawLine || lineUserId || best.shortId);
+    best.balance = (Number(best.balance) || 0) + amount;
+    await savePlayerProfile(best, env, ctx);
+    return true;
   } catch (err) {
     console.error('[Worker] refundPlayerPoints error:', err);
     return false;
@@ -1727,12 +1770,12 @@ export async function releaseHeldPreQuoteOrders(
     );
   });
 
-  // Notify both players of confirmed matched pre-quote orders
+  // Notify both players of confirmed matched pre-quote orders (concise ~20% length)
   for (const o of confirmedMatchedOrders) {
     notifyPromises.push((async () => {
       const confirmFlex = generateNoticeFlex(
-        `🎯 ยืนยันแผลดวล #${o.orderNumber} อย่างเป็นทางการ`,
-        `บั้งไฟ: ${o.rocketName || rName} | ช่วงราคา: ${o.rangeMin}-${o.rangeMax} วิ\nยอดดวล: ${o.amount.toLocaleString()} pt | คู่ดวล: ${o.creatorName} VS ${o.matcherName}\nแผลดวลล็อคเรียบร้อย พร้อมลุ้นผลการแข่งขันครับ 🚀`,
+        `🎯 ล็อคแผล #${o.orderNumber}`,
+        `${o.creatorName} VS ${o.matcherName} • ${o.amount.toLocaleString()} pt (${o.rangeMin}-${o.rangeMax}s)`,
         'success'
       );
       const tasks: Promise<any>[] = [];
@@ -2190,7 +2233,7 @@ export function deduplicatePlayers(list: any[]): any[] {
         bankAccount: p.bankAccount || p.accountNumber || existing.bankAccount || existing.accountNumber || '',
         accountName: p.accountName || existing.accountName || p.displayName || p.name || '',
         registeredAt: existing.registeredAt || p.registeredAt || Date.now(),
-        updatedAt: Math.max(existing.updatedAt || 0, p.updatedAt || 0, Date.now()),
+        updatedAt: Math.max(existing.updatedAt || 0, p.updatedAt || 0),
       };
       map.set(existingKey, merged);
     } else {
@@ -2207,7 +2250,7 @@ export function deduplicatePlayers(list: any[]): any[] {
         bankAccount: p.bankAccount || p.accountNumber || '',
         accountName: p.accountName || p.displayName || p.name || '',
         registeredAt: p.registeredAt || Date.now(),
-        updatedAt: p.updatedAt || Date.now(),
+        updatedAt: Number(p.updatedAt) || 0,
       });
     }
   }
@@ -2437,8 +2480,12 @@ export async function addTransaction(tx: Transaction, env: Env, ctx?: ExecutionC
 }
 
 export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: ExecutionContext): Promise<PlayerProfile> {
-  const cacheKey = `USER_${userId}`;
-  const shortId = `PL${userId.slice(-6).toUpperCase()}`;
+  const isShortInput = userId.startsWith('PL');
+  const shortId = isShortInput ? userId.toUpperCase() : `PL${userId.slice(-6).toUpperCase()}`;
+  const resolvedLine = isShortInput
+    ? ((await state(env).get(`RAW_LINE_${shortId}`)) || '')
+    : userId;
+  const cacheKey = resolvedLine ? `USER_${resolvedLine}` : `USER_${userId}`;
 
   // 1. Check direct user key and shortId key in parallel
   const [cachedUser, cachedShort] = await Promise.all([
@@ -2449,8 +2496,9 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
   let profile = cachedUser ? (JSON.parse(cachedUser) as PlayerProfile) : null;
   let shortProfile = cachedShort ? (JSON.parse(cachedShort) as PlayerProfile) : null;
 
-  // Cross-reconcile direct user key and shortId key:
-  // If one key has a newer updatedAt or higher balance, prioritize the authoritative update
+  // Cross-reconcile direct user key and shortId key strictly by newest updatedAt.
+  // NEVER use Math.max(shortBal, userBal) — after a bet deduction, the newer balance
+  // is LOWER than the old balance, so Math.max would resurrect pre-bet balances!
   if (profile || shortProfile) {
     if (!profile) {
       profile = shortProfile!;
@@ -2460,20 +2508,41 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
       const shortBal = Number(shortProfile.balance) || 0;
       const userBal = Number(profile.balance) || 0;
 
-      if (shortBal > userBal || shortUpdated > userUpdated) {
-        profile = { ...profile, ...shortProfile, lineUserId: userId, shortId, balance: Math.max(shortBal, userBal) };
-        // Self-heal direct user cache key immediately
+      if (shortUpdated > userUpdated) {
+        profile = {
+          ...profile,
+          ...shortProfile,
+          lineUserId: resolvedLine || profile.lineUserId || shortProfile.lineUserId || userId,
+          shortId,
+          balance: shortBal,
+          updatedAt: shortUpdated,
+        };
         const healedJson = JSON.stringify(profile);
         if (ctx) {
           ctx.waitUntil(state(env).put(cacheKey, healedJson).catch(() => {}));
         } else {
           state(env).put(cacheKey, healedJson).catch(() => {});
         }
+      } else if (userUpdated > shortUpdated || shortBal !== userBal) {
+        profile = {
+          ...shortProfile,
+          ...profile,
+          lineUserId: resolvedLine || profile.lineUserId || shortProfile.lineUserId || userId,
+          shortId,
+          balance: userBal,
+          updatedAt: userUpdated,
+        };
+        const healedJson = JSON.stringify(profile);
+        if (ctx) {
+          ctx.waitUntil(state(env).put(`USER_${shortId}`, healedJson).catch(() => {}));
+        } else {
+          state(env).put(`USER_${shortId}`, healedJson).catch(() => {});
+        }
       }
     }
 
     if (!profile.shortId) profile.shortId = shortId;
-    if (!profile.lineUserId) profile.lineUserId = userId;
+    if (!profile.lineUserId) profile.lineUserId = resolvedLine || userId;
     return profile;
   }
 

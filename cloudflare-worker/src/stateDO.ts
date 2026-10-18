@@ -92,15 +92,38 @@ function dedupeProfiles(list: any[]): any[] {
     const primaryKey = lineId || shortId || p.id;
     if (!primaryKey) continue;
 
-    const existing = map.get(primaryKey);
-    if (!existing) {
-      map.set(primaryKey, { ...p, id: shortId || p.id || primaryKey, shortId: shortId || p.shortId || p.id || primaryKey });
+    let existingKey: string | null = null;
+    for (const [k, val] of map.entries()) {
+      if (
+        k === primaryKey ||
+        (lineId && val.lineUserId === lineId) ||
+        (shortId && (val.shortId === shortId || val.id === shortId))
+      ) {
+        existingKey = k;
+        break;
+      }
+    }
+
+    if (!existingKey) {
+      map.set(primaryKey, {
+        ...p,
+        id: shortId || p.id || primaryKey,
+        shortId: shortId || p.shortId || p.id || primaryKey,
+        updatedAt: Number(p.updatedAt) || 0,
+      });
       continue;
     }
 
-    // Later records are newer; keep the newest balance/name but retain any
-    // bank details the newer record happens to be missing.
-    map.set(primaryKey, {
+    const existing = map.get(existingKey);
+    const exAt = Number(existing.updatedAt) || 0;
+    const inAt = Number(p.updatedAt) || 0;
+    const exBal = Number(existing.balance) || 0;
+    const inBal = p.balance !== undefined && !Number.isNaN(Number(p.balance)) ? Number(p.balance) : exBal;
+    const chosenBal = exAt > 0 && inAt > 0
+      ? (inAt >= exAt ? inBal : exBal)
+      : (inAt > 0 ? inBal : (exAt > 0 ? exBal : inBal));
+
+    map.set(existingKey, {
       ...existing,
       ...p,
       id: shortId || p.shortId || existing.shortId || existing.id || primaryKey,
@@ -108,15 +131,13 @@ function dedupeProfiles(list: any[]): any[] {
       lineUserId: lineId || existing.lineUserId || '',
       name: p.displayName || p.name || existing.displayName || existing.name || 'ผู้เล่น',
       displayName: p.displayName || p.name || existing.displayName || existing.name || 'ผู้เล่น',
-      balance: p.balance !== undefined && !Number.isNaN(Number(p.balance))
-        ? Number(p.balance)
-        : (Number(existing.balance) || 0),
+      balance: chosenBal,
       bankName: p.bankName || existing.bankName || '',
       accountNumber: p.accountNumber || p.bankAccount || existing.accountNumber || existing.bankAccount || '',
       bankAccount: p.bankAccount || p.accountNumber || existing.bankAccount || existing.accountNumber || '',
       accountName: p.accountName || existing.accountName || p.displayName || p.name || '',
       registeredAt: existing.registeredAt || p.registeredAt || Date.now(),
-      updatedAt: Math.max(existing.updatedAt || 0, p.updatedAt || 0, Date.now()),
+      updatedAt: Math.max(exAt, inAt),
     });
   }
   return Array.from(map.values());

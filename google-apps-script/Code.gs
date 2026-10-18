@@ -3128,29 +3128,27 @@ function adminResolveBets(finalTime, targetMin, targetMax) {
         bSheet.getRange(i + 1, 8, 1, 2).setValues([[rangeMin, rangeMax]]);
       }
       
-      let isLowWinner = true;
-      if (type === 'range' || (rangeMin && rangeMax)) {
-        const midPoint = (rangeMin + rangeMax) / 2;
-        if (timeSec < rangeMin) {
-          isLowWinner = true;
-        } else if (timeSec > rangeMax) {
-          isLowWinner = false;
-        } else {
-          isLowWinner = timeSec <= midPoint;
-        }
-      } else {
-        isLowWinner = timeSec < ((tMin + tMax) / 2);
+      const effMin = (Number(rangeMin) > 0) ? Number(rangeMin) : tMin;
+      const effMax = (Number(rangeMax) > 0) ? Number(rangeMax) : tMax;
+
+      if (timeSec >= effMin && timeSec <= effMax) {
+        // Draw inside range: refund both sides 100%, 0 commission
+        if (pLowId) adjustPlayerBalance(pLowId, amount);
+        if (pHighId) adjustPlayerBalance(pHighId, amount);
+        bSheet.getRange(i + 1, 10, 1, 2).setValues([['resolved', 'เสมอ (คืนทุน)']]);
+        continue;
       }
-      
+
+      const isLowWinner = timeSec < effMin;
       const winnerId = isLowWinner ? pLowId : pHighId;
       const winnerName = isLowWinner ? pLowName : pHighName;
       const loserId = isLowWinner ? pHighId : pLowId;
       const loserName = isLowWinner ? pHighName : pLowName;
       
-      // Calculate 10% commission deduction from winnings (opponent's bet portion)
+      // Calculate 10% commission deduction from winnings (opponent's bet portion), rounded to whole points
       const commissionRate = 0.10;
       const winnings = amount;
-      const commission = winnings * commissionRate;
+      const commission = Math.round(winnings * commissionRate);
       const payout = amount + (winnings - commission); // amount * 1.90
       
       // Perform payment in Sheets

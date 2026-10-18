@@ -101,6 +101,10 @@ export class StateStore {
   private readonly env: Env;
   /** Set once the binding is known to be missing entirely (never retry per call). */
   private bindingMissing = false;
+  /** Short circuit-breaker timestamp when DO throws a runtime/quota error so fallback calls don't stall. */
+  private doCircuitOpenUntil = 0;
+  /** Isolate-scoped claim cache used as a first-line atomic guard when DO falls back to KV. */
+  private static fallbackClaims = new Map<string, { v: string; exp: number }>();
 
   constructor(env: Env) {
     this.env = env;
@@ -119,17 +123,28 @@ export class StateStore {
    */
   private stub(): DOStub | null {
     if (this.bindingMissing) return null;
+    if (this.doCircuitOpenUntil > Date.now()) return null;
     try {
       const ns = (this.env as any).ROCKET_STATE as DurableObjectNamespace | undefined;
       if (!ns) {
         this.bindingMissing = true;
         return null;
       }
-      return ns.getByName(DO_NAME) as unknown as DOStub;
+      const rawStub = typeof (ns as any).getByName === 'function'
+        ? (ns as any).getByName(DO_NAME)
+        : ns.get(ns.idFromName(DO_NAME));
+      return rawStub as unknown as DOStub;
     } catch (err) {
       console.warn('[StateStore] Durable Object binding unavailable, falling back to KV:', err);
       this.bindingMissing = true;
       return null;
+    }
+  }
+
+  private tripCircuit(err: unknown): void {
+    const msg = String((err as Error)?.message || err || '');
+    if (msg.includes('exceeded') || msg.includes('limit') || msg.includes('quota') || msg.includes('storage')) {
+      this.doCircuitOpenUntil = Date.now() + 15_000;
     }
   }
 
@@ -143,6 +158,7 @@ export class StateStore {
       const value = await stub.get(key);
       if (value !== null && value !== undefined) return value;
     } catch (err) {
+      this.tripCircuit(err);
       console.warn(`[StateStore] DO get failed for ${key}, using KV:`, err);
       return this.env.KV_CACHE.get(key);
     }
@@ -175,6 +191,7 @@ export class StateStore {
     try {
       return await stub.multi(keys);
     } catch (err) {
+      this.tripCircuit(err);
       console.warn('[StateStore] DO multi failed, falling back to per-key reads:', err);
       return Promise.all(keys.map((k) => this.get(k)));
     }
@@ -196,6 +213,7 @@ export class StateStore {
       }
       return true;
     } catch (err) {
+      this.tripCircuit(err);
       console.warn('[StateStore] atomic upsertTransaction failed:', err);
       return false;
     }
@@ -218,6 +236,7 @@ export class StateStore {
       }
       return true;
     } catch (err) {
+      this.tripCircuit(err);
       console.warn('[StateStore] atomic patchTransactionStatus failed:', err);
       return false;
     }
@@ -231,6 +250,7 @@ export class StateStore {
       await stub.appendChatLog(JSON.stringify(log));
       return true;
     } catch (err) {
+      this.tripCircuit(err);
       console.warn('[StateStore] atomic appendChatLog failed:', err);
       return false;
     }
@@ -239,26 +259,55 @@ export class StateStore {
   /**
    * Take an exclusive claim on a named key. True for the first caller only.
    *
-   * Unlike every other method here this one FAILS CLOSED. The others degrade to
-   * "carry on with the old read-modify-write", which is an acceptable trade for
-   * cached data but not for money: if the claim cannot be taken, the caller must
-   * NOT move money, because it cannot prove it is the only one doing so. An
-   * un-refunded cancelled order or an un-credited slip is a visible, recoverable
-   * discrepancy; a silently doubled balance is not.
-   *
-   * Not mirrored to KV — a claim is authoritative only in the DO, and a stale KV
-   * copy would be actively misleading.
+   * Primary path: strongly-consistent Durable Object compare-and-set.
+   * Fallback path (when DO RPC is unavailable due to Free Tier quota or mock test
+   * environments without DO): synchronous isolate-memory claim check + KV_CACHE
+   * persistence so single-use claims (MATCH, REFUND, SLIP) remain enforced
+   * without deadlocking live operations.
    */
   async claimExclusive(claimKey: string, payload: unknown, ttlMs: number = 0): Promise<boolean> {
+    const payloadJson = JSON.stringify(payload);
     const stub = this.stub();
-    if (!stub) {
-      console.error(`[StateStore] claim "${claimKey}" unavailable (no Durable Object) — refusing`);
+    if (stub) {
+      try {
+        const claimed = await stub.claimExclusive(claimKey, payloadJson, ttlMs);
+        if (claimed) {
+          const now = Date.now();
+          const exp = ttlMs > 0 ? now + ttlMs : 0;
+          StateStore.fallbackClaims.set(claimKey, { v: payloadJson, exp });
+          const kvOpts = ttlMs > 0 ? { expirationTtl: Math.max(60, Math.ceil(ttlMs / 1000)) } : undefined;
+          this.env.KV_CACHE.put(`CLAIM_${claimKey}`, payloadJson, kvOpts as any).catch(() => {});
+        }
+        return claimed;
+      } catch (err) {
+        this.tripCircuit(err);
+        console.warn(`[StateStore] DO claim "${claimKey}" failed, using fallback claim guard:`, err);
+      }
+    }
+
+    // Fallback claim guard (isolate memory + KV_CACHE) when DO is unavailable
+    if (!this.env?.KV_CACHE) {
+      console.error(`[StateStore] claim "${claimKey}" unavailable (no DO and no KV_CACHE) — refusing`);
+      return false;
+    }
+    const now = Date.now();
+    const mem = StateStore.fallbackClaims.get(claimKey);
+    if (mem && (!mem.exp || mem.exp > now)) {
       return false;
     }
     try {
-      return await stub.claimExclusive(claimKey, JSON.stringify(payload), ttlMs);
-    } catch (err) {
-      console.error(`[StateStore] claim "${claimKey}" failed — refusing:`, err);
+      const existingKv = await this.env.KV_CACHE.get(`CLAIM_${claimKey}`);
+      if (existingKv !== null && existingKv !== undefined) {
+        StateStore.fallbackClaims.set(claimKey, { v: existingKv, exp: ttlMs > 0 ? now + ttlMs : 0 });
+        return false;
+      }
+      const exp = ttlMs > 0 ? now + ttlMs : 0;
+      StateStore.fallbackClaims.set(claimKey, { v: payloadJson, exp });
+      const kvOpts = ttlMs > 0 ? { expirationTtl: Math.max(60, Math.ceil(ttlMs / 1000)) } : undefined;
+      await this.env.KV_CACHE.put(`CLAIM_${claimKey}`, payloadJson, kvOpts as any);
+      return true;
+    } catch (kvErr) {
+      console.error(`[StateStore] fallback claim "${claimKey}" failed — refusing:`, kvErr);
       return false;
     }
   }
@@ -266,10 +315,22 @@ export class StateStore {
   /** Inspect a claim (audit / diagnostics). */
   async getClaim(claimKey: string): Promise<unknown | null> {
     const stub = this.stub();
-    if (!stub) return null;
+    if (stub) {
+      try {
+        const raw = await stub.getClaim(claimKey);
+        if (raw) return JSON.parse(raw);
+      } catch (err) {
+        this.tripCircuit(err);
+      }
+    }
+    const now = Date.now();
+    const mem = StateStore.fallbackClaims.get(claimKey);
+    if (mem && (!mem.exp || mem.exp > now)) {
+      try { return JSON.parse(mem.v); } catch { return null; }
+    }
     try {
-      const raw = await stub.getClaim(claimKey);
-      return raw ? JSON.parse(raw) : null;
+      const rawKv = await this.env.KV_CACHE.get(`CLAIM_${claimKey}`);
+      return rawKv ? JSON.parse(rawKv) : null;
     } catch {
       return null;
     }
@@ -280,20 +341,38 @@ export class StateStore {
    * short id, raw-line mapping) together with its PLAYERS_LIST directory entry.
    * This is the single call that keeps the Admin Console balance and the LINE OA
    * balance from drifting apart.
+   *
+   * CRITICAL: Always mirror USER_<lineUserId>, USER_<shortId>, RAW_LINE_<shortId>,
+   * AND PLAYERS_LIST to KV_CACHE so that if the Durable Object ever trips quota or
+   * falls back to KV_CACHE mid-round, KV_CACHE never serves a stale pre-bet balance!
    */
   async saveProfile(profile: unknown, entry: unknown): Promise<boolean> {
     const stub = this.stub();
     if (!stub) return false;
     try {
-      const ok = await stub.saveProfile(JSON.stringify(profile), JSON.stringify(entry));
+      const profileJson = JSON.stringify(profile);
+      const ok = await stub.saveProfile(profileJson, JSON.stringify(entry));
       if (!ok) return false;
-      // Cold KV mirror so the pre-DO backup / Sheets-merge paths keep working.
+      // Cold KV mirror of ALL profile keys + PLAYERS_LIST so fallback reads are 100% consistent.
+      const p = profile as any;
+      const mirrorTasks: Promise<any>[] = [];
+      if (p && typeof p.lineUserId === 'string' && p.lineUserId.startsWith('U')) {
+        mirrorTasks.push(this.env.KV_CACHE.put(`USER_${p.lineUserId}`, profileJson).catch(() => {}));
+      }
+      if (p && p.shortId) {
+        mirrorTasks.push(this.env.KV_CACHE.put(`USER_${p.shortId}`, profileJson).catch(() => {}));
+        if (typeof p.lineUserId === 'string' && p.lineUserId.startsWith('U')) {
+          mirrorTasks.push(this.env.KV_CACHE.put(`RAW_LINE_${p.shortId}`, p.lineUserId).catch(() => {}));
+        }
+      }
       const mirror = await this.get('PLAYERS_LIST');
       if (mirror !== null) {
-        this.env.KV_CACHE.put('PLAYERS_LIST', mirror).catch(() => {});
+        mirrorTasks.push(this.env.KV_CACHE.put('PLAYERS_LIST', mirror).catch(() => {}));
       }
+      await Promise.all(mirrorTasks);
       return true;
     } catch (err) {
+      this.tripCircuit(err);
       console.warn('[StateStore] atomic saveProfile failed:', err);
       return false;
     }

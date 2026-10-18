@@ -36,6 +36,7 @@ import {
   voidAllRoundOrders,
   getPendingOrdersList,
   getPlayersList,
+  getOrCreatePlayerProfile,
   savePlayerProfile,
   getTransactionsList,
   addTransaction,
@@ -572,11 +573,9 @@ const isPublicAllowed =
           const p2p: any[] = [];
           for (const order of settledOrders) {
             if (order.winnerSide && order.winnerSide !== 'draw') {
-              const winnerName = order.winnerName || '-';
-              const loserName =
-                order.winnerSide === 'low'
-                  ? (order.side === 'high' ? (order.matcherName || order.creatorName) : order.creatorName)
-                  : (order.side === 'high' ? (order.matcherName || order.creatorName) : order.creatorName);
+              const isCreatorWinner = order.winnerSide === order.side;
+              const winnerName = (isCreatorWinner ? order.creatorName : order.matcherName) || order.winnerName || '-';
+              const loserName = (isCreatorWinner ? order.matcherName : order.creatorName) || '-';
               p2p.push({
                 orderNumber: order.orderNumber,
                 amount: Number(order.amount) || 0,
@@ -937,48 +936,9 @@ const isPublicAllowed =
                 ? playerId
                 : (rawLine ? `PL${rawLine.slice(-6).toUpperCase()}` : playerId);
 
-              // 2. Fetch authoritative profile directly from entity keys (Single Source of Truth)
-              let existingProfile: PlayerProfile | null = null;
-              if (rawLine) {
-                const raw = await state(env).get(`USER_${rawLine}`);
-                if (raw) {
-                  try { existingProfile = JSON.parse(raw); } catch (_) {}
-                }
-              }
-              if (!existingProfile && shortId) {
-                const raw = await state(env).get(`USER_${shortId}`);
-                if (raw) {
-                  try { existingProfile = JSON.parse(raw); } catch (_) {}
-                }
-              }
-              if (!existingProfile) {
-                const players = await getPlayersList(env);
-                const p = players.find(x => x.id === playerId || x.shortId === shortId || (rawLine && x.lineUserId === rawLine));
-                if (p) {
-                  existingProfile = {
-                    shortId: p.shortId || shortId,
-                    lineUserId: p.lineUserId || rawLine,
-                    displayName: p.displayName || p.name || targetTx.playerName || 'ผู้เล่น',
-                    balance: Number(p.balance) || 0,
-                    bankName: p.bankName || '',
-                    accountNumber: p.bankAccount || p.accountNumber || '',
-                    accountName: p.accountName || p.displayName || '',
-                    registeredAt: Date.now(),
-                    updatedAt: Date.now(),
-                  };
-                }
-              }
-
-              if (!existingProfile) {
-                existingProfile = {
-                  shortId,
-                  lineUserId: rawLine,
-                  displayName: targetTx.playerName || 'ผู้เล่น',
-                  balance: 0,
-                  registeredAt: Date.now(),
-                  updatedAt: Date.now(),
-                };
-              }
+              // 2. Fetch authoritative profile via getOrCreatePlayerProfile (cross-reconciles newest updatedAt)
+              const lookupKey = rawLine || shortId || playerId;
+              const existingProfile = await getOrCreatePlayerProfile(lookupKey, env, ctx);
 
               const effectiveLine = rawLine || existingProfile.lineUserId;
               const effectiveShort = shortId || existingProfile.shortId;
@@ -1001,17 +961,6 @@ const isPublicAllowed =
                   updatedAt: Date.now(),
                 };
 
-                const profileJson = JSON.stringify(updatedProfile);
-                // Atomic fan-out so no reader can see a partially-credited profile.
-                const entries: Array<[string, string]> = [[`USER_${effectiveShort}`, profileJson]];
-                if (effectiveLine && effectiveLine.startsWith('U')) {
-                  entries.push([`USER_${effectiveLine}`, profileJson]);
-                  entries.push([`RAW_LINE_${effectiveShort}`, effectiveLine]);
-                }
-                const profileWritten = await state(env).writeMany(entries);
-                if (!profileWritten) {
-                  await Promise.all(entries.map(([k, v]) => state(env).put(k, v)));
-                }
                 await savePlayerProfile(updatedProfile, env, ctx);
 
                 // Push notice to player
@@ -1056,36 +1005,8 @@ const isPublicAllowed =
                 ? playerId
                 : (rawLine ? `PL${rawLine.slice(-6).toUpperCase()}` : playerId);
 
-              let existingProfile: PlayerProfile | null = null;
-              if (rawLine) {
-                const raw = await state(env).get(`USER_${rawLine}`);
-                if (raw) {
-                  try { existingProfile = JSON.parse(raw); } catch (_) {}
-                }
-              }
-              if (!existingProfile && shortId) {
-                const raw = await state(env).get(`USER_${shortId}`);
-                if (raw) {
-                  try { existingProfile = JSON.parse(raw); } catch (_) {}
-                }
-              }
-              if (!existingProfile) {
-                const players = await getPlayersList(env);
-                const p = players.find(x => x.id === playerId || x.shortId === shortId || (rawLine && x.lineUserId === rawLine));
-                if (p) {
-                  existingProfile = {
-                    shortId: p.shortId || shortId,
-                    lineUserId: p.lineUserId || rawLine,
-                    displayName: p.displayName || p.name || targetTx.playerName || 'ผู้เล่น',
-                    balance: Number(p.balance) || 0,
-                    bankName: p.bankName || '',
-                    accountNumber: p.bankAccount || p.accountNumber || '',
-                    accountName: p.accountName || p.displayName || '',
-                    registeredAt: Date.now(),
-                    updatedAt: Date.now(),
-                  };
-                }
-              }
+              const lookupKey = rawLine || shortId || playerId;
+              const existingProfile = lookupKey ? await getOrCreatePlayerProfile(lookupKey, env, ctx) : null;
 
               if (existingProfile) {
                 const effectiveLine = rawLine || existingProfile.lineUserId;
@@ -1103,16 +1024,6 @@ const isPublicAllowed =
                     updatedAt: Date.now(),
                   };
 
-                  const profileJson = JSON.stringify(updatedProfile);
-                  const entries: Array<[string, string]> = [[`USER_${effectiveShort}`, profileJson]];
-                  if (effectiveLine && effectiveLine.startsWith('U')) {
-                    entries.push([`USER_${effectiveLine}`, profileJson]);
-                    entries.push([`RAW_LINE_${effectiveShort}`, effectiveLine]);
-                  }
-                  const profileWritten = await state(env).writeMany(entries);
-                  if (!profileWritten) {
-                    await Promise.all(entries.map(([k, v]) => state(env).put(k, v)));
-                  }
                   await savePlayerProfile(updatedProfile, env, ctx);
 
                   if (effectiveLine && effectiveLine.startsWith('U')) {
@@ -1227,19 +1138,13 @@ const isPublicAllowed =
           const displayName = player?.name || player?.displayName || passedName || 'ผู้เล่น';
           let oldBal = player ? (Number(player.balance) || 0) : 0;
 
-          // Check if direct profile exists under targetLineUserId or shortId
+          // Fetch authoritative profile via getOrCreatePlayerProfile so oldBal is never stale
+          const lookupKey = targetLineUserId || shortId || userId;
           let existingProfile: PlayerProfile | null = null;
-          if (targetLineUserId) {
-            const raw = await state(env).get(`USER_${targetLineUserId}`);
-            if (raw) {
-              try { existingProfile = JSON.parse(raw); } catch (_) {}
-            }
-          }
-          if (!existingProfile && shortId) {
-            const raw = await state(env).get(`USER_${shortId}`);
-            if (raw) {
-              try { existingProfile = JSON.parse(raw); } catch (_) {}
-            }
+          if (lookupKey) {
+            try {
+              existingProfile = await getOrCreatePlayerProfile(lookupKey, env, ctx);
+            } catch (_) {}
           }
           if (existingProfile && existingProfile.balance !== undefined) {
             oldBal = Number(existingProfile.balance) || 0;

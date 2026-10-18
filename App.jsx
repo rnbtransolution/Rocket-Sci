@@ -1135,27 +1135,38 @@ export default function App() {
     // Calculate payouts details from currently matched bets for the popup modal
     const previouslyMatched = bets.filter(b => b.status === 'matched');
     const payouts = previouslyMatched.map(b => {
-      let isLowWinner;
-      const minSec = (b.type === 'range' && b.rangeMin !== null && b.rangeMax !== null) ? Number(b.rangeMin) : tMin;
-      const maxSec = (b.type === 'range' && b.rangeMin !== null && b.rangeMax !== null) ? Number(b.rangeMax) : tMax;
+      const minSec = Number.isFinite(Number(b.rangeMin)) && Number(b.rangeMin) > 0 ? Number(b.rangeMin) : tMin;
+      const maxSec = Number.isFinite(Number(b.rangeMax)) && Number(b.rangeMax) > 0 ? Number(b.rangeMax) : tMax;
 
-      if (timeSec < minSec) {
-        isLowWinner = true;
-      } else if (timeSec > maxSec) {
-        isLowWinner = false;
-      } else {
-        const midPoint = (minSec + maxSec) / 2;
-        isLowWinner = timeSec <= midPoint;
-      }
       const isLowOrder = b.side === 'low';
       const lowWinnerName = b.playerLowName || (isLowOrder ? b.creatorName : b.matcherName) || 'ฝั่งต่ำ';
       const highWinnerName = b.playerHighName || (!isLowOrder ? b.creatorName : b.matcherName) || 'ฝั่งสูง';
-      const winnerName = isLowWinner ? lowWinnerName : highWinnerName;
+
+      let winnerSide = 'draw';
+      if (timeSec < minSec) {
+        winnerSide = 'low';
+      } else if (timeSec > maxSec) {
+        winnerSide = 'high';
+      }
+
+      const amt = Number(b.amount) || 0;
+      const commission = winnerSide !== 'draw' ? Math.round(amt * 0.10) : 0;
+      const payout = winnerSide !== 'draw' ? amt + (amt - commission) : amt;
+      const winnerName = winnerSide === 'low'
+        ? lowWinnerName
+        : winnerSide === 'high'
+          ? highWinnerName
+          : `เสมอ (${lowWinnerName} & ${highWinnerName} คืนทุน)`;
+
       return {
         orderNumber: b.orderNumber,
         winnerName: winnerName,
-        amount: b.amount,
-        payout: Math.round(b.amount * 1.90)
+        winnerSide: winnerSide,
+        rangeMin: minSec,
+        rangeMax: maxSec,
+        amount: amt,
+        commission: commission,
+        payout: payout
       };
     });
 
