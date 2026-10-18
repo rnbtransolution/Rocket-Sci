@@ -1505,34 +1505,42 @@ export async function refundPlayerPoints(
  * self-quoted custom-range order is valid with or without an admin quote and
  * must survive this untouched.
  */
-export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext): Promise<{ cancelled: number }> {
+export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext): Promise<{ cancelled: number; cancelledOrderNumbers: string[] }> {
   let cancelledCount = 0;
+  const cancelledOrderNumbers: string[] = [];
   try {
     const [pendingList, matchedList] = await Promise.all([
       getPendingOrdersList(env),
       getMatchedOrdersList(env),
     ]);
 
-    // Anything still carrying betType 'pre_quote' belongs to this round's
-    // un-quoted pre-orders, whichever index it happens to be sitting in.
-    const isPreQuote = (o: any) => Boolean(o) && o.betType === 'pre_quote';
+    // Still a pre-quote AND never confirmed by a quote → nobody ever priced it.
+    //
+    // The `offsetConfirmedAt` test matters as much as the betType one. A matched
+    // pre-quote order KEEPS betType 'pre_quote' after its quote lands — that is
+    // how it stays identifiable — so keying on betType alone would cancel and
+    // refund every pre-quote order in a round that quoted perfectly normally.
+    // `offsetConfirmedAt` is stamped by releaseHeldPreQuoteOrders at the moment
+    // the quote assigns a real range, so its presence means "running, settle it".
+    const isUnquotedPreQuote = (o: any) =>
+      Boolean(o) && o.betType === 'pre_quote' && !o.offsetConfirmedAt;
     const candidates: Order[] = [];
     const seen = new Set<string>();
     for (const o of [...pendingList, ...matchedList]) {
-      if (!isPreQuote(o) || !o.orderNumber || seen.has(o.orderNumber)) continue;
+      if (!isUnquotedPreQuote(o) || !o.orderNumber || seen.has(o.orderNumber)) continue;
       seen.add(o.orderNumber);
       candidates.push(o);
     }
 
-    const remainingPending = pendingList.filter((o) => !isPreQuote(o));
-    const remainingMatched = matchedList.filter((o) => !isPreQuote(o));
+    const remainingPending = pendingList.filter((o) => !isUnquotedPreQuote(o));
+    const remainingMatched = matchedList.filter((o) => !isUnquotedPreQuote(o));
 
     for (const item of candidates) {
       const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
       if (!raw) continue;
       try {
         const order = JSON.parse(raw) as Order;
-        if (order.betType !== 'pre_quote') continue;
+        if (order.betType !== 'pre_quote' || order.offsetConfirmedAt) continue;
         if (order.status !== 'pending_hold' && order.status !== 'matched') continue;
 
         const amt = Number(order.amount) || 0;
@@ -1547,6 +1555,7 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
         await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
         if (!refund.refunded) continue;
         cancelledCount++;
+        cancelledOrderNumbers.push(order.orderNumber);
 
         // Both parties are owed a refund on a matched pre-quote order, so both
         // hear about it.
@@ -1585,7 +1594,7 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
   } catch (err) {
     console.error('[Worker] cancelHeldPreQuoteOrders error:', err);
   }
-  return { cancelled: cancelledCount };
+  return { cancelled: cancelledCount, cancelledOrderNumbers };
 }
 
 /**

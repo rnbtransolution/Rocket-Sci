@@ -2108,16 +2108,47 @@ const isPublicAllowed =
           const tMin = Number(args[1]) || 330;
           const tMax = Number(args[2]) || 380;
 
+          // Pre-quote orders the admin never priced are cancelled and refunded FIRST.
+          //
+          // Order matters. cancelHeldPreQuoteOrders also sweeps the MATCHED
+          // index, so running it after the matched list was read left the
+          // snapshot holding orders that had just been refunded: the loser got
+          // their stake back as if the round were void, and then settlement paid
+          // the winner on top. A player who lost was credited in full. Cancel
+          // first, then read what is left to settle.
+          const { cancelledOrderNumbers } = await cancelHeldPreQuoteOrders(env, ctx);
+          const voidedThisSettlement = new Set(cancelledOrderNumbers);
+
           const matchedOrders = await getMatchedOrdersList(env);
           const resolvedOrders: any[] = [];
           const activeRoundStr = await state(env).get('ACTIVE_ROUND');
           const activeRound = activeRoundStr ? JSON.parse(activeRoundStr) : { name: 'บั้งไฟสด' };
 
-          // Any orders still held as pre_quote (price never released this round) must be
-          // auto-cancelled + refunded before settlement.
-          await cancelHeldPreQuoteOrders(env, ctx);
-
           for (const order of matchedOrders) {
+            // Belt and braces: never settle an order this same settlement
+            // cancelled, whatever the index says.
+            if (voidedThisSettlement.has(order.orderNumber)) {
+              console.warn(`[Worker] skipping already-voided order #${order.orderNumber} during settlement`);
+              continue;
+            }
+
+            // Independent of ordering: re-read the order and refuse to settle
+            // anything that is no longer live. The index snapshot is a cached
+            // list; the record itself is the truth. This is the guard that stops
+            // a loser being credited in full when an order has already been
+            // cancelled and refunded by another path in the same round.
+            const freshRaw = await env.KV_ORDERS.get(`ORDER_${order.orderNumber}`);
+            if (freshRaw) {
+              try {
+                const fresh = JSON.parse(freshRaw) as Order;
+                if (fresh.status !== 'matched') {
+                  console.warn(
+                    `[Worker] skipping order #${order.orderNumber} at settlement: status is "${fresh.status}", not "matched"`
+                  );
+                  continue;
+                }
+              } catch (_) {}
+            }
             const amt = Number(order.amount) || 0;
                 // Settle each order against ITS OWN quoted range, not the round
                 // band. A player who quotes their own rate (custom_range) is

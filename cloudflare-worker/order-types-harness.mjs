@@ -136,14 +136,15 @@ console.log('\nTYPE [2] SELF-QUOTED — valid with or without a quote');
   const fn = qh.slice(qh.indexOf('export async function cancelHeldPreQuoteOrders'));
   const body = fn.slice(0, fn.indexOf('\nexport '));
   check('cancelHeldPreQuoteOrders keys off betType, so custom_range is untouched',
-    /const isPreQuote = \(o: any\) => Boolean\(o\) && o\.betType === 'pre_quote'/.test(body));
+    /const isUnquotedPreQuote = \(o: any\) =>\s*\n?\s*Boolean\(o\) && o\.betType === 'pre_quote' && !o\.offsetConfirmedAt/.test(body)
+    || /isUnquotedPreQuote/.test(body) && /betType === 'pre_quote'/.test(body));
 }
 
 // ── Settlement must honour each order's OWN range ─────────────────────────
 console.log('\nSETTLEMENT — judged against the order\'s own quoted range');
 {
   const fn = ix.slice(ix.indexOf("functionName === 'adminResolveBets'"));
-  const body = fn.slice(0, 4000);
+  const body = fn.slice(0, 6000);
   check('reads the order\'s own rangeMin/rangeMax', /order\.rangeMin/.test(body));
   check('falls back to the round band only when the order has no range',
     /orderMin = [\s\S]{0,200}\? Number\(order\.rangeMin\)[\s\S]{0,80}: tMin/.test(body));
