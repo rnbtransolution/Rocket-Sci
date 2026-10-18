@@ -904,6 +904,41 @@ async function handleMatchOrder(
     return;
   }
 
+  // ── Claim the match ──
+  //
+  // Everything above decided "is this order still open?" by reading KV_ORDERS,
+  // which is eventually consistent. Two match requests arriving close together
+  // can BOTH observe `pending_match` and both proceed to debit their matcher and
+  // mark the order matched — two matches against one order, with only one
+  // refund ever owed.
+  //
+  // The production chat log shows exactly this traffic: players re-tapping the
+  // same order seconds apart (A-K at 07:33:50 and again at 07:33:57 on #7015,
+  // with a third attempt from another player at 07:35:47). Each tap is a
+  // separate webhook invocation, so the race is reachable, not theoretical.
+  //
+  // This is the same compare-and-set that makes `refundOrderOnce` idempotent,
+  // applied to the other direction of the trade. Only the claim winner debits
+  // anybody. Fails closed: if the claim cannot be taken, the match is refused
+  // rather than risking a second debit.
+  const matchClaimKey = `MATCH:${resolvedNo}@${Number(order.createdAt) || 0}`;
+  const matchClaimed = await state(env).claimExclusive(matchClaimKey, {
+    orderNumber: resolvedNo,
+    createdAt: Number(order.createdAt) || 0,
+    amount: effectiveAmt,
+    matcherId: profile.shortId,
+    claimedAt: Date.now(),
+  });
+
+  if (!matchClaimed) {
+    await deliverPrivateNotice(
+      userId, replyToken, groupId,
+      generateMatchMismatchFlex(resolvedNo, 'แผลนี้ถูกรับไปโดยผู้เล่นอื่นแล้วครับ', 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ'),
+      env, profile.displayName, ctx
+    );
+    return;
+  }
+
   // Deduct matcher balance BEFORE saving
   profile.balance -= effectiveAmt;
 
@@ -920,10 +955,14 @@ async function handleMatchOrder(
   order.matchedAt = Date.now();
   // Clear the pre-match side so settlement cannot double-assign a winner. The
   // creator's side is restored below for the remainder order only.
-  order.playerLowId = null;
-  order.playerLowName = null;
-  order.playerHighId = null;
-  order.playerHighName = null;
+  // The creator's own side was recorded when the order opened; restore it so
+  // the settled record names BOTH players. Blanking both fields and setting
+  // only the matcher's side left playerHighId null on every matched 'high'
+  // order, which the P2P report and the admin portal both read.
+  order.playerLowId = order.side === 'low' ? order.creatorId : null;
+  order.playerLowName = order.side === 'low' ? order.creatorName : null;
+  order.playerHighId = order.side === 'high' ? order.creatorId : null;
+  order.playerHighName = order.side === 'high' ? order.creatorName : null;
   if (order.side === 'low') {
     order.playerHighId = profile.shortId;
     order.playerHighName = profile.displayName;

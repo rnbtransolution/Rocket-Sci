@@ -2359,6 +2359,119 @@ const isPublicAllowed =
             const stats = await state(env).stats();
             result = { stats, usingDurableObject: Boolean((env as any).ROCKET_STATE) };
           }
+        } else if (functionName === 'adminInspectClaim') {
+          // Read-only view of a refund claim, for reconciling a disputed refund.
+          // The claim is the authoritative record of WHICH path paid an order and
+          // how much, which is the only way to tell a double refund from a
+          // legitimate one paid on two different orders.
+          const isSuperAdmin = adminRole === 'superadmin';
+          if (!isSuperAdmin) {
+            result = { error: 'Forbidden: เฉพาะ Super Admin เท่านั้น' };
+          } else {
+            const orderNo = String(args[0] || '').trim().replace(/^#/, '');
+            const raw = orderNo ? await env.KV_ORDERS.get(`ORDER_${orderNo}`) : null;
+            if (!raw) {
+              result = { found: false, orderNumber: orderNo };
+            } else {
+              const o = JSON.parse(raw) as Order;
+              const key = `${o.orderNumber}@${Number(o.createdAt) || 0}`;
+              const payload = await state(env).getClaim(`REFUND:${key}`);
+              result = {
+                found: Boolean(payload),
+                claimKey: `REFUND:${key}`,
+                // StateStore.getClaim already parses the stored JSON.
+                claim: payload ?? null,
+              };
+            }
+          }
+        } else if (functionName === 'adminListOrders') {
+          // Read-only sweep of KV_ORDERS, for investigating a disputed balance.
+          // KV list is eventually consistent and slow, which is why it is not on
+          // any hot path — but for a one-off audit it is the only way to see
+          // orders that are no longer in the pending or matched indexes.
+          const isSuperAdmin = adminRole === 'superadmin';
+          if (!isSuperAdmin) {
+            result = { error: 'Forbidden: เฉพาะ Super Admin เท่านั้น' };
+          } else {
+            const scan = await env.KV_ORDERS.list({ prefix: 'ORDER_' });
+            const rows: any[] = [];
+            for (const k of scan.keys || []) {
+              const raw = await env.KV_ORDERS.get(k.name);
+              if (!raw) continue;
+              try {
+                const o = JSON.parse(raw) as Order;
+                rows.push({
+                  orderNumber: o.orderNumber,
+                  status: o.status,
+                  amount: o.amount,
+                  side: o.side,
+                  creatorId: o.creatorId,
+                  creatorName: o.creatorName,
+                  matcherId: o.matcherId ?? null,
+                  matcherName: o.matcherName ?? null,
+                  commission: o.commission ?? null,
+                  payout: o.payout ?? null,
+                  parentOrderNumber: o.parentOrderNumber ?? null,
+                  selfMatch: o.creatorId && o.matcherId ? o.creatorId === o.matcherId : false,
+                  createdAt: o.createdAt,
+                });
+              } catch (_) {}
+            }
+            rows.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            result = { count: rows.length, truncated: scan.list_complete === false, orders: rows };
+          }
+        } else if (functionName === 'adminInspectOrder') {
+          // Read-only single-order lookup, for investigating a disputed balance.
+          //
+          // Balance bugs are very hard to reason about from the outside: the
+          // symptom is a number, and every plausible cause — a double refund,
+          // a self-match, a second order for the same stake — produces the
+          // same number. Guessing between them burns more time than one
+          // endpoint does. Super Admin only because it exposes player IDs.
+          const isSuperAdmin = adminRole === 'superadmin';
+          if (!isSuperAdmin) {
+            result = { error: 'Forbidden: เฉพาะ Super Admin เท่านั้น' };
+          } else {
+            const orderNo = String(args[0] || '').trim().replace(/^#/, '');
+            const raw = orderNo ? await env.KV_ORDERS.get(`ORDER_${orderNo}`) : null;
+            if (!raw) {
+              result = { found: false, orderNumber: orderNo };
+            } else {
+              const o = JSON.parse(raw) as Order;
+              result = {
+                found: true,
+                order: {
+                  orderNumber: o.orderNumber,
+                  status: o.status,
+                  amount: o.amount,
+                  side: o.side,
+                  betType: o.betType,
+                  rangeMin: o.rangeMin,
+                  rangeMax: o.rangeMax,
+                  creatorId: o.creatorId,
+                  creatorName: o.creatorName,
+                  matcherId: o.matcherId ?? null,
+                  matcherName: o.matcherName ?? null,
+                  playerLowId: o.playerLowId ?? null,
+                  playerHighId: o.playerHighId ?? null,
+                  winnerSide: o.winnerSide ?? null,
+                  winnerName: o.winnerName ?? null,
+                  grossWinAmount: o.grossWinAmount ?? null,
+                  commission: o.commission ?? null,
+                  payout: o.payout ?? null,
+                  parentOrderNumber: o.parentOrderNumber ?? null,
+                  createdAt: o.createdAt,
+                  matchedAt: o.matchedAt ?? null,
+                  settledAt: o.settledAt ?? null,
+                  groupId: o.groupId ?? null,
+                },
+                // The one thing that decides whether a void overpaid: was the
+                // creator also the matcher? Both being refunded is correct for
+                // two distinct players, and a double refund for one.
+                selfMatch: o.creatorId && o.matcherId ? o.creatorId === o.matcherId : false,
+              };
+            }
+          }
         } else if (functionName === 'adminResetTestData') {
           // 1. Clean pending bets list
           await state(env).put('PENDING_ORDERS_LIST', JSON.stringify([]));
