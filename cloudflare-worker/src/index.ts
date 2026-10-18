@@ -2307,10 +2307,9 @@ const isPublicAllowed =
               .filter((o) => o.winnerSide && o.winnerSide !== 'draw')
               .slice(0, 20)
               .map((o) => {
-                const winName = o.winnerName || '-';
-                const loseName = o.winnerSide === 'low'
-                  ? (o.side === 'high' ? o.matcherName || o.creatorName : o.creatorName)
-                  : (o.side === 'high' ? o.matcherName || o.creatorName : o.creatorName);
+                const isCreatorWinner = o.winnerSide === o.side;
+                const winName = (isCreatorWinner ? o.creatorName : o.matcherName) || o.winnerName || '-';
+                const loseName = (isCreatorWinner ? o.matcherName : o.creatorName) || '-';
                 return {
                   type: 'box',
                   layout: 'horizontal',
@@ -2326,7 +2325,7 @@ const isPublicAllowed =
             if (pairBodies.length > 0) {
               const p2pFlex = {
                 type: 'flex',
-                altText: `🤝 ผลดวลตัวต่อตัว ${pairBodies.length} แผล (ผู้ชนะได้ 1.9x หักค่าคอม 10%)`,
+                altText: `🤝 ผลดวลตัวต่อตัว ${pairBodies.length} แผล`,
                 contents: {
                   type: 'bubble',
                   size: 'giga',
@@ -2338,7 +2337,6 @@ const isPublicAllowed =
                     contents: [
                       { type: 'text', text: '🤝 ผลดวลตัวต่อตัว (P2P)', weight: 'bold', color: '#FDE047', size: 'sm', align: 'center' },
                       { type: 'text', text: `รอบ [${activeRound.name || 'บั้งไฟสด'}] | เวลา ${finalSeconds}s`, color: '#FFFFFF', size: 'xs', align: 'center', margin: 'xs' },
-                      { type: 'text', text: `ผู้ชนะได้ ${(1 + (1 - PLATFORM_COMMISSION_RATE)).toFixed(1)} เท่า (หักค่าคอม ${PLATFORM_COMMISSION_RATE * 100}% จากส่วนของผู้แพ้)`, color: '#A7F3D0', size: 'xs', align: 'center', margin: 'xs', wrap: true },
                     ],
                   },
                   body: {

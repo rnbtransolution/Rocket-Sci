@@ -176,7 +176,8 @@ async function freshEnv() {
     for (const o of d.bets || []) {
       if (seen.has(o.orderNumber)) continue; // list dedupes, count once
       seen.add(o.orderNumber);
-      total += Number(o.amount) || 0;
+      const mult = o.status === 'matched' ? 2 : 1;
+      total += (Number(o.amount) || 0) * mult;
     }
     return total;
   }

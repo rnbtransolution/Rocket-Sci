@@ -839,6 +839,18 @@ async function handleMatchOrder(
   env: Env,
   ctx?: ExecutionContext
 ): Promise<void> {
+  const roundStr = await state(env).get('ACTIVE_ROUND');
+  const round = roundStr ? (JSON.parse(roundStr) as RocketRound) : null;
+  if (round && round.status !== 'ACTIVE') {
+    const closedFlex = generateNoticeFlex(
+      '⛔ ปิดรับดวลรอบนี้แล้ว',
+      'ปิดรับดวลรอบนี้แล้วครับ (ล็อครอบระหว่างการแข่งขัน)\nกรุณารอรอบถัดไปครับ 🙏',
+      'warning'
+    );
+    await deliverPrivateNotice(userId, replyToken, groupId, closedFlex, env, profile.displayName, ctx);
+    return;
+  }
+
   const resolvedNo = await resolveOrderNumber(orderNo, profile.shortId, env);
   if (!resolvedNo) {
     const errorMsg = orderNo
