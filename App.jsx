@@ -725,13 +725,19 @@ export default function App() {
     };
   }, [isGAS, isLiveBackend, isGitHubPages, API_BASE_URL, adminAuthenticated, playerUserId]);
 
-  // Toast Notification manager
-  const addToast = (msg, type = 'info') => {
-    const id = Date.now();
+  // Toast Notification manager (auto-dismiss in 2 seconds)
+  const addToast = (msg, type = 'info', duration = 2000) => {
+    const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, msg, type }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4000);
+    }, duration);
+    return id;
+  };
+
+  const removeToast = (id) => {
+    if (!id) return;
+    setToasts(prev => prev.filter(t => t.id !== id));
   };
 
   // Safe portal close & round-reset function (preserves player data & transaction history)
@@ -758,9 +764,10 @@ export default function App() {
       }
     }
 
-    addToast('⏳ กำลังปิดรอบและรีเซ็ตระบบ...', 'info');
+    const loadingToastId = addToast('⏳ กำลังปิดรอบและรีเซ็ตระบบ...', 'info');
     try {
       const data = await runBackendFunction('adminCloseRound', []);
+      removeToast(loadingToastId);
       if (data && data.success === false) {
         addToast(`⚠️ ปิดรอบไม่สำเร็จ: ${data.message || data.error || 'เกิดข้อผิดพลาด'}`, 'danger');
         return;
@@ -829,9 +836,11 @@ export default function App() {
 
     setSettlementResult(null);
 
+    let resetLoadingToastId = null;
     try {
-      addToast('⏳ กำลังล้างระเบียนข้อมูลระบบ (Factory Reset)...', 'info');
+      resetLoadingToastId = addToast('⏳ กำลังล้างระเบียนข้อมูลระบบ (Factory Reset)...', 'info');
       const data = await runBackendFunction('resetGoogleSheetsDatabase', [pin]);
+      removeToast(resetLoadingToastId);
       if (data) {
         if (data.players) setPlayers(deduplicatePlayersList(data.players));
         if (data.transactions) setTransactions(data.transactions);
@@ -857,12 +866,13 @@ export default function App() {
   };
 
   const forceSyncFreshData = async () => {
-    addToast('⏳ กำลังดึงข้อมูลล่าสุดจากฐานข้อมูล...', 'info');
+    const loadingToastId = addToast('⏳ กำลังดึงข้อมูลล่าสุดจากฐานข้อมูล...', 'info');
     try {
       if (typeof window !== 'undefined') {
         localStorage.removeItem('rocket_sci_dashboard_cache');
       }
       const d = await runBackendFunction('getDashboardData', []);
+      removeToast(loadingToastId);
       if (d) {
         if (Array.isArray(d.players)) setPlayers(deduplicatePlayersList(d.players));
         if (Array.isArray(d.transactions)) setTransactions(d.transactions);
@@ -878,6 +888,7 @@ export default function App() {
         addToast('✅ ดึงข้อมูลสดสำเร็จ', 'success');
       }
     } catch (e) {
+      removeToast(loadingToastId);
       console.error('[Force Sync Error]:', e);
       addToast('❌ ไม่สามารถดึงข้อมูลสดได้', 'error');
     }
@@ -1525,24 +1536,27 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-100/80 lg:pl-[260px] flex flex-col">
       {/* Toast Manager */}
-      <div className="fixed top-4 right-4 z-[999999] flex flex-col gap-2 max-w-sm w-80">
+      <div className="fixed top-4 right-4 z-[999999] flex flex-col gap-2 max-w-sm w-80 pointer-events-none">
         {toasts.map(t => (
           <div 
             key={t.id} 
-            className={`px-4 py-3 rounded-xl text-sm font-semibold flex items-start gap-2.5 shadow-lg border transition-all ${
+            onClick={() => removeToast(t.id)}
+            role="alert"
+            title="คลิกเพื่อปิด"
+            className={`pointer-events-auto cursor-pointer select-none px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-2.5 shadow-lg border transition-all duration-200 hover:opacity-80 active:scale-95 ${
               t.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
-              t.type === 'danger' ? 'bg-rose-50 border-rose-200 text-rose-800' :
+              t.type === 'danger' || t.type === 'error' ? 'bg-rose-50 border-rose-200 text-rose-800' :
               t.type === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800' :
               'bg-sky-50 border-sky-200 text-sky-800'
             }`}
           >
-            <span className="mt-0.5 shrink-0">
+            <span className="shrink-0">
               {t.type === 'success' && <CheckCircle size={15} />}
-              {t.type === 'danger' && <XCircle size={15} />}
+              {(t.type === 'danger' || t.type === 'error') && <XCircle size={15} />}
               {t.type === 'warning' && <AlertTriangle size={15} />}
               {t.type === 'info' && <Info size={15} />}
             </span>
-            <span className="leading-snug">{t.msg}</span>
+            <span className="leading-snug flex-1">{t.msg}</span>
           </div>
         ))}
       </div>
@@ -3641,15 +3655,17 @@ export default function App() {
                       )}
                       <button
                         onClick={async () => {
-                          addToast('⚡ กำลังทดสอบส่ง Push...', 'info');
+                          const testPushToastId = addToast('⚡ กำลังทดสอบส่ง Push...', 'info');
                           try {
                             const testRes = await runBackendFunction('adminTestPushGroupMessage', [activeGroupId || 'ALL']);
+                            removeToast(testPushToastId);
                             if (testRes && testRes.success) {
                               addToast('✅ ทดสอบส่ง Push สำเร็จ', 'success');
                             } else {
                               addToast(`⚠️ ส่งไม่สำเร็จ: ${testRes?.error || 'โควตาเต็ม'}`, 'warning');
                             }
                           } catch {
+                            removeToast(testPushToastId);
                             addToast('❌ ส่งไม่สำเร็จ', 'danger');
                           }
                         }}
