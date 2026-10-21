@@ -8,7 +8,20 @@
 // Optional: LINE_CHANNEL_SECRET, ALLOW_LINE_WEBHOOK (=true only if GAS is the LINE webhook)
 function getScriptSecret_(key) {
   var props = PropertiesService.getScriptProperties();
-  return (props.getProperty(key) || '').toString().trim();
+  var val = (props.getProperty(key) || '').toString().trim();
+  if (!val) {
+    var DEFAULTS = {
+      ADMIN_API_KEY: '_UeYlCflMEmsARuvt4KIHo1JhhXSz0-qz7KxLj6U6IFA1rbj',
+      LINE_CHANNEL_ACCESS_TOKEN: '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=',
+      LINE_CHANNEL_SECRET: '8b03265380a42a02b934a80527c9ba5c',
+      SLIP_API_KEY: 'WNsIQaS1CqRpyHwPHb0SA5wcdh55sQYZT6cSNLSSssY='
+    };
+    if (DEFAULTS[key]) {
+      val = DEFAULTS[key];
+      props.setProperty(key, val);
+    }
+  }
+  return val;
 }
 
 function getLineToken_() {
@@ -45,10 +58,10 @@ try {
  */
 function bootstrapScriptSecrets(lineToken, slipKey, adminKey, lineSecret, admin1Key) {
   var props = PropertiesService.getScriptProperties();
-  if (lineToken) props.setProperty('LINE_CHANNEL_ACCESS_TOKEN', String(lineToken));
-  if (slipKey) props.setProperty('SLIP_API_KEY', String(slipKey));
-  if (adminKey) props.setProperty('ADMIN_API_KEY', String(adminKey));
-  if (lineSecret) props.setProperty('LINE_CHANNEL_SECRET', String(lineSecret));
+  props.setProperty('LINE_CHANNEL_ACCESS_TOKEN', String(lineToken || '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU='));
+  props.setProperty('SLIP_API_KEY', String(slipKey || 'WNsIQaS1CqRpyHwPHb0SA5wcdh55sQYZT6cSNLSSssY='));
+  props.setProperty('ADMIN_API_KEY', String(adminKey || '_UeYlCflMEmsARuvt4KIHo1JhhXSz0-qz7KxLj6U6IFA1rbj'));
+  props.setProperty('LINE_CHANNEL_SECRET', String(lineSecret || '8b03265380a42a02b934a80527c9ba5c'));
   if (admin1Key) props.setProperty('ADMIN1_API_KEY', String(admin1Key));
   props.setProperty('ALLOW_LINE_WEBHOOK', 'false'); // Node is the single LINE writer
   return { ok: true, keys: Object.keys(props.getProperties()) };
@@ -607,6 +620,12 @@ function executeAdminAction(functionName, args, adminKey) {
         return { success: true, message: 'LINE token updated' };
       }
       return { success: false, error: 'No token provided' };
+    case 'adminSetLineSecret':
+      if (args[0]) {
+        PropertiesService.getScriptProperties().setProperty('LINE_CHANNEL_SECRET', String(args[0]).trim());
+        return { success: true, message: 'LINE secret updated' };
+      }
+      return { success: false, error: 'No secret provided' };
     case 'adminLogin':
       return adminLogin(args[0], args[1]);
     case 'pruneDeadLineGroupsFromProperties': return pruneDeadLineGroupsFromProperties();
@@ -631,7 +650,8 @@ function doPost(e) {
       }
       const fn = postData.functionName || postData.action;
       const args = postData.args || [];
-      const res = executeAdminAction(fn, args);
+      const key = postData.apiKey || postData.adminKey || (e.parameter && (e.parameter.apiKey || e.parameter.adminKey));
+      const res = executeAdminAction(fn, args, key);
       return ContentService.createTextOutput(JSON.stringify({ success: true, data: res }))
         .setMimeType(ContentService.MimeType.JSON);
     }
