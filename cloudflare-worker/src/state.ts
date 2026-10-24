@@ -1,5 +1,8 @@
 import { Env } from './types.js';
 import { evaluateRateLimit, RateLimitDecision } from './auth.js';
+import type { TxnSpec, TxnResult } from './stateDO.js';
+
+export type { TxnSpec, TxnResult, TxnBalanceResult } from './stateDO.js';
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
@@ -90,7 +93,11 @@ interface DOStub {
   patchTransactionStatus(txId: string, status: string, reviewReason: string, actualAmount?: number | null): Promise<string | null>;
   appendChatLog(logJson: string, limit?: number): Promise<void>;
   writeMany(entries: Array<[string, string]>, expiresAt?: number): Promise<void>;
-  saveProfile(profileJson: string, entryJson: string, limit?: number): Promise<boolean>;
+  saveProfile(profileJson: string, entryJson: string, limit?: number): Promise<string | null>;
+  txn(specJson: string): Promise<string>;
+  putIfAbsent(key: string, value: string): Promise<string>;
+  parkMatched(metaJson: string, force: boolean): Promise<string>;
+  removeInFlight(roundId: string): Promise<string | null>;
   rateLimit(key: string): Promise<{ count: number; resetAt: number }>;
   setRateLimit(key: string, value: { count: number; resetAt: number }): Promise<void>;
   clearRateLimit(key: string): Promise<void>;
@@ -169,7 +176,14 @@ export class StateStore {
     try {
       const legacy = await this.env.KV_CACHE.get(key);
       if (legacy !== null && legacy !== undefined) {
-        await stub.put(key, legacy).catch(() => {});
+        // Put-if-absent, never a blind put: between our miss and this write a
+        // ledger txn may already have committed a newer value for the key, and
+        // the stale KV copy must not overwrite it.
+        try {
+          return await stub.putIfAbsent(key, legacy);
+        } catch (_) {
+          return legacy;
+        }
       }
       return legacy ?? null;
     } catch (err) {
@@ -271,7 +285,9 @@ export class StateStore {
     if (stub) {
       try {
         const claimed = await stub.claimExclusive(claimKey, payloadJson, ttlMs);
-        if (claimed) {
+        // Webhook-dedup claims are high-volume and short-lived; they are not
+        // worth a KV write per LINE message.
+        if (claimed && !claimKey.startsWith('EVENT:')) {
           const now = Date.now();
           const exp = ttlMs > 0 ? now + ttlMs : 0;
           StateStore.fallbackClaims.set(claimKey, { v: payloadJson, exp });
@@ -350,9 +366,14 @@ export class StateStore {
     const stub = this.stub();
     if (!stub) return false;
     try {
-      const profileJson = JSON.stringify(profile);
-      const ok = await stub.saveProfile(profileJson, JSON.stringify(entry));
-      if (!ok) return false;
+      const p0 = profile as any;
+      await this.warmProfile(p0?.shortId, p0?.lineUserId);
+      const saved = await stub.saveProfile(JSON.stringify(profile), JSON.stringify(entry));
+      if (!saved) return false;
+      // The DO keeps the stored balance; reflect it back to the caller's object.
+      const stored = JSON.parse(saved);
+      if (p0 && typeof p0 === 'object') p0.balance = stored.balance;
+      const profileJson = saved;
       // Cold KV mirror of ALL profile keys + PLAYERS_LIST so fallback reads are 100% consistent.
       const p = profile as any;
       const mirrorTasks: Promise<any>[] = [];
@@ -376,6 +397,158 @@ export class StateStore {
       console.warn('[StateStore] atomic saveProfile failed:', err);
       return false;
     }
+  }
+
+  // ── Atomic ledger ────────────────────────────────────────────────────────
+
+  /**
+   * Make sure a player's records live in the Durable Object. `get` adopts a
+   * legacy KV value on a miss, which is what lets a txn find a player who has
+   * not been touched since the KV → DO migration.
+   */
+  async warmProfile(shortId?: string | null, lineUserId?: string | null): Promise<void> {
+    const tasks: Promise<unknown>[] = [];
+    if (typeof lineUserId === 'string' && lineUserId.startsWith('U')) tasks.push(this.get(`USER_${lineUserId}`));
+    if (typeof shortId === 'string' && shortId) {
+      tasks.push(this.get(`USER_${shortId}`));
+      tasks.push(this.get(`RAW_LINE_${shortId}`));
+    }
+    await Promise.all(tasks);
+  }
+
+  /**
+   * The authoritative order record. Orders used to live only in KV_ORDERS,
+   * which is eventually consistent — a status written in one region could read
+   * back stale in another for up to a minute, which is how an order could be
+   * both matched and cancelled. The DO copy is now the record; KV_ORDERS is
+   * adopted once on a miss and kept as an audit mirror.
+   */
+  async getOrder(orderNumber: string): Promise<any | null> {
+    const key = `ORDER_${orderNumber}`;
+    const stub = this.stub();
+    if (stub) {
+      try {
+        let raw = await stub.get(key);
+        if (raw === null || raw === undefined) {
+          const legacy = await this.env.KV_ORDERS.get(key);
+          if (legacy) raw = await stub.putIfAbsent(key, legacy);
+        }
+        return raw ? JSON.parse(raw) : null;
+      } catch (err) {
+        this.tripCircuit(err);
+        console.warn(`[StateStore] DO order read failed for ${key}, using KV:`, err);
+      }
+    }
+    const raw = await this.env.KV_ORDERS.get(key);
+    return raw ? JSON.parse(raw) : null;
+  }
+
+  /**
+   * Run a ledger transaction in the Durable Object.
+   *
+   * FAILS CLOSED: if the Durable Object cannot be reached, nothing moves and
+   * the result says `unavailable`. Credit is real money; a degraded KV path
+   * cannot do an atomic check-and-debit, so it must not be attempted.
+   */
+  async txn(spec: TxnSpec): Promise<TxnResult> {
+    const fail = (reason: string, detail = ''): TxnResult =>
+      ({ ok: false, reason, detail, orders: {}, balances: [], transactions: {}, writes: [] });
+    const stub = this.stub();
+    if (!stub) return fail('unavailable', 'state store offline');
+
+    try {
+      // Fast path: one RPC. Records already live in the Durable Object.
+      let result = JSON.parse(await stub.txn(JSON.stringify(spec))) as TxnResult;
+
+      // A record the DO has never seen may still exist only in legacy KV (not
+      // yet touched since the KV → DO migration). Adopt the parties involved
+      // and retry once; the retry re-runs every check from scratch.
+      if (!result.ok && (result.reason === 'player_not_found' || result.reason === 'order_not_found')) {
+        await this.warmForTxn(spec);
+        result = JSON.parse(await stub.txn(JSON.stringify({ ...spec, allowDirectoryFallback: true }))) as TxnResult;
+      }
+
+      if (result.ok) await this.mirror(result.writes);
+      return result;
+    } catch (err) {
+      this.tripCircuit(err);
+      console.error('[StateStore] txn failed:', err);
+      return fail('unavailable', String((err as Error)?.message || err));
+    }
+  }
+
+  /** Adopt every legacy record a txn may touch (see `get` / `getOrder`). */
+  private async warmForTxn(spec: TxnSpec): Promise<void> {
+    const warm: Promise<unknown>[] = [];
+    for (const b of spec.balances || []) warm.push(this.warmProfile(b.shortId, b.lineUserId));
+    for (const o of spec.orders || []) {
+      if (o.create) continue;
+      warm.push(this.getOrder(o.orderNumber).then((ord) => Promise.all([
+        ord ? this.warmProfile(ord.creatorId, ord.creatorLineUserId) : null,
+        ord && ord.matcherId ? this.warmProfile(ord.matcherId, ord.matcherLineUserId) : null,
+      ])));
+    }
+    if ((spec.transactions || []).some((t) => !t.insert)) {
+      warm.push(this.get('TRANSACTIONS_LIST').then(async (raw) => {
+        const list = raw ? (JSON.parse(raw) as any[]) : [];
+        for (const t of spec.transactions || []) {
+          const tx = list.find((x) => x && x.id === t.id);
+          if (tx) await this.warmProfile(tx.playerId, tx.lineUserId);
+        }
+      }));
+    }
+    warm.push(this.get('PLAYERS_LIST'));
+    await Promise.all(warm);
+  }
+
+  /** Copy committed rows to KV: orders awaited (audit tools read KV_ORDERS), the rest best-effort. */
+  private async mirror(writes: Array<[string, string]>): Promise<void> {
+    const orderPuts: Promise<unknown>[] = [];
+    for (const [key, value] of writes || []) {
+      if (key.startsWith('ORDER_')) {
+        orderPuts.push(this.env.KV_ORDERS.put(key, value).catch(() => {}));
+      } else if (!isEphemeral(key)) {
+        this.env.KV_CACHE.put(key, value).catch(() => {});
+      }
+    }
+    await Promise.all(orderPuts);
+  }
+
+  /** Write a key only if it does not exist yet. Returns the value now stored. */
+  async putIfAbsent(key: string, value: string): Promise<string> {
+    const stub = this.stub();
+    if (stub) {
+      try {
+        return await stub.putIfAbsent(key, value);
+      } catch (err) {
+        this.tripCircuit(err);
+      }
+    }
+    const existing = await this.env.KV_CACHE.get(key);
+    if (existing !== null) return existing;
+    await this.env.KV_CACHE.put(key, value);
+    return value;
+  }
+
+  /** Atomically park the matched board into a new in-flight round. */
+  async parkMatched(meta: Record<string, unknown>, force: boolean): Promise<any | null> {
+    const stub = this.stub();
+    if (!stub) throw new Error('state store offline');
+    const matched = await this.get('MATCHED_ORDERS_LIST');
+    const list = matched ? (JSON.parse(matched) as any[]) : [];
+    await Promise.all(list.map((o) => (o && o.orderNumber ? this.getOrder(o.orderNumber) : null)));
+    await this.get('IN_FLIGHT_ROUNDS');
+    const res = JSON.parse(await stub.parkMatched(JSON.stringify(meta), force));
+    await this.mirror(res.writes || []);
+    return res.parkedRound;
+  }
+
+  /** Remove a parked round. Null when another call already removed it. */
+  async removeInFlight(roundId: string): Promise<any | null> {
+    const stub = this.stub();
+    if (!stub) throw new Error('state store offline');
+    const raw = await stub.removeInFlight(roundId);
+    return raw ? JSON.parse(raw) : null;
   }
 
   /**

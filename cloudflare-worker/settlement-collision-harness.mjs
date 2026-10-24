@@ -193,15 +193,15 @@ console.log('\nCODE-LEVEL GUARDS');
     cancelAt > -1 && snapshotAt > -1 && cancelAt < snapshotAt,
     `cancel@${cancelAt} snapshot@${snapshotAt}`);
   check('settlement skips anything this settlement voided',
-    /voidedThisSettlement\.has\(order\.orderNumber\)/.test(fn));
-  check('settlement re-reads the order and requires status matched',
-    /fresh\.status !== 'matched'/.test(fn));
+    /settleOrdersAtomically\([\s\S]{0,120}voidedThisSettlement/.test(fn) && /skip\.has\(item\.orderNumber\)/.test(src));
+  check('settlement re-checks the stored order and requires status matched',
+    /expectStatus: \['matched'\],\s*settle:/.test(src));
 
   const qh = (await import('node:fs')).readFileSync('src/queueHandler.ts', 'utf8');
   check('cancellation honours offsetConfirmedAt, not just betType',
     /betType === 'pre_quote' && !o\.offsetConfirmedAt/.test(qh));
   check('the quote path stamps offsetConfirmedAt on matched pre-quotes',
-    /order\.offsetConfirmedAt = Date\.now\(\)/.test(qh));
+    /offsetConfirmedAt: Date\.now\(\)/.test(qh));
 }
 
 console.log(`\nRESULT\n  ${pass} passed, ${fail} failed\n`);

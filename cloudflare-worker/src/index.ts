@@ -48,6 +48,9 @@ import {
   removeFromMatchedOrdersList,
   removeFromPendingOrdersList,
   refundPlayerPoints,
+  ledger,
+  getOrderRecord,
+  mirrorTransactionToSheets,
   refundOrderOnce,
   deduplicatePlayers,
   getInFlightRounds,
@@ -145,6 +148,61 @@ async function resolveTargetGroupIds(target: string | undefined, env: Env): Prom
  * which is how it came to be missing in the first place.
  */
 const PLATFORM_COMMISSION_RATE = 0.10;
+
+/**
+ * Settle orders against a flight time, each in its own atomic ledger step.
+ *
+ * The Durable Object re-reads the stored order, refuses anything no longer
+ * `matched`, computes the winner and the 10% fee from the STORED amount and
+ * parties, credits the winner (or both stakes on a draw), and moves the order
+ * from the matched list to the settled list — all at once. Settlement used to
+ * check a KV copy and then pay in separate writes, so a second "settle" click,
+ * or a cancel landing in between, could pay the same order twice.
+ */
+async function settleOrdersAtomically(
+  candidates: Order[],
+  finalSeconds: number,
+  tMin: number,
+  tMax: number,
+  env: Env,
+  ctx: ExecutionContext | undefined,
+  skip: Set<string> = new Set()
+): Promise<{ settled: Order[]; failed: Array<{ orderNumber: string; reason: string }> }> {
+  const settled: Order[] = [];
+  const failed: Array<{ orderNumber: string; reason: string }> = [];
+  const seen = new Set<string>();
+  for (const item of candidates) {
+    if (!item || !item.orderNumber || seen.has(item.orderNumber) || skip.has(item.orderNumber)) continue;
+    seen.add(item.orderNumber);
+    const res = await ledger(env, {
+      orders: [{
+        orderNumber: item.orderNumber,
+        ...(item.createdAt ? { expectCreatedAt: Number(item.createdAt) } : {}),
+        expectStatus: ['matched'],
+        settle: { finalSeconds, tMin, tMax, commissionRate: PLATFORM_COMMISSION_RATE },
+      }],
+      lists: [
+        { key: 'MATCHED_ORDERS_LIST', op: 'remove', orderNumber: item.orderNumber },
+        { key: 'SETTLED_ORDERS_LIST', op: 'upsert', orderNumber: item.orderNumber, cap: 100 },
+      ],
+    }, ctx);
+    if (res.ok) {
+      settled.push(res.orders[item.orderNumber] as Order);
+    } else if (res.reason === 'order_status') {
+      console.warn(`[Worker] skipping order #${item.orderNumber} at settlement: status is "${res.current?.status}", not "matched"`);
+    } else {
+      console.error(`[Worker] settlement of #${item.orderNumber} failed: ${res.reason} ${res.detail || ''}`);
+      failed.push({ orderNumber: item.orderNumber, reason: String(res.reason) });
+    }
+  }
+  return { settled, failed };
+}
+
+/** A flight time the admin actually entered. `Number('') || 0` settled every order as a low-side win. */
+function parseFlightSeconds(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 async function hashPayload(payload: unknown): Promise<string> {
   const json = JSON.stringify(payload);
@@ -278,16 +336,18 @@ export default {
             try {
               if (!isVerifyProbe) {
                 // Deduplicate redelivered webhook events if LINE provides webhookEventId
+                // An atomic claim, not get-then-put: a redelivery arriving
+                // while the first copy is still in flight must not run a
+                // second time (a bet or match would be placed twice).
                 if (event.webhookEventId) {
-                  const seen = await state(env).get(`SEEN_EVENT_${event.webhookEventId}`);
-                  if (seen) {
+                  const first = await state(env).claimExclusive(
+                    `EVENT:${event.webhookEventId}`,
+                    { at: Date.now() },
+                    10 * 60 * 1000
+                  );
+                  if (!first) {
                     console.log(`[Worker] Duplicate webhookEventId ${event.webhookEventId} dropped.`);
                     return;
-                  }
-                  if (ctx) {
-                    ctx.waitUntil(state(env).put(`SEEN_EVENT_${event.webhookEventId}`, '1', { expirationTtl: 600 }).catch(() => {}));
-                  } else {
-                    state(env).put(`SEEN_EVENT_${event.webhookEventId}`, '1', { expirationTtl: 600 }).catch(() => {});
                   }
                 }
                 await processLineEvent(event, env, ctx);
@@ -908,200 +968,149 @@ const isPublicAllowed =
           const txId = args[0];
           const txs = await getTransactionsList(env);
           const targetTx = txs.find(t => t.id === txId);
-          if (targetTx) {
-            if (targetTx.status === 'success' || targetTx.status === 'rejected') {
-              result = { success: false, error: 'รายการนี้ได้รับการดำเนินการไปแล้ว', txId };
-            } else {
-              targetTx.status = 'success';
-              targetTx.actualAmount = targetTx.requestedAmount;
-              // Atomic status flip so a concurrent LINE OA deposit is preserved.
-              const approvedAtomic = await state(env).patchTransactionStatus(
-                txId, 'success', '', targetTx.requestedAmount
-              );
-              if (!approvedAtomic) {
-                await state(env).put('TRANSACTIONS_LIST', JSON.stringify(txs));
-              }
-
-              const isWithdrawal = String(txId).startsWith('WD') || targetTx.type === 'withdraw';
-              const playerId = targetTx.playerId;
-              const txLine = targetTx.lineUserId;
-
-              // 1. Authoritative resolution of LINE user ID and Short ID
-              const rawLine = (txLine && txLine.startsWith('U'))
-                ? txLine
-                : (playerId && playerId.startsWith('U'))
-                  ? playerId
-                  : ((await state(env).get(`RAW_LINE_${playerId}`)) || '');
-              const shortId = (playerId && playerId.startsWith('PL'))
-                ? playerId
-                : (rawLine ? `PL${rawLine.slice(-6).toUpperCase()}` : playerId);
-
-              // 2. Fetch authoritative profile via getOrCreatePlayerProfile (cross-reconciles newest updatedAt)
-              const lookupKey = rawLine || shortId || playerId;
-              const existingProfile = await getOrCreatePlayerProfile(lookupKey, env, ctx);
-
-              const effectiveLine = rawLine || existingProfile.lineUserId;
-              const effectiveShort = shortId || existingProfile.shortId;
-
-              if (isWithdrawal) {
-                // Withdrawal: balance was already deducted upon request. Notify player of success.
-                if (effectiveLine && effectiveLine.startsWith('U')) {
-                  ctx?.waitUntil(pushToLine(effectiveLine, `💸 [ถอนเงินสำเร็จ]: ยอด ${targetTx.requestedAmount.toLocaleString()} บาท แอดมินได้โอนเข้าบัญชีของคุณเรียบร้อยแล้วครับ 🚀`, env).catch(e => console.error(e)));
-                }
-              } else {
-                // Deposit: credit player balance directly on authoritative entity keys
-                const oldBal = Number(existingProfile.balance) || 0;
-                const newBal = oldBal + (Number(targetTx.requestedAmount) || 0);
-                const updatedProfile: PlayerProfile = {
-                  ...existingProfile,
-                  shortId: effectiveShort,
-                  lineUserId: effectiveLine,
-                  displayName: targetTx.playerName || existingProfile.displayName || 'ผู้เล่น',
-                  balance: newBal,
-                  updatedAt: Date.now(),
-                };
-
-                await savePlayerProfile(updatedProfile, env, ctx);
-
-                // Push notice to player
-                if (effectiveLine && effectiveLine.startsWith('U')) {
-                  ctx?.waitUntil(pushToLine(effectiveLine, `✅ อนุมัติยอดเงินฝาก ${targetTx.requestedAmount.toLocaleString()} บาท เรียบร้อยแล้วครับ!\nแต้มคงเหลือปัจจุบัน: ${newBal.toLocaleString()} pt 🚀`, env).catch(e => console.error(e)));
-                }
-              }
-
-              result = { success: true, txId };
-            }
-          } else {
+          if (!targetTx) {
             result = { success: false, error: 'Transaction not found', txId };
+          } else {
+            const isWithdrawal = String(txId).startsWith('WD') || targetTx.type === 'withdraw';
+            const requested = Number(targetTx.requestedAmount) || 0;
+            // Status flip and credit in ONE atomic step, conditional on the
+            // stored status. Two approve clicks (or two admins) used to both
+            // pass the "already processed" check and credit the deposit twice.
+            const res = await ledger(env, {
+              transactions: [{
+                id: txId,
+                mustExist: true,
+                expectStatusNotIn: ['success', 'rejected'],
+                patch: { status: 'success', actualAmount: requested },
+                creditRequested: !isWithdrawal && requested > 0,
+              }],
+            }, ctx);
+
+            if (!res.ok) {
+              result = res.reason === 'tx_status'
+                ? { success: false, error: 'รายการนี้ได้รับการดำเนินการไปแล้ว', txId }
+                : { success: false, error: `อนุมัติไม่สำเร็จ (${res.reason}) — ไม่มีการเปลี่ยนแปลงยอดเงิน`, txId, ledgerFailure: true };
+            } else {
+              const tx = res.transactions[txId] || targetTx;
+              const credited = res.balances[0];
+              const effectiveLine = credited?.lineUserId ||
+                (tx.lineUserId && tx.lineUserId.startsWith('U') ? tx.lineUserId : '') ||
+                (await state(env).get(`RAW_LINE_${tx.playerId}`)) || '';
+              mirrorTransactionToSheets(tx, env, ctx);
+
+              if (effectiveLine && effectiveLine.startsWith('U')) {
+                const text = isWithdrawal
+                  ? `💸 [ถอนเงินสำเร็จ]: ยอด ${requested.toLocaleString()} บาท แอดมินได้โอนเข้าบัญชีของคุณเรียบร้อยแล้วครับ 🚀`
+                  : `✅ อนุมัติยอดเงินฝาก ${requested.toLocaleString()} บาท เรียบร้อยแล้วครับ!\nแต้มคงเหลือปัจจุบัน: ${(credited?.after ?? 0).toLocaleString()} pt 🚀`;
+                ctx?.waitUntil(pushToLine(effectiveLine, text, env).catch(e => console.error(e)));
+              }
+              result = {
+                success: true,
+                txId,
+                ...(credited ? { balance: credited.after } : {}),
+                ...(!isWithdrawal && !(requested > 0)
+                  ? { warning: 'ยอดฝากในรายการนี้เป็น 0 — ไม่ได้เพิ่มเครดิต กรุณาปรับยอดผู้เล่นด้วยตนเอง' }
+                  : {}),
+              };
+            }
           }
         } else if (functionName === 'adminRejectTransaction') {
           const txId = args[0];
           const reason = args[1] || 'ไม่พบยอดเงินเข้าบัญชี';
           const txs = await getTransactionsList(env);
           const targetTx = txs.find(t => t.id === txId);
-          if (targetTx) {
-            if (targetTx.status === 'success' || targetTx.status === 'rejected') {
-              result = { success: false, error: 'รายการนี้ได้รับการดำเนินการไปแล้ว', txId };
+          if (!targetTx) {
+            result = { success: false, error: 'Transaction not found', txId };
+          } else {
+            const isWithdrawal = String(txId).startsWith('WD') || targetTx.type === 'withdraw';
+            const requested = Number(targetTx.requestedAmount) || 0;
+            // A rejected withdrawal returns the points that were locked when it
+            // was requested — exactly once, in the same step as the status flip.
+            const res = await ledger(env, {
+              transactions: [{
+                id: txId,
+                mustExist: true,
+                expectStatusNotIn: ['success', 'rejected'],
+                patch: { status: 'rejected', reviewReason: reason },
+                creditRequested: isWithdrawal && requested > 0,
+              }],
+            }, ctx);
+
+            if (!res.ok) {
+              result = res.reason === 'tx_status'
+                ? { success: false, error: 'รายการนี้ได้รับการดำเนินการไปแล้ว', txId }
+                : { success: false, error: `ปฏิเสธไม่สำเร็จ (${res.reason}) — ไม่มีการเปลี่ยนแปลงยอดเงิน`, txId, ledgerFailure: true };
             } else {
-              targetTx.status = 'rejected';
-              targetTx.reviewReason = reason;
-              // Atomic status flip so a concurrent LINE OA deposit is preserved.
-              const rejectedAtomic = await state(env).patchTransactionStatus(txId, 'rejected', reason);
-              if (!rejectedAtomic) {
-                await state(env).put('TRANSACTIONS_LIST', JSON.stringify(txs));
+              const tx = res.transactions[txId] || targetTx;
+              const credited = res.balances[0];
+              const effectiveLine = credited?.lineUserId ||
+                (tx.lineUserId && tx.lineUserId.startsWith('U') ? tx.lineUserId : '') ||
+                (await state(env).get(`RAW_LINE_${tx.playerId}`)) || '';
+              mirrorTransactionToSheets(tx, env, ctx);
+
+              if (effectiveLine && effectiveLine.startsWith('U')) {
+                const text = isWithdrawal
+                  ? `❌ [ปฏิเสธการถอนเงิน]: ยอด ${requested.toLocaleString()} pt (สาเหตุ: ${reason})\nระบบได้คืนแต้มเข้ากระเป๋าเรียบร้อย แต้มคงเหลือ: ${(credited?.after ?? 0).toLocaleString()} pt 🚀`
+                  : `❌ [ปฏิเสธการฝากเงิน]: ยอด ${requested.toLocaleString()} บาท (สาเหตุ: ${reason})`;
+                ctx?.waitUntil(pushToLine(effectiveLine, text, env).catch(e => console.error(e)));
               }
-
-              const isWithdrawal = String(txId).startsWith('WD') || targetTx.type === 'withdraw';
-              const playerId = targetTx.playerId;
-              const txLine = targetTx.lineUserId;
-
-              // 1. Authoritative resolution of LINE user ID and Short ID
-              const rawLine = (txLine && txLine.startsWith('U'))
-                ? txLine
-                : (playerId && playerId.startsWith('U'))
-                  ? playerId
-                  : ((await state(env).get(`RAW_LINE_${playerId}`)) || '');
-              const shortId = (playerId && playerId.startsWith('PL'))
-                ? playerId
-                : (rawLine ? `PL${rawLine.slice(-6).toUpperCase()}` : playerId);
-
-              const lookupKey = rawLine || shortId || playerId;
-              const existingProfile = lookupKey ? await getOrCreatePlayerProfile(lookupKey, env, ctx) : null;
-
-              if (existingProfile) {
-                const effectiveLine = rawLine || existingProfile.lineUserId;
-                const effectiveShort = shortId || existingProfile.shortId;
-
-                if (isWithdrawal) {
-                  // Refund locked withdrawal points back to player profile across authoritative keys
-                  const oldBal = Number(existingProfile.balance) || 0;
-                  const newBal = oldBal + (Number(targetTx.requestedAmount) || 0);
-                  const updatedProfile: PlayerProfile = {
-                    ...existingProfile,
-                    shortId: effectiveShort,
-                    lineUserId: effectiveLine,
-                    balance: newBal,
-                    updatedAt: Date.now(),
-                  };
-
-                  await savePlayerProfile(updatedProfile, env, ctx);
-
-                  if (effectiveLine && effectiveLine.startsWith('U')) {
-                    ctx?.waitUntil(pushToLine(effectiveLine, `❌ [ปฏิเสธการถอนเงิน]: ยอด ${targetTx.requestedAmount.toLocaleString()} pt (สาเหตุ: ${reason})\nระบบได้คืนแต้มเข้ากระเป๋าเรียบร้อย แต้มคงเหลือ: ${newBal.toLocaleString()} pt 🚀`, env).catch(e => console.error(e)));
-                  }
-                } else {
-                  if (effectiveLine && effectiveLine.startsWith('U')) {
-                    ctx?.waitUntil(pushToLine(effectiveLine, `❌ [ปฏิเสธการฝากเงิน]: ยอด ${targetTx.requestedAmount.toLocaleString()} บาท (สาเหตุ: ${reason})`, env).catch(e => console.error(e)));
-                  }
-                }
-              }
-
               result = { success: true, txId };
             }
-          } else {
-            result = { success: false, error: 'Transaction not found', txId };
           }
         } else if (functionName === 'adminRequestCancelBet') {
           const rawId = args[0] ? String(args[0]).trim() : '';
           const orderNo = rawId.replace(/^bet_/, '');
-          const rawOrder = await env.KV_ORDERS.get(`ORDER_${orderNo}`);
-          if (rawOrder) {
-            const order = JSON.parse(rawOrder) as Order;
-            if (order.status === 'cancelled' || order.status === 'resolved') {
-              result = { success: false, error: `แผล Order #${orderNo} อยู่ในสถานะ ${order.status} แล้ว` };
+          const order = await getOrderRecord(orderNo, env);
+          if (!order) {
+            result = { success: false, error: `ไม่พบข้อมูลแผล Order #${orderNo}` };
+          } else if (order.status === 'matched_paired') {
+            // The mirror half of an auto-matched pair: its stake is settled
+            // (or refunded) through the partner order, which names both players.
+            result = {
+              success: false,
+              error: `แผล Order #${orderNo} เป็นคู่ที่จับอัตโนมัติ — กรุณายกเลิกที่แผลของ ${order.matcherName || order.matcherId || 'คู่ดวล'} ที่จับคู่กับแผลนี้แทน`,
+            };
+          } else {
+            // Only an order that still holds stake can be cancelled. This used to
+            // exclude just `cancelled` and `resolved`, so a SETTLED order could be
+            // cancelled after payout and both players refunded on top of it.
+            // refundOrderOnce re-checks the stored status atomically.
+            const refund = await refundOrderOnce(order, env, ctx, 'admin_cancel');
+
+            if (!refund.refunded) {
+              const now = refund.order?.status || order.status;
+              result = refund.reason === 'claim_unavailable'
+                ? { success: false, error: 'ระบบไม่สามารถยืนยันรายการได้ในขณะนี้ — ไม่มีการคืนแต้ม กรุณาลองใหม่', ledgerFailure: true }
+                : refund.reason === 'already_refunded' || now === 'cancelled'
+                  ? {
+                      success: true,
+                      orderNumber: orderNo,
+                      alreadyRefunded: true,
+                      message: `แผล Order #${orderNo} ถูกยกเลิก/คืนแต้มไปแล้ว — ไม่ได้คืนแต้มซ้ำ`,
+                    }
+                  : { success: false, error: `แผล Order #${orderNo} อยู่ในสถานะ ${now} แล้ว — ไม่สามารถยกเลิก/คืนแต้มได้` };
             } else {
-              order.status = 'refunding';
-              await env.KV_ORDERS.put(`ORDER_${orderNo}`, JSON.stringify(order));
-
-              // Refund creator and matcher, but only through the shared claim.
-              //
-              // This path used to credit both sides unconditionally after its own
-              // status check. That check reads eventually-consistent KV, so a
-              // player cancelling from LINE a moment later could still see
-              // `pending_match`, pass their own guard, and be refunded a second
-              // time for the same order — the admin's refund being invisible to
-              // them made it worse, since they had no reason to believe the order
-              // was already settled. refundOrderOnce() arbitrates.
-              const refund = await refundOrderOnce(order, env, ctx, 'admin_cancel');
-
-              order.status = 'cancelled';
-              await Promise.all([
-                env.KV_ORDERS.put(`ORDER_${orderNo}`, JSON.stringify(order)),
-                removeFromPendingOrdersList(orderNo, env),
-                removeFromMatchedOrdersList(orderNo, env),
-              ]);
-
               // Tell the player. A silent refund is indistinguishable from a
               // failed one, and the player has no way to know the order is gone.
-              if (refund.refunded && refund.amount > 0 && order.creatorLineUserId) {
-                const notify = pushToLine(
-                  order.creatorLineUserId,
-                  `🚫 แอดมินยกเลิก Order #${orderNo} ของคุณ\n💰 คืนแต้ม: +${refund.amount.toLocaleString()} pt เข้ากระเป๋าเรียบร้อยแล้วครับ 🚀`,
+              const notifyTargets = [order.creatorLineUserId, refund.matcherCredited ? order.matcherLineUserId : null]
+                .filter((x): x is string => typeof x === 'string' && x.startsWith('U'));
+              if (refund.amount > 0 && notifyTargets.length > 0) {
+                const notify = Promise.all(notifyTargets.map((to) => pushToLine(
+                  to,
+                  `🚫 แอดมินยกเลิก Order #${orderNo}\n💰 คืนแต้ม: +${refund.amount.toLocaleString()} pt เข้ากระเป๋าเรียบร้อยแล้วครับ 🚀`,
                   env
-                ).catch((e) => console.error('[Worker] admin cancel notice failed:', e));
+                ))).catch((e) => console.error('[Worker] admin cancel notice failed:', e));
                 if (ctx) ctx.waitUntil(notify);
                 else await notify;
               }
-
-              if (!refund.refunded) {
-                result = {
-                  success: true,
-                  orderNumber: orderNo,
-                  alreadyRefunded: true,
-                  message: `แผล Order #${orderNo} ถูกยกเลิก/คืนแต้มไปแล้ว — ไม่ได้คืนแต้มซ้ำ`,
-                };
-              } else {
-                result = {
-                  success: true,
-                  orderNumber: orderNo,
-                  refundedAmount: refund.amount,
-                  creatorCredited: refund.creatorCredited,
-                  matcherCredited: refund.matcherCredited,
-                };
-              }
+              result = {
+                success: true,
+                orderNumber: orderNo,
+                refundedAmount: refund.amount,
+                creatorCredited: refund.creatorCredited,
+                matcherCredited: refund.matcherCredited,
+              };
             }
-          } else {
-            result = { success: false, error: `ไม่พบข้อมูลแผล Order #${orderNo}` };
           }
         } else if (functionName === 'adminGetBankDetails') {
           // Readable by any admin — the deposit screen needs it and it is not
@@ -1152,7 +1161,7 @@ const isPublicAllowed =
 
           const updatedProfile: PlayerProfile = {
             ...(existingProfile || {}),
-            shortId,
+            shortId: existingProfile?.shortId || shortId,
             lineUserId: targetLineUserId || existingProfile?.lineUserId || shortId,
             displayName: passedName || existingProfile?.displayName || displayName,
             balance: newBal,
@@ -1163,33 +1172,36 @@ const isPublicAllowed =
             updatedAt: Date.now(),
           };
 
-          // Ledger-First: Record admin adjustment
-          await addTransaction({
-            id: `ADJ${Date.now().toString().slice(-6)}`,
-            playerId: shortId,
-            playerName: updatedProfile.displayName,
-            requestedAmount: newBal - oldBal,
-            actualAmount: newBal - oldBal,
-            slipRef: 'ADMIN_ADJUST',
-            status: 'success',
-            reviewReason: `Admin set balance: ${oldBal} → ${newBal}`,
-            timestamp: formatTime(),
-            type: 'deposit',
-            createdAt: Date.now(),
-          }, env, ctx);
-
-          // Save synchronously to both USER_${targetLineUserId} and USER_${shortId}
-          if (targetLineUserId && targetLineUserId.startsWith('U')) {
-            await state(env).put(`USER_${targetLineUserId}`, JSON.stringify(updatedProfile));
-            await state(env).put(`RAW_LINE_${shortId}`, targetLineUserId);
+          // Set the balance atomically. The old value comes from the commit
+          // itself, so the ledger records the real delta, and a bet or payout
+          // landing at the same moment is not silently overwritten by a value
+          // computed from an earlier read.
+          await savePlayerProfile(updatedProfile, env, ctx); // name / bank fields; never the balance
+          const setRes = await ledger(env, {
+            balances: [{ shortId: updatedProfile.shortId, lineUserId: updatedProfile.lineUserId, set: newBal, displayName: updatedProfile.displayName }],
+          }, ctx);
+          if (!setRes.ok) {
+            result = { success: false, error: `ปรับยอดไม่สำเร็จ (${setRes.reason}) — ยอดเงินไม่เปลี่ยนแปลง`, ledgerFailure: true };
+          } else {
+            oldBal = setRes.balances[0]?.before ?? oldBal;
+            await addTransaction({
+              id: `ADJ${Date.now().toString().slice(-6)}${Math.floor(10 + Math.random() * 90)}`,
+              playerId: updatedProfile.shortId,
+              lineUserId: updatedProfile.lineUserId,
+              playerName: updatedProfile.displayName,
+              requestedAmount: newBal - oldBal,
+              actualAmount: newBal - oldBal,
+              slipRef: 'ADMIN_ADJUST',
+              status: 'success',
+              reviewReason: `Admin set balance: ${oldBal} → ${newBal}`,
+              timestamp: formatTime(),
+              type: 'deposit',
+              createdAt: Date.now(),
+            }, env, ctx);
           }
-          await state(env).put(`USER_${shortId}`, JSON.stringify(updatedProfile));
-
-          // Save to PLAYERS_LIST and Sheets
-          await savePlayerProfile(updatedProfile, env, ctx);
 
           // Push DM to LINE user so they are immediately aware of their updated credit amount
-          if (targetLineUserId && targetLineUserId.startsWith('U')) {
+          if (result === null && targetLineUserId && targetLineUserId.startsWith('U')) {
             try {
               const adjustFlex = generateCreditAdjustmentFlex(displayName, oldBal, newBal);
               const pushTask = Promise.all([
@@ -1211,7 +1223,7 @@ const isPublicAllowed =
             }
           }
 
-          result = { success: true, balance: newBal };
+          if (result === null) result = { success: true, balance: newBal };
         } else if (functionName === 'adminCreatePlayer') {
           const lineId = args[0];
           const name = args[1];
@@ -1226,6 +1238,12 @@ const isPublicAllowed =
             updatedAt: Date.now(),
           };
           await savePlayerProfile(newP, env, ctx);
+          // savePlayerProfile never overwrites an existing balance; an explicit
+          // starting balance is applied through the ledger.
+          if (newP.balance !== bal) {
+            const setRes = await ledger(env, { balances: [{ shortId, lineUserId: lineId, set: bal }] }, ctx);
+            if (setRes.ok) newP.balance = bal;
+          }
 
           if (bal > 0 && lineId && lineId.startsWith('U')) {
             try {
@@ -1492,6 +1510,16 @@ const isPublicAllowed =
           //   • Clears SETTLED_ORDERS_LIST (round-history display resets)
           //   • Resets ACTIVE_ROUND to a blank ACTIVE state
           // ──────────────────────────────────────────────────────────────────
+          // Lock first so nothing is opened or matched while orders are being
+          // refunded; then each order is refunded and de-listed atomically.
+          // The matched list and in-flight rounds are no longer blanked
+          // wholesale afterwards — that dropped any order matched mid-close,
+          // with both stakes held and nothing left to refund them from.
+          const closeLockStr = await state(env).get('ACTIVE_ROUND');
+          const closeLock = closeLockStr ? JSON.parse(closeLockStr) : null;
+          if (closeLock && closeLock.status === 'ACTIVE') {
+            await state(env).put('ACTIVE_ROUND', JSON.stringify({ ...closeLock, status: 'CLOSED', updatedAt: Date.now() }));
+          }
           const { voided } = await voidAllRoundOrders(env, ctx);
           let voidedInFlight = 0;
           const inFlightList = await getInFlightRounds(env);
@@ -1501,9 +1529,7 @@ const isPublicAllowed =
           }
 
           await Promise.all([
-            state(env).put('MATCHED_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 }),
             state(env).put('SETTLED_ORDERS_LIST', JSON.stringify([])),
-            state(env).put('IN_FLIGHT_ROUNDS', JSON.stringify([])),
             state(env).put('ACTIVE_ROUND', JSON.stringify({
               name: 'บั้งไฟสด',
               targetMin: 330,
@@ -2186,9 +2212,24 @@ const isPublicAllowed =
           }
           result = { success: true };
         } else if (functionName === 'adminResolveBets') {
-          const finalSeconds = Number(args[0]) || 0;
+          const finalSecondsParsed = parseFlightSeconds(args[0]);
           const tMin = Number(args[1]) || 330;
           const tMax = Number(args[2]) || 380;
+          if (finalSecondsParsed === null) {
+            return new Response(JSON.stringify({ success: false, error: 'กรุณาระบุเวลาบินจริง (วินาที) ให้ถูกต้องก่อนตัดสินผล' }), {
+              status: 400,
+              headers: { 'Content-Type': 'application/json', ...corsHeaders },
+            });
+          }
+          const finalSeconds = finalSecondsParsed;
+
+          // Lock the round first, so no order can be opened or matched while
+          // this flight time is being applied.
+          const lockStr = await state(env).get('ACTIVE_ROUND');
+          const lockRound = lockStr ? JSON.parse(lockStr) : null;
+          if (lockRound && lockRound.status === 'ACTIVE') {
+            await state(env).put('ACTIVE_ROUND', JSON.stringify({ ...lockRound, status: 'CLOSED', updatedAt: Date.now() }));
+          }
 
           // Pre-quote orders the admin never priced are cancelled and refunded FIRST.
           //
@@ -2196,140 +2237,19 @@ const isPublicAllowed =
           // index, so running it after the matched list was read left the
           // snapshot holding orders that had just been refunded: the loser got
           // their stake back as if the round were void, and then settlement paid
-          // the winner on top. A player who lost was credited in full. Cancel
-          // first, then read what is left to settle.
+          // the winner on top. Cancel first, then read what is left to settle.
+          // (Settlement also re-checks each stored order atomically.)
           const { cancelledOrderNumbers } = await cancelHeldPreQuoteOrders(env, ctx);
           await clearAllPendingOrders(env, ctx);
           const voidedThisSettlement = new Set(cancelledOrderNumbers);
 
           const matchedOrders = await getMatchedOrdersList(env);
-          const resolvedOrders: any[] = [];
           const activeRoundStr = await state(env).get('ACTIVE_ROUND');
           const activeRound = activeRoundStr ? JSON.parse(activeRoundStr) : { name: 'บั้งไฟสด' };
 
-          for (const order of matchedOrders) {
-            // Belt and braces: never settle an order this same settlement
-            // cancelled, whatever the index says.
-            if (voidedThisSettlement.has(order.orderNumber)) {
-              console.warn(`[Worker] skipping already-voided order #${order.orderNumber} during settlement`);
-              continue;
-            }
-
-            // Independent of ordering: re-read the order and refuse to settle
-            // anything that is no longer live. The index snapshot is a cached
-            // list; the record itself is the truth. This is the guard that stops
-            // a loser being credited in full when an order has already been
-            // cancelled and refunded by another path in the same round.
-            const freshRaw = await env.KV_ORDERS.get(`ORDER_${order.orderNumber}`);
-            if (freshRaw) {
-              try {
-                const fresh = JSON.parse(freshRaw) as Order;
-                if (fresh.status !== 'matched') {
-                  console.warn(
-                    `[Worker] skipping order #${order.orderNumber} at settlement: status is "${fresh.status}", not "matched"`
-                  );
-                  continue;
-                }
-                Object.assign(order, fresh);
-              } catch (_) {}
-            }
-            const amt = Number(order.amount) || 0;
-                // Settle each order against ITS OWN quoted range, not the round
-                // band. A player who quotes their own rate (custom_range) is
-                // betting that specific range; judging it against the admin's
-                // band settled bets on a number the player never chose. The
-                // round band is only the fallback for an order that has no range
-                // of its own.
-                //
-                // A pre-quote order has only an offset until the admin quotes,
-                // at which point releaseHeldPreQuoteOrders writes its real
-                // range. If it is settled without one (admin quoted nothing and
-                // the order slipped through cancellation), there is no range to
-                // judge against, so the round band is used and flagged.
-                const orderMin = Number.isFinite(Number(order.rangeMin)) && Number(order.rangeMin) > 0
-                  ? Number(order.rangeMin)
-                  : tMin;
-                const orderMax = Number.isFinite(Number(order.rangeMax)) && Number(order.rangeMax) > 0
-                  ? Number(order.rangeMax)
-                  : tMax;
-                const usingRoundFallback =
-                  orderMin === tMin && orderMax === tMax &&
-                  !(Number(order.rangeMin) > 0 && Number(order.rangeMax) > 0);
-                if (usingRoundFallback && order.betType === 'pre_quote') {
-                  console.warn(
-                    `[Worker] settling pre-quote order #${order.orderNumber} with no quoted range — using round band ${tMin}-${tMax}`
-                  );
-                }
-
-                let winnerSide: 'low' | 'high' | 'draw' = 'draw';
-                if (finalSeconds < orderMin) {
-                  winnerSide = 'low';
-                } else if (finalSeconds > orderMax) {
-                  winnerSide = 'high';
-                } else {
-                  winnerSide = 'draw';
-                }
-
-                let winnerName = '-';
-                let winnerLineId = '';
-                if (winnerSide === 'low') {
-                  winnerName = (order.side === 'low' ? order.creatorName : order.matcherName) || '-';
-                  winnerLineId = order.side === 'low' ? order.creatorId : (order.matcherId || '');
-                } else if (winnerSide === 'high') {
-                  winnerName = (order.side === 'high' ? order.creatorName : order.matcherName) || '-';
-                  winnerLineId = order.side === 'high' ? order.creatorId : (order.matcherId || '');
-                }
-
-                // 10% rake on the loser's portion only.
-                //
-                // The winner gets their own stake back untouched, plus the
-                // opponent's stake less the platform's cut. This settlement
-                // paid `amt * 2` with no deduction, so the rake was never
-                // collected at all — the platform earned nothing on every
-                // settled round. The 1.90x multiplier is the behaviour the GAS
-                // implementation shipped with (Code.gs ~3135:
-                // `payout = amount + (winnings - commission)`).
-                //
-                // Rounded to whole points so balances stay integral: a stake of
-                // 333 would otherwise credit 299.7 of winnings and leave every
-                // downstream display showing a fraction.
-                //
-                // A draw refunds both stakes in full and takes no commission —
-                // nobody won, so there is nothing to rake.
-                const hasWinner = Boolean(winnerLineId) && winnerSide !== 'draw';
-                const commission = hasWinner ? Math.round(amt * PLATFORM_COMMISSION_RATE) : 0;
-                const payout = hasWinner ? amt + (amt - commission) : 0;
-
-                order.status = 'settled';
-                order.finalTime = finalSeconds;
-                order.winnerSide = winnerSide;
-                order.winnerName = winnerName;
-                order.settledAt = Date.now();
-                // Recorded on the order so the platform's take is auditable per
-                // round rather than having to be inferred from balances.
-                order.grossWinAmount = hasWinner ? amt : 0;
-                order.commission = commission;
-                order.payout = payout;
-                // Persisted AFTER the settlement fields so the stored order
-                // actually carries the money that moved.
-                await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-                await addToSettledOrdersList(order, env);
-                await removeFromMatchedOrdersList(order.orderNumber, env);
-                resolvedOrders.push(order);
-
-                if (hasWinner) {
-                  const winnerLineUserId = winnerLineId === order.creatorId ? order.creatorLineUserId : (order.matcherLineUserId || undefined);
-                  await refundPlayerPoints(winnerLineId, winnerLineUserId, payout, env, ctx);
-                } else if (winnerSide === 'draw') {
-                  if (order.creatorId) {
-                    await refundPlayerPoints(order.creatorId, order.creatorLineUserId, amt, env, ctx);
-                  }
-                  if (order.matcherId) {
-                    await refundPlayerPoints(order.matcherId, order.matcherLineUserId || undefined, amt, env, ctx);
-                  }
-                }
-          }
-
+          const { settled: resolvedOrders, failed: settleFailures } = await settleOrdersAtomically(
+            matchedOrders, finalSeconds, tMin, tMax, env, ctx, voidedThisSettlement
+          );
 
           activeRound.status = 'RESOLVED';
           activeRound.finalTime = finalSeconds;
@@ -2417,107 +2337,55 @@ const isPublicAllowed =
             }
           }
 
-          result = { success: true, resolvedCount: resolvedOrders.length, finalTime: finalSeconds };
+          result = {
+            success: settleFailures.length === 0,
+            resolvedCount: resolvedOrders.length,
+            finalTime: finalSeconds,
+            ...(settleFailures.length > 0 ? { error: `ตัดสินผลไม่สำเร็จ ${settleFailures.length} แผล — กดตัดสินผลซ้ำได้อย่างปลอดภัย (แผลที่จ่ายแล้วจะไม่ถูกจ่ายซ้ำ)`, failed: settleFailures, ledgerFailure: true } : {}),
+          };
         } else if (functionName === 'adminResolveInFlightRound') {
           const requestedRoundId = args[0] ? String(args[0]).trim() : '';
-          const finalSeconds = Number(args[1]) || 0;
+          const finalSecondsParsed = parseFlightSeconds(args[1]);
           const inFlightList = await getInFlightRounds(env);
           const targetRound = requestedRoundId
             ? inFlightList.find((r) => r.roundId === requestedRoundId)
             : inFlightList[0];
 
-          if (!targetRound) {
+          if (finalSecondsParsed === null) {
+            result = { success: false, error: 'กรุณาระบุเวลาบินจริง (วินาที) ให้ถูกต้องก่อนตัดสินผล' };
+          } else if (!targetRound) {
             result = { success: false, error: 'ไม่พบรอบบั้งไฟที่กำลังลอยอยู่ในคิวตัดสินผล' };
           } else {
-            const remaining = inFlightList.filter((r) => r.roundId !== targetRound.roundId);
-            await saveInFlightRounds(remaining, env);
-
+            const finalSeconds = finalSecondsParsed;
             const tMin = Number(targetRound.targetMin) || 330;
             const tMax = Number(targetRound.targetMax) || 380;
-            const resolvedOrders: any[] = [];
 
-            for (const order of targetRound.matchedOrders || []) {
-              if (!order || !order.orderNumber) continue;
-              const freshRaw = await env.KV_ORDERS.get(`ORDER_${order.orderNumber}`);
-              if (freshRaw) {
-                try {
-                  const fresh = JSON.parse(freshRaw) as Order;
-                  if (fresh.status !== 'matched') {
-                    console.warn(
-                      `[Worker] skipping in-flight order #${order.orderNumber} at settlement: status is "${fresh.status}", not "matched"`
-                    );
-                    continue;
-                  }
-                  Object.assign(order, fresh);
-                } catch (_) {}
-              }
-
-              // If an unquoted pre-quote somehow reached in-flight, refund both sides instead of settling
-              if (order.betType === 'pre_quote' && !order.offsetConfirmedAt) {
-                order.status = 'refunding';
-                await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-                await refundOrderOnce(order, env, ctx, 'cancel_held_pre_quote');
-                order.status = 'cancelled';
-                await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-                continue;
-              }
-
-              const amt = Number(order.amount) || 0;
-              const orderMin = Number.isFinite(Number(order.rangeMin)) && Number(order.rangeMin) > 0
-                ? Number(order.rangeMin)
-                : tMin;
-              const orderMax = Number.isFinite(Number(order.rangeMax)) && Number(order.rangeMax) > 0
-                ? Number(order.rangeMax)
-                : tMax;
-
-              let winnerSide: 'low' | 'high' | 'draw' = 'draw';
-              if (finalSeconds < orderMin) {
-                winnerSide = 'low';
-              } else if (finalSeconds > orderMax) {
-                winnerSide = 'high';
-              } else {
-                winnerSide = 'draw';
-              }
-
-              let winnerName = '-';
-              let winnerLineId = '';
-              if (winnerSide === 'low') {
-                winnerName = (order.side === 'low' ? order.creatorName : order.matcherName) || '-';
-                winnerLineId = order.side === 'low' ? order.creatorId : (order.matcherId || '');
-              } else if (winnerSide === 'high') {
-                winnerName = (order.side === 'high' ? order.creatorName : order.matcherName) || '-';
-                winnerLineId = order.side === 'high' ? order.creatorId : (order.matcherId || '');
-              }
-
-              const hasWinner = Boolean(winnerLineId) && winnerSide !== 'draw';
-              const commission = hasWinner ? Math.round(amt * PLATFORM_COMMISSION_RATE) : 0;
-              const payout = hasWinner ? amt + (amt - commission) : 0;
-
-              order.status = 'settled';
-              order.finalTime = finalSeconds;
-              order.winnerSide = winnerSide;
-              order.winnerName = winnerName;
-              order.settledAt = Date.now();
-              order.grossWinAmount = hasWinner ? amt : 0;
-              order.commission = commission;
-              order.payout = payout;
-
-              await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-              await addToSettledOrdersList(order, env);
-              resolvedOrders.push(order);
-
-              if (hasWinner) {
-                const winnerLineUserId = winnerLineId === order.creatorId ? order.creatorLineUserId : (order.matcherLineUserId || undefined);
-                await refundPlayerPoints(winnerLineId, winnerLineUserId, payout, env, ctx);
-              } else if (winnerSide === 'draw') {
-                if (order.creatorId) {
-                  await refundPlayerPoints(order.creatorId, order.creatorLineUserId, amt, env, ctx);
-                }
-                if (order.matcherId) {
-                  await refundPlayerPoints(order.matcherId, order.matcherLineUserId || undefined, amt, env, ctx);
-                }
+            // An unquoted pre-quote that somehow reached in-flight is refunded
+            // to both sides instead of being settled (atomic, at most once).
+            const unquoted = new Set<string>();
+            for (const item of targetRound.matchedOrders || []) {
+              if (!item || !item.orderNumber) continue;
+              const stored = await getOrderRecord(item.orderNumber, env);
+              if (stored && stored.betType === 'pre_quote' && !stored.offsetConfirmedAt && stored.status === 'matched') {
+                unquoted.add(item.orderNumber);
+                await refundOrderOnce(item, env, ctx, 'cancel_held_pre_quote', {
+                  allowedStatuses: ['matched'],
+                  expectFields: { betType: 'pre_quote' },
+                  expectMissingFields: ['offsetConfirmedAt'],
+                });
               }
             }
+
+            const { settled: resolvedOrders, failed: settleFailures } = await settleOrdersAtomically(
+              targetRound.matchedOrders || [], finalSeconds, tMin, tMax, env, ctx, unquoted
+            );
+
+            // Remove the parked round only once every order is settled. Doing
+            // it first meant a failure part-way stranded the rest with their
+            // stakes held and no round left to settle them from. A retry is
+            // safe: settled orders are never paid twice.
+            if (settleFailures.length === 0) await state(env).removeInFlight(targetRound.roundId);
+            const remaining = await getInFlightRounds(env);
 
             const targets = await resolveTargetGroupIds('ALL', env);
             if (targets.length > 0) {
@@ -2600,12 +2468,13 @@ const isPublicAllowed =
             }
 
             result = {
-              success: true,
+              success: settleFailures.length === 0,
               roundId: targetRound.roundId,
               roundName: targetRound.name,
               resolvedCount: resolvedOrders.length,
               finalTime: finalSeconds,
               inFlightRounds: remaining,
+              ...(settleFailures.length > 0 ? { error: `ตัดสินผลไม่สำเร็จ ${settleFailures.length} แผล — กดตัดสินผลซ้ำได้อย่างปลอดภัย`, failed: settleFailures, ledgerFailure: true } : {}),
             };
           }
         } else if (functionName === 'simulateTextMessageFromDashboard') {
@@ -2699,7 +2568,8 @@ const isPublicAllowed =
             result = { error: 'Forbidden: เฉพาะ Super Admin เท่านั้น' };
           } else {
             const orderNo = String(args[0] || '').trim().replace(/^#/, '');
-            const raw = orderNo ? await env.KV_ORDERS.get(`ORDER_${orderNo}`) : null;
+            const rec = orderNo ? await getOrderRecord(orderNo, env) : null;
+            const raw = rec ? JSON.stringify(rec) : null;
             if (!raw) {
               result = { found: false, orderNumber: orderNo };
             } else {
@@ -2793,7 +2663,8 @@ const isPublicAllowed =
             result = { error: 'Forbidden: เฉพาะ Super Admin เท่านั้น' };
           } else {
             const orderNo = String(args[0] || '').trim().replace(/^#/, '');
-            const raw = orderNo ? await env.KV_ORDERS.get(`ORDER_${orderNo}`) : null;
+            const rec = orderNo ? await getOrderRecord(orderNo, env) : null;
+            const raw = rec ? JSON.stringify(rec) : null;
             if (!raw) {
               result = { found: false, orderNumber: orderNo };
             } else {
@@ -2832,6 +2703,11 @@ const isPublicAllowed =
               };
             }
           }
+        } else if (functionName === 'adminResetTestData' && (adminRole !== 'superadmin' || env.ENVIRONMENT === 'production')) {
+          // A test fixture: it overwrites one real player's balance to 1900 and
+          // blanks the pending board (stranding every pending stake). It must
+          // never be reachable on the live platform.
+          result = { success: false, error: 'Forbidden: adminResetTestData ใช้ได้เฉพาะสภาพแวดล้อมทดสอบ (Super Admin) เท่านั้น' };
         } else if (functionName === 'adminResetTestData') {
           // 1. Clean pending bets list
           await state(env).put('PENDING_ORDERS_LIST', JSON.stringify([]));
@@ -2903,6 +2779,16 @@ const isPublicAllowed =
               ETag: etag,
               ...corsHeaders,
             },
+          });
+        }
+
+        // A money operation the ledger refused or only partly applied must
+        // surface as an error: the console treats any 200 as success and would
+        // otherwise show a green toast for a settlement that did not finish.
+        if (result && typeof result === 'object' && (result as any).ledgerFailure) {
+          return new Response(JSON.stringify({ success: false, error: (result as any).error, data: result }), {
+            status: 409,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
           });
         }
 

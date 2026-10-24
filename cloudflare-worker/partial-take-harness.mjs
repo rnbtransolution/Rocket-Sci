@@ -75,13 +75,15 @@ console.log('REMAINDER — returned to the creator, no second order');
   check('does not re-add anything to the pending board',
     !/addToPendingOrdersList/.test(body.slice(body.indexOf('Remainder handling'))));
   check('credits the untaken remainder to the creator',
-    /creatorProfile\.balance \+= remainderRefunded/.test(body));
+    /credits: isPartial && remainingAmount > 0 \? \[\{ who: 'creator', delta: remainingAmount \}\]/.test(body));
   check('the creator is refunded the exact untaken amount',
-    /remainderRefunded = remainingAmount/.test(body));
+    /remainderRefunded = isPartial \? remainingAmount : 0/.test(body));
   check('records the untaken amount on the order for audit',
     /unmatchedAmount/.test(body) || /remainingAmount/.test(body));
-  check('has a fallback if the creator profile cannot be loaded',
-    /refundPlayerPoints\(order\.creatorId/.test(body));
+  // The remainder is credited in the same atomic commit as the match, so there
+  // is no separate credit step that could fail on its own.
+  check('the remainder credit commits atomically with the match',
+    /const res = await ledger\(env, \{[\s\S]*credits: isPartial/.test(body));
   check('tells the creator the points are back',
     /ส่วนที่ไม่ถูกรับ/.test(body) || /คืนเข้ากระเป๋าคุณแล้ว/.test(body));
   check('does not reference a "remainder order number" in the notice',
