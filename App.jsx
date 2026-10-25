@@ -12,7 +12,6 @@ import {
   Clock, 
   Database,
   Users,
-  User,
   FileText,
   RefreshCw,
   TrendingUp,
@@ -39,7 +38,7 @@ const SLIP_PRESETS = [
   {
     id: 'preset_valid_100',
     name: 'KBANK 100 THB (Match)',
-    bankLogo: '🟢',
+    bankLogo: '',
     bankName: 'ธนาคารกสิกรไทย (KBANK)',
     gradient: 'from-emerald-50 to-emerald-100 border-emerald-200 text-emerald-950',
     amount: 100,
@@ -53,7 +52,7 @@ const SLIP_PRESETS = [
   {
     id: 'preset_valid_500',
     name: 'SCB 500 THB (Match)',
-    bankLogo: '🟣',
+    bankLogo: '',
     bankName: 'ธนาคารไทยพาณิชย์ (SCB)',
     gradient: 'from-purple-50 to-purple-100 border-purple-200 text-purple-950',
     amount: 500,
@@ -67,7 +66,7 @@ const SLIP_PRESETS = [
   {
     id: 'preset_mismatch',
     name: 'BBL 100 THB (Mismatch)',
-    bankLogo: '🔵',
+    bankLogo: '',
     bankName: 'ธนาคารกรุงเทพ (BBL)',
     gradient: 'from-blue-50 to-blue-100 border-blue-200 text-blue-950',
     amount: 500,
@@ -81,7 +80,7 @@ const SLIP_PRESETS = [
   {
     id: 'preset_duplicate',
     name: 'KBANK 100 THB (Duplicate)',
-    bankLogo: '🟢',
+    bankLogo: '',
     bankName: 'ธนาคารกสิกรไทย (KBANK)',
     gradient: 'from-emerald-50 to-emerald-100 border-emerald-200 text-emerald-950',
     amount: 100,
@@ -95,7 +94,7 @@ const SLIP_PRESETS = [
   {
     id: 'preset_no_qr',
     name: 'KTB 200 THB (No QR)',
-    bankLogo: '🔷',
+    bankLogo: '',
     bankName: 'ธนาคารกรุงไทย (KTB)',
     gradient: 'from-sky-50 to-sky-100 border-sky-200 text-sky-950',
     amount: 200,
@@ -433,7 +432,7 @@ export default function App() {
         paymentBank.note,
       ]);
       if (res && res.success === false) {
-        addToast(`⚠️ บันทึกไม่สำเร็จ: ${res.error || 'ข้อมูลไม่ครบถ้วน'}`, 'danger');
+        addToast(`บันทึกไม่สำเร็จ: ${res.error || 'ข้อมูลไม่ครบถ้วน'}`, 'danger');
         return;
       }
       if (res && res.bank) {
@@ -444,9 +443,9 @@ export default function App() {
           note: res.bank.note || '',
         });
       }
-      addToast('🏦 บันทึกบัญชีรับเงินเรียบร้อย (ใช้กับข้อความฝากใน LINE ทันที)', 'success');
+      addToast('บันทึกบัญชีรับเงินเรียบร้อย (ใช้กับข้อความฝากใน LINE ทันที)', 'success');
     } catch (err) {
-      addToast(`❌ บันทึกไม่สำเร็จ: ${err?.message || err}`, 'danger');
+      addToast(`บันทึกไม่สำเร็จ: ${err?.message || err}`, 'danger');
     } finally {
       setPaymentBankSaving(false);
     }
@@ -457,9 +456,9 @@ export default function App() {
     try {
       await runBackendFunction('adminSetDangerPin', [dangerPin]);
       setDangerPin('');
-      addToast('🔒 ตั้งค่า PIN สำหรับการล้างข้อมูลระบบเรียบร้อย', 'success');
+      addToast('ตั้งค่า PIN สำหรับการล้างข้อมูลระบบเรียบร้อย', 'success');
     } catch (err) {
-      addToast(`❌ บันทึกไม่สำเร็จ: ${err?.message || err}`, 'danger');
+      addToast(`บันทึกไม่สำเร็จ: ${err?.message || err}`, 'danger');
     } finally {
       setDangerPinSaving(false);
     }
@@ -504,23 +503,23 @@ export default function App() {
     const name = rocketName.trim() || 'ช่างบั้งไฟสด';
 
     if (!min || !max || Number(min) >= Number(max)) {
-      addToast('⚠️ กรุณากรอกช่วงราคาช่างให้ถูกต้อง (Min ต้องน้อยกว่า Max) ก่อนประกาศออกราคาครับ', 'warning');
+      addToast('กรุณากรอกช่วงราคาช่างให้ถูกต้อง (Min ต้องน้อยกว่า Max) ก่อนประกาศออกราคาครับ', 'warning');
       return;
     }
 
     try {
       const res = await runBackendFunction('adminBroadcastQuote', [broadcastTargetGroup || 'ALL', name, min, max, isChotoy]);
       if (res && res.success === false) {
-        addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
+        addToast(`ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
       } else {
         // Quote published: the round's authoritative values now match what is
         // on screen, so the inputs are released and the poll may manage them
         // again for the next round.
         clearTouched();
-        addToast(`🚀 ประกาศราคาสำเร็จ (${min}-${max}s)`, 'success');
+        addToast(`ประกาศราคาสำเร็จ (${min}-${max}s)`, 'success');
       }
     } catch {
-      addToast('❌ ส่งไม่สำเร็จ', 'danger');
+      addToast('ส่งไม่สำเร็จ', 'danger');
     }
   };
   const [customRocketTime, setCustomRocketTime] = useState(''); // Manual entry by admin (blank default)
@@ -566,7 +565,7 @@ export default function App() {
       if (data.lineGroups && data.lineGroups.length > 0) {
         setLineGroups(data.lineGroups);
       } else if (data.activeGroupId) {
-        setLineGroups([{ id: data.activeGroupId, name: `🚀 กลุ่มดวลสด LINE (#${data.activeGroupId.slice(-4)})`, lastMessage: 'เชื่อมต่อสำเร็จ', timestamp: 'Live' }]);
+        setLineGroups([{ id: data.activeGroupId, name: `กลุ่มดวลสด LINE (#${data.activeGroupId.slice(-4)})`, lastMessage: 'เชื่อมต่อสำเร็จ', timestamp: 'Live' }]);
       } else if (Array.isArray(data.lineGroups)) {
         setLineGroups([]);
       }
@@ -771,12 +770,12 @@ export default function App() {
     });
     if (!ok) return;
 
-    const loadingToastId = addToast('⏳ กำลังปิดรอบและรีเซ็ตระบบ...', 'info');
+    const loadingToastId = addToast('กำลังปิดรอบและรีเซ็ตระบบ...', 'info');
     try {
       const data = await runBackendFunction('adminCloseRound', []);
       removeToast(loadingToastId);
       if (data && data.success === false) {
-        addToast(`⚠️ ปิดรอบไม่สำเร็จ: ${data.message || data.error || 'เกิดข้อผิดพลาด'}`, 'danger');
+        addToast(`ปิดรอบไม่สำเร็จ: ${data.message || data.error || 'เกิดข้อผิดพลาด'}`, 'danger');
         return;
       }
 
@@ -798,20 +797,20 @@ export default function App() {
       const refunded = data?.clearedOrders ?? data?.clearedPending ?? 0;
       addToast(
         refunded > 0
-          ? `✅ ปิดรอบเรียบร้อย — คืนแต้ม ${refunded} แผลค้างอยู่ เปิดรอบใหม่แล้ว 🚀`
-          : '✅ ปิดรอบและเปิดรอบใหม่เรียบร้อยแล้ว 🚀',
+          ? `ปิดรอบเรียบร้อย — คืนแต้ม ${refunded} แผลค้างอยู่ เปิดรอบใหม่แล้ว `
+          : 'ปิดรอบและเปิดรอบใหม่เรียบร้อยแล้ว',
         'success'
       );
     } catch (err) {
       console.error('handleClosePortal error:', err);
-      addToast('❌ ปิดรอบไม่สำเร็จ: ' + (err.message || err), 'danger');
+      addToast('ปิดรอบไม่สำเร็จ:' + (err.message || err), 'danger');
     }
   };
 
   // Expose reset state for debug button (preventing reference error)
   const resetConsoleState = async () => {
     if (adminRole !== 'superadmin') {
-      addToast('⛔ สิทธิ์ไม่เพียงพอ: บัญชีผู้ดูแลนี้ไม่มีสิทธิ์ล้างระเบียนข้อมูลระบบ (เฉพาะ Super Admin เท่านั้น)', 'danger');
+      addToast('สิทธิ์ไม่เพียงพอ: บัญชีผู้ดูแลนี้ไม่มีสิทธิ์ล้างระเบียนข้อมูลระบบ (เฉพาะ Super Admin เท่านั้น)', 'danger');
       return;
     }
 
@@ -838,7 +837,7 @@ export default function App() {
 
     let resetLoadingToastId = null;
     try {
-      resetLoadingToastId = addToast('⏳ กำลังล้างระเบียนข้อมูลระบบ (Factory Reset)...', 'info');
+      resetLoadingToastId = addToast('กำลังล้างระเบียนข้อมูลระบบ (Factory Reset)...', 'info');
       const data = await runBackendFunction('resetGoogleSheetsDatabase', [pin]);
       removeToast(resetLoadingToastId);
       if (data) {
@@ -858,7 +857,7 @@ export default function App() {
       } catch {
         // ignore cache removal error
       }
-      addToast('✅ ล้างระเบียนข้อมูลระบบ (Factory Reset) สำเร็จแล้ว', 'success');
+      addToast('ล้างระเบียนข้อมูลระบบ (Factory Reset) สำเร็จแล้ว', 'success');
     } catch (err) {
       console.error("Failed to reset database:", err);
       addToast('เกิดข้อผิดพลาดในการล้างระเบียนระบบ: ' + (err.message || err), 'error');
@@ -866,7 +865,7 @@ export default function App() {
   };
 
   const forceSyncFreshData = async () => {
-    const loadingToastId = addToast('⏳ กำลังดึงข้อมูลล่าสุดจากฐานข้อมูล...', 'info');
+    const loadingToastId = addToast('กำลังดึงข้อมูลล่าสุดจากฐานข้อมูล...', 'info');
     try {
       if (typeof window !== 'undefined') {
         localStorage.removeItem('rocket_sci_dashboard_cache');
@@ -885,12 +884,12 @@ export default function App() {
         if (typeof window !== 'undefined') {
           localStorage.setItem('rocket_sci_dashboard_cache', JSON.stringify(d));
         }
-        addToast('✅ ดึงข้อมูลสดสำเร็จ', 'success');
+        addToast('ดึงข้อมูลสดสำเร็จ', 'success');
       }
     } catch (e) {
       removeToast(loadingToastId);
       console.error('[Force Sync Error]:', e);
-      addToast('❌ ไม่สามารถดึงข้อมูลสดได้', 'error');
+      addToast('ไม่สามารถดึงข้อมูลสดได้', 'error');
     }
   };
 
@@ -901,7 +900,7 @@ export default function App() {
       const minNum = Number(nextRocketMin);
       const maxNum = Number(nextRocketMax);
       if (!minNum || !maxNum || minNum <= 0 || maxNum <= 0) {
-        addToast('⚠️ กรุณาระบุช่วงราคาเปิด (Min - Max) ให้ถูกต้องสำหรับโหมดออกราคาช่างทันที', 'warning');
+        addToast('กรุณาระบุช่วงราคาเปิด (Min - Max) ให้ถูกต้องสำหรับโหมดออกราคาช่างทันที', 'warning');
         return;
       }
     }
@@ -918,7 +917,7 @@ export default function App() {
         Boolean(nextRocketBroadcast),
       ]);
       if (res && res.success === false) {
-        addToast(`⚠️ เปิดรอบถัดไปไม่สำเร็จ: ${res.message || res.error || 'เกิดข้อผิดพลาด'}`, 'danger');
+        addToast(`เปิดรอบถัดไปไม่สำเร็จ: ${res.message || res.error || 'เกิดข้อผิดพลาด'}`, 'danger');
         return;
       }
 
@@ -943,13 +942,13 @@ export default function App() {
       await forceSyncFreshData();
 
       if (res?.parkedRound) {
-        addToast(`🚀 พักบั้งไฟ "${res.parkedRound.name}" (${res.parkedRound.matchedCount} คู่ดวล) ไว้รอผลเวลา และเปิดรับดวล "${cleanName}" สำเร็จ!`, 'success');
+        addToast(`พักบั้งไฟ "${res.parkedRound.name}" (${res.parkedRound.matchedCount} คู่ดวล) ไว้รอผลเวลา และเปิดรับดวล "${cleanName}" สำเร็จ!`, 'success');
       } else {
-        addToast(`🚀 เปิดรอบบั้งไฟใหม่ "${cleanName}" พร้อมรับออเดอร์แล้ว!`, 'success');
+        addToast(`เปิดรอบบั้งไฟใหม่ "${cleanName}" พร้อมรับออเดอร์แล้ว!`, 'success');
       }
     } catch (err) {
       console.error('handleOpenNextRocket error:', err);
-      addToast('❌ เปิดรอบบั้งไฟถัดไปไม่สำเร็จ: ' + (err.message || err), 'danger');
+      addToast('เปิดรอบบั้งไฟถัดไปไม่สำเร็จ:' + (err.message || err), 'danger');
     } finally {
       setIsOpeningNextRocket(false);
     }
@@ -959,7 +958,7 @@ export default function App() {
     const rawTime = inFlightTimes[flt.roundId];
     const finalSec = Number(rawTime);
     if (!rawTime || isNaN(finalSec) || finalSec <= 0) {
-      addToast(`⚠️ กรุณากรอกเวลาบินจริง (วินาที) ของบั้งไฟ "${flt.name}" ให้ถูกต้อง`, 'warning');
+      addToast(`กรุณากรอกเวลาบินจริง (วินาที) ของบั้งไฟ "${flt.name}" ให้ถูกต้อง`, 'warning');
       return;
     }
 
@@ -967,7 +966,7 @@ export default function App() {
     try {
       const res = await runBackendFunction('adminResolveInFlightRound', [flt.roundId, finalSec]);
       if (res && res.success === false) {
-        addToast(`⚠️ ตัดสินผลไม่สำเร็จ: ${res.message || res.error || 'เกิดข้อผิดพลาด'}`, 'danger');
+        addToast(`ตัดสินผลไม่สำเร็จ: ${res.message || res.error || 'เกิดข้อผิดพลาด'}`, 'danger');
         return;
       }
       setInFlightTimes(prev => {
@@ -979,14 +978,14 @@ export default function App() {
         setSettlementResult(res.summary);
       }
       setFlightLogs(prev => [
-        `[${new Date().toLocaleTimeString('th-TH')}] 🏆 ตัดสินบั้งไฟกลางอากาศ "${flt.name}" เวลา ${finalSec}s เคลียร์ ${res?.resolvedCount ?? 0} คู่ดวล`,
+        `[${new Date().toLocaleTimeString('th-TH')}] ตัดสินบั้งไฟกลางอากาศ "${flt.name}" เวลา ${finalSec}s เคลียร์ ${res?.resolvedCount ?? 0} คู่ดวล`,
         ...prev,
       ]);
       await forceSyncFreshData();
-      addToast(`🏆 ตัดสินผลบั้งไฟ "${flt.name}" (${finalSec} วินาที) และโอนแต้มเรียบร้อย! (ไม่กระทบแผลรอบปัจจุบัน)`, 'success');
+      addToast(`ตัดสินผลบั้งไฟ "${flt.name}" (${finalSec} วินาที) และโอนแต้มเรียบร้อย! (ไม่กระทบแผลรอบปัจจุบัน)`, 'success');
     } catch (err) {
       console.error('handleSettleInFlightRound error:', err);
-      addToast('❌ ตัดสินผลไม่สำเร็จ: ' + (err.message || err), 'danger');
+      addToast('ตัดสินผลไม่สำเร็จ:' + (err.message || err), 'danger');
     } finally {
       setSettlingInFlightId(null);
     }
@@ -1008,14 +1007,14 @@ export default function App() {
     try {
       const res = await runBackendFunction('adminVoidInFlightRound', [flt.roundId, broadcastTargetGroup || 'ALL']);
       if (res && res.success === false) {
-        addToast(`⚠️ โมฆะรอบไม่สำเร็จ: ${res.message || res.error || 'เกิดข้อผิดพลาด'}`, 'danger');
+        addToast(`โมฆะรอบไม่สำเร็จ: ${res.message || res.error || 'เกิดข้อผิดพลาด'}`, 'danger');
         return;
       }
       await forceSyncFreshData();
-      addToast(`⛔ โมฆะบั้งไฟ "${flt.name}" และคืนแต้ม ${res?.voidedCount ?? 0} คู่ดวลเรียบร้อยแล้ว`, 'warning');
+      addToast(`โมฆะบั้งไฟ "${flt.name}" และคืนแต้ม ${res?.voidedCount ?? 0} คู่ดวลเรียบร้อยแล้ว`, 'warning');
     } catch (err) {
       console.error('handleVoidInFlightRound error:', err);
-      addToast('❌ โมฆะรอบไม่สำเร็จ: ' + (err.message || err), 'danger');
+      addToast('โมฆะรอบไม่สำเร็จ:' + (err.message || err), 'danger');
     } finally {
       setSettlingInFlightId(null);
     }
@@ -1047,7 +1046,7 @@ export default function App() {
         if (bet) {
           setBets(prev => prev.map(b => b.id === betId ? { ...b, status: 'pending_cancel' } : b));
         }
-        addToast('❌ เกิดข้อผิดพลาดในการยกเลิกแผลสด: ' + (err.message || err), 'error');
+        addToast('เกิดข้อผิดพลาดในการยกเลิกแผลสด:' + (err.message || err), 'error');
       });
   };
 
@@ -1055,12 +1054,12 @@ export default function App() {
   const handleAdminApproveReview = (txId) => {
     const targetTx = transactions.find(t => t.id === txId);
     if (!targetTx || targetTx.status !== 'escalated') {
-      addToast('⚠️ รายการนี้ถูกดำเนินการไปแล้วหรือไม่อยู่ในสถานะรอตรวจสอบ', 'warning');
+      addToast('รายการนี้ถูกดำเนินการไปแล้วหรือไม่อยู่ในสถานะรอตรวจสอบ', 'warning');
       return;
     }
     const approvedAmount = (targetTx.actualAmount && targetTx.actualAmount > 0) ? targetTx.actualAmount : (targetTx.requestedAmount || 0);
 
-    // 🚀 OPTIMISTIC UPDATE: Update React State Instantly (0ms response time for admin!)
+    // OPTIMISTIC UPDATE: Update React State Instantly (0ms response time for admin!)
     setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'success', actualAmount: approvedAmount, reviewReason: 'Manually approved by admin' } : t));
     if (!txId.startsWith('WD')) {
       setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) + approvedAmount } : p));
@@ -1081,18 +1080,18 @@ export default function App() {
         if (!txId.startsWith('WD')) {
           setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) - approvedAmount } : p));
         }
-        addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน: ' + (err.message || err), 'error');
+        addToast('เกิดข้อผิดพลาดในการบันทึกหลังบ้าน:' + (err.message || err), 'error');
       });
   };
 
   const handleAdminRejectReview = (txId, reason) => {
     const targetTx = transactions.find(t => t.id === txId);
     if (!targetTx || targetTx.status !== 'escalated') {
-      addToast('⚠️ รายการนี้ถูกดำเนินการไปแล้วหรือไม่อยู่ในสถานะรอตรวจสอบ', 'warning');
+      addToast('รายการนี้ถูกดำเนินการไปแล้วหรือไม่อยู่ในสถานะรอตรวจสอบ', 'warning');
       return;
     }
 
-    // 🚀 OPTIMISTIC UPDATE: Update React State Instantly (0ms response time for admin!)
+    // OPTIMISTIC UPDATE: Update React State Instantly (0ms response time for admin!)
     setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'rejected', reviewReason: reason } : t));
     if (txId.startsWith('WD')) {
       setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) + targetTx.requestedAmount } : p));
@@ -1115,25 +1114,25 @@ export default function App() {
         if (txId.startsWith('WD')) {
           setPlayers(prev => prev.map(p => p.id === targetTx.playerId ? { ...p, balance: (p.balance || 0) - targetTx.requestedAmount } : p));
         }
-        addToast('❌ เกิดข้อผิดพลาดในการบันทึกหลังบ้าน: ' + (err.message || err), 'error');
+        addToast('เกิดข้อผิดพลาดในการบันทึกหลังบ้าน:' + (err.message || err), 'error');
       });
   };
 
   // Submit manual telemetry flight result (No flight animation, resolve immediately)
   const handleSubmitOnsiteResult = (finalTime) => {
     if (!finalTime || finalTime <= 0) {
-      addToast('⚠️ กรุณาระบุเวลาผลการบินของบั้งไฟให้ถูกต้อง', 'warning');
+      addToast('กรุณาระบุเวลาผลการบินของบั้งไฟให้ถูกต้อง', 'warning');
       return;
     }
 
     if (!targetMin || !targetMax || Number(targetMin) >= Number(targetMax)) {
-      addToast('⚠️ กรุณาระบุช่วงราคาช่าง (Min ต้องน้อยกว่า Max) ก่อนชำระแต้มครับ', 'warning');
+      addToast('กรุณาระบุช่วงราคาช่าง (Min ต้องน้อยกว่า Max) ก่อนชำระแต้มครับ', 'warning');
       return;
     }
 
     const activeMatched = bets.filter(b => b.status === 'matched');
     if (activeMatched.length === 0) {
-      addToast('⚠️ ไม่พบแผลดวลที่จับคู่สำเร็จ (Matched Bets = 0) ในรอบนี้! ระบบไม่สามารถชำระแต้มได้', 'warning');
+      addToast('ไม่พบแผลดวลที่จับคู่สำเร็จ (Matched Bets = 0) ในรอบนี้! ระบบไม่สามารถชำระแต้มได้', 'warning');
       return;
     }
 
@@ -1149,7 +1148,7 @@ export default function App() {
     const tMax = targetMax ? Number(targetMax) : 380;
     const name = rocketName || 'ช่างบั้งไฟสด';
 
-    setFlightLogs(prev => [`💥 Telemetry link settled. Final Air Time: ${finalTime}s.`, ...prev]);
+    setFlightLogs(prev => [`Telemetry link settled. Final Air Time: ${finalTime}s.`, ...prev]);
 
     // Calculate payouts details from currently matched bets for the popup modal
     const previouslyMatched = bets.filter(b => b.status === 'matched');
@@ -1208,10 +1207,10 @@ export default function App() {
         if (data.players) setPlayers(deduplicatePlayersList(data.players));
         if (data.transactions) setTransactions(data.transactions);
       }
-      addToast(`🚀 เคลียร์ผลรางวัลรอบ [${name}] เวลา ${finalTime}s (ช่วง ${tMin}-${tMax}s) และบรอดแคสต์ลงกลุ่มเรียบร้อย!`, 'success');
+      addToast(`เคลียร์ผลรางวัลรอบ [${name}] เวลา ${finalTime}s (ช่วง ${tMin}-${tMax}s) และบรอดแคสต์ลงกลุ่มเรียบร้อย!`, 'success');
     } catch (e) {
       console.error('Settlement backend error:', e);
-      addToast(`❌ เกิดข้อผิดพลาดในการบันทึกผลการตัดสิน: ${e?.message || 'ระบบหลังบ้านไม่ตอบสนอง'}`, 'error');
+      addToast(`เกิดข้อผิดพลาดในการบันทึกผลการตัดสิน: ${e?.message || 'ระบบหลังบ้านไม่ตอบสนอง'}`, 'error');
     }
   };
 
@@ -1226,7 +1225,7 @@ export default function App() {
         actualAmount: effectiveAmt,
         refCode: 'CUSTX' + effectiveAmt + '9982',
         senderName: 'คุณ (You)',
-        bankLogo: '🟣',
+        bankLogo: '',
         gradient: 'from-purple-50 to-purple-100 border-purple-200 text-purple-950',
         isValidQR: true
       };
@@ -1237,7 +1236,7 @@ export default function App() {
         actualAmount: effectiveAmt,
         refCode: 'KBNK' + effectiveAmt + '8827',
         senderName: 'คุณ (You)',
-        bankLogo: '🟢',
+        bankLogo: '',
         gradient: 'from-emerald-50 to-emerald-100 border-emerald-200 text-emerald-950',
         isValidQR: true
       };
@@ -1279,7 +1278,7 @@ export default function App() {
           <div className="flex flex-col gap-0.5 text-[9.5px] text-slate-500 font-mono">
             <div>รหัสอ้างอิง: {p.refCode}</div>
             <div className="flex items-center justify-between mt-1">
-              <span>สถานะ QR: {p.isValidQR ? '✅ มีรหัสตรวจพบ' : '❌ ไม่มี/เสียหาย'}</span>
+              <span>สถานะ QR: {p.isValidQR ? 'มีรหัสตรวจพบ' : 'ไม่มี/เสียหาย'}</span>
               <span className="text-[8px] px-1.5 py-0.5 bg-slate-200/60 rounded text-slate-600 font-bold">API LINKED</span>
             </div>
           </div>
@@ -1356,7 +1355,7 @@ export default function App() {
         onDone={() => {
           setShowPasswordChange(false);
           refreshPasswordStatus();
-          addToast('🔐 เปลี่ยนรหัสผ่านเรียบร้อย', 'success');
+          addToast('เปลี่ยนรหัสผ่านเรียบร้อย', 'success');
         }}
       />
     );
@@ -1374,7 +1373,7 @@ export default function App() {
         onDone={() => {
           setShowRecoveryCodes(false);
           refreshPasswordStatus();
-          addToast('🔄 สร้าง Recovery Codes ใหม่เรียบร้อย', 'success');
+          addToast('สร้าง Recovery Codes ใหม่เรียบร้อย', 'success');
         }}
       />
     );
@@ -1400,7 +1399,7 @@ export default function App() {
         onDone={() => {
           setMustChangePassword(false);
           setPasswordStatus(null);
-          addToast('🔐 เปลี่ยนรหัสผ่านเรียบร้อย', 'success');
+          addToast('เปลี่ยนรหัสผ่านเรียบร้อย', 'success');
         }}
       />
     );
@@ -1423,7 +1422,7 @@ export default function App() {
             onCancel={() => setResetMode(false)}
             onDone={() => {
               setResetMode(false);
-              addToast('🔓 รีเซ็ตรหัสผ่านเรียบร้อย กรุณาเข้าสู่ระบบใหม่', 'success');
+              addToast('รีเซ็ตรหัสผ่านเรียบร้อย กรุณาเข้าสู่ระบบใหม่', 'success');
             }}
           />
         ) : (
@@ -1454,95 +1453,91 @@ export default function App() {
   // Worker/GAS report an open round as 'ACTIVE'; legacy builds used 'OPEN'.
   const isRoundOpen = roundStatus === 'ACTIVE' || roundStatus === 'OPEN';
 
+  const NAV_GROUPS = ['รอบแข่ง', 'เงิน', 'กลุ่ม LINE และตั้งค่า'];
   const navItems = [
     {
       id: 'quote',
       activeMatch: (t) => t === 'quote' || t === 'rocket',
       label: 'ออกราคาช่าง',
-      sublabel: 'Quote & Round Setup',
       icon: Layers,
-      section: 'FIELD OPERATIONS',
+      section: 'รอบแข่ง',
     },
     {
-      id: 'next_rocket',
-      activeMatch: (t) => t === 'next_rocket',
-      label: 'เปิดบั้งไฟถัดไป (Rocket B)',
-      sublabel: 'Concurrent In-Flight',
-      icon: Rocket,
-      section: 'FIELD OPERATIONS',
-      badge: inFlightRounds.length > 0 ? `${inFlightRounds.length} บินอยู่` : null,
-      badgeColor: 'bg-orange-500 text-white animate-pulse',
-    },
-    {
-      id: 'broadcast',
-      activeMatch: (t) => t === 'broadcast',
-      label: 'บรอดแคสต์ & คีย์ลัด',
-      sublabel: 'Live Action & Hotkeys',
-      icon: Radio,
-      section: 'FIELD OPERATIONS',
+      id: 'bets',
+      activeMatch: (t) => t === 'bets',
+      label: 'กระดานดวล',
+      icon: Trophy,
+      section: 'รอบแข่ง',
+      badge: bets.filter(b => b.status === 'matched' || b.status === 'pending_match').length || null,
     },
     {
       id: 'settle',
       activeMatch: (t) => t === 'settle',
       label: 'ป้อนผลเวลา',
-      sublabel: 'Flight Telemetry Settle',
       icon: Zap,
-      section: 'FIELD OPERATIONS',
+      section: 'รอบแข่ง',
       badge: inFlightRounds.length > 0 ? inFlightRounds.length : null,
-      badgeColor: 'bg-amber-500 text-slate-950',
+      attention: inFlightRounds.length > 0,
     },
     {
-      id: 'bets',
-      activeMatch: (t) => t === 'bets',
-      label: 'กระดานดวลสด',
-      sublabel: 'Live P2P & Mechanic Board',
-      icon: Trophy,
-      section: 'MATCH & LEDGER',
-      badge: bets.filter(b => b.status === 'matched' || b.status === 'pending_match').length || null,
-      badgeColor: 'bg-sky-500 text-white',
+      id: 'next_rocket',
+      activeMatch: (t) => t === 'next_rocket',
+      label: 'บั้งไฟลำถัดไป',
+      icon: Rocket,
+      section: 'รอบแข่ง',
+      badge: inFlightRounds.length > 0 ? `${inFlightRounds.length} บินอยู่` : null,
+      attention: inFlightRounds.length > 0,
     },
     {
       id: 'review',
       activeMatch: (t) => t === 'review',
       onClick: () => { setAdminTab('review'); setTxStatusFilter('escalated'); },
-      label: 'สลิปค้างรีวิว',
-      sublabel: 'Escalated Slips & Withdrawals',
+      label: 'สลิปรอตรวจ',
       icon: FileText,
-      section: 'MATCH & LEDGER',
+      section: 'เงิน',
       badge: transactions.filter(t => t.status === 'escalated').length || null,
-      badgeColor: 'bg-amber-500 text-slate-950 animate-pulse',
+      attention: transactions.some(t => t.status === 'escalated'),
     },
     {
       id: 'players',
       activeMatch: (t) => t === 'players',
-      label: 'เครดิตผู้เล่น',
-      sublabel: 'Player Wallets & Bank',
+      label: 'ผู้เล่นและเครดิต',
       icon: Users,
-      section: 'ADMINISTRATION',
+      section: 'เงิน',
       badge: players.length || null,
-      badgeColor: 'bg-slate-100 text-slate-700 border border-slate-200',
     },
     {
       id: 'logs',
       activeMatch: (t) => t === 'logs',
       onClick: () => { setAdminTab('logs'); setTxStatusFilter('all'); },
-      label: 'ทรานแซคชัน',
-      sublabel: 'All Financial Logs',
+      label: 'ธุรกรรมทั้งหมด',
       icon: Database,
-      section: 'ADMINISTRATION',
+      section: 'เงิน',
+    },
+    {
+      id: 'broadcast',
+      activeMatch: (t) => t === 'broadcast',
+      label: 'ประกาศและสรุปรายวัน',
+      icon: Radio,
+      section: 'กลุ่ม LINE และตั้งค่า',
     },
     {
       id: 'bank',
       activeMatch: (t) => t === 'bank',
       label: 'บัญชีรับเงิน',
-      sublabel: 'LINE OA Deposit Account',
       icon: Landmark,
-      section: 'ADMINISTRATION',
+      section: 'กลุ่ม LINE และตั้งค่า',
     },
   ];
+  const activeNav = navItems.find((item) => item.activeMatch(adminTab));
+  const isConnected = Boolean(window.isNodeJS || isGAS);
+  const roundStateLabel = isRoundOpen
+    ? (activeRoundObj?.quoteReleased ? 'เปิดราคาแล้ว' : 'รอราคาช่าง')
+    : roundStatus === 'CLOSED' ? 'ปิดรับแทง' : roundStatus === 'IDLE' || !roundStatus ? 'ยังไม่เปิดรอบ' : roundStatus;
+  const headerBtn = 'min-h-[40px] px-3 rounded-md border border-[#C3C9D1] bg-white text-[13px] font-medium text-[#16191D] hover:bg-[#F3F4F6] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0';
 
   return (
-    <div className="min-h-screen bg-slate-100/80 lg:pl-[260px] flex flex-col">
+    <div className="min-h-screen bg-[#EEF0F2] lg:pl-[240px] flex flex-col">
       {dialog}
       {/* Toast Manager */}
       <div className="fixed top-4 right-4 z-[999999] flex flex-col gap-2 max-w-sm w-80 pointer-events-none">
@@ -1570,69 +1565,44 @@ export default function App() {
         ))}
       </div>
 
-      {/* ═══ LEFT SIDEBAR NAVIGATION (Fixed on Desktop · matches the Login page daylight theme) ═══ */}
-      <aside className="hidden lg:flex lg:fixed lg:inset-y-0 lg:left-0 lg:w-[260px] lg:z-40 flex-col justify-between select-none bg-white/95 backdrop-blur-md border-r border-slate-200/80 shadow-[4px_0_24px_rgba(15,23,42,0.04)]">
-        {/* Brand Header (same logo, title and badge as the Login page header) */}
+      {/* ═══ LEFT SIDEBAR NAVIGATION (fixed on desktop) ═══ */}
+      <aside className="hidden lg:flex lg:fixed lg:inset-y-0 lg:left-0 lg:w-[240px] lg:z-40 flex-col justify-between select-none bg-[#16191D] text-[#C9CED6]">
         <div className="min-h-0 flex flex-col">
-          <div className="px-5 py-4 flex items-center gap-3 border-b border-slate-200/80">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center text-white shrink-0 shadow-md shadow-sky-500/20">
-              <Rocket size={19} className="transform -rotate-45" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-sm font-black tracking-tight text-slate-900 uppercase font-heading truncate">
-                Bang Fai Commander
-              </div>
-              <span className="inline-block mt-1 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider bg-sky-50 text-sky-700 rounded border border-sky-200">
-                Cloud Portal
-              </span>
-            </div>
+          <div className="px-5 pt-5 pb-4 flex flex-col gap-0.5">
+            <span className="text-[15px] font-bold text-white">Rocket Science</span>
+            <span className="text-xs text-[#9AA2AD]">คอนโซลแอดมิน</span>
           </div>
 
-          {/* Live Active & In-Flight Status Strip */}
-          <div className="mx-3 mt-3 p-3 rounded-xl space-y-2 bg-slate-50 border border-slate-200">
-            <div className="flex items-center justify-between text-[10px] font-bold">
-              <span className="uppercase tracking-wider text-slate-500">รอบปัจจุบัน (Active)</span>
-              <span
-                className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase border ${
-                  isRoundOpen
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                    : roundStatus === 'CLOSED'
-                    ? 'bg-rose-50 text-rose-700 border-rose-200'
-                    : 'bg-slate-100 text-slate-600 border-slate-200'
-                }`}
-              >
-                {isRoundOpen
-                  ? activeRoundObj?.quoteReleased
-                    ? '🟢 เปิดราคาแล้ว'
-                    : '🟡 รอราคาช่าง'
-                  : roundStatus === 'CLOSED'
-                  ? '🔴 ปิดรับดวล'
-                  : roundStatus}
+          {/* Current round */}
+          <div className="mx-3 mb-2 px-3 py-2.5 rounded-md bg-[#22272E] flex flex-col gap-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] text-[#9AA2AD]">รอบปัจจุบัน</span>
+              <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${
+                isRoundOpen ? (activeRoundObj?.quoteReleased ? 'text-[#7FD3A6]' : 'text-[#F0C46A]') : 'text-[#F2A39B]'
+              }`}>
+                <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                {roundStateLabel}
               </span>
             </div>
-            <div className="text-xs font-extrabold text-slate-900 truncate font-heading">
-              🎯 {activeRoundObj?.name || rocketName || 'ยังไม่ได้ตั้งชื่อบั้งไฟ'}
+            <div className="text-[13px] font-semibold text-white truncate">
+              {activeRoundObj?.name || rocketName || 'ยังไม่ได้ตั้งชื่อบั้งไฟ'}
             </div>
             {inFlightRounds.length > 0 && (
               <button
                 onClick={() => setAdminTab('next_rocket')}
-                className="w-full mt-1 px-2.5 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 border border-orange-200 text-orange-700 text-[10.5px] font-bold flex items-center justify-between transition-all cursor-pointer"
+                className="mt-1 text-left text-[12px] text-[#F0C46A] hover:underline cursor-pointer"
               >
-                <span>🚀 บั้งไฟบนฟ้า ({inFlightRounds.length} ลำ)</span>
-                <span className="underline text-[9.5px]">ดูคิว ➜</span>
+                บั้งไฟบนฟ้า {inFlightRounds.length} ลำ · ดูคิว
               </button>
             )}
           </div>
 
-          {/* Navigation Menu Items Grouped by Section */}
-          <nav className="px-2.5 py-3 space-y-4 overflow-y-auto max-h-[calc(100vh-290px)]">
-            {['FIELD OPERATIONS', 'MATCH & LEDGER', 'ADMINISTRATION'].map(sectionName => (
-              <div key={sectionName} className="space-y-1">
-                <div className="px-3 py-1 text-[9.5px] font-extrabold uppercase tracking-widest text-slate-400">
-                  {sectionName}
-                </div>
+          <nav aria-label="เมนูแอดมิน" className="px-3 py-2 flex flex-col gap-5 overflow-y-auto max-h-[calc(100vh-260px)]">
+            {NAV_GROUPS.map(group => (
+              <div key={group} className="flex flex-col gap-0.5">
+                <div className="px-2 pb-1.5 text-[11px] font-semibold tracking-wide text-[#8A929D]">{group}</div>
                 {navItems
-                  .filter(item => item.section === sectionName)
+                  .filter(item => item.section === group)
                   .map(item => {
                     const IconComp = item.icon;
                     const isActive = item.activeMatch(adminTab);
@@ -1641,33 +1611,18 @@ export default function App() {
                         key={item.id}
                         onClick={() => (item.onClick ? item.onClick() : setAdminTab(item.id))}
                         aria-current={isActive ? 'page' : undefined}
-                        className={`w-full flex items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-lg text-left transition-all cursor-pointer relative group ${
-                          isActive
-                            ? 'bg-sky-50 text-sky-700 font-bold'
-                            : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                        className={`w-full min-h-[40px] flex items-center justify-between gap-2 px-2.5 rounded-md text-left text-sm cursor-pointer ${
+                          isActive ? 'bg-[#2A2F36] text-white font-medium' : 'text-[#C9CED6] hover:bg-[#1F242A] hover:text-white'
                         }`}
                       >
-                        {isActive && (
-                          <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-gradient-to-b from-sky-500 to-blue-600" />
-                        )}
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <IconComp
-                            size={16}
-                            className={`shrink-0 transition-transform group-hover:scale-105 ${
-                              isActive ? 'text-sky-600' : 'text-slate-400 group-hover:text-slate-600'
-                            }`}
-                          />
-                          <div className="min-w-0">
-                            <div className="text-xs font-heading tracking-wide truncate leading-tight">
-                              {item.label}
-                            </div>
-                            <div className={`text-[9.5px] truncate leading-tight mt-0.5 font-normal ${isActive ? 'text-sky-600/80' : 'text-slate-400'}`}>
-                              {item.sublabel}
-                            </div>
-                          </div>
-                        </div>
+                        <span className="flex items-center gap-2.5 min-w-0">
+                          <IconComp size={16} className={`shrink-0 ${isActive ? 'text-white' : 'text-[#8A929D]'}`} />
+                          <span className="truncate">{item.label}</span>
+                        </span>
                         {item.badge !== null && item.badge !== undefined && (
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-black shrink-0 ${item.badgeColor}`}>
+                          <span className={`text-[11px] font-mono tabular-nums shrink-0 ${
+                            item.attention ? 'px-1.5 py-0.5 rounded bg-[#F0C46A] text-[#16191D] font-semibold' : 'text-[#8A929D]'
+                          }`}>
                             {item.badge}
                           </span>
                         )}
@@ -1679,92 +1634,46 @@ export default function App() {
           </nav>
         </div>
 
-        {/* Sidebar Footer */}
-        <div className="px-4 py-3.5 text-[10.5px] space-y-2 border-t border-slate-200/80 text-slate-500">
-          <div className="flex items-center justify-between">
-            <span className="flex items-center gap-1.5 font-semibold text-slate-600">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              Cloud Edge KV
-            </span>
-            <span className="font-mono text-[10px] font-bold text-sky-700">
-              {adminRole === 'superadmin' ? 'SUPER ADMIN' : 'FIELD ADMIN'}
-            </span>
-          </div>
-          <div className="text-[9.5px] text-slate-400 truncate">
-            LINE Group: {activeGroupId ? `#${activeGroupId.slice(-6)}` : 'Auto-Broadcast'}
-          </div>
+        <div className="px-5 py-4 border-t border-[#2A2F36] flex flex-col gap-1 text-[12px]">
+          <span className="text-[#C9CED6]">
+            {adminRole === 'superadmin' ? 'Super Admin' : `Admin${usernameInput ? ` (${usernameInput})` : ''}`}
+          </span>
+          <span className="text-[#8A929D] truncate">
+            กลุ่ม LINE {activeGroupId ? `#${activeGroupId.slice(-6)}` : 'ยังไม่ได้เชื่อม'}
+          </span>
         </div>
       </aside>
 
       {/* Main Content Wrapper */}
-      <div className="w-full max-w-6xl mx-auto p-3.5 sm:p-6 space-y-5 flex-1">
-        {/* Header Panel - Cloud PMS Corporate Bar */}
-        <header className="w-full bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-3.5 sm:gap-4 shadow-xs">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center text-white shrink-0 shadow-md shadow-sky-500/20">
-              <Rocket size={20} className="transform -rotate-45" />
+      <div className="w-full min-w-0 max-w-6xl mx-auto p-3.5 sm:p-6 space-y-5 flex-1">
+        {/* Page header */}
+        <header className="w-full flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+          <div className="min-w-0 flex flex-col gap-1">
+            <div className="flex items-center gap-2 flex-wrap text-[13px] text-[#5B636E]">
+              <span>{activeNav?.section || 'คอนโซลแอดมิน'}</span>
+              <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[12px] font-semibold ${
+                isConnected ? 'bg-[#E2F2E9] text-[#1B6E43]' : 'bg-[#E6E9ED] text-[#3B424C]'
+              }`}>
+                <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                {isConnected ? 'เชื่อมต่อระบบจริง' : 'โหมดทดลอง'}
+              </span>
+              <span className="lg:hidden">{adminRole === 'superadmin' ? 'Super Admin' : 'Admin'}</span>
             </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-lg sm:text-xl md:text-2xl font-black tracking-tight text-slate-900 uppercase font-heading whitespace-nowrap">
-                  Bang Fai Commander
-                </h1>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap shrink-0 ${
-                  (window.isNodeJS || isGAS) ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-slate-100 border border-slate-200 text-slate-600'
-                }`}>
-                  {(window.isNodeJS || isGAS) ? '🟢 Cloud Connected' : '🧪 Sandbox Mode'}
-                </span>
-                {adminRole === 'superadmin' ? (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-50 border border-purple-300 text-purple-700 flex items-center gap-1 shadow-xs whitespace-nowrap shrink-0" title="Super Admin: สิทธิ์เต็มรูปแบบทุกฟังก์ชัน">
-                    <ShieldCheck size={12} className="text-purple-600" />
-                    <span>Super Admin</span>
-                  </span>
-                ) : (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-sky-50 border border-sky-300 text-sky-700 flex items-center gap-1 shadow-xs whitespace-nowrap shrink-0" title="Admin: สิทธิ์ปฏิบัติการภาคสนาม (ไม่สามารถรีเซ็ตระบบได้)">
-                    <User size={12} className="text-sky-600" />
-                    <span>Admin</span>
-                    <span className="font-semibold text-sky-600/80">({usernameInput || 'Admin1'})</span>
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] text-slate-500 mt-0.5 font-sans">
-                ระบบบริหารจัดการธุรกรรมเครดิตและการแข่งขันบั้งไฟสดภาคสนาม
-              </p>
-            </div>
+            <h1 className="m-0 text-2xl font-bold leading-tight text-[#16191D]">{activeNav?.label || 'คอนโซลแอดมิน'}</h1>
           </div>
-          <div className="flex items-center gap-1.5 sm:gap-2 justify-start xl:justify-end flex-nowrap shrink-0 overflow-x-auto">
-            <button 
-              onClick={handleClosePortal}
-              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
-              title="รีเซ็ตและปิดรอบพอร์ทัลปัจจุบัน โดยไม่ลบข้อมูลผู้เล่นหรือประวัติธุรกรรม"
-            >
-              <RotateCcw size={13} className="text-amber-700" />
-              <span>ปิดรอบพอร์ทัล</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={forceSyncFreshData} className={headerBtn} title="ดึงข้อมูลล่าสุดจากฐานข้อมูลและล้างแคชในเบราว์เซอร์">
+              <RefreshCw size={14} className="text-[#5B636E]" />
+              <span>ซิงค์ข้อมูล</span>
             </button>
-            <button 
-              onClick={forceSyncFreshData}
-              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap shadow-xs"
-              title="ดึงข้อมูลล่าสุดจากฐานข้อมูลและล้างแคชในเบราว์เซอร์ทันที"
-            >
-              <RefreshCw size={13} className="text-white" />
-              <span>ซิงค์ข้อมูลสด</span>
+            <button onClick={handleClosePortal} className={headerBtn} title="ปิดรอบปัจจุบันและเปิดรอบใหม่ โดยไม่ลบข้อมูลผู้เล่นหรือประวัติธุรกรรม">
+              <RotateCcw size={14} className="text-[#5B636E]" />
+              <span>ปิดรอบ</span>
             </button>
-            {adminRole === 'superadmin' && (
-              <button 
-                onClick={resetConsoleState}
-                className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-slate-700 hover:text-rose-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
-                title="ล้างข้อมูลระบบทั้งหมดกลับสู่ค่าเริ่มต้นโรงงาน (เฉพาะ Super Admin)"
-              >
-                <RotateCcw size={13} className="text-rose-600" />
-                <span>รีเซ็ตระบบ</span>
-              </button>
-            )}
             <button
               onClick={() => { refreshPasswordStatus(); setShowPasswordChange(true); }}
-              className={`px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold border flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap ${
-                passwordStatus && passwordStatus.daysUntilExpiry !== undefined && passwordStatus.daysUntilExpiry <= 7
-                  ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-800'
-                  : 'bg-white hover:bg-sky-50 border-slate-200 hover:border-sky-300 text-slate-700'
+              className={`${headerBtn} ${
+                passwordStatus && passwordStatus.daysUntilExpiry !== undefined && passwordStatus.daysUntilExpiry <= 7 ? 'border-[#E8C48F] text-[#8A4B00]' : ''
               }`}
               title={
                 passwordStatus?.daysUntilExpiry !== undefined
@@ -1772,35 +1681,37 @@ export default function App() {
                   : 'เปลี่ยนรหัสผ่าน'
               }
             >
-              <KeyRound size={13} className="text-sky-600" />
+              <KeyRound size={14} className="text-[#5B636E]" />
               <span>เปลี่ยนรหัสผ่าน</span>
               {passwordStatus?.daysUntilExpiry !== undefined && passwordStatus.daysUntilExpiry <= 7 && (
-                <span className="px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 text-[10px] font-black">
-                  {passwordStatus.daysUntilExpiry}d
+                <span className="px-1.5 py-0.5 rounded bg-[#FDF1E1] text-[#8A4B00] text-[11px] font-semibold">
+                  {passwordStatus.daysUntilExpiry} วัน
                 </span>
               )}
             </button>
             <button
               onClick={() => { refreshPasswordStatus(); setShowRecoveryCodes(true); }}
-              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-slate-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
+              className={headerBtn}
               title={`สร้าง Recovery Codes ใหม่ (คงเหลือ ${passwordStatus?.recoveryCodesRemaining ?? '-'})`}
             >
-              <ShieldCheck size={13} className="text-emerald-600" />
-              <span>Codes ใหม่</span>
+              <ShieldCheck size={14} className="text-[#5B636E]" />
+              <span>Recovery Codes</span>
             </button>
-            <button 
-              onClick={handleAdminLogout}
-              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
-              title="ออกจากระบบแอดมิน"
-            >
-              <LogOut size={13} className="text-slate-500" />
+            {adminRole === 'superadmin' && (
+              <button onClick={resetConsoleState} className={`${headerBtn} text-[#B42318]`} title="ล้างข้อมูลระบบทั้งหมด (เฉพาะ Super Admin)">
+                <RotateCcw size={14} />
+                <span>ล้างข้อมูลระบบ</span>
+              </button>
+            )}
+            <button onClick={handleAdminLogout} className={headerBtn} title="ออกจากระบบแอดมิน">
+              <LogOut size={14} className="text-[#5B636E]" />
               <span>ออกจากระบบ</span>
             </button>
           </div>
         </header>
 
-        {/* Mobile / Tablet Navigation Bar (< lg) matching the Login page daylight theme */}
-        <div className="lg:hidden p-1.5 flex text-xs font-semibold tracking-wide overflow-x-auto gap-1.5 rounded-xl shadow-xs bg-white border border-slate-200">
+        {/* Mobile / tablet navigation (< lg) */}
+        <nav aria-label="เมนูแอดมิน" className="lg:hidden p-1 flex text-[13px] overflow-x-auto gap-1 rounded-md bg-white border border-[#D9DDE2]">
           {navItems.map(item => {
             const IconComp = item.icon;
             const isActive = item.activeMatch(adminTab);
@@ -1809,23 +1720,21 @@ export default function App() {
                 key={item.id}
                 onClick={() => (item.onClick ? item.onClick() : setAdminTab(item.id))}
                 aria-current={isActive ? 'page' : undefined}
-                className={`py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap font-heading cursor-pointer shrink-0 ${
-                  isActive
-                    ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white font-extrabold shadow-md shadow-sky-500/25'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                className={`min-h-[40px] px-3 rounded flex items-center gap-1.5 whitespace-nowrap cursor-pointer shrink-0 ${
+                  isActive ? 'bg-[#16191D] text-white font-medium' : 'text-[#3B424C] hover:bg-[#F3F4F6]'
                 }`}
               >
                 <IconComp size={14} />
                 <span>{item.label}</span>
                 {item.badge !== null && item.badge !== undefined && (
-                  <span className={`text-[9.5px] px-1.5 py-0.2 rounded-full font-black ${item.badgeColor}`}>
+                  <span className={`text-[11px] font-mono ${item.attention ? 'px-1 rounded bg-[#F0C46A] text-[#16191D]' : 'opacity-70'}`}>
                     {item.badge}
                   </span>
                 )}
               </button>
             );
           })}
-        </div>
+        </nav>
 
         {/* Main Sandbox Grid (Standardized to corporate light 100% width column) */}
         <main className="w-full space-y-5">
@@ -1884,7 +1793,7 @@ export default function App() {
                 <span className="text-xs font-bold text-slate-400">ดีลคู่</span>
                 {inFlightRounds.length > 0 && (
                   <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 border border-orange-200 font-black">
-                    🚀 {inFlightRounds.length} บั้งไฟบนฟ้า
+                    {inFlightRounds.length} บั้งไฟบนฟ้า
                   </span>
                 )}
               </div>
@@ -1934,7 +1843,7 @@ export default function App() {
                 <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">
-                      🎯 บั้งไฟรอบปัจจุบันที่รับออเดอร์อยู่ (Active Slot)
+                      บั้งไฟรอบปัจจุบันที่รับออเดอร์อยู่ (Active Slot)
                     </span>
                     <span
                       className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
@@ -1945,9 +1854,9 @@ export default function App() {
                     >
                       {isRoundOpen
                         ? activeRoundObj?.quoteReleased
-                          ? '🟢 เปิดรับดวล (มีราคาช่างแล้ว)'
-                          : '🟡 เปิดรับแผลล่วงหน้า (รอราคาช่าง)'
-                        : '🔴 ปิดรับดวล (บั้งไฟออกแล้ว)'}
+                          ? 'เปิดรับดวล (มีราคาช่างแล้ว)'
+                          : 'เปิดรับแผลล่วงหน้า (รอราคาช่าง)'
+                        : 'ปิดรับดวล (บั้งไฟออกแล้ว)'}
                     </span>
                   </div>
                   <div className="text-base font-black text-slate-900 font-heading">
@@ -1982,7 +1891,7 @@ export default function App() {
                 <div className="p-4 rounded-xl bg-orange-50/70 border border-orange-200 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-black uppercase tracking-wider text-orange-900">
-                      🚀 บั้งไฟที่กำลังบินอยู่บนฟ้า (In-Flight Queue)
+                      บั้งไฟที่กำลังบินอยู่บนฟ้า (In-Flight Queue)
                     </span>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-orange-200 text-orange-950">
                       {inFlightRounds.length} ลำรอตัดสินผล
@@ -2013,7 +1922,7 @@ export default function App() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-1">
-                      🚀 ชื่อบั้งไฟลูกถัดไป (Rocket B Name):
+                      ชื่อบั้งไฟลูกถัดไป (Rocket B Name):
                     </label>
                     <input
                       type="text"
@@ -2026,7 +1935,7 @@ export default function App() {
 
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-1">
-                      ⚙️ โหมดการเปิดรับออเดอร์บั้งไฟลูกถัดไป:
+                      โหมดการเปิดรับออเดอร์บั้งไฟลูกถัดไป:
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       <button
@@ -2038,7 +1947,7 @@ export default function App() {
                             : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                         }`}
                       >
-                        <div className="font-black">🎯 เปิดรับแผลล่วงหน้า</div>
+                        <div className="font-black">เปิดรับแผลล่วงหน้า</div>
                         <div className={`text-[10px] mt-0.5 ${nextRocketMode === 'pre_quote' ? 'text-sky-100' : 'text-slate-400'}`}>
                           เชิญเปิดแผลก่อน (ออกราคาช่างทีหลัง)
                         </div>
@@ -2053,7 +1962,7 @@ export default function App() {
                             : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                         }`}
                       >
-                        <div className="font-black">🏛️ ออกราคาช่างทันที</div>
+                        <div className="font-black">ออกราคาช่างทันที</div>
                         <div className={`text-[10px] mt-0.5 ${nextRocketMode === 'quote' ? 'text-emerald-100' : 'text-slate-400'}`}>
                           กำหนดช่วงเวลา Min-Max พร้อมเปิดดวล
                         </div>
@@ -2097,7 +2006,7 @@ export default function App() {
                           className="w-4 h-4 accent-emerald-600 rounded"
                         />
                         <span className="text-xs font-bold text-emerald-950">
-                          🔥 โหมดช่อทอย (10 : 8)
+                          โหมดช่อทอย (10 : 8)
                         </span>
                       </label>
                     </div>
@@ -2113,7 +2022,7 @@ export default function App() {
                       className="w-4 h-4 accent-sky-600 rounded"
                     />
                     <span>
-                      📢 ส่งประกาศแจ้งเปิดบั้งไฟลูกใหม่ ({nextRocketName || 'บั้งไฟชุดต่อไป'}) เข้ากลุ่ม LINE ทันที
+                      ส่งประกาศแจ้งเปิดบั้งไฟลูกใหม่ ({nextRocketName || 'บั้งไฟชุดต่อไป'}) เข้ากลุ่ม LINE ทันที
                     </span>
                   </label>
 
@@ -2125,8 +2034,8 @@ export default function App() {
                     <Rocket size={16} />
                     <span>
                       {isOpeningNextRocket
-                        ? '⏳ กำลังสลับรอบและเปิดบั้งไฟถัดไป...'
-                        : `🚀 พักรอบเดิมไว้บนฟ้า & เปิดรับดวล "${nextRocketName || 'บั้งไฟชุดต่อไป'}" ทันที`}
+                        ? 'กำลังสลับรอบและเปิดบั้งไฟถัดไป...'
+                        : `พักรอบเดิมไว้บนฟ้า & เปิดรับดวล "${nextRocketName || 'บั้งไฟชุดต่อไป'}" ทันที`}
                     </span>
                   </button>
                 </div>
@@ -2150,7 +2059,7 @@ export default function App() {
 
                 {inFlightRounds.length === 0 ? (
                   <div className="p-8 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-center space-y-1.5">
-                    <div className="text-2xl">🌤️</div>
+                    <div className="text-2xl"></div>
                     <div className="text-xs font-bold text-slate-700">
                       ขณะนี้ไม่มีบั้งไฟค้างอยู่บนฟ้าในคิว In-Flight
                     </div>
@@ -2175,7 +2084,7 @@ export default function App() {
                               </span>
                               <div>
                                 <div className="text-sm font-black text-slate-900 font-heading flex items-center gap-2">
-                                  <span>🚀 {flt.name}</span>
+                                  <span>{flt.name}</span>
                                   {flt.isChotoy && (
                                     <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-300 text-[10px] font-black">
                                       ช่อทอย 10:8
@@ -2193,7 +2102,7 @@ export default function App() {
                               disabled={isSettlingThis}
                               className="self-start sm:self-auto px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-300 text-xs font-bold transition-all cursor-pointer"
                             >
-                              ⛔ โมฆะเฉพาะลำนี้ & คืนแต้ม
+                              โมฆะเฉพาะลำนี้ & คืนแต้ม
                             </button>
                           </div>
 
@@ -2244,8 +2153,8 @@ export default function App() {
                               <CheckCircle size={15} />
                               <span>
                                 {isSettlingThis
-                                  ? '⏳ กำลังตัดสินผล...'
-                                  : `⚡ ตัดสินผลเวลาบิน "${flt.name}" (${inputTime || 0}s)`}
+                                  ? 'กำลังตัดสินผล...'
+                                  : `ตัดสินผลเวลาบิน "${flt.name}" (${inputTime || 0}s)`}
                               </span>
                             </button>
                           </div>
@@ -2288,7 +2197,7 @@ export default function App() {
                       {(() => {
                         const activeObj = lineGroups.find(g => g.id === activeGroupId);
                         const isRaw = !activeObj || !activeObj.name || activeObj.name.startsWith('C') || activeObj.name.includes(activeGroupId) || !isNaN(activeObj.name);
-                        return !isRaw ? activeObj.name : `🚀 กลุ่มดวลสด (#${activeGroupId.slice(-4)})`;
+                        return !isRaw ? activeObj.name : `กลุ่มดวลสด (#${activeGroupId.slice(-4)})`;
                       })()}
                     </span>
                   ) : (
@@ -2393,7 +2302,7 @@ export default function App() {
                       กลุ่มเป้าหมายที่จะบรอดแคสต์ (Broadcast Target Group):
                     </label>
                     <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                      {broadcastTargetGroup === 'ALL' ? '🌐 ทุกกลุ่มดวลสด (All)' : '🎯 เฉพาะกลุ่มที่เลือก'}
+                      {broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่มดวลสด (All)' : 'เฉพาะกลุ่มที่เลือก'}
                     </span>
                   </div>
                   <select
@@ -2401,13 +2310,13 @@ export default function App() {
                     onChange={(e) => setBroadcastTargetGroup(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 text-slate-900 font-bold px-3 py-2 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                   >
-                    <option value="ALL">🌐 กระจายทุกกลุ่มดวลสดพร้อมกัน (Broadcast All Groups - One Shot)</option>
+                    <option value="ALL">กระจายทุกกลุ่มดวลสดพร้อมกัน (Broadcast All Groups - One Shot)</option>
                     {lineGroups.map((g, idx) => {
                       const isRawId = !g.name || g.name.startsWith('C') || g.name.includes(g.id) || !isNaN(g.name);
-                      const displayName = !isRawId ? g.name : `🚀 กลุ่มดวลสด #${idx + 1} (${g.id.slice(-4)})`;
+                      const displayName = !isRawId ? g.name : `กลุ่มดวลสด #${idx + 1} (${g.id.slice(-4)})`;
                       return (
                         <option key={g.id} value={g.id}>
-                          🎯 เฉพาะกลุ่ม: {displayName}
+                          เฉพาะกลุ่ม: {displayName}
                         </option>
                       );
                     })}
@@ -2426,13 +2335,13 @@ export default function App() {
 
                 {/* Tab 1 Footer Note & Shortcut to Broadcast Tab */}
                 <div className="pt-2 border-t border-emerald-100 flex items-center justify-between text-[11px] font-sans flex-wrap gap-2">
-                  <span className="text-emerald-700 font-bold">💡 ราคาช่างเปิดจากแอดมินไม่ต้องใช้แต้ม</span>
+                  <span className="text-emerald-700 font-bold">ราคาช่างเปิดจากแอดมินไม่ต้องใช้แต้ม</span>
                   <button 
                     onClick={() => setAdminTab('broadcast')}
                     className="text-purple-700 hover:text-purple-900 font-bold underline flex items-center gap-1 transition-all active:scale-95"
                   >
                     <Radio size={13} className="text-purple-600" />
-                    <span>ไปยังศูนย์บรอดแคสต์ & คีย์ลัดแอดมิน ➜</span>
+                    <span>ไปยังศูนย์บรอดแคสต์ & คีย์ลัดแอดมิน </span>
                   </button>
                 </div>
               </div>
@@ -2463,13 +2372,13 @@ export default function App() {
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <span className="text-xs font-black text-amber-950 font-heading flex items-center gap-1.5">
                       <Rocket size={15} className="text-orange-600" />
-                      <span>🚀 คิวบั้งไฟบนฟ้าที่รอตัดสินผล ({inFlightRounds.length} ลำ) — ตัดสินแยกโดยไม่กระทบแผลรอบใหม่</span>
+                      <span>คิวบั้งไฟบนฟ้าที่รอตัดสินผล ({inFlightRounds.length} ลำ) — ตัดสินแยกโดยไม่กระทบแผลรอบใหม่</span>
                     </span>
                     <button
                       onClick={() => setAdminTab('next_rocket')}
                       className="text-[11px] font-bold text-orange-700 hover:text-orange-900 underline cursor-pointer"
                     >
-                      จัดการคิวบั้งไฟถัดไป ➜
+                      จัดการคิวบั้งไฟถัดไป 
                     </button>
                   </div>
                   <div className="space-y-2.5">
@@ -2481,7 +2390,7 @@ export default function App() {
                           <div>
                             <div className="text-xs font-black text-slate-900 flex items-center gap-2">
                               <span className="px-2 py-0.5 rounded bg-orange-600 text-white font-mono text-[10px]">ลำ #{idx + 1}</span>
-                              <span>🚀 {flt.name}</span>
+                              <span>{flt.name}</span>
                               <span className="text-[11px] font-mono text-slate-500">
                                 ({flt.quoteReleased ? `${flt.targetMin}-${flt.targetMax}s` : 'P2P'} · {flt.matchedCount || (flt.matchedOrders || []).length} คู่ดวล)
                               </span>
@@ -2501,7 +2410,7 @@ export default function App() {
                               disabled={isSettlingThis}
                               className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold cursor-pointer whitespace-nowrap"
                             >
-                              {isSettlingThis ? '⏳...' : `⚡ ตัดสิน "${flt.name}"`}
+                              {isSettlingThis ? '...' : `ตัดสิน "${flt.name}"`}
                             </button>
                           </div>
                         </div>
@@ -2562,11 +2471,11 @@ export default function App() {
                     <div className="flex justify-between items-center text-xs font-bold">
                       <span>คาดการณ์ผลชนะ:</span>
                       {Number(customRocketTime || 0) < Number(targetMin || 330) ? (
-                        <span className="px-2.5 py-1 bg-blue-100 text-blue-800 font-black rounded-lg text-xs flex items-center gap-1">🔵 ฝั่งต่ำ (LOW / ชถ) ชนะ</span>
+                        <span className="px-2.5 py-1 bg-blue-100 text-blue-800 font-black rounded-lg text-xs flex items-center gap-1">ฝั่งต่ำ (LOW / ชถ) ชนะ</span>
                       ) : Number(customRocketTime || 0) > Number(targetMax || 380) ? (
-                        <span className="px-2.5 py-1 bg-rose-100 text-rose-800 font-black rounded-lg text-xs flex items-center gap-1">🔴 ฝั่งสูง (HIGH / ชล) ชนะ</span>
+                        <span className="px-2.5 py-1 bg-rose-100 text-rose-800 font-black rounded-lg text-xs flex items-center gap-1">ฝั่งสูง (HIGH / ชล) ชนะ</span>
                       ) : (
-                        <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-black rounded-lg text-xs flex items-center gap-1">🎯 ในราคาช่าง (RANGE)</span>
+                        <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-black rounded-lg text-xs flex items-center gap-1">ในราคาช่าง (RANGE)</span>
                       )}
                     </div>
                   </div>
@@ -2578,7 +2487,7 @@ export default function App() {
                   className="w-full py-3.5 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider rounded-lg flex items-center justify-center gap-2 active:scale-95 transition-all font-heading cursor-pointer"
                 >
                   <CheckCircle size={16} />
-                  <span>⚡ สรุปผลและชำระแต้มดีลทั้งหมด / SETTLE ONSITE ROUND (ผลลัพธ์ยิงจริง: {customRocketTime || 0}s)</span>
+                  <span>สรุปผลและชำระแต้มดีลทั้งหมด / SETTLE ONSITE ROUND (ผลลัพธ์ยิงจริง: {customRocketTime || 0}s)</span>
                 </button>
               </div>
 
@@ -2586,7 +2495,7 @@ export default function App() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-mono text-[11px]">
                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col" style={{ minHeight: '160px', maxHeight: '220px' }}>
                   <span className="text-[11px] font-bold text-slate-800 border-b border-slate-200 pb-1.5 mb-2 flex items-center justify-between font-sans shrink-0">
-                    <span>📋 LAUNCH ENGINE LOGS</span>
+                    <span>LAUNCH ENGINE LOGS</span>
                     <Clock size={12} className="text-slate-400" />
                   </span>
                   <div className="flex-1 overflow-y-auto space-y-1 pr-1" style={{ wordBreak: 'break-all' }}>
@@ -2594,8 +2503,8 @@ export default function App() {
                       <span className="text-slate-400 italic text-[11px]">-- ไม่มีข้อมูลบันทึกในเซสชันนี้ --</span>
                     ) : (
                       flightLogs.map((l, i) => (
-                        <div key={i} className={`text-[11px] ${l.includes('🏆') || l.includes('SUCCESS') ? 'text-emerald-600 font-bold' : l.includes('💥') || l.includes('terminated') ? 'text-rose-600 font-bold' : 'text-slate-600'}`}>
-                          ➜ {l}
+                        <div key={i} className={`text-[11px] ${l.includes('') || l.includes('SUCCESS') ? 'text-emerald-600 font-bold' : l.includes('') || l.includes('terminated') ? 'text-rose-600 font-bold' : 'text-slate-600'}`}>
+                          {l}
                         </div>
                       ))
                     )}
@@ -2604,7 +2513,7 @@ export default function App() {
 
                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col" style={{ minHeight: '160px', maxHeight: '220px' }}>
                   <span className="text-[11px] font-bold text-slate-800 border-b border-slate-200 pb-1.5 mb-2 flex justify-between font-sans shrink-0">
-                    <span>🗂️ ประวัติออกผล</span>
+                    <span>ประวัติออกผล</span>
                     <span className="text-[11px] text-slate-400">รวม {flights.length} รอบ</span>
                   </span>
                   <div className="flex-1 overflow-y-auto space-y-1 pr-1" style={{ wordBreak: 'break-all' }}>
@@ -2712,27 +2621,27 @@ export default function App() {
                         onClick={() => setBetStatusFilter('matched')}
                         className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${betStatusFilter === 'matched' ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-50'}`}
                       >
-                        <span>⚔️ ดวลกันอยู่</span>
+                        <span>ดวลกันอยู่</span>
                         {matchedCount > 0 && <span className="bg-indigo-200 text-indigo-950 text-[10px] px-1.5 py-0.2 rounded-full font-black">{matchedCount}</span>}
                       </button>
                       <button
                         onClick={() => setBetStatusFilter('pending_match')}
                         className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${betStatusFilter === 'pending_match' ? 'bg-amber-600 text-white' : 'bg-white text-amber-700 border border-amber-200 hover:bg-amber-50'}`}
                       >
-                        <span>⏳ รอคู่ดวล</span>
+                        <span>รอคู่ดวล</span>
                         {pendingCount > 0 && <span className="bg-amber-200 text-amber-950 text-[10px] px-1.5 py-0.2 rounded-full font-black">{pendingCount}</span>}
                       </button>
                       <button
                         onClick={() => setBetStatusFilter('resolved')}
                         className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${betStatusFilter === 'resolved' ? 'bg-emerald-600 text-white' : 'bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50'}`}
                       >
-                        ✅ สรุปผลแล้ว ({resolvedCount})
+                        สรุปผลแล้ว ({resolvedCount})
                       </button>
                       <button
                         onClick={() => setBetStatusFilter('cancelled')}
                         className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${betStatusFilter === 'cancelled' ? 'bg-rose-600 text-white' : 'bg-white text-rose-700 border border-rose-200 hover:bg-rose-50'}`}
                       >
-                        ❌ ขอยกเลิก ({cancelCount})
+                        ขอยกเลิก ({cancelCount})
                       </button>
                     </div>
 
@@ -2823,28 +2732,28 @@ export default function App() {
                               <td className="py-3 px-3 text-center font-mono">
                                 {b.type === 'range' ? (
                                   <span className="px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 font-extrabold rounded text-[10.5px]">
-                                    🤝 P2P ({b.rangeMin > 1000 ? (b.rangeMin/100) : b.rangeMin}-{b.rangeMax > 1000 ? (b.rangeMax/100) : b.rangeMax}s)
+                                    P2P ({b.rangeMin > 1000 ? (b.rangeMin/100) : b.rangeMin}-{b.rangeMax > 1000 ? (b.rangeMax/100) : b.rangeMax}s)
                                   </span>
                                 ) : (
                                   <span className="px-2 py-0.5 bg-sky-50 border border-sky-200 text-sky-800 font-bold rounded text-[10.5px]">
-                                    🏛️ ราคาช่าง ({targetMin}-{targetMax}s)
+                                    ราคาช่าง ({targetMin}-{targetMax}s)
                                   </span>
                                 )}
                               </td>
                               <td className="py-3 px-3 text-center font-sans font-bold text-[10.5px]">
                                 {b.status === 'matched' && (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-full font-bold">
-                                    ⚔️ ดวลกันอยู่
+                                    ดวลกันอยู่
                                   </span>
                                 )}
                                 {b.status === 'pending_match' && (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-full font-bold animate-pulse">
-                                    ⏳ รอคู่ดวล
+                                    รอคู่ดวล
                                   </span>
                                 )}
                                 {b.status === 'pending_cancel' && (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-full font-bold">
-                                    ⚠️ รอถอนแผล
+                                    รอถอนแผล
                                   </span>
                                 )}
                                 {b.status === 'cancelled' && (
@@ -2854,7 +2763,7 @@ export default function App() {
                                 )}
                                 {b.status === 'resolved' && (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-bold">
-                                    🏆 {b.winnerName ? b.winnerName.split(' ')[0] : 'จบแล้ว'}
+                                    {b.winnerName ? b.winnerName.split('')[0] : 'จบแล้ว'}
                                   </span>
                                 )}
                               </td>
@@ -2946,20 +2855,20 @@ export default function App() {
                         onClick={() => setTxStatusFilter('escalated')}
                         className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${txStatusFilter === 'escalated' ? 'bg-amber-600 text-white shadow-xs' : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'}`}
                       >
-                        <span>⏳ รออนุมัติ</span>
+                        <span>รออนุมัติ</span>
                         {escalatedCount > 0 && <span className="bg-amber-200 text-amber-900 text-[10px] px-1.5 py-0.2 rounded-full font-black">{escalatedCount}</span>}
                       </button>
                       <button 
                         onClick={() => setTxStatusFilter('success')}
                         className={`px-2.5 py-1 rounded-lg transition-all ${txStatusFilter === 'success' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'}`}
                       >
-                        ✅ อนุมัติแล้ว ({successCount})
+                        อนุมัติแล้ว ({successCount})
                       </button>
                       <button 
                         onClick={() => setTxStatusFilter('rejected')}
                         className={`px-2.5 py-1 rounded-lg transition-all ${txStatusFilter === 'rejected' ? 'bg-rose-600 text-white shadow-xs' : 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100'}`}
                       >
-                        ❌ ปฏิเสธ ({rejectedCount})
+                        ปฏิเสธ ({rejectedCount})
                       </button>
 
                       <div className="h-4 w-px bg-slate-200 mx-1 hidden md:block"></div>
@@ -2975,20 +2884,20 @@ export default function App() {
                         onClick={() => setTxTypeFilter('deposit')}
                         className={`px-2 py-1 rounded-lg text-[11px] transition-all ${txTypeFilter === 'deposit' ? 'bg-emerald-700 text-white' : 'bg-white text-emerald-700 border border-emerald-200'}`}
                       >
-                        📥 ฝากเงิน
+                        ฝากเงิน
                       </button>
                       <button 
                         onClick={() => setTxTypeFilter('withdrawal')}
                         className={`px-2 py-1 rounded-lg text-[11px] transition-all ${txTypeFilter === 'withdrawal' ? 'bg-rose-700 text-white' : 'bg-white text-rose-700 border border-rose-200'}`}
                       >
-                        📤 ถอนเงิน
+                        ถอนเงิน
                       </button>
                     </div>
 
                     <div className="relative min-w-[240px] flex-1 md:flex-initial">
                       <input 
                         type="text" 
-                        placeholder="🔍 ค้นหา TX ID / ชื่อผู้เล่น / LINE ID / Ref..." 
+                        placeholder="ค้นหา TX ID / ชื่อผู้เล่น / LINE ID / Ref..." 
                         value={txSearchQuery}
                         onChange={e => setTxSearchQuery(e.target.value)}
                         className="w-full pl-3 pr-8 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-sans text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-2xs"
@@ -3046,9 +2955,9 @@ export default function App() {
 
                               <td className="py-2.5 px-3 text-center">
                                 {isWithdrawal ? (
-                                  <span className="px-2 py-0.5 bg-rose-100 text-rose-800 font-black rounded-md text-[10px]">📤 ถอนเงิน</span>
+                                  <span className="px-2 py-0.5 bg-rose-100 text-rose-800 font-black rounded-md text-[10px]">ถอนเงิน</span>
                                 ) : (
-                                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-black rounded-md text-[10px]">📥 ฝากเงิน</span>
+                                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-black rounded-md text-[10px]">ฝากเงิน</span>
                                 )}
                               </td>
 
@@ -3061,8 +2970,8 @@ export default function App() {
                               </td>
 
                               <td className="py-2.5 px-3 text-center">
-                                {tx.status === 'success' && <span className="badge-success px-2 py-0.5 rounded-lg text-[10px] font-bold">✓ อนุมัติแล้ว</span>}
-                                {tx.status === 'escalated' && <span className="badge-warning px-2 py-0.5 rounded-lg text-[10px] font-bold animate-pulse">⏳ รออนุมัติ</span>}
+                                {tx.status === 'success' && <span className="badge-success px-2 py-0.5 rounded-lg text-[10px] font-bold">อนุมัติแล้ว</span>}
+                                {tx.status === 'escalated' && <span className="badge-warning px-2 py-0.5 rounded-lg text-[10px] font-bold animate-pulse">รออนุมัติ</span>}
                                 {tx.status === 'rejected' && <span className="badge-high px-2 py-0.5 rounded-lg text-[10px] font-bold">✕ ปฏิเสธ</span>}
                               </td>
 
@@ -3080,7 +2989,7 @@ export default function App() {
                                         className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] rounded-lg transition-all shadow-2xs"
                                         title="อนุมัติรายการ"
                                       >
-                                        ✓ อนุมัติ
+                                        อนุมัติ
                                       </button>
                                       <button 
                                         onClick={() => handleAdminRejectReview(tx.id, isWithdrawal ? 'ปฏิเสธคำขอและส่งแต้มคืนเข้าบัญชี' : 'ปฏิเสธเนื่องจากไม่มียอดโอนจริง')}
@@ -3096,7 +3005,7 @@ export default function App() {
                                     className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition-all border border-slate-300"
                                     title="ดูสลิปและรายละเอียดเต็ม"
                                   >
-                                    👁️ สลิป
+                                    สลิป
                                   </button>
                                 </div>
                               </td>
@@ -3185,8 +3094,8 @@ export default function App() {
                           {/* Status */}
                           <td className="py-3 px-3 text-center">
                             {hasBank
-                              ? <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full text-[10px] font-bold">✓ ลงทะเบียนแล้ว</span>
-                              : <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-full text-[10px] font-bold animate-pulse">⚠ รอลงทะเบียน</span>}
+                              ? <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full text-[10px] font-bold">ลงทะเบียนแล้ว</span>
+                              : <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-full text-[10px] font-bold animate-pulse">รอลงทะเบียน</span>}
                           </td>
                           {/* Actions */}
                           <td className="py-3 px-3">
@@ -3200,7 +3109,7 @@ export default function App() {
                                 }}
                                 className="px-2.5 py-1.5 bg-sky-50 border border-sky-200 text-sky-700 text-[10px] font-bold rounded-lg hover:bg-sky-100 transition-all active:scale-95"
                               >
-                                ✏️ แก้ไข
+                                แก้ไข
                               </button>
                               {/* Edit bank */}
                               <button
@@ -3211,7 +3120,7 @@ export default function App() {
                                 }}
                                 className="px-2.5 py-1.5 bg-teal-50 border border-teal-200 text-teal-700 text-[10px] font-bold rounded-lg hover:bg-teal-100 transition-all active:scale-95"
                               >
-                                🏦 บัญชี
+                                บัญชี
                               </button>
                               {/* Delete */}
                               <button
@@ -3219,7 +3128,7 @@ export default function App() {
                                 onClick={() => setConfirmDelete({ player: p })}
                                 className="px-2.5 py-1.5 bg-rose-50 border border-rose-200 text-rose-600 text-[10px] font-bold rounded-lg hover:bg-rose-100 transition-all active:scale-95"
                               >
-                                🗑
+                                
                               </button>
                             </div>
                           </td>
@@ -3252,13 +3161,13 @@ export default function App() {
               </div>
 
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 leading-relaxed">
-                ⚠️ ตรวจสอบเลขบัญชีให้ถูกต้องก่อนบันทึก — ผู้เล่นจะโอนเงินตามข้อมูลชุดนี้ทันที
+                ตรวจสอบเลขบัญชีให้ถูกต้องก่อนบันทึก — ผู้เล่นจะโอนเงินตามข้อมูลชุดนี้ทันที
                 และระบบจะเติมเครดิตอัตโนมัติจากยอดในสลิปที่ส่งมา
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="block">
-                  <span className="text-xs font-bold text-slate-600">🏦 ธนาคาร</span>
+                  <span className="text-xs font-bold text-slate-600">ธนาคาร</span>
                   <input
                     type="text"
                     value={paymentBank.bankName}
@@ -3268,7 +3177,7 @@ export default function App() {
                   />
                 </label>
                 <label className="block">
-                  <span className="text-xs font-bold text-slate-600">🔢 เลขบัญชี</span>
+                  <span className="text-xs font-bold text-slate-600">เลขบัญชี</span>
                   <input
                     type="text"
                     value={paymentBank.accountNumber}
@@ -3278,7 +3187,7 @@ export default function App() {
                   />
                 </label>
                 <label className="block sm:col-span-2">
-                  <span className="text-xs font-bold text-slate-600">👤 ชื่อบัญชี</span>
+                  <span className="text-xs font-bold text-slate-600">ชื่อบัญชี</span>
                   <input
                     type="text"
                     value={paymentBank.accountName}
@@ -3288,7 +3197,7 @@ export default function App() {
                   />
                 </label>
                 <label className="block sm:col-span-2">
-                  <span className="text-xs font-bold text-slate-600">📌 หมายเหตุ (ถ้ามี)</span>
+                  <span className="text-xs font-bold text-slate-600">หมายเหตุ (ถ้ามี)</span>
                   <input
                     type="text"
                     value={paymentBank.note}
@@ -3319,19 +3228,19 @@ export default function App() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
                 <div className="flex items-center gap-2">
                   <ShieldAlert size={18} className="text-rose-600" />
-                  <h3 className="text-base font-black text-slate-800">🔒 PIN สำหรับการล้างข้อมูลระบบ</h3>
+                  <h3 className="text-base font-black text-slate-800">PIN สำหรับการล้างข้อมูลระบบ</h3>
                 </div>
                 <span className="text-[11px] text-slate-500">Super Admin เท่านั้น</span>
               </div>
 
               <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs text-rose-800 space-y-1">
-                <p className="font-bold">⚠️ การล้างระเบียนข้อมูล (Factory Reset) ไม่มีการสำรองข้อมูลและย้อนกลับไม่ได้</p>
+                <p className="font-bold">การล้างระเบียนข้อมูล (Factory Reset) ไม่มีการสำรองข้อมูลและย้อนกลับไม่ได้</p>
                 <p>ระบบจะไม่อนุญาตให้ล้างข้อมูลจนกว่าจะตั้งค่า PIN นี้ ข้อมูลผู้เล่น ยอดเครดิต ธุรกรรม และบันทึกแชททั้งหมดจะถูกลบถาวร</p>
                 <p>PIN นี้ไม่เกี่ยวข้องกับรหัสผ่านของคุณ และจะถูกตรวจสอบบนเซิร์ฟเวอร์อีกครั้งก่อนดำเนินการ</p>
               </div>
 
               <label className="block">
-                <span className="text-xs font-bold text-slate-600">🔢 ตั้งค่า PIN (ตัวเลข 4–12 หลัก)</span>
+                <span className="text-xs font-bold text-slate-600">ตั้งค่า PIN (ตัวเลข 4–12 หลัก)</span>
                 <input
                   type="password"
                   inputMode="numeric"
@@ -3390,13 +3299,13 @@ export default function App() {
                     onChange={(e) => setBroadcastTargetGroup(e.target.value)}
                     className="w-full bg-white border border-purple-200 text-purple-950 font-bold px-3 py-1.5 rounded-lg text-xs focus:ring-2 focus:ring-purple-500 focus:outline-none"
                   >
-                    <option value="ALL">🌐 กระจายทุกกลุ่มดวลสด (All Groups)</option>
+                    <option value="ALL">กระจายทุกกลุ่มดวลสด (All Groups)</option>
                     {lineGroups.map((g, idx) => {
                       const isRawId = !g.name || g.name.startsWith('C') || g.name.includes(g.id) || !isNaN(g.name);
-                      const displayName = !isRawId ? g.name : `🚀 กลุ่มดวลสด #${idx + 1} (${g.id.slice(-4)})`;
+                      const displayName = !isRawId ? g.name : `กลุ่มดวลสด #${idx + 1} (${g.id.slice(-4)})`;
                       return (
                         <option key={g.id} value={g.id}>
-                          🎯 เฉพาะกลุ่ม: {displayName}
+                          เฉพาะกลุ่ม: {displayName}
                         </option>
                       );
                     })}
@@ -3408,7 +3317,7 @@ export default function App() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                   <span className="text-xs font-black text-slate-800 uppercase tracking-wider font-heading flex items-center gap-1.5">
-                    <span>⚡ 1. ปุ่มคีย์ลัดสั่งการสนาม & กฎกติกา</span>
+                    <span>1. ปุ่มคีย์ลัดสั่งการสนาม & กฎกติกา</span>
                   </span>
                   <span className="text-[10px] text-slate-400 font-sans">ส่งการ์ด Flex แจ้งเตือนด่วนเข้ากลุ่ม LINE ทันที</span>
                 </div>
@@ -3419,14 +3328,14 @@ export default function App() {
                     <div className="space-y-1">
                       <div className="flex items-center justify-between gap-1 flex-wrap">
                         <span className="text-xs font-black text-orange-950 font-heading flex items-center gap-1">
-                          <span>🚀 บั้งไฟออกแล้ว! (ปิดรับดวล)</span>
+                          <span>บั้งไฟออกแล้ว! (ปิดรับดวล)</span>
                         </span>
                         <span className="text-[10px] font-black px-2 py-0.5 bg-orange-200 text-orange-950 rounded-md">
                           Live Action · Final Call
                         </span>
                       </div>
                       <p className="text-[10.5px] text-orange-900/90 font-sans leading-relaxed">
-                        ล็อกรอบและประกาศ <strong>&ldquo;🚀 บั้งไฟออกแล้ว + ⛔ ปิดรับดวล&rdquo;</strong> พร้อมกันในคลิกเดียว ยกเลิกแผลเปิดที่ไม่มีคู่และคืนแต้มอัตโนมัติทันที
+                        ล็อกรอบและประกาศ <strong>&ldquo;บั้งไฟออกแล้ว + ปิดรับดวล&rdquo;</strong> พร้อมกันในคลิกเดียว ยกเลิกแผลเปิดที่ไม่มีคู่และคืนแต้มอัตโนมัติทันที
                       </p>
                     </div>
                     <div className="space-y-1.5">
@@ -3435,26 +3344,26 @@ export default function App() {
                           try {
                             const res = await runBackendFunction('adminBroadcastRocketLaunched', [broadcastTargetGroup || 'ALL']);
                             if (res && res.success === false) {
-                              addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
+                              addToast(`ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
                             } else {
                               await forceSyncFreshData();
-                              addToast('🚀 บั้งไฟออกแล้ว & ⛔ ปิดรับดวลเรียบร้อย!', 'warning');
+                              addToast('บั้งไฟออกแล้ว & ปิดรับดวลเรียบร้อย!', 'warning');
                             }
                           } catch {
-                            addToast('❌ ส่งไม่สำเร็จ', 'danger');
+                            addToast('ส่งไม่สำเร็จ', 'danger');
                           }
                         }}
                         style={{ backgroundColor: '#ea580c', color: '#ffffff' }}
                         className="w-full py-2.5 px-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-xs font-black transition-all active:scale-95 flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
                       >
-                        <span className="text-white font-black">🚀 บั้งไฟออกแล้ว! (ปิดรับดวลทันที)</span>
+                        <span className="text-white font-black">บั้งไฟออกแล้ว! (ปิดรับดวลทันที)</span>
                       </button>
                       <button
                         onClick={() => setAdminTab('next_rocket')}
                         className="w-full py-1.5 px-2.5 bg-white/90 hover:bg-white text-orange-900 border border-orange-300 rounded-lg text-[10.5px] font-extrabold transition-all flex items-center justify-center gap-1 cursor-pointer"
                       >
                         <Rocket size={12} className="text-orange-600" />
-                        <span>เปิดรับบั้งไฟลูกถัดไป (Rocket B) ต่อทันที ➜</span>
+                        <span>เปิดรับบั้งไฟลูกถัดไป (Rocket B) ต่อทันที </span>
                       </button>
                     </div>
                   </div>
@@ -3463,7 +3372,7 @@ export default function App() {
                   <div className="bg-rose-50/70 border border-rose-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-rose-900 font-heading">⛔ โมฆะรอบ (ช่าง ⛔)</span>
+                        <span className="text-xs font-black text-rose-900 font-heading">โมฆะรอบ (ช่าง )</span>
                         <span className="text-[10px] font-bold px-2 py-0.5 bg-rose-200 text-rose-900 rounded-md">Emergency</span>
                       </div>
                       <p className="text-[10.5px] text-rose-800/80 font-sans leading-relaxed">
@@ -3483,15 +3392,15 @@ export default function App() {
                         if (!ok) return;
                         try {
                           const res = await runBackendFunction('adminBroadcastVoidRound', [broadcastTargetGroup || 'ALL']);
-                          if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
+                          if (res && res.success === false) addToast(`ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
                           else addToast('โมฆะรอบและคืนเงินแล้ว', 'success');
                         } catch {
-                          addToast('❌ ส่งไม่สำเร็จ', 'danger');
+                          addToast('ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
                       className="w-full py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
                     >
-                      <span>⛔ สั่งโมฆะรอบ & คืนแต้ม</span>
+                      <span>สั่งโมฆะรอบ & คืนแต้ม</span>
                     </button>
                   </div>
 
@@ -3499,7 +3408,7 @@ export default function App() {
                   <div className="bg-teal-50/70 border border-teal-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-teal-900 font-heading">📖 คู่มือกติกา</span>
+                        <span className="text-xs font-black text-teal-900 font-heading">คู่มือกติกา</span>
                         <span className="text-[10px] font-bold px-2 py-0.5 bg-teal-200 text-teal-900 rounded-md">Guide</span>
                       </div>
                       <p className="text-[10.5px] text-teal-800/80 font-sans leading-relaxed">
@@ -3510,15 +3419,15 @@ export default function App() {
                       onClick={async () => {
                         try {
                           const res = await runBackendFunction('adminBroadcastRuleGuide', [broadcastTargetGroup || 'ALL']);
-                          if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
-                          else addToast('📖 ส่งกติกาแล้ว', 'info');
+                          if (res && res.success === false) addToast(`ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
+                          else addToast('ส่งกติกาแล้ว', 'info');
                         } catch {
-                          addToast('❌ ส่งไม่สำเร็จ', 'danger');
+                          addToast('ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
                       className="w-full py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
                     >
-                      <span>📖 ส่งคู่มือกติกาเข้ากลุ่ม</span>
+                      <span>ส่งคู่มือกติกาเข้ากลุ่ม</span>
                     </button>
                   </div>
 
@@ -3526,7 +3435,7 @@ export default function App() {
                   <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-indigo-900 font-heading">📅 สรุปผลประจำวัน</span>
+                        <span className="text-xs font-black text-indigo-900 font-heading">สรุปผลประจำวัน</span>
                         <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-200 text-indigo-900 rounded-md">Summary</span>
                       </div>
                       <p className="text-[10.5px] text-indigo-800/80 font-sans leading-relaxed">
@@ -3548,7 +3457,7 @@ export default function App() {
                           ) : (
                             summaryPreview.rounds.map((r) => (
                               <div key={r.key} className="flex items-center justify-between text-[10.5px] gap-2">
-                                <span className="font-bold text-indigo-950 truncate">🚀 {r.name}</span>
+                                <span className="font-bold text-indigo-950 truncate">{r.name}</span>
                                 <span className="text-slate-500 shrink-0">{r.pairs} คู่ · ค่าธรรมเนียม {r.fees.toLocaleString()}</span>
                               </div>
                             ))
@@ -3562,7 +3471,7 @@ export default function App() {
                           try {
                             const res = await runBackendFunction('adminGetDailySummary', [summaryDay]);
                             if (!res || res.success === false) {
-                              addToast(`⚠️ โหลดสรุปไม่สำเร็จ: ${res?.error || 'ไม่ทราบสาเหตุ'}`, 'warning');
+                              addToast(`โหลดสรุปไม่สำเร็จ: ${res?.error || 'ไม่ทราบสาเหตุ'}`, 'warning');
                             } else {
                               const byRound = new Map();
                               for (const o of res.orders || []) {
@@ -3575,14 +3484,14 @@ export default function App() {
                               setSummaryPreview({ count: res.count || 0, rounds: [...byRound.values()] });
                             }
                           } catch {
-                            addToast('❌ โหลดสรุปไม่สำเร็จ', 'danger');
+                            addToast('โหลดสรุปไม่สำเร็จ', 'danger');
                           } finally {
                             setSummaryBusy(false);
                           }
                         }}
                         className="w-full py-1.5 px-2.5 bg-white/90 hover:bg-white text-indigo-900 border border-indigo-300 rounded-lg text-[10.5px] font-extrabold transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-60"
                       >
-                        <span>🔍 ดูตัวอย่างสรุป</span>
+                        <span>ดูตัวอย่างสรุป</span>
                       </button>
                       <button
                         disabled={summaryBusy}
@@ -3596,17 +3505,17 @@ export default function App() {
                           setSummaryBusy(true);
                           try {
                             const res = await runBackendFunction('adminBroadcastDailySummary', [summaryDay, broadcastTargetGroup || 'ALL']);
-                            if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
-                            else addToast(`📅 ส่งสรุปผลประจำวันแล้ว (${res?.count ?? 0} คู่)`, 'info');
+                            if (res && res.success === false) addToast(`ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
+                            else addToast(`ส่งสรุปผลประจำวันแล้ว (${res?.count ?? 0} คู่)`, 'info');
                           } catch {
-                            addToast('❌ ส่งไม่สำเร็จ', 'danger');
+                            addToast('ส่งไม่สำเร็จ', 'danger');
                           } finally {
                             setSummaryBusy(false);
                           }
                         }}
                         className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
                       >
-                        <span>📅 ส่งสรุปผลเข้ากลุ่ม</span>
+                        <span>ส่งสรุปผลเข้ากลุ่ม</span>
                       </button>
                     </div>
                   </div>
@@ -3617,7 +3526,7 @@ export default function App() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                   <span className="text-xs font-black text-slate-800 uppercase tracking-wider font-heading flex items-center gap-1.5">
-                    <span>📢 2. ส่งประกาศอิสระเข้ากลุ่ม LINE</span>
+                    <span>2. ส่งประกาศอิสระเข้ากลุ่ม LINE</span>
                   </span>
                   <span className="text-[10px] text-slate-400 font-sans">พิมพ์ข้อความแจ้งเตือนหรือข้อมูลสนามส่งตรงเข้ากลุ่ม</span>
                 </div>
@@ -3628,34 +3537,34 @@ export default function App() {
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">ข้อความด่วนแนะนำ (คลิกเพื่อใส่ข้อความ):</span>
                     <div className="flex flex-wrap gap-2">
                       <button
-                        onClick={() => setCustomBroadcastText('☕ ประกาศจากสนาม: ขณะนี้อยู่ในช่วงพักเบรก 15 นาที จะเริ่มเปิดรับดวลรอบถัดไปเร็ว ๆ นี้ครับ')}
+                        onClick={() => setCustomBroadcastText('ประกาศจากสนาม: ขณะนี้อยู่ในช่วงพักเบรก 15 นาที จะเริ่มเปิดรับดวลรอบถัดไปเร็ว ๆ นี้ครับ')}
                         className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95 cursor-pointer"
                       >
-                        ☕ พักเบรก 15 นาที
+                        พักเบรก 15 นาที
                       </button>
                       <button
-                        onClick={() => setCustomBroadcastText('🌧️ ประกาศจากสนาม: เนื่องจากสภาพอากาศมีฝนตก จึงขอพักการปล่อยบั้งไฟชั่วคราว เมื่อพร้อมจะแจ้งให้ทราบครับ')}
+                        onClick={() => setCustomBroadcastText('ประกาศจากสนาม: เนื่องจากสภาพอากาศมีฝนตก จึงขอพักการปล่อยบั้งไฟชั่วคราว เมื่อพร้อมจะแจ้งให้ทราบครับ')}
                         className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95 cursor-pointer"
                       >
-                        🌧️ ฝนตก พักการยิงชั่วคราว
+                        ฝนตก พักการยิงชั่วคราว
                       </button>
                       <button
-                        onClick={() => setCustomBroadcastText('🔥 เตรียมพร้อม! บั้งไฟกำลังขึ้นติดตั้งบนแท่นยิง โปรดเตรียมแต้มให้พร้อมสำหรับการท้าดวล')}
+                        onClick={() => setCustomBroadcastText('เตรียมพร้อม! บั้งไฟกำลังขึ้นติดตั้งบนแท่นยิง โปรดเตรียมแต้มให้พร้อมสำหรับการท้าดวล')}
                         className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95 cursor-pointer"
                       >
-                        🔥 บั้งไฟกำลังขึ้นแท่นยิง
+                        บั้งไฟกำลังขึ้นแท่นยิง
                       </button>
                       <button
-                        onClick={() => setCustomBroadcastText(`🎯 บั้งไฟ ${rocketName || activeRoundObj?.name || 'รอบใหม่'} พร้อมแล้ว เปิดแผลเล่นได้เลยครับ 🚀`)}
+                        onClick={() => setCustomBroadcastText(`บั้งไฟ ${rocketName || activeRoundObj?.name || 'รอบใหม่'} พร้อมแล้ว เปิดแผลเล่นได้เลยครับ`)}
                         className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-300 rounded-lg text-[10.5px] font-extrabold transition-all active:scale-95 cursor-pointer"
                       >
-                        🎯 บั้งไฟพร้อมแล้ว เชิญเปิดแผล
+                        บั้งไฟพร้อมแล้ว เชิญเปิดแผล
                       </button>
                       <button
-                        onClick={() => setCustomBroadcastText('🏁 สรุปผลการแข่งขันและการดวลประจำวันเสร็จสิ้นเรียบร้อย ขอบพระคุณสมาชิกทุกท่านที่ร่วมสนุกครับ')}
+                        onClick={() => setCustomBroadcastText('สรุปผลการแข่งขันและการดวลประจำวันเสร็จสิ้นเรียบร้อย ขอบพระคุณสมาชิกทุกท่านที่ร่วมสนุกครับ')}
                         className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95 cursor-pointer"
                       >
-                        🏁 จบการแข่งขันประจำวัน
+                        จบการแข่งขันประจำวัน
                       </button>
                     </div>
                   </div>
@@ -3693,13 +3602,13 @@ export default function App() {
                           try {
                             const res = await runBackendFunction('sendAdminMessageToLine', [broadcastTargetGroup || 'ALL', customBroadcastText.trim()]);
                             if (res && res.success === false) {
-                              addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
+                              addToast(`ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
                             } else {
-                              addToast('📢 ส่งประกาศเข้ากลุ่มแล้ว', 'success');
+                              addToast('ส่งประกาศเข้ากลุ่มแล้ว', 'success');
                               setCustomBroadcastText('');
                             }
                           } catch {
-                            addToast('❌ ส่งไม่สำเร็จ', 'danger');
+                            addToast('ส่งไม่สำเร็จ', 'danger');
                           } finally {
                             setIsSendingBroadcast(false);
                           }
@@ -3707,7 +3616,7 @@ export default function App() {
                         className="py-2 px-5 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all active:scale-95 shadow-md flex items-center gap-1.5"
                       >
                         <Megaphone size={14} />
-                        <span>{isSendingBroadcast ? 'กำลังส่ง...' : '📢 ส่งประกาศเข้ากลุ่ม LINE'}</span>
+                        <span>{isSendingBroadcast ? 'กำลังส่ง...' : 'ส่งประกาศเข้ากลุ่ม LINE'}</span>
                       </button>
                     </div>
                   </div>
@@ -3718,7 +3627,7 @@ export default function App() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                   <span className="text-xs font-black text-slate-800 uppercase tracking-wider font-heading flex items-center gap-1.5">
-                    <span>📡 3. จัดการการเชื่อมต่อกลุ่ม LINE</span>
+                    <span>3. จัดการการเชื่อมต่อกลุ่ม LINE</span>
                   </span>
                   <span className="text-[10px] text-slate-400 font-sans">ตรวจสอบสถานะ Webhook และทดสอบการส่งข้อความ</span>
                 </div>
@@ -3762,33 +3671,33 @@ export default function App() {
                               await runBackendFunction('adminSetActiveGroupId', [gid.trim()]);
                               const dash = await runBackendFunction('getDashboardData', []);
                               if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
-                              addToast(`✅ เปลี่ยน Group ID เป็น ...${gid.trim().slice(-8)}`, 'success');
+                              addToast(`เปลี่ยน Group ID เป็น ...${gid.trim().slice(-8)}`, 'success');
                             }
                           }}
                           className="px-2.5 py-1 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-[10.5px] font-bold transition-all active:scale-95"
                         >
-                          ✏️ เปลี่ยน Group ID
+                          เปลี่ยน Group ID
                         </button>
                       )}
                       <button
                         onClick={async () => {
-                          const testPushToastId = addToast('⚡ กำลังทดสอบส่ง Push...', 'info');
+                          const testPushToastId = addToast('กำลังทดสอบส่ง Push...', 'info');
                           try {
                             const testRes = await runBackendFunction('adminTestPushGroupMessage', [activeGroupId || 'ALL']);
                             removeToast(testPushToastId);
                             if (testRes && testRes.success) {
-                              addToast('✅ ทดสอบส่ง Push สำเร็จ', 'success');
+                              addToast('ทดสอบส่ง Push สำเร็จ', 'success');
                             } else {
-                              addToast(`⚠️ ส่งไม่สำเร็จ: ${testRes?.error || 'โควตาเต็ม'}`, 'warning');
+                              addToast(`ส่งไม่สำเร็จ: ${testRes?.error || 'โควตาเต็ม'}`, 'warning');
                             }
                           } catch {
                             removeToast(testPushToastId);
-                            addToast('❌ ส่งไม่สำเร็จ', 'danger');
+                            addToast('ส่งไม่สำเร็จ', 'danger');
                           }
                         }}
                         className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10.5px] font-bold transition-all active:scale-95 shadow-xs flex items-center gap-1"
                       >
-                        <span>⚡ ทดสอบส่ง Push เข้ากลุ่ม</span>
+                        <span>ทดสอบส่ง Push เข้ากลุ่ม</span>
                       </button>
                     </div>
                   </div>
@@ -3801,21 +3710,21 @@ export default function App() {
                           const res = await runBackendFunction('adminDiscoverGroupIds', []);
                           if (res && res.discovered && res.discovered.length > 0) {
                             const first = res.discovered[0];
-                            addToast(`🔍 พบ Group ID: ...${first.id.slice(-6)}`, 'info');
+                            addToast(`พบ Group ID: ...${first.id.slice(-6)}`, 'info');
                             await runBackendFunction('adminSetActiveGroupId', [first.id]);
                             const dash = await runBackendFunction('getDashboardData', []);
                             if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
-                            addToast('✅ ตั้งค่า Group ID สำเร็จ', 'success');
+                            addToast('ตั้งค่า Group ID สำเร็จ', 'success');
                           } else {
-                            addToast('⚠️ ไม่พบ Group ID ในระบบ', 'warning');
+                            addToast('ไม่พบ Group ID ในระบบ', 'warning');
                           }
                         } catch {
-                          addToast('❌ ค้นหาไม่สำเร็จ', 'danger');
+                          addToast('ค้นหาไม่สำเร็จ', 'danger');
                         }
                       }}
                       className="py-2 px-3.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-all active:scale-95 whitespace-nowrap"
                     >
-                      🔍 Auto Discover
+                      Auto Discover
                     </button>
                     <input
                       type="text"
@@ -3828,11 +3737,11 @@ export default function App() {
                             await runBackendFunction('adminSetActiveGroupId', [gid]);
                             const dash = await runBackendFunction('getDashboardData', []);
                             if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
-                            addToast(`✅ ตั้งค่า Group ID สำเร็จ: ...${gid.slice(-8)}`, 'success');
+                            addToast(`ตั้งค่า Group ID สำเร็จ: ...${gid.slice(-8)}`, 'success');
                             e.target.value = '';
                           } catch(err) {
                             const errStr = err?.message || (typeof err === 'string' ? err : JSON.stringify(err)) || 'Error';
-                            addToast(`❌ Error: ${errStr}`, 'danger');
+                            addToast(`Error: ${errStr}`, 'danger');
                           }
                         }
                       }}
@@ -3876,7 +3785,7 @@ export default function App() {
                   className="bg-sky-600 bg-gradient-to-r from-sky-600 to-sky-700 px-6 py-4"
                   style={{ backgroundColor: '#0284c7', color: '#ffffff' }}
                 >
-                  <h3 className="font-bold text-base" style={{ color: '#ffffff' }}>✏️ แก้ไขข้อมูลผู้เล่น</h3>
+                  <h3 className="font-bold text-base" style={{ color: '#ffffff' }}>แก้ไขข้อมูลผู้เล่น</h3>
                   <p className="text-xs mt-0.5 font-mono" style={{ color: '#e0f2fe' }}>{playerEditModal.player.id}</p>
                 </div>
                 <div className="px-6 py-5 space-y-4">
@@ -3927,15 +3836,15 @@ export default function App() {
                         if (lastData && lastData.transactions) setTransactions(lastData.transactions);
                         setPlayerEditSaving(false);
                         setPlayerEditModal(null);
-                        addToast(balChanged ? `✅ ปรับเครดิต ${playerEditForm.name} เป็น ${playerEditForm.balance.toLocaleString()} pt (ส่ง DM เรียบร้อย)` : `✅ อัปเดตข้อมูล ${p.name} สำเร็จ`, 'success');
+                        addToast(balChanged ? `ปรับเครดิต ${playerEditForm.name} เป็น ${playerEditForm.balance.toLocaleString()} pt (ส่ง DM เรียบร้อย)` : `อัปเดตข้อมูล ${p.name} สำเร็จ`, 'success');
                       } catch (err) {
                         setPlayerEditSaving(false);
-                        addToast('❌ ' + (err.message || err), 'error');
+                        addToast('' + (err.message || err), 'error');
                       }
                     }}
                     className="flex-1 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition-all active:scale-95 shadow-md"
                   >
-                    {playerEditSaving ? '⏳ บันทึก...' : '💾 บันทึก'}
+                    {playerEditSaving ? 'บันทึก...' : 'บันทึก'}
                   </button>
                 </div>
               </div>
@@ -3954,7 +3863,7 @@ export default function App() {
                   className="bg-teal-700 bg-gradient-to-r from-teal-600 to-teal-700 px-6 py-4"
                   style={{ backgroundColor: '#0f766e', color: '#ffffff' }}
                 >
-                  <h3 className="font-bold text-base" style={{ color: '#ffffff' }}>🏦 ลงทะเบียนบัญชีธนาคาร</h3>
+                  <h3 className="font-bold text-base" style={{ color: '#ffffff' }}>ลงทะเบียนบัญชีธนาคาร</h3>
                   <p className="text-xs mt-0.5" style={{ color: '#ccfbf1' }}>
                     {bankEditModal.player.name} · <span className="font-mono" style={{ color: '#99f6e4' }}>{bankEditModal.player.id.slice(0, 18)}…</span>
                   </p>
@@ -3963,7 +3872,7 @@ export default function App() {
                 {/* Modal Body */}
                 <div className="px-6 py-5 space-y-4">
                   <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs">
-                    <strong>⚠️ ตรวจสอบให้แน่ใจ:</strong> เลขบัญชีและชื่อบัญชีต้องตรงกับสลิปที่ผู้เล่นส่งมาเท่านั้น
+                    <strong>ตรวจสอบให้แน่ใจ:</strong> เลขบัญชีและชื่อบัญชีต้องตรงกับสลิปที่ผู้เล่นส่งมาเท่านั้น
                   </div>
 
                   {/* Bank name */}
@@ -4031,10 +3940,10 @@ export default function App() {
                         if (data && data.players) setPlayers(deduplicatePlayersList(data.players));
                         setBankEditSaving(false);
                         setBankEditModal(null);
-                        addToast(`✅ บันทึกบัญชีธนาคารของ ${p.name} สำเร็จ`, 'success');
+                        addToast(`บันทึกบัญชีธนาคารของ ${p.name} สำเร็จ`, 'success');
                       } catch (err) {
                         setBankEditSaving(false);
-                        addToast('❌ เกิดข้อผิดพลาด: ' + (err.message || err), 'error');
+                        addToast('เกิดข้อผิดพลาด:' + (err.message || err), 'error');
                       }
                     }}
                     className="flex-1 px-4 py-2.5 text-white text-sm font-bold rounded-xl transition-all active:scale-95 disabled:cursor-not-allowed"
@@ -4043,7 +3952,7 @@ export default function App() {
                       color: '#ffffff' 
                     }}
                   >
-                    {bankEditSaving ? '⏳ กำลังบันทึก...' : '💾 บันทึกบัญชี'}
+                    {bankEditSaving ? 'กำลังบันทึก...' : 'บันทึกบัญชี'}
                   </button>
                 </div>
               </div>
@@ -4066,7 +3975,7 @@ export default function App() {
                 </div>
                 <div className="px-6 py-5 space-y-4">
                   <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-xs">
-                    <strong>💡 วิธีหา LINE ID:</strong> ให้ผู้เล่นส่งข้อความมาใน LINE OA ก่อน แล้วดู ID ในหน้า LINE Chat ของแดชบอร์ดนี้
+                    <strong>วิธีหา LINE ID:</strong> ให้ผู้เล่นส่งข้อความมาใน LINE OA ก่อน แล้วดู ID ในหน้า LINE Chat ของแดชบอร์ดนี้
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-slate-600 block">LINE User ID <span className="text-rose-500">*</span></label>
@@ -4113,10 +4022,10 @@ export default function App() {
                         if (data && data.players) setPlayers(deduplicatePlayersList(data.players));
                         setCreatePlayerSaving(false);
                         setCreatePlayerModal(false);
-                        addToast(`✅ สร้างบัญชี ${name} สำเร็จ`, 'success');
+                        addToast(`สร้างบัญชี ${name} สำเร็จ`, 'success');
                       } catch (err) {
                         setCreatePlayerSaving(false);
-                        addToast('❌ ' + (err.message || err), 'error');
+                        addToast('' + (err.message || err), 'error');
                       }
                     }}
                     className="flex-1 px-4 py-2.5 text-white text-sm font-bold rounded-xl transition-all active:scale-95 disabled:cursor-not-allowed"
@@ -4125,7 +4034,7 @@ export default function App() {
                       color: '#ffffff' 
                     }}
                   >
-                    {createPlayerSaving ? '⏳ กำลังสร้าง...' : '🎉 สร้างบัญชี'}
+                    {createPlayerSaving ? 'กำลังสร้าง...' : 'สร้างบัญชี'}
                   </button>
                 </div>
               </div>
@@ -4140,7 +4049,7 @@ export default function App() {
             >
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
                 <div className="bg-rose-600 px-6 py-4">
-                  <h3 className="text-white font-bold text-base">🗑 ยืนยันการลบผู้เล่น</h3>
+                  <h3 className="text-white font-bold text-base">ยืนยันการลบผู้เล่น</h3>
                 </div>
                 <div className="px-6 py-5 space-y-3">
                   <div className="flex items-center gap-3 p-3 bg-rose-50 border border-rose-200 rounded-xl">
@@ -4166,15 +4075,15 @@ export default function App() {
                         if (data && data.players) setPlayers(deduplicatePlayersList(data.players));
                         setDeleteSaving(false);
                         setConfirmDelete(null);
-                        addToast(`🗑 ลบบัญชี ${p.name} สำเร็จ`, 'info');
+                        addToast(`ลบบัญชี ${p.name} สำเร็จ`, 'info');
                       } catch (err) {
                         setDeleteSaving(false);
-                        addToast('❌ ' + (err.message || err), 'error');
+                        addToast('' + (err.message || err), 'error');
                       }
                     }}
                     className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition-all active:scale-95 shadow-md"
                   >
-                    {deleteSaving ? '⏳ กำลังลบ...' : '🗑 ยืนยันลบ'}
+                    {deleteSaving ? 'กำลังลบ...' : 'ยืนยันลบ'}
                   </button>
                 </div>
               </div>
@@ -4201,7 +4110,7 @@ export default function App() {
                   >
                     <div>
                       <h3 className="font-extrabold text-base flex items-center gap-2" style={{ color: '#ffffff' }}>
-                        {isWithdrawal ? '📤 รายละเอียดคำขอถอนเงิน' : '📥 รายละเอียดการแจ้งสลิปเติมเงิน'}
+                        {isWithdrawal ? 'รายละเอียดคำขอถอนเงิน' : 'รายละเอียดการแจ้งสลิปเติมเงิน'}
                         <span className="bg-white/20 px-2 py-0.5 rounded font-mono text-xs" style={{ color: '#ffffff' }}>{tx.id}</span>
                       </h3>
                       <p className="text-xs mt-0.5" style={{ color: 'rgba(255, 255, 255, 0.9)' }}>ผู้เล่น: {tx.playerName} ({tx.playerId})</p>
@@ -4222,7 +4131,7 @@ export default function App() {
                       <div className="flex justify-center shrink-0">
                         {isWithdrawal ? (
                           <div className="w-full max-w-xs h-[240px] bg-gradient-to-b from-rose-100 to-rose-200 border border-rose-300 rounded-2xl p-4 flex flex-col items-center justify-between text-center select-none shadow-sm">
-                            <div className="text-4xl mt-2">💸</div>
+                            <div className="text-4xl mt-2"></div>
                             <div className="space-y-1">
                               <span className="text-[10px] text-rose-800 font-black uppercase tracking-wider bg-rose-200 px-2 py-0.5 rounded-md">คำขอถอนเงิน</span>
                               <h4 className="text-2xl font-black text-rose-950 font-mono">-{tx.requestedAmount}.00 THB</h4>
@@ -4242,8 +4151,8 @@ export default function App() {
                           <div className="flex justify-between items-center border-b border-slate-200 pb-2">
                             <span className="text-slate-500 font-bold">สถานะทำรายการ:</span>
                             <span>
-                              {tx.status === 'success' && <span className="badge-success px-2 py-0.5 rounded-lg font-bold">✓ อนุมัติเรียบร้อย</span>}
-                              {tx.status === 'escalated' && <span className="badge-warning px-2 py-0.5 rounded-lg font-bold animate-pulse">⏳ รออนุมัติแมนนวล</span>}
+                              {tx.status === 'success' && <span className="badge-success px-2 py-0.5 rounded-lg font-bold">อนุมัติเรียบร้อย</span>}
+                              {tx.status === 'escalated' && <span className="badge-warning px-2 py-0.5 rounded-lg font-bold animate-pulse">รออนุมัติแมนนวล</span>}
                               {tx.status === 'rejected' && <span className="badge-high px-2 py-0.5 rounded-lg font-bold">✕ ปฏิเสธบิล</span>}
                             </span>
                           </div>
@@ -4269,9 +4178,9 @@ export default function App() {
                         {/* OCR Logs */}
                         {tx.logs && tx.logs.length > 0 && (
                           <div className="p-3 bg-slate-900 text-slate-200 rounded-xl text-[10px] font-mono space-y-1 max-h-[100px] overflow-y-auto">
-                            <span className="text-emerald-400 font-bold block font-sans">🔍 Scan Analysis Logs:</span>
+                            <span className="text-emerald-400 font-bold block font-sans">Scan Analysis Logs:</span>
                             {tx.logs.map((l, i) => (
-                              <div key={i}>➜ {l}</div>
+                              <div key={i}>{l}</div>
                             ))}
                           </div>
                         )}
@@ -4299,7 +4208,7 @@ export default function App() {
                           onClick={() => { handleAdminApproveReview(tx.id); setTxDetailModal(null); }}
                           className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black shadow-md transition-all active:scale-95"
                         >
-                          ✓ ยืนยันอนุมัติ ({isWithdrawal ? tx.requestedAmount : (tx.actualAmount || tx.requestedAmount)} THB)
+                          ยืนยันอนุมัติ ({isWithdrawal ? tx.requestedAmount : (tx.actualAmount || tx.requestedAmount)} THB)
                         </button>
                       </div>
                     )}
@@ -4349,10 +4258,10 @@ export default function App() {
             }`}>
               ผลตัดสินฝั่งชนะ: {
                 settlementResult.outcome === 'LOW' 
-                  ? 'ต่ำ (LOW) 🔵' 
+                  ? 'ต่ำ (LOW)' 
                   : settlementResult.outcome === 'HIGH' 
-                  ? 'สูง (HIGH) 🔴' 
-                  : 'ในราคาช่าง (RANGE) 🎯'
+                  ? 'สูง (HIGH)' 
+                  : 'ในราคาช่าง (RANGE) '
               }
             </div>
 
@@ -4466,7 +4375,7 @@ function PlayerDashboard({ player, transactions, bets, playerUserId, players }) 
                 activeTab === 'statement' ? 'border-sky-600 text-sky-700 bg-white font-black' : 'border-transparent hover:text-slate-700'
               }`}
             >
-              📊 ประวัติการเงิน ({transactions.length})
+              ประวัติการเงิน ({transactions.length})
             </button>
             <button
               onClick={() => setActiveTab('bets')}
@@ -4474,7 +4383,7 @@ function PlayerDashboard({ player, transactions, bets, playerUserId, players }) 
                 activeTab === 'bets' ? 'border-sky-600 text-sky-700 bg-white font-black' : 'border-transparent hover:text-slate-700'
               }`}
             >
-              ⏱️ รายการดวลบั้งไฟ ({bets.length})
+              รายการดวลบั้งไฟ ({bets.length})
             </button>
           </div>
 
