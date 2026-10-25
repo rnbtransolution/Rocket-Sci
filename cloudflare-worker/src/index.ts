@@ -254,6 +254,18 @@ async function roundSettledOrders(orderNumbers: Iterable<string>, justSettled: O
   return out.sort((a, b) => (Number(a.settledAt) || 0) - (Number(b.settledAt) || 0));
 }
 
+/**
+ * Refuse a settlement retry whose flight time differs from the one the round
+ * was already partly paid on. 409 like any other refused money operation, so
+ * the console cannot read it as success.
+ */
+function settleRetryRefusal(error: string, lockedFinalTime: number, headers: Record<string, string>): Response {
+  return new Response(
+    JSON.stringify({ success: false, error, data: { success: false, error, lockedFinalTime } }),
+    { status: 409, headers: { 'Content-Type': 'application/json', ...headers } }
+  );
+}
+
 /** A flight time the admin actually entered. `Number('') || 0` settled every order as a low-side win. */
 function parseFlightSeconds(v: unknown): number | null {
   const n = Number(v);
@@ -2210,10 +2222,23 @@ if (
           }
           const finalSeconds = finalSecondsParsed;
 
-          // Lock the round first, so no order can be opened or matched while
-          // this flight time is being applied.
+          // A retry after a partial failure settles the rest of the SAME rocket,
+          // so it must use the flight time and range the first attempt paid on.
+          // A different time would settle one rocket on two results.
           const lockStr = await state(env).get('ACTIVE_ROUND');
           const lockRound = lockStr ? JSON.parse(lockStr) : null;
+          const prior = lockRound?.partialSettlement;
+          if (prior && prior.roundId === (lockRound.roundId ?? null) && prior.finalSeconds !== undefined
+            && (prior.finalSeconds !== finalSeconds || prior.tMin !== tMin || prior.tMax !== tMax)) {
+            return settleRetryRefusal(
+              `รอบนี้จ่ายไปแล้ว ${(prior.orderNumbers || []).length} แผลที่เวลาบิน ${prior.finalSeconds} วิ (ช่าง ${prior.tMin}–${prior.tMax}) — ตัดสินผลซ้ำต้องใช้ค่าเดิม`,
+              prior.finalSeconds,
+              corsHeaders
+            );
+          }
+
+          // Lock the round first, so no order can be opened or matched while
+          // this flight time is being applied.
           if (lockRound && lockRound.status === 'ACTIVE') {
             await state(env).put('ACTIVE_ROUND', JSON.stringify({ ...lockRound, status: 'CLOSED', updatedAt: Date.now() }));
           }
@@ -2255,7 +2280,7 @@ if (
           activeRound.finalTime = finalSeconds;
           activeRound.updatedAt = Date.now();
           if (settleFailures.length > 0) {
-            activeRound.partialSettlement = { roundId: roundKey, orderNumbers: [...new Set(settledSoFar)] };
+            activeRound.partialSettlement = { roundId: roundKey, orderNumbers: [...new Set(settledSoFar)], finalSeconds, tMin, tMax };
           } else {
             delete activeRound.partialSettlement;
           }
@@ -2336,10 +2361,27 @@ if (
 
             // An unquoted pre-quote that somehow reached in-flight is refunded
             // to both sides instead of being settled (atomic, at most once).
-            const unquoted = new Set<string>();
+            const storedOrders: Array<{ item: Order; stored: Order | null }> = [];
             for (const item of targetRound.matchedOrders || []) {
               if (!item || !item.orderNumber) continue;
-              const stored = await getOrderRecord(item.orderNumber, env);
+              storedOrders.push({ item, stored: await getOrderRecord(item.orderNumber, env) });
+            }
+
+            // A retry after a partial failure must use the flight time the
+            // earlier attempt paid on (the range is the parked round's, fixed).
+            const paidAt = storedOrders.find(({ stored }) => stored?.status === 'settled' && Number(stored.finalTime) > 0);
+            if (paidAt && Number(paidAt.stored!.finalTime) !== finalSeconds) {
+              const lockedFinalTime = Number(paidAt.stored!.finalTime);
+              const paidCount = storedOrders.filter(({ stored }) => stored?.status === 'settled').length;
+              return settleRetryRefusal(
+                `บั้งไฟ "${targetRound.name || 'บั้งไฟสด'}" จ่ายไปแล้ว ${paidCount} แผลที่เวลาบิน ${lockedFinalTime} วิ — ตัดสินผลซ้ำต้องใช้เวลาเดิม`,
+                lockedFinalTime,
+                corsHeaders
+              );
+            }
+
+            const unquoted = new Set<string>();
+            for (const { item, stored } of storedOrders) {
               if (stored && stored.betType === 'pre_quote' && !stored.offsetConfirmedAt && stored.status === 'matched') {
                 unquoted.add(item.orderNumber);
                 await refundOrderOnce(item, env, ctx, 'cancel_held_pre_quote', {
