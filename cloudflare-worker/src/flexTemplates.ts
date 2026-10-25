@@ -240,7 +240,7 @@ const duelTable = (orders: Order[]) => {
       contents: draw
         ? [cell(`#${o.orderNumber}`, { color: MUTED, flex: 3 }), cell(`เสมอ · ${winName} · ${loseName}`, { color: BODY, flex: 10 })]
         : [
-            cell(`#${o.orderNumber}`, { color: MUTED, flex: 3 }),
+            cell(`#${o.orderNumber}`, { color: MUTED, flex: 3, adjustMode: 'shrink-to-fit' }),
             cell(winName, { color: TONES.in.accent, weight: 'bold', flex: 5 }),
             cell(loseName, { color: TONES.error.accent, flex: 5 }),
           ],
@@ -309,16 +309,19 @@ export function generateOrderFlex(order: Order): any {
     .filter((v, i, arr) => arr.indexOf(v) === i); // rounding can collide
   const amt100 = numAmount;
 
+  // Phones render Thai wider than the bubble's nominal width, so a fixed
+  // label like "เต็ม 500" was cut to "เต็ม 5..". The full-take button gets
+  // twice the width and every label shrinks to fit instead of truncating.
   const takeButton = (val: number, full: boolean) => ({
     type: 'box',
     layout: 'vertical',
-    flex: 1,
+    flex: full ? 2 : 1,
     backgroundColor: full ? TONES.info.accent : TONES.info.tint,
     cornerRadius: 'md',
     ...btnPad,
     action: { type: 'message', label: `${val}`, text: `ต ${orderNumber} ${val}` },
     contents: [text(full ? `เต็ม ${val.toLocaleString()}` : val.toLocaleString(), {
-      size: 'sm', color: full ? '#FFFFFF' : TONES.info.accent, weight: 'bold', align: 'center', wrap: false,
+      size: 'sm', color: full ? '#FFFFFF' : TONES.info.accent, weight: 'bold', align: 'center', wrap: false, adjustMode: 'shrink-to-fit',
     })],
   });
 
@@ -598,7 +601,7 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
           layout: 'vertical',
           flex: 1,
           contents: [
-            text(`#${b.orderNumber} · ${pt(Number(b.amount || 0))}`, { size: 'sm', color: INK, weight: 'bold', wrap: false }),
+            text(`#${b.orderNumber} · ${pt(Number(b.amount || 0))}`, { size: 'sm', color: INK, weight: 'bold', wrap: false, adjustMode: 'shrink-to-fit' }),
             text(`${sideText} · ${rangeText} · ${b.creatorName || 'ผู้เล่น'}`, { size: 'xs', color: MUTED, wrap: false }),
           ],
         },
@@ -606,13 +609,13 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
         {
           type: 'box',
           layout: 'vertical',
-          width: '72px',
+          width: '80px',
           backgroundColor: TONES.info.accent,
           cornerRadius: 'md',
           paddingTop: '8px',
           paddingBottom: '8px',
           action: { type: 'message', label: `ต ${b.orderNumber}`, text: `ต ${b.orderNumber}` },
-          contents: [text('รับดวล', { size: 'sm', color: '#FFFFFF', weight: 'bold', align: 'center', wrap: false })],
+          contents: [text('รับดวล', { size: 'sm', color: '#FFFFFF', weight: 'bold', align: 'center', wrap: false, adjustMode: 'shrink-to-fit' })],
         },
       ],
     };
