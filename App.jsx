@@ -114,6 +114,17 @@ const SLIP_PRESETS = [
 const SUPER_ADMIN_USERNAME = import.meta.env.VITE_SUPER_ADMIN_USERNAME || import.meta.env.VITE_ADMIN_USERNAME || '';
 const LIMITED_ADMIN_USERNAME = import.meta.env.VITE_LIMITED_ADMIN_USERNAME || import.meta.env.VITE_ADMIN1_USERNAME || '';
 
+// Voiding refunds a whole round and cannot be undone, so it takes the same PIN
+// as Factory Reset (checked by the Worker). It replaced typing the round's Thai
+// name, which is slow and error-prone on a phone at the launch site.
+const VOID_PIN_FIELD = {
+  name: 'pin',
+  label: 'PIN ยืนยัน (ตั้งไว้ในหัวข้อ “ความปลอดภัย” ไม่ใช่รหัสผ่าน)',
+  type: 'password',
+  inputMode: 'numeric',
+  validate: (v) => (v.trim() ? null : 'กรุณากรอก PIN'),
+};
+
 export default function App() {
   const isGASHost = typeof window !== 'undefined' && (
     window.location.hostname.includes('googleusercontent.com') ||
@@ -454,7 +465,7 @@ export default function App() {
     try {
       await runBackendFunction('adminSetDangerPin', [dangerPin]);
       setDangerPin('');
-      addToast('ตั้งค่า PIN สำหรับการล้างข้อมูลระบบเรียบร้อย', 'success');
+      addToast('ตั้งค่า PIN ยืนยันเรียบร้อย', 'success');
     } catch (err) {
       addToast(`บันทึกไม่สำเร็จ: ${err?.message || err}`, 'danger');
     } finally {
@@ -997,13 +1008,13 @@ export default function App() {
         `คืนเงิน ${flt.matchedCount || (flt.matchedOrders || []).length} คู่ดวลของบั้งไฟนี้ 100% และย้อนกลับไม่ได้`,
         'ออเดอร์ของบั้งไฟรอบใหม่ที่กำลังเปิดรับอยู่ไม่ได้รับผลกระทบ',
       ],
-      typeToConfirm: flt.name,
+      fields: [VOID_PIN_FIELD],
       confirmLabel: 'โมฆะและคืนเงิน',
     });
     if (!ok) return;
     setSettlingInFlightId(flt.roundId);
     try {
-      const res = await runBackendFunction('adminVoidInFlightRound', [flt.roundId, broadcastTargetGroup || 'ALL']);
+      const res = await runBackendFunction('adminVoidInFlightRound', [flt.roundId, broadcastTargetGroup || 'ALL', ok.values.pin]);
       if (res && res.success === false) {
         addToast(`โมฆะรอบไม่สำเร็จ: ${res.message || res.error || 'เกิดข้อผิดพลาด'}`, 'danger');
         return;
@@ -3067,14 +3078,14 @@ export default function App() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#D9DDE2] pb-3">
                 <div className="flex items-center gap-2">
                   <ShieldAlert size={18} className="text-[#B42318]" />
-                  <h3 className="text-base font-semibold text-[#16191D]">PIN สำหรับการล้างข้อมูลระบบ</h3>
+                  <h3 className="text-base font-semibold text-[#16191D]">PIN ยืนยันคำสั่งฉุกเฉิน</h3>
                 </div>
                 <span className="text-[12px] text-[#5B636E]">Super Admin เท่านั้น</span>
               </div>
 
               <div className="bg-[#FBEAE8] border border-[#E7B4AE] rounded-lg p-3 text-xs text-[#B42318] space-y-1">
                 <p className="font-bold">การล้างระเบียนข้อมูล (Factory Reset) ไม่มีการสำรองข้อมูลและย้อนกลับไม่ได้</p>
-                <p>ระบบจะไม่อนุญาตให้ล้างข้อมูลจนกว่าจะตั้งค่า PIN นี้ ข้อมูลผู้เล่น ยอดเครดิต ธุรกรรม และบันทึกแชททั้งหมดจะถูกลบถาวร</p>
+                <p>ใช้ยืนยันการโมฆะรอบ (คืนเงินทั้งรอบ) และการล้างข้อมูลทั้งระบบ ระบบจะไม่อนุญาตทั้งสองคำสั่งจนกว่าจะตั้งค่า PIN นี้</p>
                 <p>PIN นี้ไม่เกี่ยวข้องกับรหัสผ่านของคุณ และจะถูกตรวจสอบบนเซิร์ฟเวอร์อีกครั้งก่อนดำเนินการ</p>
               </div>
 
@@ -3225,16 +3236,16 @@ export default function App() {
                           title: `โมฆะรอบ “${roundLabel}”`,
                           tone: 'danger',
                           body: 'ยกเลิกทุกแผลในรอบนี้และคืนเงินผู้เล่น 100% ย้อนกลับไม่ได้ และจะแจ้งเข้ากลุ่ม LINE',
-                          typeToConfirm: roundLabel,
+                          fields: [VOID_PIN_FIELD],
                           confirmLabel: 'โมฆะและคืนเงิน',
                         });
                         if (!ok) return;
                         try {
-                          const res = await runBackendFunction('adminBroadcastVoidRound', [broadcastTargetGroup || 'ALL']);
+                          const res = await runBackendFunction('adminBroadcastVoidRound', [broadcastTargetGroup || 'ALL', ok.values.pin]);
                           if (res && res.success === false) addToast(`ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
                           else addToast('โมฆะรอบและคืนเงินแล้ว', 'success');
-                        } catch {
-                          addToast('ส่งไม่สำเร็จ', 'danger');
+                        } catch (err) {
+                          addToast(`โมฆะรอบไม่สำเร็จ: ${err.message || err}`, 'danger');
                         }
                       }}
                       className="w-full py-2 px-3 bg-[#B42318] hover:bg-[#B42318] text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"

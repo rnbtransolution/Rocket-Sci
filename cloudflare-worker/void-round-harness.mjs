@@ -28,6 +28,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const ADMIN_KEY = 'test_admin_key';
+/** Voiding a round takes the danger PIN; each scenario sets it first. */
+const VOID_PIN = '7391';
+const setVoidPin = async (mf) => (await mf.dispatchFetch('http://localhost/api/run', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'x-admin-key': ADMIN_KEY },
+  body: JSON.stringify({ functionName: 'adminSetDangerPin', args: [VOID_PIN] }),
+})).text();
 const CREATED_AT = 1750000000000;
 
 let pass = 0, fail = 0;
@@ -127,11 +134,12 @@ async function runVoid({ amount = 500, extraOrders = [], before = null }) {
     await kvC.put(`RAW_LINE_${x.p.shortId}`, x.p.lineUserId);
   }
   await kvC.put('ACTIVE_ROUND', JSON.stringify({ name: 'R', targetMin: 350, targetMax: 400, status: 'ACTIVE' }));
+  await setVoidPin(mf);
 
   await (await mf.dispatchFetch('http://localhost/api/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-admin-key': ADMIN_KEY },
-    body: JSON.stringify({ functionName: 'adminBroadcastVoidRound', args: ['ALL'] }),
+    body: JSON.stringify({ functionName: 'adminBroadcastVoidRound', args: ['ALL', VOID_PIN] }),
   })).text();
   await new Promise((r) => setTimeout(r, 400));
 
@@ -215,11 +223,12 @@ console.log('\nIDEMPOTENCE — voiding an already-voided round');
     await kvC.put(`USER_${p.shortId}`, prof(p, 500));
     await kvC.put(`RAW_LINE_${p.shortId}`, p.lineUserId);
   }
+  await setVoidPin(mf);
   const voidOnce = async () => {
     await (await mf.dispatchFetch('http://localhost/api/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-admin-key': ADMIN_KEY },
-      body: JSON.stringify({ functionName: 'adminBroadcastVoidRound', args: ['ALL'] }),
+      body: JSON.stringify({ functionName: 'adminBroadcastVoidRound', args: ['ALL', VOID_PIN] }),
     })).text();
     await new Promise((r) => setTimeout(r, 350));
     const d = (await (await mf.dispatchFetch('http://localhost/api/run', {

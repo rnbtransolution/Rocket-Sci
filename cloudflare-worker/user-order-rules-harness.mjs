@@ -255,7 +255,8 @@ console.log('\nSCENARIO 4: Void round -> All orders refunded, ZERO extra credit 
   check('Before void: p1=500, p2=500', bPre.p1 === 500 && bPre.p2 === 500);
 
   // Admin voids round
-  await env.rpc('adminBroadcastVoidRound', ['ALL']);
+  await env.rpc('adminSetDangerPin', ['7391']);
+  await env.rpc('adminBroadcastVoidRound', ['ALL', '7391']);
 
   const bPost = await env.balances();
   check('After void: P1 refunded to exactly 1000', bPost.p1 === 1000, `p1=${bPost.p1}`);

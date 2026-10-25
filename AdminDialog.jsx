@@ -17,7 +17,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
  *   confirmLabel   says what happens ("ปิดรอบและคืน 400 pt"), never just "ตกลง"
  *   tone           'primary' (default) | 'danger' — danger is for irreversible actions
  *   typeToConfirm  text the admin must type before confirming (irreversible actions)
- *   fields         [{ name, label, type, defaultValue, placeholder, validate(v) → error|null }]
+ *   fields         [{ name, label, type, inputMode, defaultValue, placeholder, validate(v) → error|null }]
  *
  * Esc, the backdrop and "ยกเลิก" all cancel.
  */
@@ -126,6 +126,7 @@ function AdminDialog({ request, onClose }) {
                   id={`admin-dialog-${f.name}`}
                   ref={i === 0 && !typeToConfirm ? firstInputRef : undefined}
                   type={f.type || 'text'}
+                  inputMode={f.inputMode}
                   autoComplete="off"
                   placeholder={f.placeholder}
                   value={values[f.name]}
