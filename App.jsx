@@ -1806,34 +1806,31 @@ export default function App() {
 
           {/* ═══ NEW TAB: CONCURRENT ROCKET B LAUNCHER & IN-FLIGHT ROCKET A QUEUE ═══ */}
           {adminTab === 'next_rocket' && (
-            <div className="glass-panel p-5 space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div className="bg-white border border-[#D9DDE2] rounded-lg p-4 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#D9DDE2] pb-3">
                 <div>
-                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
-                    <Rocket size={18} className="text-orange-600" />
-                    เปิดบั้งไฟถัดไป (Rocket B) ขณะรอผลบั้งไฟกลางอากาศ (Rocket A)
+                  <h3 className="text-base font-semibold text-[#16191D] flex items-center gap-2 font-heading">
+                    <Rocket size={18} className="text-[#8A4B00]" />
+                    เปิดบั้งไฟลำถัดไปขณะลำเดิมยังบินอยู่
                   </h3>
-                  <p className="text-xs text-slate-500 font-sans mt-0.5">
-                    แยกสัญญาคู่ดวลของบั้งไฟที่ปล่อยขึ้นฟ้าแล้วเข้าคิวรอผลเวลา (In-Flight Queue) และเปิดรับออเดอร์บั้งไฟลูกถัดไปได้ทันทีโดยที่เลขแผลและราคาไม่ชนกัน
+                  <p className="text-xs text-[#5B636E] font-sans mt-0.5">
+                    คู่ดวลของลำที่ขึ้นแล้วย้ายไปรอผลในคิว ลำใหม่รับออเดอร์ได้ทันที เลขออเดอร์และราคาไม่ปนกัน
                   </p>
                 </div>
-                <span className="self-start sm:self-auto text-[10px] text-orange-800 font-extrabold bg-orange-50 px-2.5 py-1 rounded-full border border-orange-200">
-                  Concurrent Multi-Rocket Engine
-                </span>
               </div>
 
               {/* Current Active Rocket Status vs In-Flight Overview */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="p-4 rounded-lg bg-[#F7F8F9] border border-[#D9DDE2] space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">
-                      บั้งไฟรอบปัจจุบันที่รับออเดอร์อยู่ (Active Slot)
+                    <span className="text-[12px] font-semibold text-[#5B636E]">
+                      ลำที่รับออเดอร์อยู่
                     </span>
                     <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                      className={`px-2 py-0.5 rounded-full text-[12px] font-semibold ${
                         isRoundOpen
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                          : 'bg-rose-100 text-rose-800 border border-rose-300'
+                          ? 'bg-[#D3EBDD] text-[#1B6E43] border border-[#B9DEC8]'
+                          : 'bg-[#F6D7D3] text-[#B42318] border border-[#E7B4AE]'
                       }`}
                     >
                       {isRoundOpen
@@ -1843,13 +1840,13 @@ export default function App() {
                         : 'ปิดรับดวล (บั้งไฟออกแล้ว)'}
                     </span>
                   </div>
-                  <div className="text-base font-black text-slate-900 font-heading">
+                  <div className="text-base font-semibold text-[#16191D] font-heading">
                     {activeRoundObj?.name || rocketName || 'ยังไม่ได้กำหนดชื่อบั้งไฟ'}
                   </div>
-                  <div className="flex flex-wrap gap-3 text-xs text-slate-600 font-sans pt-1">
+                  <div className="flex flex-wrap gap-3 text-xs text-[#3B424C] font-sans pt-1">
                     <span>
                       ช่วงราคาช่าง:{' '}
-                      <strong className="font-mono text-slate-900">
+                      <strong className="font-mono text-[#16191D]">
                         {activeRoundObj?.quoteReleased
                           ? `${activeRoundObj.targetMin}-${activeRoundObj.targetMax}s`
                           : 'ยังไม่ปล่อยราคา'}
@@ -1858,81 +1855,81 @@ export default function App() {
                     <span>•</span>
                     <span>
                       คู่ดวลติดแล้ว:{' '}
-                      <strong className="font-mono text-indigo-700">
+                      <strong className="font-mono text-[#1E4DB7]">
                         {bets.filter(b => b.status === 'matched').length} คู่
                       </strong>
                     </span>
                     <span>•</span>
                     <span>
                       รอคู่ดวล:{' '}
-                      <strong className="font-mono text-amber-700">
+                      <strong className="font-mono text-[#8A4B00]">
                         {bets.filter(b => b.status === 'pending_match' || b.status === 'pending_hold').length} แผล
                       </strong>
                     </span>
                   </div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-orange-50/70 border border-orange-200 space-y-2">
+                <div className="p-4 rounded-lg bg-[#FDF1E1] border border-[#E8C48F] space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-black uppercase tracking-wider text-orange-900">
-                      บั้งไฟที่กำลังบินอยู่บนฟ้า (In-Flight Queue)
+                    <span className="text-[12px] font-semibold text-[#8A4B00]">
+                      ลำที่บินอยู่ รอผล
                     </span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-orange-200 text-orange-950">
+                    <span className="px-2 py-0.5 rounded-full text-[12px] font-semibold bg-[#FBE5C6] text-[#8A4B00]">
                       {inFlightRounds.length} ลำรอตัดสินผล
                     </span>
                   </div>
-                  <p className="text-xs text-orange-900/90 leading-relaxed">
-                    เมื่อกดเปิดบั้งไฟลูกใหม่ (Rocket B) ด้านล่าง ระบบจะล็อกและย้ายคู่ดวลของบั้งไฟลูกเดิม (Rocket A) มาเก็บในคิวรอผลเวลาบินโดยอัตโนมัติ และรันเลข Order # ไม่ให้ซ้ำกัน 100%
+                  <p className="text-xs text-[#8A4B00] leading-relaxed">
+                    เมื่อเปิดลำใหม่ คู่ดวลของลำเดิมจะย้ายมารอผลที่นี่อัตโนมัติ
                   </p>
                 </div>
               </div>
 
               {/* STEP 1: OPEN ROCKET B FORM */}
-              <div className="p-4 sm:p-5 rounded-xl bg-gradient-to-br from-sky-50/80 via-white to-indigo-50/50 border border-sky-200 space-y-4">
-                <div className="flex items-center justify-between flex-wrap gap-2 border-b border-sky-100 pb-2.5">
+              <div className="p-4 sm:p-5 rounded-lg bg-[#F7F8F9] via-white border border-[#C7D3F1] space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2 border-b border-[#C7D3F1] pb-2.5">
                   <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-lg bg-sky-600 text-white font-black text-xs flex items-center justify-center">
+                    <span className="w-6 h-6 rounded-lg bg-[#1E4DB7] text-white font-semibold text-xs flex items-center justify-center">
                       1
                     </span>
-                    <h4 className="text-sm font-black text-slate-900 font-heading">
-                      เปิดรับออเดอร์บั้งไฟลูกถัดไป (Rocket B) ทันที
+                    <h4 className="text-sm font-semibold text-[#16191D] font-heading">
+                      เปิดลำถัดไป
                     </h4>
                   </div>
-                  <span className="text-[10.5px] font-bold text-sky-700">
-                    บั้งไฟลูกปัจจุบันจะถูกพักไว้ในคิวรอผลเวลาอัตโนมัติ (ถ้ามีคู่ดวลค้างอยู่)
+                  <span className="text-[12px] font-bold text-[#1E4DB7]">
+                    ลำปัจจุบันจะย้ายไปรอผลในคิว ถ้ามีคู่ที่ต่อติดอยู่
                   </span>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-1">
-                      ชื่อบั้งไฟลูกถัดไป (Rocket B Name):
+                    <label className="text-xs font-bold text-[#3B424C] block mb-1">
+                      ชื่อบั้งไฟลำถัดไป
                     </label>
                     <input
                       type="text"
                       value={nextRocketName}
                       onChange={e => setNextRocketName(e.target.value)}
                       placeholder="เช่น เทพพนม 2 / สิงห์อีสาน (ลูกที่ 2)"
-                      className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                      className="w-full px-3.5 py-2.5 bg-white border border-[#C3C9D1] rounded-lg text-sm font-bold text-[#16191D] focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30"
                     />
                   </div>
 
                   <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-1">
-                      โหมดการเปิดรับออเดอร์บั้งไฟลูกถัดไป:
+                    <label className="text-xs font-bold text-[#3B424C] block mb-1">
+                      วิธีเปิดรับออเดอร์
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
                         onClick={() => setNextRocketMode('pre_quote')}
-                        className={`py-2.5 px-3 rounded-xl text-xs font-bold border text-left transition-all cursor-pointer ${
+                        className={`py-2.5 px-3 rounded-lg text-xs font-bold border text-left transition-all cursor-pointer ${
                           nextRocketMode === 'pre_quote'
-                            ? 'bg-sky-600 text-white border-sky-700 shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                            ? 'bg-[#1E4DB7] text-white border-[#C7D3F1]'
+                            : 'bg-white text-[#3B424C] border-[#D9DDE2] hover:bg-[#F7F8F9]'
                         }`}
                       >
-                        <div className="font-black">เปิดรับแผลล่วงหน้า</div>
-                        <div className={`text-[10px] mt-0.5 ${nextRocketMode === 'pre_quote' ? 'text-sky-100' : 'text-slate-400'}`}>
+                        <div className="font-semibold">เปิดรับแผลล่วงหน้า</div>
+                        <div className={`text-[12px] mt-0.5 ${nextRocketMode === 'pre_quote' ? 'text-sky-100' : 'text-[#8A929D]'}`}>
                           เชิญเปิดแผลก่อน (ออกราคาช่างทีหลัง)
                         </div>
                       </button>
@@ -1940,15 +1937,15 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => setNextRocketMode('quote')}
-                        className={`py-2.5 px-3 rounded-xl text-xs font-bold border text-left transition-all cursor-pointer ${
+                        className={`py-2.5 px-3 rounded-lg text-xs font-bold border text-left transition-all cursor-pointer ${
                           nextRocketMode === 'quote'
-                            ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                            ? 'bg-[#1B6E43] text-white border-[#B9DEC8]'
+                            : 'bg-white text-[#3B424C] border-[#D9DDE2] hover:bg-[#F7F8F9]'
                         }`}
                       >
-                        <div className="font-black">ออกราคาช่างทันที</div>
-                        <div className={`text-[10px] mt-0.5 ${nextRocketMode === 'quote' ? 'text-emerald-100' : 'text-slate-400'}`}>
-                          กำหนดช่วงเวลา Min-Max พร้อมเปิดดวล
+                        <div className="font-semibold">ออกราคาช่างทันที</div>
+                        <div className={`text-[12px] mt-0.5 ${nextRocketMode === 'quote' ? 'text-[#1B6E43]' : 'text-[#8A929D]'}`}>
+                          กำหนดช่วงราคาแล้วเปิดดวลเลย
                         </div>
                       </button>
                     </div>
@@ -1956,40 +1953,40 @@ export default function App() {
                 </div>
 
                 {nextRocketMode === 'quote' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 bg-emerald-50/60 border border-emerald-200 rounded-xl">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 bg-[#E2F2E9] border border-[#B9DEC8] rounded-lg">
                     <div>
-                      <label className="text-[11px] font-bold text-emerald-900 block mb-1">
-                        เวลาต่ำสุด (Min วินาที):
+                      <label className="text-[12px] font-bold text-[#1B6E43] block mb-1">
+                        ราคาต่ำสุด (วินาที)
                       </label>
                       <input
                         type="number"
                         value={nextRocketMin}
                         onChange={e => setNextRocketMin(e.target.value)}
                         placeholder="เช่น 330"
-                        className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-lg text-sm font-mono font-black text-slate-900"
+                        className="w-full px-3 py-2 bg-white border border-[#B9DEC8] rounded-lg text-sm font-mono font-semibold text-[#16191D]"
                       />
                     </div>
                     <div>
-                      <label className="text-[11px] font-bold text-emerald-900 block mb-1">
-                        เวลาสูงสุด (Max วินาที):
+                      <label className="text-[12px] font-bold text-[#1B6E43] block mb-1">
+                        ราคาสูงสุด (วินาที)
                       </label>
                       <input
                         type="number"
                         value={nextRocketMax}
                         onChange={e => setNextRocketMax(e.target.value)}
                         placeholder="เช่น 360"
-                        className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-lg text-sm font-mono font-black text-slate-900"
+                        className="w-full px-3 py-2 bg-white border border-[#B9DEC8] rounded-lg text-sm font-mono font-semibold text-[#16191D]"
                       />
                     </div>
                     <div className="flex items-end">
-                      <label className="flex items-center gap-2 cursor-pointer p-2.5 bg-white border border-emerald-200 rounded-lg w-full">
+                      <label className="flex items-center gap-2 cursor-pointer p-2.5 bg-white border border-[#B9DEC8] rounded-lg w-full">
                         <input
                           type="checkbox"
                           checked={nextRocketChotoy}
                           onChange={e => setNextRocketChotoy(e.target.checked)}
-                          className="w-4 h-4 accent-emerald-600 rounded"
+                          className="w-4 h-4 accent-[#1E4DB7] rounded"
                         />
-                        <span className="text-xs font-bold text-emerald-950">
+                        <span className="text-xs font-bold text-[#1B6E43]">
                           โหมดช่อทอย (10 : 8)
                         </span>
                       </label>
@@ -1998,28 +1995,28 @@ export default function App() {
                 )}
 
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-                  <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                  <label className="flex items-center gap-2 text-xs font-bold text-[#3B424C] cursor-pointer">
                     <input
                       type="checkbox"
                       checked={nextRocketBroadcast}
                       onChange={e => setNextRocketBroadcast(e.target.checked)}
-                      className="w-4 h-4 accent-sky-600 rounded"
+                      className="w-4 h-4 accent-[#1E4DB7] rounded"
                     />
                     <span>
-                      ส่งประกาศแจ้งเปิดบั้งไฟลูกใหม่ ({nextRocketName || 'บั้งไฟชุดต่อไป'}) เข้ากลุ่ม LINE ทันที
+                      ประกาศเข้ากลุ่ม LINE
                     </span>
                   </label>
 
                   <button
                     onClick={handleOpenNextRocket}
                     disabled={isOpeningNextRocket}
-                    className="py-3 px-6 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+                    className="py-3 px-6 bg-[#1E4DB7] hover:bg-[#1E4DB7] disabled:opacity-50 text-white font-semibold text-xs sm:text-sm rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <Rocket size={16} />
                     <span>
                       {isOpeningNextRocket
                         ? 'กำลังสลับรอบและเปิดบั้งไฟถัดไป...'
-                        : `พักรอบเดิมไว้บนฟ้า & เปิดรับดวล "${nextRocketName || 'บั้งไฟชุดต่อไป'}" ทันที`}
+                        : `เปิดลำถัดไป${nextRocketName ? ` · ${nextRocketName}` : ''}`}
                     </span>
                   </button>
                 </div>
@@ -2027,28 +2024,27 @@ export default function App() {
 
               {/* STEP 2: IN-FLIGHT ROCKETS QUEUE (AWAITING FLIGHT RESULT SETTLEMENT) */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                <div className="flex items-center justify-between border-b border-[#D9DDE2] pb-2">
                   <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-lg bg-orange-600 text-white font-black text-xs flex items-center justify-center">
+                    <span className="w-6 h-6 rounded-lg bg-[#9A5B00] text-white font-semibold text-xs flex items-center justify-center">
                       2
                     </span>
-                    <h4 className="text-sm font-black text-slate-900 font-heading">
-                      คิวบั้งไฟที่กำลังบินอยู่บนฟ้า รอป้อนผลเวลา (In-Flight Rockets Queue)
+                    <h4 className="text-sm font-semibold text-[#16191D] font-heading">
+                      คิวบั้งไฟที่บินอยู่ รอป้อนผลเวลา
                     </h4>
                   </div>
-                  <span className="text-[11px] font-bold text-slate-500">
+                  <span className="text-[12px] font-bold text-[#5B636E]">
                     ตัดสินผลแยกเฉพาะลำ โดยไม่รบกวนออเดอร์ของบั้งไฟลูกใหม่
                   </span>
                 </div>
 
                 {inFlightRounds.length === 0 ? (
-                  <div className="p-8 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-center space-y-1.5">
-                    <div className="text-2xl"></div>
-                    <div className="text-xs font-bold text-slate-700">
-                      ขณะนี้ไม่มีบั้งไฟค้างอยู่บนฟ้าในคิว In-Flight
+                  <div className="p-8 rounded-lg bg-[#F7F8F9] border border-dashed border-[#C3C9D1] text-center space-y-1.5">
+                                        <div className="text-xs font-bold text-[#3B424C]">
+                      ยังไม่มีบั้งไฟที่บินอยู่
                     </div>
-                    <p className="text-[11px] text-slate-500 max-w-md mx-auto">
-                      เมื่อบั้งไฟ A ปล่อยขึ้นฟ้าแล้ว และคุณกดเปิดบั้งไฟ B ด้านบน คู่ดวลของบั้งไฟ A จะย้ายมาแสดงที่นี่เพื่อให้คุณกรอกผลเวลาบินเมื่อบั้งไฟ A ตกถึงพื้น
+                    <p className="text-[12px] text-[#5B636E] max-w-md mx-auto">
+                      เมื่อเปิดลำถัดไป คู่ดวลของลำเดิมจะมารอป้อนผลเวลาที่นี่
                     </p>
                   </div>
                 ) : (
@@ -2059,24 +2055,24 @@ export default function App() {
                       return (
                         <div
                           key={flt.roundId}
-                          className="p-4 rounded-xl bg-amber-50/70 border-2 border-amber-300 space-y-3 shadow-xs"
+                          className="p-4 rounded-lg bg-[#FDF1E1] border-2 border-[#E8C48F] space-y-3"
                         >
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200 pb-2.5">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#E8C48F] pb-2.5">
                             <div className="flex items-center gap-2.5">
-                              <span className="px-2.5 py-1 rounded-lg bg-orange-600 text-white font-black text-xs font-mono">
+                              <span className="px-2.5 py-1 rounded-lg bg-[#9A5B00] text-white font-semibold text-xs font-mono">
                                 ลำที่ #{idx + 1} บนฟ้า
                               </span>
                               <div>
-                                <div className="text-sm font-black text-slate-900 font-heading flex items-center gap-2">
+                                <div className="text-sm font-semibold text-[#16191D] font-heading flex items-center gap-2">
                                   <span>{flt.name}</span>
                                   {flt.isChotoy && (
-                                    <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-300 text-[10px] font-black">
+                                    <span className="px-2 py-0.5 rounded bg-[#E3EAFB] text-[#16191D] border border-[#C7D3F1] text-[12px] font-semibold">
                                       ช่อทอย 10:8
                                     </span>
                                   )}
                                 </div>
-                                <div className="text-[11px] text-slate-600 font-mono">
-                                  ราคาช่าง: <strong>{flt.quoteReleased ? `${flt.targetMin} - ${flt.targetMax} วินาที` : 'P2P / ไม่มีราคาช่าง'}</strong> • คู่ดวลที่ติดแล้ว: <strong className="text-indigo-700">{flt.matchedCount || (flt.matchedOrders || []).length} คู่</strong>
+                                <div className="text-[12px] text-[#3B424C] font-mono">
+                                  ราคาช่าง: <strong>{flt.quoteReleased ? `${flt.targetMin} - ${flt.targetMax} วินาที` : 'P2P / ไม่มีราคาช่าง'}</strong> • คู่ดวลที่ติดแล้ว: <strong className="text-[#1E4DB7]">{flt.matchedCount || (flt.matchedOrders || []).length} คู่</strong>
                                 </div>
                               </div>
                             </div>
@@ -2084,7 +2080,7 @@ export default function App() {
                             <button
                               onClick={() => handleVoidInFlightRound(flt)}
                               disabled={isSettlingThis}
-                              className="self-start sm:self-auto px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-300 text-xs font-bold transition-all cursor-pointer"
+                              className="self-start sm:self-auto px-3 py-1.5 rounded-lg bg-[#FBEAE8] hover:bg-[#B42318] text-[#B42318] hover:text-white border border-[#E7B4AE] text-xs font-bold transition-all cursor-pointer"
                             >
                               โมฆะเฉพาะลำนี้ & คืนแต้ม
                             </button>
@@ -2096,11 +2092,11 @@ export default function App() {
                               {flt.matchedOrders.map(m => (
                                 <span
                                   key={m.id || m.orderNumber}
-                                  className="px-2 py-1 rounded-md bg-white border border-amber-200 text-[10.5px] font-mono text-slate-700"
+                                  className="px-2 py-1 rounded-md bg-white border border-[#E8C48F] text-[12px] font-mono text-[#3B424C]"
                                 >
                                   <strong>#{m.orderNumber}</strong>:{' '}
-                                  <span className="text-sky-700 font-bold">{m.playerLowName || 'ฝั่งต่ำ'}</span> vs{' '}
-                                  <span className="text-rose-700 font-bold">{m.playerHighName || 'ฝั่งสูง'}</span> ({m.amount} pt)
+                                  <span className="text-[#1E4DB7] font-bold">{m.playerLowName || 'ฝั่งต่ำ'}</span> vs{' '}
+                                  <span className="text-[#B42318] font-bold">{m.playerHighName || 'ฝั่งสูง'}</span> ({m.amount} pt)
                                 </span>
                               ))}
                             </div>
@@ -2108,9 +2104,9 @@ export default function App() {
 
                           {/* Settle Input Row */}
                           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
-                            <div className="flex items-center gap-2 flex-1 bg-white px-3 py-2 rounded-xl border border-amber-300">
-                              <Clock size={15} className="text-orange-600 shrink-0" />
-                              <span className="text-xs font-bold text-slate-700 whitespace-nowrap">
+                            <div className="flex items-center gap-2 flex-1 bg-white px-3 py-2 rounded-lg border border-[#E8C48F]">
+                              <Clock size={15} className="text-[#8A4B00] shrink-0" />
+                              <span className="text-xs font-bold text-[#3B424C] whitespace-nowrap">
                                 เวลาบินจริง ({flt.name}):
                               </span>
                               <input
@@ -2124,15 +2120,15 @@ export default function App() {
                                   }))
                                 }
                                 placeholder="กรอกวินาที เช่น 348"
-                                className="w-full font-mono font-black text-sm text-slate-900 focus:outline-none"
+                                className="w-full font-mono font-semibold text-sm text-[#16191D] focus:outline-none"
                               />
-                              <span className="text-xs font-mono font-bold text-slate-400">วินาที (s)</span>
+                              <span className="text-xs font-mono font-bold text-[#8A929D]">วินาที (s)</span>
                             </div>
 
                             <button
                               onClick={() => handleSettleInFlightRound(flt)}
                               disabled={isSettlingThis}
-                              className="py-2.5 px-5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                              className="py-2.5 px-5 bg-[#1B6E43] hover:bg-[#1B6E43] disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
                             >
                               <CheckCircle size={15} />
                               <span>
@@ -2669,14 +2665,14 @@ export default function App() {
             const rejectedCount = transactions.filter(t => t.status === 'rejected').length;
 
             return (
-              <div className="glass-panel p-5 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+              <div className="bg-white border border-[#D9DDE2] rounded-lg p-4 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#D9DDE2] pb-3">
                   <div>
-                    <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
+                    <h3 className="text-base font-semibold text-[#16191D] flex items-center gap-2 font-heading">
                       <FileText size={18} className={isReviewOnly ? 'text-amber-600' : 'text-slate-600'} />
                       {isReviewOnly ? 'ธุรกรรมรอตรวจสอบสลิป & คำขอถอน' : 'ประวัติการทำรายการฝาก-ถอนทั้งหมด'}
                     </h3>
-                    <p className="text-xs text-slate-500 font-sans mt-0.5">
+                    <p className="text-xs text-[#5B636E] font-sans mt-0.5">
                       {isReviewOnly 
                         ? 'สลิปโอนที่ยอดไม่ตรง หรือคำขอถอนเงินที่รอแอดมินตรวจสอบและยืนยัน'
                         : 'บันทึกประวัติการเติมเงิน สแกนสลิป และถอนเครดิตทั้งหมดในระบบ'}
@@ -2685,53 +2681,53 @@ export default function App() {
                 </div>
 
                   {/* Filter & Search Bar */}
-                  <div className="flex items-center justify-between gap-3 flex-wrap bg-slate-50 p-3 rounded-xl border border-slate-200">
+                  <div className="flex items-center justify-between gap-3 flex-wrap bg-[#F7F8F9] p-3 rounded-lg border border-[#D9DDE2]">
                     <div className="flex items-center gap-2 flex-wrap text-xs font-bold font-sans">
-                      <span className="text-slate-400 text-[11px] uppercase tracking-wider">สถานะ:</span>
+                      <span className="text-[#8A929D] text-[12px]">สถานะ:</span>
                       <button 
                         onClick={() => setTxStatusFilter('all')}
-                        className={`px-2.5 py-1 rounded-lg transition-all ${txStatusFilter === 'all' ? 'bg-slate-800 text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}`}
+                        className={`px-2.5 py-1 rounded-lg transition-all ${txStatusFilter === 'all' ? 'bg-[#16191D] text-white' : 'bg-white text-[#3B424C] border border-[#D9DDE2] hover:bg-[#EEF0F2]'}`}
                       >
                         ทั้งหมด ({transactions.length})
                       </button>
                       <button 
                         onClick={() => setTxStatusFilter('escalated')}
-                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${txStatusFilter === 'escalated' ? 'bg-amber-600 text-white shadow-xs' : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'}`}
+                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${txStatusFilter === 'escalated' ? 'bg-[#9A5B00] text-white' : 'bg-[#FDF1E1] text-[#8A4B00] border border-[#E8C48F] hover:bg-[#FBE5C6]'}`}
                       >
                         <span>รออนุมัติ</span>
-                        {escalatedCount > 0 && <span className="bg-amber-200 text-amber-900 text-[10px] px-1.5 py-0.2 rounded-full font-black">{escalatedCount}</span>}
+                        {escalatedCount > 0 && <span className="bg-[#FBE5C6] text-[#8A4B00] text-[12px] px-1.5 py-0.2 rounded-full font-semibold">{escalatedCount}</span>}
                       </button>
                       <button 
                         onClick={() => setTxStatusFilter('success')}
-                        className={`px-2.5 py-1 rounded-lg transition-all ${txStatusFilter === 'success' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'}`}
+                        className={`px-2.5 py-1 rounded-lg transition-all ${txStatusFilter === 'success' ? 'bg-[#1B6E43] text-white' : 'bg-[#E2F2E9] text-[#1B6E43] border border-[#B9DEC8] hover:bg-[#D3EBDD]'}`}
                       >
                         อนุมัติแล้ว ({successCount})
                       </button>
                       <button 
                         onClick={() => setTxStatusFilter('rejected')}
-                        className={`px-2.5 py-1 rounded-lg transition-all ${txStatusFilter === 'rejected' ? 'bg-rose-600 text-white shadow-xs' : 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100'}`}
+                        className={`px-2.5 py-1 rounded-lg transition-all ${txStatusFilter === 'rejected' ? 'bg-[#B42318] text-white' : 'bg-[#FBEAE8] text-[#B42318] border border-[#E7B4AE] hover:bg-[#F6D7D3]'}`}
                       >
                         ปฏิเสธ ({rejectedCount})
                       </button>
 
-                      <div className="h-4 w-px bg-slate-200 mx-1 hidden md:block"></div>
+                      <div className="h-4 w-px bg-[#EEF0F2] mx-1 hidden md:block"></div>
 
-                      <span className="text-slate-400 text-[11px] uppercase tracking-wider hidden md:inline">ประเภท:</span>
+                      <span className="text-[#8A929D] text-[12px] hidden md:inline">ประเภท:</span>
                       <button 
                         onClick={() => setTxTypeFilter('all')}
-                        className={`px-2 py-1 rounded-lg text-[11px] transition-all ${txTypeFilter === 'all' ? 'bg-slate-700 text-white' : 'bg-white text-slate-500 border border-slate-200'}`}
+                        className={`px-2 py-1 rounded-lg text-[12px] transition-all ${txTypeFilter === 'all' ? 'bg-slate-700 text-white' : 'bg-white text-[#5B636E] border border-[#D9DDE2]'}`}
                       >
                         ทั้งหมด
                       </button>
                       <button 
                         onClick={() => setTxTypeFilter('deposit')}
-                        className={`px-2 py-1 rounded-lg text-[11px] transition-all ${txTypeFilter === 'deposit' ? 'bg-emerald-700 text-white' : 'bg-white text-emerald-700 border border-emerald-200'}`}
+                        className={`px-2 py-1 rounded-lg text-[12px] transition-all ${txTypeFilter === 'deposit' ? 'bg-[#1B6E43] text-white' : 'bg-white text-[#1B6E43] border border-[#B9DEC8]'}`}
                       >
                         ฝากเงิน
                       </button>
                       <button 
                         onClick={() => setTxTypeFilter('withdrawal')}
-                        className={`px-2 py-1 rounded-lg text-[11px] transition-all ${txTypeFilter === 'withdrawal' ? 'bg-rose-700 text-white' : 'bg-white text-rose-700 border border-rose-200'}`}
+                        className={`px-2 py-1 rounded-lg text-[12px] transition-all ${txTypeFilter === 'withdrawal' ? 'bg-[#B42318] text-white' : 'bg-white text-[#B42318] border border-[#E7B4AE]'}`}
                       >
                         ถอนเงิน
                       </button>
@@ -2743,12 +2739,12 @@ export default function App() {
                         placeholder="ค้นหา TX ID / ชื่อผู้เล่น / LINE ID / Ref..." 
                         value={txSearchQuery}
                         onChange={e => setTxSearchQuery(e.target.value)}
-                        className="w-full pl-3 pr-8 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-sans text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-2xs"
+                        className="w-full pl-3 pr-8 py-1.5 bg-white border border-[#C3C9D1] rounded-lg text-xs font-sans text-[#16191D] focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30 shadow-2xs"
                       />
                       {txSearchQuery && (
                         <button 
                           onClick={() => setTxSearchQuery('')}
-                          className="absolute right-2.5 top-1.5 text-slate-400 hover:text-slate-600 font-bold text-xs"
+                          className="absolute right-2.5 top-1.5 text-[#8A929D] hover:text-[#3B424C] font-bold text-xs"
                         >
                           ✕
                         </button>
@@ -2757,10 +2753,10 @@ export default function App() {
                   </div>
 
                 {/* High-Density Compact Transaction Table */}
-                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                <div className="overflow-x-auto rounded-lg border border-[#D9DDE2] bg-white">
                   <table className="w-full text-left font-sans text-xs border-collapse min-w-[850px]">
-                    <thead className="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider text-[10.5px]">
-                      <tr className="border-b border-slate-200">
+                    <thead className="bg-[#EEF0F2] text-[#3B424C] font-bold text-[12px]">
+                      <tr className="border-b border-[#D9DDE2]">
                         <th className="py-2.5 px-3">TX ID / เวลา</th>
                         <th className="py-2.5 px-3">ผู้เล่น / LINE ID</th>
                         <th className="py-2.5 px-3 text-center">ประเภท</th>
@@ -2771,10 +2767,10 @@ export default function App() {
                         <th className="py-2.5 px-3 text-center">จัดการ</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                    <tbody className="divide-y divide-[#E6E9ED] text-[#3B424C]">
                       {filteredTxList.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="py-10 text-center text-slate-400 font-sans">
+                          <td colSpan={8} className="py-10 text-center text-[#8A929D] font-sans">
                             <p className="font-bold text-xs">-- ไม่พบรายการธุรกรรมตามเงื่อนไขที่เลือก --</p>
                           </td>
                         </tr>
@@ -2785,42 +2781,42 @@ export default function App() {
                             (tx.reviewReason && tx.reviewReason.toString().toLowerCase().includes('withdraw'));
                           
                           return (
-                            <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
+                            <tr key={tx.id} className="hover:bg-[#F7F8F9] transition-colors">
                               <td className="py-2.5 px-3">
-                                <div className="font-bold font-mono text-slate-900 text-[11px]">{tx.id}</div>
-                                <div className="text-[9.5px] text-slate-400 font-mono">{tx.timestamp}</div>
+                                <div className="font-bold font-mono text-[#16191D] text-[12px]">{tx.id}</div>
+                                <div className="text-[12px] text-[#8A929D] font-mono">{tx.timestamp}</div>
                               </td>
 
                               <td className="py-2.5 px-3">
-                                <div className="font-bold text-slate-800">{tx.playerName}</div>
-                                <div className="text-[9.5px] text-slate-400 font-mono">{tx.playerId}</div>
+                                <div className="font-bold text-[#16191D]">{tx.playerName}</div>
+                                <div className="text-[12px] text-[#8A929D] font-mono">{tx.playerId}</div>
                               </td>
 
                               <td className="py-2.5 px-3 text-center">
                                 {isWithdrawal ? (
-                                  <span className="px-2 py-0.5 bg-rose-100 text-rose-800 font-black rounded-md text-[10px]">ถอนเงิน</span>
+                                  <span className="px-2 py-0.5 bg-[#F6D7D3] text-[#B42318] font-semibold rounded-md text-[12px]">ถอนเงิน</span>
                                 ) : (
-                                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-black rounded-md text-[10px]">ฝากเงิน</span>
+                                  <span className="px-2 py-0.5 bg-[#D3EBDD] text-[#1B6E43] font-semibold rounded-md text-[12px]">ฝากเงิน</span>
                                 )}
                               </td>
 
-                              <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-[#16191D]">
                                 {isWithdrawal ? `-${tx.requestedAmount}` : tx.requestedAmount}.00
                               </td>
 
-                              <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-700">
-                                {tx.actualAmount > 0 ? `${tx.actualAmount}.00` : <span className="text-slate-400 italic">0.00</span>}
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-[#1B6E43]">
+                                {tx.actualAmount > 0 ? `${tx.actualAmount}.00` : <span className="text-[#8A929D] italic">0.00</span>}
                               </td>
 
                               <td className="py-2.5 px-3 text-center">
-                                {tx.status === 'success' && <span className="badge-success px-2 py-0.5 rounded-lg text-[10px] font-bold">อนุมัติแล้ว</span>}
-                                {tx.status === 'escalated' && <span className="badge-warning px-2 py-0.5 rounded-lg text-[10px] font-bold animate-pulse">รออนุมัติ</span>}
-                                {tx.status === 'rejected' && <span className="badge-high px-2 py-0.5 rounded-lg text-[10px] font-bold">✕ ปฏิเสธ</span>}
+                                {tx.status === 'success' && <span className="badge-success px-2 py-0.5 rounded-lg text-[12px] font-bold">อนุมัติแล้ว</span>}
+                                {tx.status === 'escalated' && <span className="badge-warning px-2 py-0.5 rounded-lg text-[12px] font-bold">รออนุมัติ</span>}
+                                {tx.status === 'rejected' && <span className="badge-high px-2 py-0.5 rounded-lg text-[12px] font-bold">✕ ปฏิเสธ</span>}
                               </td>
 
                               <td className="py-2.5 px-3 max-w-[220px]">
-                                <div className="font-mono text-[10px] text-slate-700 font-bold truncate" title={tx.slipRef}>{tx.slipRef}</div>
-                                <div className="text-[9.5px] text-slate-500 truncate" title={tx.reviewReason}>{tx.reviewReason}</div>
+                                <div className="font-mono text-[12px] text-[#3B424C] font-bold truncate" title={tx.slipRef}>{tx.slipRef}</div>
+                                <div className="text-[12px] text-[#5B636E] truncate" title={tx.reviewReason}>{tx.reviewReason}</div>
                               </td>
 
                               <td className="py-2.5 px-3 text-center">
@@ -2829,14 +2825,14 @@ export default function App() {
                                     <>
                                       <button 
                                         onClick={() => handleAdminApproveReview(tx.id)}
-                                        className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] rounded-lg transition-all shadow-2xs"
+                                        className="px-2 py-1 bg-[#1B6E43] hover:bg-emerald-500 text-white font-bold text-[12px] rounded-lg transition-all shadow-2xs"
                                         title="อนุมัติรายการ"
                                       >
                                         อนุมัติ
                                       </button>
                                       <button 
                                         onClick={() => handleAdminRejectReview(tx.id, isWithdrawal ? 'ปฏิเสธคำขอและส่งแต้มคืนเข้าบัญชี' : 'ปฏิเสธเนื่องจากไม่มียอดโอนจริง')}
-                                        className="px-2 py-1 bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-200 text-[10px] font-bold rounded-lg transition-all"
+                                        className="px-2 py-1 bg-[#FBEAE8] hover:bg-[#B42318] text-[#B42318] hover:text-white border border-[#E7B4AE] text-[12px] font-bold rounded-lg transition-all"
                                         title="ปฏิเสธรายการ"
                                       >
                                         ✕ ปฏิเสธ
@@ -2845,7 +2841,7 @@ export default function App() {
                                   )}
                                   <button 
                                     onClick={() => setTxDetailModal(tx)}
-                                    className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition-all border border-slate-300"
+                                    className="px-2 py-1 bg-[#EEF0F2] hover:bg-[#EEF0F2] text-[#3B424C] text-[12px] font-bold rounded-lg transition-all border border-[#C3C9D1]"
                                     title="ดูสลิปและรายละเอียดเต็ม"
                                   >
                                     สลิป
@@ -2865,14 +2861,14 @@ export default function App() {
 
           {/* TAB 5: PLAYERS CREDIT */}
           {adminTab === 'players' && (
-            <div className="glass-panel p-5 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div className="bg-white border border-[#D9DDE2] rounded-lg p-4 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#D9DDE2] pb-3">
                 <div>
-                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
-                    <Users size={18} className="text-teal-600" />
+                  <h3 className="text-base font-semibold text-[#16191D] flex items-center gap-2 font-heading">
+                    <Users size={18} className="text-[#1E4DB7]" />
                     จัดการบัญชีผู้เล่น
                   </h3>
-                  <p className="text-xs text-slate-500 font-sans mt-0.5">
+                  <p className="text-xs text-[#5B636E] font-sans mt-0.5">
                     ตรวจสอบรายชื่อ แก้ไขเครดิต บัญชีธนาคาร หรือเพิ่มสมาชิกใหม่
                   </p>
                 </div>
@@ -2885,17 +2881,17 @@ export default function App() {
                     setCreatePlayerModal(true); 
                     setCreatePlayerForm({ lineId: randomId, name: '', balance: 0 }); 
                   }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-lg transition-all active:scale-95"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1E4DB7] hover:bg-[#1E4DB7] text-white text-xs font-bold rounded-lg transition-all"
                 >
                   <span>＋ เพิ่มผู้เล่น</span>
                 </button>
               </div>
 
               {/* Player Table */}
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <div className="overflow-x-auto rounded-lg border border-[#D9DDE2]">
                 <table className="w-full text-left font-sans text-xs border-collapse min-w-[700px]">
-                  <thead className="bg-slate-50">
-                    <tr className="border-b border-slate-200 text-slate-500 font-bold">
+                  <thead className="bg-[#F7F8F9]">
+                    <tr className="border-b border-[#D9DDE2] text-[#5B636E] font-bold">
                       <th className="py-2.5 px-3">ผู้เล่น / LINE ID</th>
                       <th className="py-2.5 px-3 text-right">เครดิต</th>
                       <th className="py-2.5 px-3">ธนาคาร</th>
@@ -2904,41 +2900,41 @@ export default function App() {
                       <th className="py-2.5 px-3 text-center">จัดการ</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-[#E6E9ED]">
                     {players.map(p => {
                       const hasBank = !!(p.bankName && p.bankAccount);
                       return (
-                        <tr key={p.shortId || p.lineUserId || p.id} className="hover:bg-teal-50/20 transition-colors group">
+                        <tr key={p.shortId || p.lineUserId || p.id} className="hover:bg-[#EEF2FB] transition-colors group">
                           {/* Player name + ID */}
                           <td className="py-3 px-3">
                             <div className="flex items-center gap-2">
-                              <span className="text-lg w-8 h-8 flex items-center justify-center bg-slate-100 rounded-full border border-slate-200 shrink-0">{p.avatar}</span>
+                              <span className="text-lg w-8 h-8 flex items-center justify-center bg-[#EEF0F2] rounded-full border border-[#D9DDE2] shrink-0">{p.avatar}</span>
                               <div>
-                                <div className="font-bold text-slate-800">{p.name}</div>
-                                <div className="text-[9px] text-slate-400 font-mono" title={p.id}>{p.id.length > 18 ? p.id.slice(0, 18) + '…' : p.id}</div>
+                                <div className="font-bold text-[#16191D]">{p.name}</div>
+                                <div className="text-[12px] text-[#8A929D] font-mono" title={p.id}>{p.id.length > 18 ? p.id.slice(0, 18) + '…' : p.id}</div>
                               </div>
                             </div>
                           </td>
                           {/* Balance */}
                           <td className="py-3 px-3 text-right">
-                            <span className="font-extrabold text-sky-700 font-mono text-sm">{p.balance.toLocaleString()}</span>
-                            <span className="text-slate-400 ml-1 text-[10px]">pt</span>
+                            <span className="font-semibold text-[#1E4DB7] font-mono text-sm">{p.balance.toLocaleString()}</span>
+                            <span className="text-[#8A929D] ml-1 text-[12px]">pt</span>
                           </td>
                           {/* Bank */}
                           <td className="py-3 px-3">
                             {hasBank
-                              ? <span className="px-2 py-0.5 bg-teal-50 border border-teal-200 text-teal-800 rounded font-bold">{p.bankName}</span>
-                              : <span className="text-slate-300 italic">—</span>}
+                              ? <span className="px-2 py-0.5 bg-[#EEF2FB] border border-[#C7D3F1] text-[#16191D] rounded font-bold">{p.bankName}</span>
+                              : <span className="text-[#8A929D] italic">—</span>}
                           </td>
                           {/* Account no */}
                           <td className="py-3 px-3 font-mono">
-                            {hasBank ? p.bankAccount : <span className="text-slate-300">—</span>}
+                            {hasBank ? p.bankAccount : <span className="text-[#8A929D]">—</span>}
                           </td>
                           {/* Status */}
                           <td className="py-3 px-3 text-center">
                             {hasBank
-                              ? <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full text-[10px] font-bold">ลงทะเบียนแล้ว</span>
-                              : <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-full text-[10px] font-bold animate-pulse">รอลงทะเบียน</span>}
+                              ? <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#E2F2E9] border border-[#B9DEC8] text-[#1B6E43] rounded-full text-[12px] font-bold">ลงทะเบียนแล้ว</span>
+                              : <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FDF1E1] border border-[#E8C48F] text-[#8A4B00] rounded-full text-[12px] font-bold">รอลงทะเบียน</span>}
                           </td>
                           {/* Actions */}
                           <td className="py-3 px-3">
@@ -2950,7 +2946,7 @@ export default function App() {
                                   setPlayerEditModal({ player: p });
                                   setPlayerEditForm({ name: p.name, balance: p.balance });
                                 }}
-                                className="px-2.5 py-1.5 bg-sky-50 border border-sky-200 text-sky-700 text-[10px] font-bold rounded-lg hover:bg-sky-100 transition-all active:scale-95"
+                                className="px-2.5 py-1.5 bg-[#EEF2FB] border border-[#C7D3F1] text-[#1E4DB7] text-[12px] font-bold rounded-lg hover:bg-[#E3EAFB] transition-all"
                               >
                                 แก้ไข
                               </button>
@@ -2961,7 +2957,7 @@ export default function App() {
                                   setBankEditModal({ player: p });
                                   setBankEditForm({ bankName: p.bankName || '', bankAccount: p.bankAccount || '', accountName: p.accountName || p.name || '' });
                                 }}
-                                className="px-2.5 py-1.5 bg-teal-50 border border-teal-200 text-teal-700 text-[10px] font-bold rounded-lg hover:bg-teal-100 transition-all active:scale-95"
+                                className="px-2.5 py-1.5 bg-[#EEF2FB] border border-[#C7D3F1] text-[#1E4DB7] text-[12px] font-bold rounded-lg hover:bg-[#E3EAFB] transition-all"
                               >
                                 บัญชี
                               </button>
@@ -2969,9 +2965,9 @@ export default function App() {
                               <button
                                 title="ลบผู้เล่น"
                                 onClick={() => setConfirmDelete({ player: p })}
-                                className="px-2.5 py-1.5 bg-rose-50 border border-rose-200 text-rose-600 text-[10px] font-bold rounded-lg hover:bg-rose-100 transition-all active:scale-95"
+                                className="px-2.5 py-1.5 bg-[#FBEAE8] border border-[#E7B4AE] text-[#B42318] text-[12px] font-bold rounded-lg hover:bg-[#F6D7D3] transition-all"
                               >
-                                
+                                ลบ
                               </button>
                             </div>
                           </td>
@@ -2981,7 +2977,7 @@ export default function App() {
                   </tbody>
                 </table>
                 {players.length === 0 && (
-                  <div className="py-10 text-center text-slate-400 text-sm">ยังไม่มีผู้เล่นในระบบ — กด «เพิ่มผู้เล่น» เพื่อเริ่มต้น</div>
+                  <div className="py-10 text-center text-[#8A929D] text-sm">ยังไม่มีผู้เล่นในระบบ — กด «เพิ่มผู้เล่น» เพื่อเริ่มต้น</div>
                 )}
               </div>
             </div>
@@ -2990,63 +2986,63 @@ export default function App() {
           {/* TAB 7: BROADCAST HUB & FIELD ADMIN HOTKEYS */}
           {/* TAB: DEPOSIT ACCOUNT — where the LINE OA deposit screen points players */}
           {adminTab === 'bank' && (
-            <div className="glass-panel p-5 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div className="bg-white border border-[#D9DDE2] rounded-lg p-4 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#D9DDE2] pb-3">
                 <div>
-                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
-                    <Landmark size={18} className="text-sky-600" />
+                  <h3 className="text-base font-semibold text-[#16191D] flex items-center gap-2 font-heading">
+                    <Landmark size={18} className="text-[#1E4DB7]" />
                     บัญชีรับเงินฝาก
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
+                  <p className="text-xs text-[#5B636E] mt-0.5">
                     ข้อมูลนี้คือบัญชีที่ข้อความ &ldquo;ฝาก&rdquo; ใน LINE OA แสดงให้ผู้เล่นโอนเงินเข้า
                   </p>
                 </div>
               </div>
 
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 leading-relaxed">
+              <div className="rounded-lg border border-[#E8C48F] bg-[#FDF1E1] p-3 text-xs text-[#8A4B00] leading-relaxed">
                 ตรวจสอบเลขบัญชีให้ถูกต้องก่อนบันทึก — ผู้เล่นจะโอนเงินตามข้อมูลชุดนี้ทันที
                 และระบบจะเติมเครดิตอัตโนมัติจากยอดในสลิปที่ส่งมา
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="block">
-                  <span className="text-xs font-bold text-slate-600">ธนาคาร</span>
+                  <span className="text-xs font-bold text-[#3B424C]">ธนาคาร</span>
                   <input
                     type="text"
                     value={paymentBank.bankName}
                     onChange={(e) => setPaymentBank(p => ({ ...p, bankName: e.target.value }))}
                     placeholder="เช่น SCB (ไทยพาณิชย์)"
-                    className="mt-1 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    className="mt-1 w-full px-3 py-2 text-sm border border-[#C3C9D1] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30"
                   />
                 </label>
                 <label className="block">
-                  <span className="text-xs font-bold text-slate-600">เลขบัญชี</span>
+                  <span className="text-xs font-bold text-[#3B424C]">เลขบัญชี</span>
                   <input
                     type="text"
                     value={paymentBank.accountNumber}
                     onChange={(e) => setPaymentBank(p => ({ ...p, accountNumber: e.target.value }))}
                     placeholder="เช่น 123-4-56789-0"
-                    className="mt-1 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    className="mt-1 w-full px-3 py-2 text-sm border border-[#C3C9D1] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30"
                   />
                 </label>
                 <label className="block sm:col-span-2">
-                  <span className="text-xs font-bold text-slate-600">ชื่อบัญชี</span>
+                  <span className="text-xs font-bold text-[#3B424C]">ชื่อบัญชี</span>
                   <input
                     type="text"
                     value={paymentBank.accountName}
                     onChange={(e) => setPaymentBank(p => ({ ...p, accountName: e.target.value }))}
                     placeholder="เช่น สมชาย ใจดี"
-                    className="mt-1 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    className="mt-1 w-full px-3 py-2 text-sm border border-[#C3C9D1] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30"
                   />
                 </label>
                 <label className="block sm:col-span-2">
-                  <span className="text-xs font-bold text-slate-600">หมายเหตุ (ถ้ามี)</span>
+                  <span className="text-xs font-bold text-[#3B424C]">หมายเหตุ (ถ้ามี)</span>
                   <input
                     type="text"
                     value={paymentBank.note}
                     onChange={(e) => setPaymentBank(p => ({ ...p, note: e.target.value }))}
                     placeholder="ข้อความเสริมใต้เลขบัญชี เช่น ชำระหมดค่าส่วนนี้"
-                    className="mt-1 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    className="mt-1 w-full px-3 py-2 text-sm border border-[#C3C9D1] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30"
                   />
                 </label>
               </div>
@@ -3056,7 +3052,7 @@ export default function App() {
                   onClick={handleSavePaymentBank}
                   disabled={paymentBankSaving}
                   className={`px-4 py-2.5 rounded-lg text-sm font-bold text-white transition-all flex items-center gap-2 ${
-                    paymentBankSaving ? 'bg-slate-400 cursor-not-allowed' : 'bg-sky-600 hover:bg-sky-700'
+                    paymentBankSaving ? 'bg-slate-400 cursor-not-allowed' : 'bg-[#1E4DB7] hover:bg-[#1E4DB7]'
                   }`}
                 >
                   {paymentBankSaving ? <RefreshCw size={15} className="animate-spin" /> : <CheckCircle size={15} />}
@@ -3067,23 +3063,23 @@ export default function App() {
           )}
 
           {adminTab === 'bank' && adminRole === 'superadmin' && (
-            <div className="glass-panel p-5 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div className="bg-white border border-[#D9DDE2] rounded-lg p-4 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#D9DDE2] pb-3">
                 <div className="flex items-center gap-2">
-                  <ShieldAlert size={18} className="text-rose-600" />
-                  <h3 className="text-base font-black text-slate-800">PIN สำหรับการล้างข้อมูลระบบ</h3>
+                  <ShieldAlert size={18} className="text-[#B42318]" />
+                  <h3 className="text-base font-semibold text-[#16191D]">PIN สำหรับการล้างข้อมูลระบบ</h3>
                 </div>
-                <span className="text-[11px] text-slate-500">Super Admin เท่านั้น</span>
+                <span className="text-[12px] text-[#5B636E]">Super Admin เท่านั้น</span>
               </div>
 
-              <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs text-rose-800 space-y-1">
+              <div className="bg-[#FBEAE8] border border-[#E7B4AE] rounded-lg p-3 text-xs text-[#B42318] space-y-1">
                 <p className="font-bold">การล้างระเบียนข้อมูล (Factory Reset) ไม่มีการสำรองข้อมูลและย้อนกลับไม่ได้</p>
                 <p>ระบบจะไม่อนุญาตให้ล้างข้อมูลจนกว่าจะตั้งค่า PIN นี้ ข้อมูลผู้เล่น ยอดเครดิต ธุรกรรม และบันทึกแชททั้งหมดจะถูกลบถาวร</p>
                 <p>PIN นี้ไม่เกี่ยวข้องกับรหัสผ่านของคุณ และจะถูกตรวจสอบบนเซิร์ฟเวอร์อีกครั้งก่อนดำเนินการ</p>
               </div>
 
               <label className="block">
-                <span className="text-xs font-bold text-slate-600">ตั้งค่า PIN (ตัวเลข 4–12 หลัก)</span>
+                <span className="text-xs font-bold text-[#3B424C]">ตั้งค่า PIN (ตัวเลข 4–12 หลัก)</span>
                 <input
                   type="password"
                   inputMode="numeric"
@@ -3091,7 +3087,7 @@ export default function App() {
                   value={dangerPin}
                   onChange={(e) => setDangerPin(e.target.value.replace(/[^\d]/g, ''))}
                   placeholder="เช่น 583920"
-                  className="mt-1 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 w-full px-3 py-2 text-sm border border-[#C3C9D1] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30"
                 />
               </label>
 
@@ -3100,7 +3096,7 @@ export default function App() {
                   onClick={handleSaveDangerPin}
                   disabled={dangerPinSaving}
                   className={`px-4 py-2.5 rounded-lg text-sm font-bold text-white transition-all flex items-center gap-2 ${
-                    dangerPinSaving ? 'bg-slate-400 cursor-not-allowed' : 'bg-rose-600 hover:bg-rose-700'
+                    dangerPinSaving ? 'bg-slate-400 cursor-not-allowed' : 'bg-[#B42318] hover:bg-[#B42318]'
                   }`}
                 >
                   {dangerPinSaving ? <RefreshCw size={15} className="animate-spin" /> : <ShieldAlert size={15} />}
@@ -3111,14 +3107,14 @@ export default function App() {
           )}
 
           {adminTab === 'broadcast' && (
-            <div className="glass-panel p-5 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div className="bg-white border border-[#D9DDE2] rounded-lg p-4 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#D9DDE2] pb-3">
                 <div>
-                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
-                    <Radio size={18} className="text-purple-600" />
-                    ศูนย์บรอดแคสต์ & คีย์ลัดสั่งการสนาม
+                  <h3 className="text-base font-semibold text-[#16191D] flex items-center gap-2 font-heading">
+                    <Radio size={18} className="text-[#1E4DB7]" />
+                    ประกาศเข้ากลุ่ม LINE
                   </h3>
-                  <p className="text-xs text-slate-500 font-sans mt-0.5">
+                  <p className="text-xs text-[#5B636E] font-sans mt-0.5">
                     ควบคุมรอบฉุกเฉิน ปิดรับดวล ส่งคู่มือกติกา ประกาศข้อความสนามเข้ากลุ่ม LINE
                   </p>
                 </div>
@@ -3126,23 +3122,23 @@ export default function App() {
 
 
               {/* Target Group Selector (Applies to all actions in this tab) */}
-              <div className="bg-purple-50/60 border border-purple-200 rounded-xl p-3 flex items-center justify-between flex-wrap gap-3">
+              <div className="bg-[#EEF2FB] border border-[#C7D3F1] rounded-lg p-3 flex items-center justify-between flex-wrap gap-3">
                 <div className="flex items-center gap-2">
-                  <span className="p-1.5 bg-purple-600 text-white rounded-lg">
+                  <span className="p-1.5 bg-[#1E4DB7] text-white rounded-lg">
                     <Users size={14} />
                   </span>
                   <div>
-                    <span className="text-xs font-black text-purple-950 font-heading block">กลุ่มเป้าหมายการส่งข้อความ:</span>
-                    <span className="text-[10px] text-purple-700 font-sans">คำสั่งและประกาศทั้งหมดในหน้านี้จะส่งไปยังกลุ่มที่เลือก</span>
+                    <span className="text-xs font-semibold text-[#16191D] font-heading block">กลุ่มเป้าหมายการส่งข้อความ:</span>
+                    <span className="text-[12px] text-[#1E4DB7] font-sans">คำสั่งและประกาศทั้งหมดในหน้านี้จะส่งไปยังกลุ่มที่เลือก</span>
                   </div>
                 </div>
                 <div className="w-full sm:w-80">
                   <select
                     value={broadcastTargetGroup}
                     onChange={(e) => setBroadcastTargetGroup(e.target.value)}
-                    className="w-full bg-white border border-purple-200 text-purple-950 font-bold px-3 py-1.5 rounded-lg text-xs focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                    className="w-full bg-white border border-[#C7D3F1] text-[#16191D] font-bold px-3 py-1.5 rounded-lg text-xs focus:ring-2 focus:ring-[#1E4DB7]/30 focus:outline-none"
                   >
-                    <option value="ALL">กระจายทุกกลุ่มดวลสด (All Groups)</option>
+                    <option value="ALL">ทุกกลุ่มดวล</option>
                     {lineGroups.map((g, idx) => {
                       const isRawId = !g.name || g.name.startsWith('C') || g.name.includes(g.id) || !isNaN(g.name);
                       const displayName = !isRawId ? g.name : `กลุ่มดวลสด #${idx + 1} (${g.id.slice(-4)})`;
@@ -3158,26 +3154,26 @@ export default function App() {
 
               {/* SECTION 1: FIELD OPERATION & EMERGENCY HOTKEYS */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                  <span className="text-xs font-black text-slate-800 uppercase tracking-wider font-heading flex items-center gap-1.5">
-                    <span>1. ปุ่มคีย์ลัดสั่งการสนาม & กฎกติกา</span>
+                <div className="flex items-center justify-between border-b border-[#D9DDE2] pb-2">
+                  <span className="text-xs font-semibold text-[#16191D] font-heading flex items-center gap-1.5">
+                    <span>1. คำสั่งด่วน</span>
                   </span>
-                  <span className="text-[10px] text-slate-400 font-sans">ส่งการ์ด Flex แจ้งเตือนด่วนเข้ากลุ่ม LINE ทันที</span>
+                  <span className="text-[12px] text-[#8A929D] font-sans">ส่งการ์ด Flex แจ้งเตือนด่วนเข้ากลุ่ม LINE ทันที</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {/* Combined Rocket Launched + Final Call Card */}
-                  <div className="bg-gradient-to-br from-orange-50 via-amber-50/80 to-orange-100/70 border-2 border-orange-300 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between shadow-xs">
+                  <div className="bg-white border border-[#D9DDE2] rounded-lg p-3.5 space-y-2.5 flex flex-col justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center justify-between gap-1 flex-wrap">
-                        <span className="text-xs font-black text-orange-950 font-heading flex items-center gap-1">
+                        <span className="text-xs font-semibold text-[#16191D] font-heading flex items-center gap-1">
                           <span>บั้งไฟออกแล้ว! (ปิดรับดวล)</span>
                         </span>
-                        <span className="text-[10px] font-black px-2 py-0.5 bg-orange-200 text-orange-950 rounded-md">
-                          Live Action · Final Call
+                        <span className="text-[12px] font-semibold px-2 py-0.5 bg-[#FBE5C6] text-[#8A4B00] rounded-md">
+                          ปิดรับทันที
                         </span>
                       </div>
-                      <p className="text-[10.5px] text-orange-900/90 font-sans leading-relaxed">
+                      <p className="text-[12px] text-[#5B636E] font-sans leading-relaxed">
                         ล็อกรอบและประกาศ <strong>&ldquo;บั้งไฟออกแล้ว + ปิดรับดวล&rdquo;</strong> พร้อมกันในคลิกเดียว ยกเลิกแผลเปิดที่ไม่มีคู่และคืนแต้มอัตโนมัติทันที
                       </p>
                     </div>
@@ -3196,29 +3192,29 @@ export default function App() {
                             addToast('ส่งไม่สำเร็จ', 'danger');
                           }
                         }}
-                        style={{ backgroundColor: '#ea580c', color: '#ffffff' }}
-                        className="w-full py-2.5 px-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-xs font-black transition-all active:scale-95 flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                        style={{ backgroundColor: '#9A5B00', color: '#ffffff' }}
+                        className="w-full py-2.5 px-3 bg-[#9A5B00] hover:bg-[#7A4800] text-white rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                       >
-                        <span className="text-white font-black">บั้งไฟออกแล้ว! (ปิดรับดวลทันที)</span>
+                        <span className="text-white font-semibold">บั้งไฟออกแล้ว! (ปิดรับดวลทันที)</span>
                       </button>
                       <button
                         onClick={() => setAdminTab('next_rocket')}
-                        className="w-full py-1.5 px-2.5 bg-white/90 hover:bg-white text-orange-900 border border-orange-300 rounded-lg text-[10.5px] font-extrabold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                        className="w-full py-1.5 px-2.5 bg-white hover:bg-white text-[#8A4B00] border border-[#E8C48F] rounded-lg text-[12px] font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer"
                       >
-                        <Rocket size={12} className="text-orange-600" />
-                        <span>เปิดรับบั้งไฟลูกถัดไป (Rocket B) ต่อทันที </span>
+                        <Rocket size={12} className="text-[#8A4B00]" />
+                        <span>เปิดลำถัดไป</span>
                       </button>
                     </div>
                   </div>
 
                   {/* Void Round */}
-                  <div className="bg-rose-50/70 border border-rose-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
+                  <div className="bg-white border border-[#D9DDE2] rounded-lg p-3.5 space-y-2.5 flex flex-col justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-rose-900 font-heading">โมฆะรอบ (ช่าง )</span>
-                        <span className="text-[10px] font-bold px-2 py-0.5 bg-rose-200 text-rose-900 rounded-md">Emergency</span>
+                        <span className="text-xs font-semibold text-[#16191D] font-heading">โมฆะรอบ</span>
+                        <span className="text-[12px] font-bold px-2 py-0.5 bg-[#F6D7D3] text-[#B42318] rounded-md">ฉุกเฉิน</span>
                       </div>
-                      <p className="text-[10.5px] text-rose-800/80 font-sans leading-relaxed">
+                      <p className="text-[12px] text-[#5B636E] font-sans leading-relaxed">
                         กรณีบั้งไฟมีปัญหา ยุติรอบการแข่งขัน ยกเลิกแผลดวลและโอนคืนเครดิตให้ผู้เล่น 100%
                       </p>
                     </div>
@@ -3241,20 +3237,20 @@ export default function App() {
                           addToast('ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
-                      className="w-full py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="w-full py-2 px-3 bg-[#B42318] hover:bg-[#B42318] text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <span>สั่งโมฆะรอบ & คืนแต้ม</span>
                     </button>
                   </div>
 
                   {/* Rule Guide */}
-                  <div className="bg-teal-50/70 border border-teal-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
+                  <div className="bg-white border border-[#D9DDE2] rounded-lg p-3.5 space-y-2.5 flex flex-col justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-teal-900 font-heading">คู่มือกติกา</span>
-                        <span className="text-[10px] font-bold px-2 py-0.5 bg-teal-200 text-teal-900 rounded-md">Guide</span>
+                        <span className="text-xs font-semibold text-[#16191D] font-heading">คู่มือกติกา</span>
+                        <span className="text-[12px] font-bold px-2 py-0.5 bg-[#E3EAFB] text-[#16191D] rounded-md">กติกา</span>
                       </div>
-                      <p className="text-[10.5px] text-teal-800/80 font-sans leading-relaxed">
+                      <p className="text-[12px] text-[#5B636E] font-sans leading-relaxed">
                         ส่ง Flex Card กฎกติกา คีย์เวิร์ดต่ำ/สูง อัตราต่อรอง และวิธีจับคู่ลงกลุ่มดวลสด
                       </p>
                     </div>
@@ -3268,20 +3264,20 @@ export default function App() {
                           addToast('ส่งไม่สำเร็จ', 'danger');
                         }
                       }}
-                      className="w-full py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="w-full py-2 px-3 bg-[#1E4DB7] hover:bg-[#1E4DB7] text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <span>ส่งคู่มือกติกาเข้ากลุ่ม</span>
                     </button>
                   </div>
 
                   {/* Daily Duel Summary */}
-                  <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
+                  <div className="bg-white border border-[#D9DDE2] rounded-lg p-3.5 space-y-2.5 flex flex-col justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-indigo-900 font-heading">สรุปผลประจำวัน</span>
-                        <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-200 text-indigo-900 rounded-md">Summary</span>
+                        <span className="text-xs font-semibold text-[#16191D] font-heading">สรุปผลประจำวัน</span>
+                        <span className="text-[12px] font-bold px-2 py-0.5 bg-[#E3EAFB] text-[#16191D] rounded-md">สรุปผล</span>
                       </div>
-                      <p className="text-[10.5px] text-indigo-800/80 font-sans leading-relaxed">
+                      <p className="text-[12px] text-[#5B636E] font-sans leading-relaxed">
                         ส่ง Flex สรุปคู่ดวลที่ตัดสินผลแล้วของวัน แยกตามบั้งไฟแต่ละลำ พร้อมผู้ชนะ/ผู้แพ้ทุกคู่
                       </p>
                     </div>
@@ -3291,17 +3287,17 @@ export default function App() {
                         value={summaryDay}
                         max={bangkokToday()}
                         onChange={(e) => { setSummaryDay(e.target.value); setSummaryPreview(null); }}
-                        className="w-full py-1.5 px-2 bg-white border border-indigo-200 rounded-lg text-[11px] font-bold text-indigo-950"
+                        className="w-full py-1.5 px-2 bg-white border border-[#C7D3F1] rounded-lg text-[12px] font-bold text-[#16191D]"
                       />
                       {summaryPreview && (
-                        <div className="bg-white/90 border border-indigo-100 rounded-lg p-2 space-y-1 max-h-40 overflow-y-auto">
+                        <div className="bg-white border border-[#C7D3F1] rounded-lg p-2 space-y-1 max-h-40 overflow-y-auto">
                           {summaryPreview.count === 0 ? (
-                            <p className="text-[10.5px] text-slate-500 text-center">ยังไม่มีคู่ดวลที่ตัดสินผลในวันนี้</p>
+                            <p className="text-[12px] text-[#5B636E] text-center">ยังไม่มีคู่ดวลที่ตัดสินผลในวันนี้</p>
                           ) : (
                             summaryPreview.rounds.map((r) => (
-                              <div key={r.key} className="flex items-center justify-between text-[10.5px] gap-2">
-                                <span className="font-bold text-indigo-950 truncate">{r.name}</span>
-                                <span className="text-slate-500 shrink-0">{r.pairs} คู่ · ค่าธรรมเนียม {r.fees.toLocaleString()}</span>
+                              <div key={r.key} className="flex items-center justify-between text-[12px] gap-2">
+                                <span className="font-bold text-[#16191D] truncate">{r.name}</span>
+                                <span className="text-[#5B636E] shrink-0">{r.pairs} คู่ · ค่าธรรมเนียม {r.fees.toLocaleString()}</span>
                               </div>
                             ))
                           )}
@@ -3332,7 +3328,7 @@ export default function App() {
                             setSummaryBusy(false);
                           }
                         }}
-                        className="w-full py-1.5 px-2.5 bg-white/90 hover:bg-white text-indigo-900 border border-indigo-300 rounded-lg text-[10.5px] font-extrabold transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-60"
+                        className="w-full py-1.5 px-2.5 bg-white hover:bg-white text-[#16191D] border border-[#C7D3F1] rounded-lg text-[12px] font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-60"
                       >
                         <span>ดูตัวอย่างสรุป</span>
                       </button>
@@ -3356,7 +3352,7 @@ export default function App() {
                             setSummaryBusy(false);
                           }
                         }}
-                        className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
+                        className="w-full py-2 px-3 bg-[#1E4DB7] hover:bg-[#1E4DB7] text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
                       >
                         <span>ส่งสรุปผลเข้ากลุ่ม</span>
                       </button>
@@ -3367,45 +3363,45 @@ export default function App() {
 
               {/* SECTION 2: CUSTOM FIELD ANNOUNCEMENT */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                  <span className="text-xs font-black text-slate-800 uppercase tracking-wider font-heading flex items-center gap-1.5">
+                <div className="flex items-center justify-between border-b border-[#D9DDE2] pb-2">
+                  <span className="text-xs font-semibold text-[#16191D] font-heading flex items-center gap-1.5">
                     <span>2. ส่งประกาศอิสระเข้ากลุ่ม LINE</span>
                   </span>
-                  <span className="text-[10px] text-slate-400 font-sans">พิมพ์ข้อความแจ้งเตือนหรือข้อมูลสนามส่งตรงเข้ากลุ่ม</span>
+                  <span className="text-[12px] text-[#8A929D] font-sans">พิมพ์ข้อความแจ้งเตือนหรือข้อมูลสนามส่งตรงเข้ากลุ่ม</span>
                 </div>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="bg-[#F7F8F9] border border-[#D9DDE2] rounded-lg p-4 space-y-3">
                   {/* Quick Preset Buttons */}
                   <div className="space-y-1.5">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">ข้อความด่วนแนะนำ (คลิกเพื่อใส่ข้อความ):</span>
+                    <span className="text-[12px] font-bold text-[#5B636E] block">ข้อความด่วนแนะนำ (คลิกเพื่อใส่ข้อความ):</span>
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => setCustomBroadcastText('ประกาศจากสนาม: ขณะนี้อยู่ในช่วงพักเบรก 15 นาที จะเริ่มเปิดรับดวลรอบถัดไปเร็ว ๆ นี้ครับ')}
-                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95 cursor-pointer"
+                        className="px-2.5 py-1 bg-white hover:bg-[#EEF2FB] text-[#3B424C] hover:text-[#1E4DB7] border border-[#D9DDE2] rounded-lg text-[12px] font-bold transition-all cursor-pointer"
                       >
                         พักเบรก 15 นาที
                       </button>
                       <button
                         onClick={() => setCustomBroadcastText('ประกาศจากสนาม: เนื่องจากสภาพอากาศมีฝนตก จึงขอพักการปล่อยบั้งไฟชั่วคราว เมื่อพร้อมจะแจ้งให้ทราบครับ')}
-                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95 cursor-pointer"
+                        className="px-2.5 py-1 bg-white hover:bg-[#EEF2FB] text-[#3B424C] hover:text-[#1E4DB7] border border-[#D9DDE2] rounded-lg text-[12px] font-bold transition-all cursor-pointer"
                       >
                         ฝนตก พักการยิงชั่วคราว
                       </button>
                       <button
                         onClick={() => setCustomBroadcastText('เตรียมพร้อม! บั้งไฟกำลังขึ้นติดตั้งบนแท่นยิง โปรดเตรียมแต้มให้พร้อมสำหรับการท้าดวล')}
-                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95 cursor-pointer"
+                        className="px-2.5 py-1 bg-white hover:bg-[#EEF2FB] text-[#3B424C] hover:text-[#1E4DB7] border border-[#D9DDE2] rounded-lg text-[12px] font-bold transition-all cursor-pointer"
                       >
                         บั้งไฟกำลังขึ้นแท่นยิง
                       </button>
                       <button
                         onClick={() => setCustomBroadcastText(`บั้งไฟ ${rocketName || activeRoundObj?.name || 'รอบใหม่'} พร้อมแล้ว เปิดแผลเล่นได้เลยครับ`)}
-                        className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-300 rounded-lg text-[10.5px] font-extrabold transition-all active:scale-95 cursor-pointer"
+                        className="px-2.5 py-1 bg-[#EEF2FB] hover:bg-[#E3EAFB] text-[#16191D] border border-[#C7D3F1] rounded-lg text-[12px] font-semibold transition-all cursor-pointer"
                       >
                         บั้งไฟพร้อมแล้ว เชิญเปิดแผล
                       </button>
                       <button
                         onClick={() => setCustomBroadcastText('สรุปผลการแข่งขันและการดวลประจำวันเสร็จสิ้นเรียบร้อย ขอบพระคุณสมาชิกทุกท่านที่ร่วมสนุกครับ')}
-                        className="px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border border-slate-200 rounded-lg text-[10.5px] font-bold transition-all active:scale-95 cursor-pointer"
+                        className="px-2.5 py-1 bg-white hover:bg-[#EEF2FB] text-[#3B424C] hover:text-[#1E4DB7] border border-[#D9DDE2] rounded-lg text-[12px] font-bold transition-all cursor-pointer"
                       >
                         จบการแข่งขันประจำวัน
                       </button>
@@ -3419,20 +3415,20 @@ export default function App() {
                       value={customBroadcastText}
                       onChange={(e) => setCustomBroadcastText(e.target.value)}
                       placeholder="พิมพ์ข้อความที่ต้องการประกาศส่งตรงเข้ากลุ่ม LINE..."
-                      className="w-full bg-white border border-slate-200 text-slate-900 px-3 py-2.5 rounded-xl text-xs font-sans focus:ring-2 focus:ring-purple-500 focus:outline-none placeholder-slate-400"
+                      className="w-full bg-white border border-[#D9DDE2] text-[#16191D] px-3 py-2.5 rounded-lg text-xs font-sans focus:ring-2 focus:ring-[#1E4DB7]/30 focus:outline-none placeholder-slate-400"
                     />
                   </div>
 
                   {/* Action Buttons */}
                   <div className="flex justify-between items-center gap-3 flex-wrap">
-                    <span className="text-[10px] text-slate-400 font-sans">
-                      ส่งไปยัง: <strong className="text-purple-800">{broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่มดวลสด' : 'กลุ่มที่เลือก'}</strong>
+                    <span className="text-[12px] text-[#8A929D] font-sans">
+                      ส่งไปยัง: <strong className="text-[#16191D]">{broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่มดวลสด' : 'กลุ่มที่เลือก'}</strong>
                     </span>
                     <div className="flex gap-2">
                       {customBroadcastText && (
                         <button
                           onClick={() => setCustomBroadcastText('')}
-                          className="px-3 py-1.5 border border-slate-300 text-slate-600 rounded-lg text-xs font-bold hover:bg-white transition-all active:scale-95"
+                          className="px-3 py-1.5 border border-[#C3C9D1] text-[#3B424C] rounded-lg text-xs font-bold hover:bg-white transition-all"
                         >
                           ล้างข้อความ
                         </button>
@@ -3456,7 +3452,7 @@ export default function App() {
                             setIsSendingBroadcast(false);
                           }
                         }}
-                        className="py-2 px-5 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all active:scale-95 shadow-md flex items-center gap-1.5"
+                        className="py-2 px-5 bg-[#1E4DB7] hover:bg-[#1E4DB7] disabled:opacity-40 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
                       >
                         <Megaphone size={14} />
                         <span>{isSendingBroadcast ? 'กำลังส่ง...' : 'ส่งประกาศเข้ากลุ่ม LINE'}</span>
@@ -3468,27 +3464,27 @@ export default function App() {
 
               {/* SECTION 3: LINE GROUP CONNECTION & DIAGNOSTICS */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                  <span className="text-xs font-black text-slate-800 uppercase tracking-wider font-heading flex items-center gap-1.5">
+                <div className="flex items-center justify-between border-b border-[#D9DDE2] pb-2">
+                  <span className="text-xs font-semibold text-[#16191D] font-heading flex items-center gap-1.5">
                     <span>3. จัดการการเชื่อมต่อกลุ่ม LINE</span>
                   </span>
-                  <span className="text-[10px] text-slate-400 font-sans">ตรวจสอบสถานะ Webhook และทดสอบการส่งข้อความ</span>
+                  <span className="text-[12px] text-[#8A929D] font-sans">ตรวจสอบสถานะ Webhook และทดสอบการส่งข้อความ</span>
                 </div>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="bg-[#F7F8F9] border border-[#D9DDE2] rounded-lg p-4 space-y-3">
                   {/* Status Bar */}
-                  <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-slate-200">
+                  <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-[#D9DDE2]">
                     <div className="flex items-center gap-2">
-                      <span className={`w-2.5 h-2.5 rounded-full ${activeGroupId ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
-                      <span className="text-xs font-bold text-slate-700">
-                        สถานะ Active Group ID:
+                      <span className={`w-2.5 h-2.5 rounded-full ${activeGroupId ? 'bg-emerald-500' : 'bg-[#9A5B00]'}`}></span>
+                      <span className="text-xs font-bold text-[#3B424C]">
+                        กลุ่มที่ใช้งาน:
                       </span>
                       {activeGroupId ? (
-                        <span className="px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded font-mono text-[11px] font-bold">
+                        <span className="px-2 py-0.5 bg-[#E2F2E9] border border-[#B9DEC8] text-[#1B6E43] rounded font-mono text-[12px] font-bold">
                           {activeGroupId}
                         </span>
                       ) : (
-                        <span className="px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 rounded text-[10.5px] font-bold">
+                        <span className="px-2 py-0.5 bg-[#FDF1E1] border border-[#E8C48F] text-[#8A4B00] rounded text-[12px] font-bold">
                           ยังไม่มี Group ID หลัก
                         </span>
                       )}
@@ -3517,7 +3513,7 @@ export default function App() {
                               addToast(`เปลี่ยน Group ID เป็น ...${gid.trim().slice(-8)}`, 'success');
                             }
                           }}
-                          className="px-2.5 py-1 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-[10.5px] font-bold transition-all active:scale-95"
+                          className="px-2.5 py-1 bg-white border border-[#D9DDE2] hover:bg-[#EEF0F2] text-[#3B424C] rounded-lg text-[12px] font-bold transition-all"
                         >
                           เปลี่ยน Group ID
                         </button>
@@ -3538,7 +3534,7 @@ export default function App() {
                             addToast('ส่งไม่สำเร็จ', 'danger');
                           }
                         }}
-                        className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10.5px] font-bold transition-all active:scale-95 shadow-xs flex items-center gap-1"
+                        className="px-3 py-1 bg-[#1B6E43] hover:bg-[#1B6E43] text-white rounded-lg text-[12px] font-bold transition-all flex items-center gap-1"
                       >
                         <span>ทดสอบส่ง Push เข้ากลุ่ม</span>
                       </button>
@@ -3565,14 +3561,14 @@ export default function App() {
                           addToast('ค้นหาไม่สำเร็จ', 'danger');
                         }
                       }}
-                      className="py-2 px-3.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-all active:scale-95 whitespace-nowrap"
+                      className="py-2 px-3.5 bg-[#1E4DB7] hover:bg-[#1E4DB7] text-white text-xs font-bold rounded-lg transition-all whitespace-nowrap"
                     >
                       Auto Discover
                     </button>
                     <input
                       type="text"
                       placeholder="หรือวาง LINE Group ID ด้วยตนเอง (เช่น C1234567890abcdef...) แล้วกด Enter"
-                      className="flex-1 bg-white border border-slate-200 text-slate-700 px-3 py-2 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-purple-400"
+                      className="flex-1 bg-white border border-[#D9DDE2] text-[#3B424C] px-3 py-2 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30"
                       onKeyDown={async (e) => {
                         if (e.key === 'Enter' && e.target.value.trim().length > 5) {
                           const gid = e.target.value.trim();
@@ -3594,17 +3590,17 @@ export default function App() {
                   {/* Connected Groups List */}
                   {lineGroups.length > 0 && (
                     <div className="pt-2">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                      <span className="text-[12px] font-bold text-[#8A929D] block mb-1.5">
                         กลุ่ม LINE ทั้งหมดที่บอทเชื่อมต่อ ({lineGroups.length} กลุ่ม):
                       </span>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {lineGroups.map((g, i) => (
-                          <div key={g.id || i} className="p-2.5 bg-white border border-slate-200 rounded-lg flex items-center justify-between text-xs">
+                          <div key={g.id || i} className="p-2.5 bg-white border border-[#D9DDE2] rounded-lg flex items-center justify-between text-xs">
                             <div className="min-w-0">
-                              <span className="font-bold text-slate-800 block truncate">{g.name || `กลุ่ม #${i + 1}`}</span>
-                              <span className="text-[9px] text-slate-400 font-mono block">{g.id}</span>
+                              <span className="font-bold text-[#16191D] block truncate">{g.name || `กลุ่ม #${i + 1}`}</span>
+                              <span className="text-[12px] text-[#8A929D] font-mono block">{g.id}</span>
                             </div>
-                            <span className="text-[9.5px] px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md font-bold shrink-0">
+                            <span className="text-[12px] px-2 py-0.5 bg-[#E2F2E9] text-[#1B6E43] border border-[#B9DEC8] rounded-md font-bold shrink-0">
                               Connected
                             </span>
                           </div>
@@ -3620,45 +3616,45 @@ export default function App() {
           {/* ── PLAYER EDIT MODAL (name + balance) ── */}
           {playerEditModal && (
             <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
               onClick={e => { if (e.target === e.currentTarget) setPlayerEditModal(null); }}
             >
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+              <div className="bg-white rounded-lg w-full max-w-md overflow-hidden">
                 <div 
-                  className="bg-sky-600 bg-gradient-to-r from-sky-600 to-sky-700 px-6 py-4"
-                  style={{ backgroundColor: '#0284c7', color: '#ffffff' }}
+                  className="bg-[#1E4DB7] bg-[#F7F8F9] px-6 py-4"
+                  style={{ backgroundColor: '#16191D', color: '#ffffff' }}
                 >
                   <h3 className="font-bold text-base" style={{ color: '#ffffff' }}>แก้ไขข้อมูลผู้เล่น</h3>
                   <p className="text-xs mt-0.5 font-mono" style={{ color: '#e0f2fe' }}>{playerEditModal.player.id}</p>
                 </div>
                 <div className="px-6 py-5 space-y-4">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-600 block">ชื่อผู้เล่น (Display Name)</label>
+                    <label className="text-xs font-bold text-[#3B424C] block">ชื่อผู้เล่น</label>
                     <input
                       type="text"
                       value={playerEditForm.name}
                       onChange={e => setPlayerEditForm(f => ({ ...f, name: e.target.value }))}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                      className="w-full px-3 py-2 border border-[#D9DDE2] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-600 block">ยอดเครดิต (Credit Balance)</label>
+                    <label className="text-xs font-bold text-[#3B424C] block">ยอดเครดิต</label>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => setPlayerEditForm(f => ({ ...f, balance: Math.max(0, f.balance - 100) }))} className="w-9 h-9 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 font-bold text-slate-600 text-lg flex items-center justify-center transition-all">−</button>
+                      <button onClick={() => setPlayerEditForm(f => ({ ...f, balance: Math.max(0, f.balance - 100) }))} className="w-9 h-9 rounded-lg border border-[#D9DDE2] bg-[#F7F8F9] hover:bg-[#EEF0F2] font-bold text-[#3B424C] text-lg flex items-center justify-center transition-all">−</button>
                       <input
                         type="number"
                         min="0"
                         value={playerEditForm.balance}
                         onChange={e => setPlayerEditForm(f => ({ ...f, balance: Math.max(0, Number(e.target.value)) }))}
-                        className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono text-center focus:outline-none focus:ring-2 focus:ring-sky-400"
+                        className="flex-1 px-3 py-2 border border-[#D9DDE2] rounded-lg text-sm font-mono text-center focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30"
                       />
-                      <button onClick={() => setPlayerEditForm(f => ({ ...f, balance: f.balance + 100 }))} className="w-9 h-9 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 font-bold text-slate-600 text-lg flex items-center justify-center transition-all">＋</button>
+                      <button onClick={() => setPlayerEditForm(f => ({ ...f, balance: f.balance + 100 }))} className="w-9 h-9 rounded-lg border border-[#D9DDE2] bg-[#F7F8F9] hover:bg-[#EEF0F2] font-bold text-[#3B424C] text-lg flex items-center justify-center transition-all">＋</button>
                     </div>
-                    <p className="text-[10px] text-slate-400">ยอดปัจจุบัน: <strong>{playerEditModal.player.balance.toLocaleString()} pt</strong> → ยอดใหม่: <strong className="text-sky-700">{playerEditForm.balance.toLocaleString()} pt</strong></p>
+                    <p className="text-[12px] text-[#8A929D]">ยอดปัจจุบัน: <strong>{playerEditModal.player.balance.toLocaleString()} pt</strong> → ยอดใหม่: <strong className="text-[#1E4DB7]">{playerEditForm.balance.toLocaleString()} pt</strong></p>
                   </div>
                 </div>
                 <div className="px-6 pb-5 flex gap-3">
-                  <button onClick={() => setPlayerEditModal(null)} className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-600 text-sm font-bold rounded-xl hover:bg-slate-50 transition-all">ยกเลิก</button>
+                  <button onClick={() => setPlayerEditModal(null)} className="flex-1 px-4 py-2.5 border border-[#D9DDE2] text-[#3B424C] text-sm font-bold rounded-lg hover:bg-[#F7F8F9] transition-all">ยกเลิก</button>
                   <button
                     disabled={playerEditSaving || !playerEditForm.name.trim()}
                     onClick={async () => {
@@ -3685,7 +3681,7 @@ export default function App() {
                         addToast('' + (err.message || err), 'error');
                       }
                     }}
-                    className="flex-1 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition-all active:scale-95 shadow-md"
+                    className="flex-1 px-4 py-2.5 bg-[#1E4DB7] hover:bg-[#1E4DB7] disabled:opacity-40 text-white text-sm font-bold rounded-lg transition-all"
                   >
                     {playerEditSaving ? 'บันทึก...' : 'บันทึก'}
                   </button>
@@ -3697,14 +3693,14 @@ export default function App() {
           {/* ── BANK EDIT MODAL ── */}
           {bankEditModal && (
             <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
               onClick={(e) => { if (e.target === e.currentTarget) setBankEditModal(null); }}
             >
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+              <div className="bg-white rounded-lg w-full max-w-md overflow-hidden">
                 {/* Modal Header */}
                 <div 
-                  className="bg-teal-700 bg-gradient-to-r from-teal-600 to-teal-700 px-6 py-4"
-                  style={{ backgroundColor: '#0f766e', color: '#ffffff' }}
+                  className="bg-[#1E4DB7] bg-[#F7F8F9] px-6 py-4"
+                  style={{ backgroundColor: '#16191D', color: '#ffffff' }}
                 >
                   <h3 className="font-bold text-base" style={{ color: '#ffffff' }}>ลงทะเบียนบัญชีธนาคาร</h3>
                   <p className="text-xs mt-0.5" style={{ color: '#ccfbf1' }}>
@@ -3714,17 +3710,17 @@ export default function App() {
 
                 {/* Modal Body */}
                 <div className="px-6 py-5 space-y-4">
-                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs">
+                  <div className="p-3 bg-[#FDF1E1] border border-[#E8C48F] rounded-lg text-[#8A4B00] text-xs">
                     <strong>ตรวจสอบให้แน่ใจ:</strong> เลขบัญชีและชื่อบัญชีต้องตรงกับสลิปที่ผู้เล่นส่งมาเท่านั้น
                   </div>
 
                   {/* Bank name */}
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-600 block">ธนาคาร (Bank)</label>
+                    <label className="text-xs font-bold text-[#3B424C] block">ธนาคาร</label>
                     <select
                       value={bankEditForm.bankName}
                       onChange={e => setBankEditForm(f => ({ ...f, bankName: e.target.value }))}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"
+                      className="w-full px-3 py-2 border border-[#D9DDE2] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30 bg-white"
                     >
                       <option value="">-- เลือกธนาคาร --</option>
                       {['SCB','KBANK','BBL','KTB','BAY','TMB','GSB','BAAC','CIMB','UOB','LH','TISCO','KKP','TCD'].map(b => (
@@ -3735,26 +3731,26 @@ export default function App() {
 
                   {/* Account number */}
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-600 block">เลขบัญชี (Account Number)</label>
+                    <label className="text-xs font-bold text-[#3B424C] block">เลขบัญชี (Account Number)</label>
                     <input
                       type="text"
                       inputMode="numeric"
                       placeholder="เช่น 890-1-23456-7"
                       value={bankEditForm.bankAccount}
                       onChange={e => setBankEditForm(f => ({ ...f, bankAccount: e.target.value }))}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      className="w-full px-3 py-2 border border-[#D9DDE2] rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30"
                     />
                   </div>
 
                   {/* Account holder name */}
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-600 block">ชื่อเจ้าของบัญชี (Account Name)</label>
+                    <label className="text-xs font-bold text-[#3B424C] block">ชื่อเจ้าของบัญชี</label>
                     <input
                       type="text"
                       placeholder="เช่น Somchai Jongcharoen"
                       value={bankEditForm.accountName}
                       onChange={e => setBankEditForm(f => ({ ...f, accountName: e.target.value }))}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      className="w-full px-3 py-2 border border-[#D9DDE2] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30"
                     />
                   </div>
                 </div>
@@ -3763,7 +3759,7 @@ export default function App() {
                 <div className="px-6 pb-5 flex gap-3">
                   <button
                     onClick={() => setBankEditModal(null)}
-                    className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-600 text-sm font-bold rounded-xl hover:bg-slate-50 transition-all"
+                    className="flex-1 px-4 py-2.5 border border-[#D9DDE2] text-[#3B424C] text-sm font-bold rounded-lg hover:bg-[#F7F8F9] transition-all"
                   >
                     ยกเลิก
                   </button>
@@ -3789,7 +3785,7 @@ export default function App() {
                         addToast('เกิดข้อผิดพลาด:' + (err.message || err), 'error');
                       }
                     }}
-                    className="flex-1 px-4 py-2.5 text-white text-sm font-bold rounded-xl transition-all active:scale-95 disabled:cursor-not-allowed"
+                    className="flex-1 px-4 py-2.5 text-white text-sm font-bold rounded-lg transition-all disabled:cursor-not-allowed"
                     style={{ 
                       backgroundColor: (bankEditSaving || !bankEditForm.bankName || !bankEditForm.bankAccount || !bankEditForm.accountName) ? '#94a3b8' : '#0f766e', 
                       color: '#ffffff' 
@@ -3805,54 +3801,54 @@ export default function App() {
           {/* ── CREATE PLAYER MODAL ── */}
           {createPlayerModal && (
             <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
               onClick={e => { if (e.target === e.currentTarget) setCreatePlayerModal(false); }}
             >
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+              <div className="bg-white rounded-lg w-full max-w-md overflow-hidden">
                 <div 
-                  className="bg-teal-700 bg-gradient-to-r from-teal-600 to-teal-700 px-6 py-4"
-                  style={{ backgroundColor: '#0f766e', color: '#ffffff' }}
+                  className="bg-[#1E4DB7] bg-[#F7F8F9] px-6 py-4"
+                  style={{ backgroundColor: '#16191D', color: '#ffffff' }}
                 >
                   <h3 className="font-bold text-base" style={{ color: '#ffffff' }}>＋ เพิ่มผู้เล่นใหม่</h3>
                   <p className="text-xs mt-0.5" style={{ color: '#ccfbf1' }}>สร้างบัญชีผู้เล่นใหม่ในระบบ</p>
                 </div>
                 <div className="px-6 py-5 space-y-4">
-                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-xs">
+                  <div className="p-3 bg-[#EEF2FB] border border-[#C7D3F1] rounded-lg text-[#16191D] text-xs">
                     <strong>วิธีหา LINE ID:</strong> ให้ผู้เล่นส่งข้อความมาใน LINE OA ก่อน แล้วดู ID ในหน้า LINE Chat ของแดชบอร์ดนี้
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-600 block">LINE User ID <span className="text-rose-500">*</span></label>
+                    <label className="text-xs font-bold text-[#3B424C] block">LINE User ID <span className="text-[#B42318]">*</span></label>
                     <input
                       type="text"
                       placeholder="U1234567890abcdef..."
                       value={createPlayerForm.lineId}
                       onChange={e => setCreatePlayerForm(f => ({ ...f, lineId: e.target.value }))}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      className="w-full px-3 py-2 border border-[#D9DDE2] rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-600 block">ชื่อผู้เล่น <span className="text-rose-500">*</span></label>
+                    <label className="text-xs font-bold text-[#3B424C] block">ชื่อผู้เล่น <span className="text-[#B42318]">*</span></label>
                     <input
                       type="text"
                       placeholder="ชื่อ-นามสกุล หรือชื่อเล่น"
                       value={createPlayerForm.name}
                       onChange={e => setCreatePlayerForm(f => ({ ...f, name: e.target.value }))}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      className="w-full px-3 py-2 border border-[#D9DDE2] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-600 block">เครดิตเริ่มต้น (pt)</label>
+                    <label className="text-xs font-bold text-[#3B424C] block">เครดิตเริ่มต้น (pt)</label>
                     <input
                       type="number"
                       min="0"
                       value={createPlayerForm.balance}
                       onChange={e => setCreatePlayerForm(f => ({ ...f, balance: Math.max(0, Number(e.target.value)) }))}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      className="w-full px-3 py-2 border border-[#D9DDE2] rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#1E4DB7]/30"
                     />
                   </div>
                 </div>
                 <div className="px-6 pb-5 flex gap-3">
-                  <button onClick={() => setCreatePlayerModal(false)} className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-600 text-sm font-bold rounded-xl hover:bg-slate-50 transition-all">ยกเลิก</button>
+                  <button onClick={() => setCreatePlayerModal(false)} className="flex-1 px-4 py-2.5 border border-[#D9DDE2] text-[#3B424C] text-sm font-bold rounded-lg hover:bg-[#F7F8F9] transition-all">ยกเลิก</button>
                   <button
                     disabled={createPlayerSaving || !createPlayerForm.lineId.trim() || !createPlayerForm.name.trim()}
                     onClick={async () => {
@@ -3871,7 +3867,7 @@ export default function App() {
                         addToast('' + (err.message || err), 'error');
                       }
                     }}
-                    className="flex-1 px-4 py-2.5 text-white text-sm font-bold rounded-xl transition-all active:scale-95 disabled:cursor-not-allowed"
+                    className="flex-1 px-4 py-2.5 text-white text-sm font-bold rounded-lg transition-all disabled:cursor-not-allowed"
                     style={{ 
                       backgroundColor: (createPlayerSaving || !createPlayerForm.lineId.trim() || !createPlayerForm.name.trim()) ? '#94a3b8' : '#0f766e', 
                       color: '#ffffff' 
@@ -3887,26 +3883,26 @@ export default function App() {
           {/* ── DELETE CONFIRM MODAL ── */}
           {confirmDelete && (
             <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
               onClick={e => { if (e.target === e.currentTarget) setConfirmDelete(null); }}
             >
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-                <div className="bg-rose-600 px-6 py-4">
+              <div className="bg-white rounded-lg w-full max-w-sm overflow-hidden">
+                <div className="bg-[#B42318] px-6 py-4">
                   <h3 className="text-white font-bold text-base">ยืนยันการลบผู้เล่น</h3>
                 </div>
                 <div className="px-6 py-5 space-y-3">
-                  <div className="flex items-center gap-3 p-3 bg-rose-50 border border-rose-200 rounded-xl">
+                  <div className="flex items-center gap-3 p-3 bg-[#FBEAE8] border border-[#E7B4AE] rounded-lg">
                     <span className="text-3xl">{confirmDelete.player.avatar}</span>
                     <div>
-                      <div className="font-bold text-slate-800">{confirmDelete.player.name}</div>
-                      <div className="text-xs text-slate-500 font-mono">{confirmDelete.player.id}</div>
-                      <div className="text-xs font-bold text-rose-600 mt-0.5">เครดิตคงเหลือ: {confirmDelete.player.balance.toLocaleString()} pt</div>
+                      <div className="font-bold text-[#16191D]">{confirmDelete.player.name}</div>
+                      <div className="text-xs text-[#5B636E] font-mono">{confirmDelete.player.id}</div>
+                      <div className="text-xs font-bold text-[#B42318] mt-0.5">เครดิตคงเหลือ: {confirmDelete.player.balance.toLocaleString()} pt</div>
                     </div>
                   </div>
-                  <p className="text-sm text-slate-600">การลบนี้จะ<strong>ลบข้อมูลผู้เล่นทั้งหมด</strong>ออกจากฐานข้อมูลทันที และไม่สามารถกู้คืนได้</p>
+                  <p className="text-sm text-[#3B424C]">การลบนี้จะ<strong>ลบข้อมูลผู้เล่นทั้งหมด</strong>ออกจากฐานข้อมูลทันที และไม่สามารถกู้คืนได้</p>
                 </div>
                 <div className="px-6 pb-5 flex gap-3">
-                  <button onClick={() => setConfirmDelete(null)} className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-600 text-sm font-bold rounded-xl hover:bg-slate-50 transition-all">ยกเลิก</button>
+                  <button onClick={() => setConfirmDelete(null)} className="flex-1 px-4 py-2.5 border border-[#D9DDE2] text-[#3B424C] text-sm font-bold rounded-lg hover:bg-[#F7F8F9] transition-all">ยกเลิก</button>
                   <button
                     disabled={deleteSaving}
                     onClick={async () => {
@@ -3924,7 +3920,7 @@ export default function App() {
                         addToast('' + (err.message || err), 'error');
                       }
                     }}
-                    className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition-all active:scale-95 shadow-md"
+                    className="flex-1 px-4 py-2.5 bg-[#B42318] hover:bg-[#B42318] disabled:opacity-40 text-white text-sm font-bold rounded-lg transition-all"
                   >
                     {deleteSaving ? 'กำลังลบ...' : 'ยืนยันลบ'}
                   </button>
@@ -3942,25 +3938,25 @@ export default function App() {
 
             return (
               <div 
-                className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in font-sans"
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in font-sans"
                 onClick={e => { if (e.target === e.currentTarget) setTxDetailModal(null); }}
               >
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 max-h-[90vh] flex flex-col">
+                <div className="bg-white rounded-lg w-full max-w-2xl overflow-hidden border border-[#D9DDE2] max-h-[90vh] flex flex-col">
                   {/* Modal Header */}
                   <div 
-                    className={`px-6 py-4 flex items-center justify-between text-white ${isWithdrawal ? 'bg-rose-700 bg-gradient-to-r from-rose-600 to-red-700' : 'bg-teal-700 bg-gradient-to-r from-emerald-600 to-teal-700'}`}
-                    style={{ backgroundColor: isWithdrawal ? '#be123c' : '#047857', color: '#ffffff' }}
+                    className={`px-6 py-4 flex items-center justify-between text-white ${isWithdrawal ? 'bg-[#B42318] bg-[#F7F8F9]' : 'bg-[#1E4DB7] bg-[#F7F8F9]'}`}
+                    style={{ backgroundColor: isWithdrawal ? '#B4400F' : '#0B6B3F', color: '#ffffff' }}
                   >
                     <div>
-                      <h3 className="font-extrabold text-base flex items-center gap-2" style={{ color: '#ffffff' }}>
+                      <h3 className="font-semibold text-base flex items-center gap-2" style={{ color: '#ffffff' }}>
                         {isWithdrawal ? 'รายละเอียดคำขอถอนเงิน' : 'รายละเอียดการแจ้งสลิปเติมเงิน'}
-                        <span className="bg-white/20 px-2 py-0.5 rounded font-mono text-xs" style={{ color: '#ffffff' }}>{tx.id}</span>
+                        <span className="bg-white px-2 py-0.5 rounded font-mono text-xs" style={{ color: '#ffffff' }}>{tx.id}</span>
                       </h3>
                       <p className="text-xs mt-0.5" style={{ color: 'rgba(255, 255, 255, 0.9)' }}>ผู้เล่น: {tx.playerName} ({tx.playerId})</p>
                     </div>
                     <button 
                       onClick={() => setTxDetailModal(null)}
-                      className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center font-bold transition-all"
+                      className="w-8 h-8 rounded-full bg-white hover:bg-white flex items-center justify-center font-bold transition-all"
                       style={{ color: '#ffffff' }}
                     >
                       ✕
@@ -3968,18 +3964,17 @@ export default function App() {
                   </div>
 
                   {/* Modal Body */}
-                  <div className="p-6 overflow-y-auto space-y-5 flex-1 text-xs text-slate-800">
+                  <div className="p-6 overflow-y-auto space-y-5 flex-1 text-xs text-[#16191D]">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {/* Left: e-Slip Visual */}
                       <div className="flex justify-center shrink-0">
                         {isWithdrawal ? (
-                          <div className="w-full max-w-xs h-[240px] bg-gradient-to-b from-rose-100 to-rose-200 border border-rose-300 rounded-2xl p-4 flex flex-col items-center justify-between text-center select-none shadow-sm">
-                            <div className="text-4xl mt-2"></div>
-                            <div className="space-y-1">
-                              <span className="text-[10px] text-rose-800 font-black uppercase tracking-wider bg-rose-200 px-2 py-0.5 rounded-md">คำขอถอนเงิน</span>
-                              <h4 className="text-2xl font-black text-rose-950 font-mono">-{tx.requestedAmount}.00 THB</h4>
+                          <div className="w-full max-w-xs h-[240px] bg-[#F7F8F9] border border-[#E7B4AE] rounded-lg p-4 flex flex-col items-center justify-between text-center select-none">
+                                                        <div className="space-y-1">
+                              <span className="text-[12px] text-[#B42318] font-semibold bg-[#F6D7D3] px-2 py-0.5 rounded-md">คำขอถอนเงิน</span>
+                              <h4 className="text-2xl font-semibold text-[#B42318] font-mono">-{tx.requestedAmount}.00 THB</h4>
                             </div>
-                            <div className="w-full bg-white/90 border border-rose-300 rounded-lg p-2 text-[10px] text-rose-900 font-bold leading-normal font-sans shadow-2xs">
+                            <div className="w-full bg-white border border-[#E7B4AE] rounded-lg p-2 text-[12px] text-[#B42318] font-bold leading-normal font-sans shadow-2xs">
                               {tx.reviewReason.replace('Withdrawal request to ', '')}
                             </div>
                           </div>
@@ -3990,38 +3985,38 @@ export default function App() {
 
                       {/* Right: Key Info Grid */}
                       <div className="space-y-3 flex flex-col justify-between">
-                        <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
-                          <div className="flex justify-between items-center border-b border-slate-200 pb-2">
-                            <span className="text-slate-500 font-bold">สถานะทำรายการ:</span>
+                        <div className="bg-[#F7F8F9] p-3.5 rounded-lg border border-[#D9DDE2] space-y-2">
+                          <div className="flex justify-between items-center border-b border-[#D9DDE2] pb-2">
+                            <span className="text-[#5B636E] font-bold">สถานะทำรายการ:</span>
                             <span>
                               {tx.status === 'success' && <span className="badge-success px-2 py-0.5 rounded-lg font-bold">อนุมัติเรียบร้อย</span>}
-                              {tx.status === 'escalated' && <span className="badge-warning px-2 py-0.5 rounded-lg font-bold animate-pulse">รออนุมัติแมนนวล</span>}
+                              {tx.status === 'escalated' && <span className="badge-warning px-2 py-0.5 rounded-lg font-bold">รออนุมัติแมนนวล</span>}
                               {tx.status === 'rejected' && <span className="badge-high px-2 py-0.5 rounded-lg font-bold">✕ ปฏิเสธบิล</span>}
                             </span>
                           </div>
 
                           <div className="grid grid-cols-2 gap-2 font-mono pt-1">
-                            <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                              <span className="text-[9px] text-slate-400 uppercase block font-sans font-bold">ยอดสั่งเติม:</span>
-                              <span className="text-base font-black text-sky-800">{tx.requestedAmount}.00 THB</span>
+                            <div className="bg-white p-2.5 rounded-lg border border-[#D9DDE2]">
+                              <span className="text-[12px] text-[#8A929D] block font-sans font-bold">ยอดสั่งเติม:</span>
+                              <span className="text-base font-semibold text-[#16191D]">{tx.requestedAmount}.00 THB</span>
                             </div>
-                            <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                              <span className="text-[9px] text-slate-400 uppercase block font-sans font-bold">ยอดสแกนจริง:</span>
-                              <span className="text-base font-black text-emerald-700">{tx.actualAmount}.00 THB</span>
+                            <div className="bg-white p-2.5 rounded-lg border border-[#D9DDE2]">
+                              <span className="text-[12px] text-[#8A929D] block font-sans font-bold">ยอดสแกนจริง:</span>
+                              <span className="text-base font-semibold text-[#1B6E43]">{tx.actualAmount}.00 THB</span>
                             </div>
                           </div>
 
-                          <div className="space-y-1 font-mono text-[11px] pt-1">
-                            <div><span className="text-slate-400 font-sans">เลขอ้างอิง Ref:</span> <strong className="text-slate-900">{tx.slipRef || 'N/A'}</strong></div>
-                            <div><span className="text-slate-400 font-sans">เวลาทำรายการ:</span> <strong className="text-slate-900">{tx.timestamp}</strong></div>
-                            <div><span className="text-slate-400 font-sans">สาเหตุ / หมายเหตุ:</span> <strong className="text-rose-700">{tx.reviewReason}</strong></div>
+                          <div className="space-y-1 font-mono text-[12px] pt-1">
+                            <div><span className="text-[#8A929D] font-sans">เลขอ้างอิง Ref:</span> <strong className="text-[#16191D]">{tx.slipRef || 'N/A'}</strong></div>
+                            <div><span className="text-[#8A929D] font-sans">เวลาทำรายการ:</span> <strong className="text-[#16191D]">{tx.timestamp}</strong></div>
+                            <div><span className="text-[#8A929D] font-sans">สาเหตุ / หมายเหตุ:</span> <strong className="text-[#B42318]">{tx.reviewReason}</strong></div>
                           </div>
                         </div>
 
                         {/* OCR Logs */}
                         {tx.logs && tx.logs.length > 0 && (
-                          <div className="p-3 bg-slate-900 text-slate-200 rounded-xl text-[10px] font-mono space-y-1 max-h-[100px] overflow-y-auto">
-                            <span className="text-emerald-400 font-bold block font-sans">Scan Analysis Logs:</span>
+                          <div className="p-3 bg-[#16191D] text-slate-200 rounded-lg text-[12px] font-mono space-y-1 max-h-[100px] overflow-y-auto">
+                            <span className="text-[#1B6E43] font-bold block font-sans">Scan Analysis Logs:</span>
                             {tx.logs.map((l, i) => (
                               <div key={i}>{l}</div>
                             ))}
@@ -4032,10 +4027,10 @@ export default function App() {
                   </div>
 
                   {/* Modal Footer */}
-                  <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center gap-3">
+                  <div className="px-6 py-3 bg-[#F7F8F9] border-t border-[#D9DDE2] flex justify-between items-center gap-3">
                     <button 
                       onClick={() => setTxDetailModal(null)}
-                      className="px-4 py-2 border border-slate-300 rounded-xl text-slate-700 font-bold text-xs hover:bg-slate-100 transition-all"
+                      className="px-4 py-2 border border-[#C3C9D1] rounded-lg text-[#3B424C] font-bold text-xs hover:bg-[#EEF0F2] transition-all"
                     >
                       ปิดหน้าต่าง
                     </button>
@@ -4043,13 +4038,13 @@ export default function App() {
                       <div className="flex gap-2">
                         <button 
                           onClick={() => { handleAdminRejectReview(tx.id, isWithdrawal ? 'ปฏิเสธคำขอและส่งแต้มคืนเข้าบัญชี' : 'ปฏิเสธเนื่องจากไม่มียอดโอนจริง'); setTxDetailModal(null); }}
-                          className="px-4 py-2 bg-rose-50 border border-rose-200 hover:bg-rose-600 text-rose-700 hover:text-white rounded-xl text-xs font-bold transition-all"
+                          className="px-4 py-2 bg-[#FBEAE8] border border-[#E7B4AE] hover:bg-[#B42318] text-[#B42318] hover:text-white rounded-lg text-xs font-bold transition-all"
                         >
                           ✕ ปฏิเสธรายการ
                         </button>
                         <button 
                           onClick={() => { handleAdminApproveReview(tx.id); setTxDetailModal(null); }}
-                          className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black shadow-md transition-all active:scale-95"
+                          className="px-5 py-2 bg-[#1B6E43] hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition-all"
                         >
                           ยืนยันอนุมัติ ({isWithdrawal ? tx.requestedAmount : (tx.actualAmount || tx.requestedAmount)} THB)
                         </button>
@@ -4067,58 +4062,58 @@ export default function App() {
 
       {/* Dynamic Settle Outcome Result Report Popup Overlay Modal - Cloud PMS Style */}
       {settlementResult && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-[99999] p-4 font-sans">
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 max-w-md w-full text-slate-800 space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-[#16191D]/50 flex items-center justify-center z-[99999] p-4 font-sans">
+          <div className="bg-white rounded-lg border border-[#D9DDE2] p-6 max-w-md w-full text-[#16191D] space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="text-center space-y-2">
-              <div className="w-12 h-12 bg-sky-50 text-sky-600 rounded-xl flex items-center justify-center mx-auto border border-sky-100">
+              <div className="w-12 h-12 bg-[#EEF2FB] text-[#1E4DB7] rounded-lg flex items-center justify-center mx-auto border border-[#C7D3F1]">
                 <Cloud size={28} />
               </div>
-              <h3 className="text-lg font-black text-slate-900 font-heading">
+              <h3 className="text-lg font-semibold text-[#16191D] font-heading">
                 สรุปผลการจับเวลาบั้งไฟ ({settlementResult.rocketName || 'ค่ายบั้งไฟ'})
               </h3>
-              <p className="text-xs text-slate-500">ผลการบินเปรียบเทียบเกณฑ์เส้นแบ่งราคาช่าง (Bang Fai Commander)</p>
+              <p className="text-xs text-[#5B636E]">ผลการบินเทียบกับช่วงราคาช่าง</p>
             </div>
             
-            <div className="grid grid-cols-2 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100 text-center font-mono">
+            <div className="grid grid-cols-2 gap-3 bg-[#F7F8F9] p-4 rounded-lg border border-[#E6E9ED] text-center font-mono">
               <div className="space-y-0.5">
-                <span className="text-[10px] text-slate-500 uppercase block font-sans">เวลาบินจริง</span>
-                <span className="text-2xl font-black text-slate-800 font-mono">{(settlementResult.finalTime || 0).toFixed(2)}s</span>
+                <span className="text-[12px] text-[#5B636E] block font-sans">เวลาบินจริง</span>
+                <span className="text-2xl font-semibold text-[#16191D] font-mono">{(settlementResult.finalTime || 0).toFixed(2)}s</span>
               </div>
-              <div className="border-l border-slate-200 space-y-0.5">
-                <span className="text-[10px] text-slate-500 uppercase block font-sans">ช่วงราคาช่าง</span>
-                <span className="text-lg font-black text-amber-700 font-mono">
+              <div className="border-l border-[#D9DDE2] space-y-0.5">
+                <span className="text-[12px] text-[#5B636E] block font-sans">ช่วงราคาช่าง</span>
+                <span className="text-lg font-semibold text-[#8A4B00] font-mono">
                   {settlementResult.targetMin || 330} - {settlementResult.targetMax || 380}s
                 </span>
               </div>
             </div>
 
-            <div className={`p-3 rounded-xl border text-center font-bold text-sm ${
+            <div className={`p-3 rounded-lg border text-center font-bold text-sm ${
               settlementResult.outcome === 'LOW' 
-                ? 'bg-sky-50 border-sky-200 text-sky-700' 
+                ? 'bg-[#EEF2FB] border-[#C7D3F1] text-[#1E4DB7]' 
                 : settlementResult.outcome === 'HIGH'
-                ? 'bg-rose-50 border-rose-200 text-rose-700'
-                : 'bg-amber-50 border-amber-200 text-amber-700'
+                ? 'bg-[#FBEAE8] border-[#E7B4AE] text-[#B42318]'
+                : 'bg-[#FDF1E1] border-[#E8C48F] text-[#8A4B00]'
             }`}>
               ผลตัดสินฝั่งชนะ: {
                 settlementResult.outcome === 'LOW' 
-                  ? 'ต่ำ (LOW)' 
-                  : settlementResult.outcome === 'HIGH' 
-                  ? 'สูง (HIGH)' 
-                  : 'ในราคาช่าง (RANGE) '
+                  ? 'ฝั่งต่ำ'
+                  : settlementResult.outcome === 'HIGH'
+                  ? 'ฝั่งสูง'
+                  : 'เสมอ (ในราคาช่าง)'
               }
             </div>
 
             <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-600 block">บิลที่ได้รับการชำระรางวัล ({(settlementResult.payouts || []).length}):</span>
+              <span className="text-xs font-bold text-[#3B424C] block">บิลที่ได้รับการชำระรางวัล ({(settlementResult.payouts || []).length}):</span>
               <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
                 {(!settlementResult.payouts || settlementResult.payouts.length === 0) ? (
-                  <p className="text-xs text-slate-400 italic text-center py-2">ไม่มีแผลจับคู่ในรอบนี้</p>
+                  <p className="text-xs text-[#8A929D] italic text-center py-2">ไม่มีแผลจับคู่ในรอบนี้</p>
                 ) : (
                   settlementResult.payouts.map(p => (
-                    <div key={p.orderNumber} className="flex justify-between items-center text-xs p-2 bg-slate-50 border border-slate-100 rounded-lg">
-                      <span className="font-mono font-bold text-slate-700">Order #{p.orderNumber}</span>
-                      <span className="text-slate-600 font-bold">{p.winnerName ? p.winnerName.split(' ')[0] : 'ผู้ชนะ'} Win</span>
-                      <span className="font-mono font-bold text-emerald-600">+{p.payout} pt</span>
+                    <div key={p.orderNumber} className="flex justify-between items-center text-xs p-2 bg-[#F7F8F9] border border-[#E6E9ED] rounded-lg">
+                      <span className="font-mono font-bold text-[#3B424C]">Order #{p.orderNumber}</span>
+                      <span className="text-[#3B424C] font-bold">{p.winnerName ? p.winnerName.split(' ')[0] : 'ผู้ชนะ'} Win</span>
+                      <span className="font-mono font-bold text-[#1B6E43]">+{p.payout} pt</span>
                     </div>
                   ))
                 )}
@@ -4129,7 +4124,7 @@ export default function App() {
               onClick={() => {
                 setSettlementResult(null);
               }}
-              className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+              className="w-full py-2.5 bg-[#1E4DB7] hover:bg-[#1E4DB7] text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <CheckCircle size={14} />
               ปิดหน้าต่างและเริ่มรอบใหม่
@@ -4283,7 +4278,7 @@ function PlayerDashboard({ player, transactions, bets, playerUserId, players }) 
                     const isOrderLow = b.side === 'low';
                     const lowId = b.playerLowId || (isOrderLow ? (b.creatorId || b.creatorLineUserId) : (b.matcherId || b.matcherLineUserId));
                     const isLow = lowId === playerUserId || (isOrderLow && (b.creatorId === playerUserId || b.creatorLineUserId === playerUserId));
-                    const sideText = isLow ? 'ต่ำ (LOW)' : 'สูง (HIGH)';
+                    const sideText = isLow ? 'ฝั่งต่ำ' : 'ฝั่งสูง';
                     const lowName = b.playerLowName || (isOrderLow ? b.creatorName : b.matcherName);
                     const highName = b.playerHighName || (!isOrderLow ? b.creatorName : b.matcherName);
                     const opponentText = isLow ? highName : lowName;
