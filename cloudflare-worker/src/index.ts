@@ -1608,6 +1608,33 @@ if (
             }
           } catch (_) {}
 
+          // 3b. Orders and round history. Without this a reset left every order
+          //     record, the matched / settled lists and the daily summaries
+          //     behind, still naming players that no longer exist. Orders are
+          //     deleted from KV_ORDERS too: a DO miss adopts the KV copy, so a
+          //     KV leftover would bring the order back. Claims (CLAIM_*) stay:
+          //     the slip ones are what stops a used slip being credited twice.
+          let ordersCleared = 0;
+          try {
+            const orderKeys = await state(env).list({ prefix: 'ORDER_' });
+            await Promise.all((orderKeys.keys || []).map((k) => state(env).delete(k.name)));
+            ordersCleared = (orderKeys.keys || []).length;
+            let cursor: string | undefined;
+            do {
+              const page: any = await env.KV_ORDERS.list({ prefix: 'ORDER_', cursor });
+              await Promise.all((page.keys || []).map((k: any) => env.KV_ORDERS.delete(k.name)));
+              ordersCleared = Math.max(ordersCleared, (page.keys || []).length);
+              cursor = page.list_complete ? undefined : page.cursor;
+            } while (cursor);
+            const dayKeys = await state(env).list({ prefix: 'SETTLED_DAY_' });
+            await Promise.all((dayKeys.keys || []).map((k) => state(env).delete(k.name)));
+          } catch (err) {
+            console.warn('[Worker] Factory Reset: order sweep incomplete:', err);
+          }
+          await Promise.all(
+            ['PENDING_ORDERS_LIST', 'MATCHED_ORDERS_LIST', 'SETTLED_ORDERS_LIST', 'ACTIVE_ROUND'].map((k) => state(env).delete(k))
+          );
+
           // 4. Forward database reset to Google Apps Script / Google Sheets.
           //
           // GAS is a REPORTING MIRROR only — the Durable Object is the system
@@ -1663,6 +1690,7 @@ if (
             success: true,
             scope: 'live-state',
             message: 'Live state (Durable Object + KV) cleared successfully.',
+            ordersCleared,
             sheetsMirrorCleared: sheetsResetResult !== null,
             ...(sheetsWarning ? { sheetsWarning } : {}),
             ...(sheetsResetResult ? { sheets: sheetsResetResult } : {}),
