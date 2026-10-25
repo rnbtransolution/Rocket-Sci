@@ -94,13 +94,15 @@ console.log('\nTYPE [1] NO QUOTE — cancel and refund both parties');
   check('matches on betType, so a self-quoted order is never caught',
     /betType === 'pre_quote'/.test(body) && !/status === 'pending_hold' && o\.betType/.test(body));
   check('includes already-matched orders',
-    /status !== 'pending_hold' && order\.status !== 'matched'/.test(body));
-  check('refunds via the shared claim (both sides, exactly once)',
-    /refundOrderOnce\(order, env, ctx, 'cancel_held_pre_quote'\)/.test(body));
+    /allowedStatuses: \['pending_hold', 'matched'\]/.test(body));
+  check('refunds via the shared atomic refund (both sides, exactly once)',
+    /refundOrderOnce\(order, env, ctx, 'cancel_held_pre_quote'/.test(body));
   check('notifies BOTH creator and matcher',
-    /matcherId!/.test(body) && /parties\.push/.test(body));
-  check('rewrites the matched index so cancelled orders leave it',
-    /MATCHED_ORDERS_LIST/.test(body));
+    /order\.matcherId/.test(body) && /parties\.push/.test(body));
+  // refundOrderOnce removes the order from BOTH index lists in the same commit.
+  const refundFn = qh.slice(qh.indexOf('export async function refundOrderOnce'));
+  check('the refund removes cancelled orders from the matched index',
+    /key: 'MATCHED_ORDERS_LIST', op: 'remove'/.test(refundFn.slice(0, refundFn.indexOf('\nexport '))));
 }
 
 // ── [1] Quote arrives -> a matched pre-quote order gets a real range ──────
@@ -111,15 +113,16 @@ console.log('\nTYPE [1] QUOTE ARRIVES — matched pre-quote orders get a range')
   check('scans the matched index for pre-quote orders',
     /getMatchedOrdersList/.test(body));
   check('assigns rangeMin/rangeMax from the quoted band + offset',
-    /order\.rangeMin = bandMin \+ offset/.test(body) && /order\.rangeMax = bandMax \+ offset/.test(body));
-  // The confirmed-with-a-range loop must NOT rewrite betType: cancelHeldPre-
+    /rangeMin: bandMin \+ offset/.test(body) && /rangeMax: bandMax \+ offset/.test(body));
+  // The matched (confirm) branch must NOT rewrite betType: cancelHeldPre-
   // QuoteOrders keys off it to still find (and refund) pre-quote orders. Only
   // the pending_hold -> pending_match conversion changes it.
-  const confirmLoop = body.slice(body.indexOf('const matchedPreQuote'));
-  check('confirmed loop does not rewrite betType away from pre_quote',
-    !/order\.betType =/.test(confirmLoop), confirmLoop.slice(0, 160));
-  check('confirmed loop does not put a matched order back on the pending board',
-    !/order\.status = 'pending_match'/.test(confirmLoop));
+  const confirmLoop = body.slice(body.indexOf("if (order.status === 'matched')"));
+  const confirmBranch = confirmLoop.slice(0, confirmLoop.indexOf('break;'));
+  check('confirmed branch does not rewrite betType away from pre_quote',
+    !/betType: 'range'/.test(confirmBranch), confirmBranch.slice(0, 160));
+  check('confirmed branch does not put a matched order back on the pending board',
+    !/status: 'pending_match'/.test(confirmBranch) && /expectStatus: \['matched'\]/.test(confirmBranch));
   check('reports how many matched pre-quotes were confirmed', /confirmedMatched/.test(body));
 }
 
@@ -143,11 +146,12 @@ console.log('\nTYPE [2] SELF-QUOTED — valid with or without a quote');
 // ── Settlement must honour each order's OWN range ─────────────────────────
 console.log('\nSETTLEMENT — judged against the order\'s own quoted range');
 {
-  const fn = ix.slice(ix.indexOf("functionName === 'adminResolveBets'"));
-  const body = fn.slice(0, 6000);
+  // The result is computed inside the Durable Object, from the stored order.
+  const dox = readFileSync('src/stateDO.ts', 'utf8');
+  const body = dox.slice(dox.indexOf('private computeSettlement'), dox.indexOf('async txn('));
   check('reads the order\'s own rangeMin/rangeMax', /order\.rangeMin/.test(body));
   check('falls back to the round band only when the order has no range',
-    /orderMin = [\s\S]{0,200}\? Number\(order\.rangeMin\)[\s\S]{0,80}: tMin/.test(body));
+    /orderMin = [\s\S]{0,200}\? Number\(order\.rangeMin\)[\s\S]{0,80}: spec\.tMin/.test(body));
   check('compares against the ORDER range, not tMin/tMax directly',
     /finalSeconds < orderMin/.test(body) && /finalSeconds > orderMax/.test(body));
   check('no longer compares finalSeconds straight to tMin/tMax',

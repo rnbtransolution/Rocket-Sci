@@ -1,5 +1,5 @@
 import { Env, InFlightRound, LineEvent, Order, PlayerProfile, RocketRound, Transaction } from './types.js';
-import { state } from './state.js';
+import { state, TxnSpec, TxnResult } from './state.js';
 import { scanSlipImage } from './slipScanner.js';
 import { getPaymentBank } from './paymentBank.js';
 import {
@@ -25,6 +25,7 @@ import {
   generateWithdrawalSuccessFlex,
   generateSlipReceivedFlex,
   generateSlipCreditedFlex,
+  generateDailySummaryFlex,
 } from './flexTemplates.js';
 
 export const RULE_GUIDE_TEXT = `📖 [กติกาการเล่น]
@@ -267,10 +268,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         return;
       }
 
-      profile.balance -= withdrawAmt;
-      await savePlayerProfile(profile, env, ctx);
-
-      const txId = `WD${Math.floor(100000 + Math.random() * 900000)}`;
+      const txId = `WD${Date.now().toString(36).toUpperCase()}${Math.floor(100 + Math.random() * 900)}`;
       const nowStr = new Date().toLocaleTimeString('th-TH', { hour12: false });
       const newTx: Transaction = {
         id: txId,
@@ -286,7 +284,22 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         type: 'withdraw',
         createdAt: Date.now(),
       };
-      await addTransaction(newTx, env, ctx);
+      // Debit and ledger entry in one atomic step. The balance test above used
+      // a snapshot; two "ถอน" messages sent together both passed it, and both
+      // were paid out of the same credit.
+      const wd = await ledger(env, {
+        balances: [{ shortId: profile.shortId, lineUserId: profile.lineUserId, delta: -withdrawAmt, requireSufficient: true }],
+        transactions: [{ id: txId, insert: newTx }],
+      }, ctx);
+      if (!wd.ok) {
+        const flex = wd.reason === 'insufficient'
+          ? generateInsufficientBalanceFlex(Number(wd.current?.balance) || 0, withdrawAmt - (Number(wd.current?.balance) || 0))
+          : generateNoticeFlex('⚠️ ทำรายการไม่สำเร็จ', LEDGER_UNAVAILABLE_TEXT, 'warning');
+        await deliverPrivateNotice(userId, replyToken, groupId, flex, env, profile.displayName, ctx);
+        return;
+      }
+      profile.balance = balanceAfter(wd, profile.shortId) ?? profile.balance;
+      mirrorTransactionToSheets(newTx, env, ctx);
 
       const withdrawSuccessFlex = generateWithdrawalSuccessFlex(
         withdrawAmt,
@@ -410,7 +423,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
           matchAmt = undefined;
         } else {
           // Check if exists as order
-          const exists = await env.KV_ORDERS.get(`ORDER_${numStr}`);
+          const exists = await getOrderRecord(numStr, env);
           if (exists) {
             targetOrderNo = numStr;
             matchAmt = undefined;
@@ -453,7 +466,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     }
 
     // ── 5. Admin Commands (e.g. "เปิด [ชื่อ]", "ปิดรอบ") ──
-    const openRoundRegex = /^(เปิด|เปิดรอบ|รอบ)\s*(.+)$/;
+    const openRoundRegex = /^(เปิดรอบ|เปิด|รอบ)\s*(.+)$/; // longest first, or "เปิดรอบ X" is named "รอบ X"
     if (openRoundRegex.test(text)) {
       if (!(await isSenderLineAdmin(userId, env))) {
         const unauthFlex = generateNoticeFlex('⚠️ สิทธิ์ไม่เพียงพอ', 'คำสั่งเปิดรอบสงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นครับ', 'warning');
@@ -462,7 +475,13 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       }
       const match = text.match(openRoundRegex);
       const roundName = match ? match[2].trim() : 'รอบดวลสด';
+      // Park the previous rocket first, exactly as the Admin Console does. This
+      // used to overwrite ACTIVE_ROUND in place: the previous rocket's matched
+      // orders stayed on the board and settled on the NEXT rocket's flight
+      // time, and its unpriced pre-quote orders took the next rocket's quote.
+      const parked = await parkCurrentRoundToInFlight(env, ctx, false);
       await state(env).put('ACTIVE_ROUND', JSON.stringify({
+        roundId: newRoundId(),
         name: roundName,
         targetMin: 330,
         targetMax: 380,
@@ -472,9 +491,14 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         updatedAt: Date.now(),
       }));
       if (replyToken) {
+        // The quote is not released yet, so no price is shown: plain ชล/ชถ
+        // orders wait for it, and only self-priced ranges are live now.
+        const parkedNote = parked.parkedRound
+          ? `\n🛰️ รอบก่อนหน้า (${parked.parkedRound.name}) ${parked.parkedRound.matchedOrders.length} คู่ รอตัดสินผลแยกต่างหาก`
+          : '';
         const openFlex = generateNoticeFlex(
           `🚀 เปิดรอบดวล: ${roundName}`,
-          `ราคาช่าง 330-380 วินาที\nพร้อมเปิดรับคำสั่งดวลแล้วครับ 🚀`,
+          `รอแอดมินประกาศราคาช่าง (เปิดราคาเองได้ เช่น 300-350ล500)\nพร้อมเปิดรับคำสั่งดวลแล้วครับ 🚀${parkedNote}`,
           'success'
         );
         await replyToLine(replyToken, openFlex, env, !isGroup);
@@ -490,23 +514,44 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       }
       const roundStr = await state(env).get('ACTIVE_ROUND');
       let roundName = 'รอบดวลสด';
+      let quoteReleased = false;
       if (roundStr) {
         const round = JSON.parse(roundStr) as RocketRound;
         round.status = 'CLOSED';
         roundName = round.name;
+        quoteReleased = round.quoteReleased === true;
         await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
       }
-      // Also clear pending unmatched orders so board resets cleanly for next round
-      await clearAllPendingOrders(env);
+      // Same as the Admin Console's Final Call: with no quote announced, every
+      // pre-quote order — matched ones included — is cancelled and both sides
+      // refunded. This path used to skip that, leaving matched pre-quote orders
+      // with no price to settle on.
+      if (!quoteReleased) await cancelHeldPreQuoteOrders(env, ctx);
+      const { cleared } = await clearAllPendingOrders(env, ctx);
       const closeFlex = generateNoticeFlex(
         `⛔ ปิดรับดวลรอบ: ${roundName}`,
-        `ล็อครอบเรียบร้อย (ล้างกระดานรอคู่ 0 แผล)\nรอลุ้นผลการแข่งขันครับ 💥`,
+        `ล็อครอบเรียบร้อย (ล้างกระดานรอคู่ ${cleared} แผล)\nรอลุ้นผลการแข่งขันครับ 💥`,
         'warning'
       );
       if (replyToken) {
         await replyToLine(replyToken, closeFlex, env, !isGroup);
       } else {
         await pushToLine(userId, closeFlex, env);
+      }
+      return;
+    }
+
+    // ── Admin: daily duel summary ("สรุปวันนี้", "สรุปผลวันนี้", "สรุปรายวัน") ──
+    if (clean === 'สรุปวันนี้' || clean === 'สรุปผลวันนี้' || clean === 'สรุปรายวัน') {
+      if (!(await isSenderLineAdmin(userId, env))) {
+        const unauthFlex = generateNoticeFlex('⚠️ สิทธิ์ไม่เพียงพอ', 'คำสั่งสรุปผลประจำวันสงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นครับ', 'warning');
+        if (replyToken) await replyToLine(replyToken, unauthFlex, env, !isGroup);
+        return;
+      }
+      const day = bangkokDay();
+      const summary = generateDailySummaryFlex(day, await getDailySettledOrders(day, env));
+      if (!(replyToken && (await replyToLine(replyToken, summary, env, !isGroup)))) {
+        await pushToLine(groupId || userId, summary, env);
       }
       return;
     }
@@ -605,6 +650,7 @@ async function handleCreateOrder(
     getInFlightRounds(env),
   ]);
   let round = roundStr ? (JSON.parse(roundStr) as RocketRound) : null;
+  let roundPinnable = round !== null;
 
   // Auto-initialise ONLY when there is no round at all (fresh install, or the key
   // was never written). This previously also revived VOID and RESOLVED rounds,
@@ -614,6 +660,7 @@ async function handleCreateOrder(
   // adminOpenRound); nothing a player does may reopen it.
   if (!round) {
     round = {
+      roundId: newRoundId(),
       name: 'ช่างบั้งไฟสด',
       targetMin: 330,
       targetMax: 380,
@@ -709,61 +756,101 @@ async function handleCreateOrder(
     return;
   }
 
-  // 2. Generate unique orderNumber in-memory across pending, matched, AND in-flight rounds
+  // 2. Order numbers already in use on the board, in matched orders and in flight.
   const existingNumbers = new Set<string>([
     ...pendingList.map((o) => o.orderNumber),
     ...matchedList.map((o) => o.orderNumber),
     ...inFlightRounds.flatMap((r) => (r.matchedOrders || []).map((o) => o.orderNumber)),
   ]);
-  let orderNumber = Math.floor(1000 + Math.random() * 9000).toString();
-  for (let attempt = 0; attempt < 30 && existingNumbers.has(orderNumber); attempt++) {
-    orderNumber = Math.floor(1000 + Math.random() * 9000).toString();
-  }
-
-  // 3. Determine order status
-  const quoteReleased = !!(round && round.quoteReleased === true);
-  const isPreQuote = !isCustom && !quoteReleased;
-  const orderStatus = isPreQuote ? 'pending_hold' : 'pending_match';
-
-  // 4. Construct Order object
-  const newOrder: Order = {
-    orderNumber,
-    creatorId: profile.shortId,
-    creatorName: profile.displayName,
-    creatorLineUserId: profile.lineUserId,
-    side,
-    amount,
-    betType: isPreQuote ? 'pre_quote' : (isCustom ? 'custom_range' : 'range'),
-    rangeMin: isPreQuote ? undefined : (isCustom ? rangeMin : ((round?.targetMin || 330) + offsetDelta)),
-    rangeMax: isPreQuote ? undefined : (isCustom ? rangeMax : ((round?.targetMax || 380) + offsetDelta)),
-    status: orderStatus,
-    groupId: targetGroupId,
-    userTypedCmd: text,
-    rocketName: round?.name || null,
-    offset: isPreQuote ? offsetDelta : undefined,
-    createdAt: Date.now(),
-    id: `bet_${orderNumber}`,
-    playerLowId: side === 'low' ? profile.shortId : null,
-    playerLowName: side === 'low' ? profile.displayName : null,
-    playerHighId: side === 'high' ? profile.shortId : null,
-    playerHighName: side === 'high' ? profile.displayName : null,
+  const pickOrderNumber = () => {
+    let n = Math.floor(1000 + Math.random() * 9000).toString();
+    for (let attempt = 0; attempt < 30 && existingNumbers.has(n); attempt++) {
+      n = Math.floor(1000 + Math.random() * 9000).toString();
+    }
+    return n;
   };
 
-  // 5. Update profile balance in-memory
-  profile.balance -= amount;
+  // 3-5. Build the order and commit it together with the stake debit and the
+  // board entry, as ONE atomic step. These used to be three separate writes of
+  // values computed from snapshots: two bets sent together both passed the
+  // balance test and both debited from the same starting balance, and orders
+  // created in the same second overwrote each other's PENDING_ORDERS_LIST
+  // write — the stake was taken but the order vanished from the board, so it
+  // could be neither matched nor refunded. Retried only on an order-number
+  // collision or a quote released mid-flight.
+  let newOrder!: Order;
+  let isPreQuote = false;
+  let committed: TxnResult | null = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const orderNumber = pickOrderNumber();
+    const quoteReleased = !!(round && round.quoteReleased === true);
+    isPreQuote = !isCustom && !quoteReleased;
+    newOrder = {
+      orderNumber,
+      creatorId: profile.shortId,
+      creatorName: profile.displayName,
+      creatorLineUserId: profile.lineUserId,
+      side,
+      amount,
+      betType: isPreQuote ? 'pre_quote' : (isCustom ? 'custom_range' : 'range'),
+      rangeMin: isPreQuote ? undefined : (isCustom ? rangeMin : ((round?.targetMin || 330) + offsetDelta)),
+      rangeMax: isPreQuote ? undefined : (isCustom ? rangeMax : ((round?.targetMax || 380) + offsetDelta)),
+      status: isPreQuote ? 'pending_hold' : 'pending_match',
+      groupId: targetGroupId,
+      userTypedCmd: text,
+      rocketName: round?.name || null,
+      roundId: round?.roundId ?? null,
+      offset: isPreQuote ? offsetDelta : undefined,
+      createdAt: Date.now(),
+      id: `bet_${orderNumber}`,
+      playerLowId: side === 'low' ? profile.shortId : null,
+      playerLowName: side === 'low' ? profile.displayName : null,
+      playerHighId: side === 'high' ? profile.shortId : null,
+      playerHighName: side === 'high' ? profile.displayName : null,
+    };
+
+    const res = await ledger(env, {
+      // The round is re-checked inside the commit: a Final Call landing while
+      // this message was in flight must still refuse it, and a quote released
+      // in the meantime must not leave a pre-quote order stranded on hold.
+      // Not pinned on the very first order of a fresh install: the auto-created
+      // round above is still being written in the background.
+      round: { expectStatus: ['ACTIVE'], expectQuoteReleased: quoteReleased, ...(roundPinnable && round?.roundId ? { expectRoundId: round.roundId } : {}) },
+      orders: [{ orderNumber, create: newOrder }],
+      balances: [{ shortId: profile.shortId, lineUserId: profile.lineUserId, delta: -amount, requireSufficient: true }],
+      lists: [{ key: 'PENDING_ORDERS_LIST', op: 'upsert', orderNumber }],
+    }, ctx);
+
+    if (res.ok) { committed = res; break; }
+    if (res.reason === 'order_exists') { existingNumbers.add(orderNumber); continue; }
+    if (res.reason === 'round_changed' && res.current) { round = res.current as RocketRound; roundPinnable = true; continue; }
+
+    let failFlex: any;
+    if (res.reason === 'round_closed') {
+      failFlex = generateNoticeFlex(
+        '⛔ ปิดรับออเดอร์รอบนี้แล้ว',
+        'ปิดรับออเดอร์รอบนี้แล้วครับ (ล็อครอบระหว่างการแข่งขัน)\nกรุณารอรอบถัดไปครับ 🙏',
+        'warning'
+      );
+    } else if (res.reason === 'insufficient') {
+      const have = Number(res.current?.balance) || 0;
+      failFlex = generateInsufficientBalanceFlex(have, amount - have);
+    } else {
+      failFlex = generateNoticeFlex('⚠️ เปิดแผลไม่สำเร็จ', LEDGER_UNAVAILABLE_TEXT, 'warning');
+    }
+    await deliverPrivateNotice(userId, replyToken, groupId, failFlex, env, profile.displayName, ctx);
+    return;
+  }
+  if (!committed) {
+    await deliverPrivateNotice(userId, replyToken, groupId,
+      generateNoticeFlex('⚠️ เปิดแผลไม่สำเร็จ', LEDGER_UNAVAILABLE_TEXT, 'warning'), env, profile.displayName, ctx);
+    return;
+  }
+  const orderNumber = newOrder.orderNumber;
+  profile.balance = balanceAfter(committed, profile.shortId) ?? profile.balance - amount;
 
   // 6. Generate Group Flex Card in-memory (< 0.1ms)
   const flexCard = generateOrderFlex(newOrder);
-
-  // 7. Update pending orders list in-memory
-  const updatedPendingList = [newOrder, ...pendingList.filter((o) => o.orderNumber !== orderNumber)].slice(0, 300);
-
-  // 8. Pipeline Order Persistence & LINE Dispatch Concurrently (< 500ms)
-  const persistenceTask = Promise.all([
-    env.KV_ORDERS.put(`ORDER_${orderNumber}`, JSON.stringify(newOrder)),
-    savePlayerProfile(profile, env, ctx),
-    state(env).put('PENDING_ORDERS_LIST', JSON.stringify(updatedPendingList), { expirationTtl: 86400 }),
-  ]);
 
   let cardDispatched = false;
   if (groupId) {
@@ -812,9 +899,6 @@ async function handleCreateOrder(
       }
     }
   }
-
-  // Ensure persistence completes
-  await persistenceTask;
 
   if (ctx) {
     ctx.waitUntil(
@@ -866,13 +950,12 @@ async function handleMatchOrder(
     return;
   }
 
-  const orderRaw = await env.KV_ORDERS.get(`ORDER_${resolvedNo}`);
-  if (!orderRaw) {
+  const order = await getOrderRecord(resolvedNo, env);
+  if (!order) {
     await deliverPrivateNotice(userId, replyToken, groupId, generateMatchMismatchFlex(resolvedNo, `ไม่พบแผล Order #${resolvedNo} ในระบบครับ`, 'พิมพ์ "ต <เลข order>" เพื่อลองรับแผลอื่นครับ'), env, profile.displayName, ctx);
     return;
   }
 
-  const order = JSON.parse(orderRaw) as Order;
   // A pre-quote order (pending_hold) IS matchable before the price is announced.
   // It has no range yet; it is confirmed when the admin sends the quote, and
   // cancelled with both sides refunded if the admin never sends one. So it must
@@ -886,8 +969,11 @@ async function handleMatchOrder(
     // existed.
     let reason: string;
     let hint: string;
-    if (order.status === 'matched') {
+    if (order.status === 'matched' || order.status === 'matched_paired') {
       reason = 'แผลนี้มีคู่ดวลแล้วครับ';
+      hint = 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ';
+    } else if (order.status === 'settled' || order.status === 'resolved') {
+      reason = 'แผลนี้ตัดสินผลไปแล้วครับ';
       hint = 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ';
     } else {
       reason = 'แผลนี้ถูกยกเลิกไปแล้วครับ';
@@ -947,115 +1033,102 @@ async function handleMatchOrder(
     return;
   }
 
-  // ── Claim the match ──
+  // ── Commit the match ──
   //
-  // Everything above decided "is this order still open?" by reading KV_ORDERS,
-  // which is eventually consistent. Two match requests arriving close together
-  // can BOTH observe `pending_match` and both proceed to debit their matcher and
-  // mark the order matched — two matches against one order, with only one
-  // refund ever owed.
+  // One atomic step: the order must still be open, unchanged, and not the
+  // matcher's own; the matcher must still have the credit; then the matcher is
+  // debited, any untaken remainder goes back to the creator, and the order
+  // moves from the pending board to the matched list. The checks above used a
+  // snapshot and are only a fast path for a friendly message.
   //
-  // The production chat log shows exactly this traffic: players re-tapping the
-  // same order seconds apart (A-K at 07:33:50 and again at 07:33:57 on #7015,
-  // with a third attempt from another player at 07:35:47). Each tap is a
-  // separate webhook invocation, so the race is reachable, not theoretical.
-  //
-  // This is the same compare-and-set that makes `refundOrderOnce` idempotent,
-  // applied to the other direction of the trade. Only the claim winner debits
-  // anybody. Fails closed: if the claim cannot be taken, the match is refused
-  // rather than risking a second debit.
-  const matchClaimKey = `MATCH:${resolvedNo}@${Number(order.createdAt) || 0}`;
-  const matchClaimed = await state(env).claimExclusive(matchClaimKey, {
-    orderNumber: resolvedNo,
-    createdAt: Number(order.createdAt) || 0,
+  // This replaces a separate MATCH claim followed by independent writes. That
+  // claim did stop two matchers taking one order, but nothing stopped the
+  // creator's "ยกเลิก" (or an admin cancel) running in between: the creator was
+  // refunded while the matcher was charged for an order that was then
+  // overwritten back to "matched".
+  const originalAmount = order.amount;
+  const matchedAt = Date.now();
+  const matchPatch: Partial<Order> = {
     amount: effectiveAmt,
+    status: 'matched',
     matcherId: profile.shortId,
-    claimedAt: Date.now(),
-  });
+    matcherName: profile.displayName,
+    matcherLineUserId: profile.lineUserId,
+    matchedAt,
+    // Both players named on the record: the creator keeps their side, the
+    // matcher takes the other. The P2P report and the admin portal read these.
+    playerLowId: order.side === 'low' ? order.creatorId : profile.shortId,
+    playerLowName: order.side === 'low' ? order.creatorName : profile.displayName,
+    playerHighId: order.side === 'high' ? order.creatorId : profile.shortId,
+    playerHighName: order.side === 'high' ? order.creatorName : profile.displayName,
+  };
 
-  if (!matchClaimed) {
-    await deliverPrivateNotice(
-      userId, replyToken, groupId,
-      generateMatchMismatchFlex(resolvedNo, 'แผลนี้ถูกรับไปโดยผู้เล่นอื่นแล้วครับ', 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ'),
-      env, profile.displayName, ctx
-    );
+  // Bound to the current rocket: the round must still be the one read above,
+  // and the order must belong to it. An order carried over from a previous
+  // rocket can otherwise be matched now and settle on this rocket's time.
+  const roundId = round?.roundId;
+  const res = await ledger(env, {
+    round: { expectStatus: ['ACTIVE'], ...(roundId ? { expectRoundId: roundId } : {}) },
+    orders: [{
+      orderNumber: resolvedNo,
+      expectCreatedAt: Number(order.createdAt) || 0,
+      expectStatus: ['pending_match', 'pending_hold'],
+      // Orders from before round IDs carry none and are not pinned.
+      ...(roundId && order.roundId ? { expectFields: { roundId } } : {}),
+      expectAmount: originalAmount,
+      rejectCreatorId: profile.shortId,
+      patch: matchPatch as Record<string, unknown>,
+      // The creator was charged the full order when it opened; the part nobody
+      // took goes straight back to them.
+      credits: isPartial && remainingAmount > 0 ? [{ who: 'creator', delta: remainingAmount }] : [],
+    }],
+    balances: [{ shortId: profile.shortId, lineUserId: profile.lineUserId, delta: -effectiveAmt, requireSufficient: true }],
+    lists: [
+      { key: 'PENDING_ORDERS_LIST', op: 'remove', orderNumber: resolvedNo },
+      { key: 'MATCHED_ORDERS_LIST', op: 'upsert', orderNumber: resolvedNo },
+    ],
+  }, ctx);
+
+  if (!res.ok) {
+    let msg: string;
+    let hint = 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ';
+    const curStatus = res.current?.status;
+    if (res.reason === 'round_closed') {
+      msg = 'ปิดรับดวลรอบนี้แล้วครับ (ล็อครอบระหว่างการแข่งขัน)';
+    } else if (res.reason === 'round_changed') {
+      msg = 'เปลี่ยนรอบบั้งไฟระหว่างทำรายการ กรุณาลองใหม่ครับ';
+    } else if (res.reason === 'order_field') {
+      msg = 'แผลนี้เป็นของบั้งไฟรอบก่อน รับดวลในรอบนี้ไม่ได้ครับ';
+    } else if (res.reason === 'order_status' && (curStatus === 'matched' || curStatus === 'matched_paired')) {
+      msg = 'แผลนี้ถูกรับไปโดยผู้เล่นอื่นแล้วครับ';
+    } else if (res.reason === 'order_status') {
+      msg = 'แผลนี้ถูกยกเลิกไปแล้วครับ';
+    } else if (res.reason === 'own_order') {
+      msg = 'คุณไม่สามารถรับแผลดวลของตัวเองได้ครับ';
+      hint = 'เลือกแผลของผู้เล่นอื่นเพื่อเปิดการดวลครับ';
+    } else if (res.reason === 'insufficient') {
+      const have = Number(res.current?.balance) || 0;
+      msg = `แต้มไม่พอรับแผลครับ (มี ${have.toLocaleString()} pt | ขาด ${(effectiveAmt - have).toLocaleString()} pt)`;
+      hint = 'พิมพ์ "ฝากเงิน" ในแชตนี้เพื่อเติมเครดิตครับ 🚀';
+    } else if (res.reason === 'order_amount' || res.reason === 'order_replaced') {
+      msg = 'แผลนี้มีการเปลี่ยนแปลงระหว่างทำรายการ กรุณาลองใหม่ครับ';
+    } else {
+      msg = LEDGER_UNAVAILABLE_TEXT;
+    }
+    await deliverPrivateNotice(userId, replyToken, groupId, generateMatchMismatchFlex(resolvedNo, msg, hint), env, profile.displayName, ctx);
     return;
   }
 
-  // Deduct matcher balance BEFORE saving
-  profile.balance -= effectiveAmt;
-
-  // The matched portion carries the original order number and the amount that
-  // was actually taken. Downstream settlement reads `amount`, so this is what
-  // both sides get paid out on — the matcher cannot win or lose more than the
-  // portion they committed.
-  const originalAmount = order.amount;
-  order.amount = effectiveAmt;
-  order.status = 'matched';
-  order.matcherId = profile.shortId;
-  order.matcherName = profile.displayName;
-  order.matcherLineUserId = profile.lineUserId;
-  order.matchedAt = Date.now();
-  // Clear the pre-match side so settlement cannot double-assign a winner. The
-  // creator's side is restored below for the remainder order only.
-  // The creator's own side was recorded when the order opened; restore it so
-  // the settled record names BOTH players. Blanking both fields and setting
-  // only the matcher's side left playerHighId null on every matched 'high'
-  // order, which the P2P report and the admin portal both read.
-  order.playerLowId = order.side === 'low' ? order.creatorId : null;
-  order.playerLowName = order.side === 'low' ? order.creatorName : null;
-  order.playerHighId = order.side === 'high' ? order.creatorId : null;
-  order.playerHighName = order.side === 'high' ? order.creatorName : null;
-  if (order.side === 'low') {
-    order.playerHighId = profile.shortId;
-    order.playerHighName = profile.displayName;
-  } else {
-    order.playerLowId = profile.shortId;
-    order.playerLowName = profile.displayName;
-  }
-
-  // Persist the matcher's deducted balance first so that when a partial match
-  // also refunds the creator's remainder below, the two savePlayerProfile calls
-  // never race on PLAYERS_LIST in KV fallback mode.
-  await savePlayerProfile(profile, env, ctx);
-
-  let remainderRefunded = 0;
-
-  if (isPartial) {
-    remainderRefunded = remainingAmount;
-
-    if (remainderRefunded > 0) {
-      const creatorLineIdForRefund =
-        order.creatorLineUserId || (await state(env).get(`RAW_LINE_${order.creatorId}`));
-      const creatorProfile = creatorLineIdForRefund
-        ? await getOrCreatePlayerProfile(creatorLineIdForRefund, env, ctx)
-        : null;
-      if (creatorProfile) {
-        creatorProfile.balance += remainderRefunded;
-        await savePlayerProfile(creatorProfile, env, ctx);
-      } else {
-        const refundedOk = await refundPlayerPoints(order.creatorId, order.creatorLineUserId, remainderRefunded, env, ctx);
-        if (!refundedOk) {
-          console.error(
-            `[Worker] partial take on #${resolvedNo}: failed to refund remainder ${remainderRefunded} to ${order.creatorId}`
-          );
-        }
-      }
-    }
-  }
-
-  const updatePersistence = Promise.all([
-    env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(order)),
-    removeFromPendingOrdersList(resolvedNo, env),
-    addToMatchedOrdersList(order, env),
-  ]);
+  Object.assign(order, res.orders[resolvedNo] || matchPatch);
+  profile.balance = balanceAfter(res, profile.shortId) ?? profile.balance - effectiveAmt;
+  const remainderRefunded = isPartial ? remainingAmount : 0;
 
   // Generate match card
   const matchFlex = generateMatchNotificationFlex(order);
 
   // Match notification: NEVER send to LINE Group. Send ONLY to DM of both creator and matcher.
   const creatorLineId = (await state(env).get(`RAW_LINE_${order.creatorId}`)) || order.creatorLineUserId;
-  const matchPromises: Promise<any>[] = [updatePersistence];
+  const matchPromises: Promise<any>[] = [];
 
   if (!groupId && replyToken) {
     // Matched directly inside 1-on-1 DM: reply in DM (with push fallback)
@@ -1098,6 +1171,10 @@ async function handleMatchOrder(
   }
 }
 
+/** Why a matched order cannot be cancelled. Sent to the player's DM, never the group. */
+export const MATCHED_ORDER_LOCKED_TEXT = (orderNo: string) =>
+  `🔒 แผล Order #${orderNo} ต่อติดแล้ว ระบบล็อกไว้ ไม่สามารถยกเลิกได้ทุกกรณีครับ\nรอผลการแข่งขันและสรุปผลตามเวลาบั้งไฟครับ 🚀`;
+
 async function cancelOrder(
   orderNo: string,
   profile: PlayerProfile,
@@ -1107,10 +1184,15 @@ async function cancelOrder(
   const resolvedNo = await resolveOrderNumber(orderNo, null, env);
   if (!resolvedNo) return { success: false, message: `🚫 ไม่พบแผล Order #${orderNo}` };
 
-  const raw = await env.KV_ORDERS.get(`ORDER_${resolvedNo}`);
-  if (!raw) return { success: false, message: `🚫 ไม่พบแผล Order #${resolvedNo}` };
+  const order = await getOrderRecord(resolvedNo, env);
+  if (!order) return { success: false, message: `🚫 ไม่พบแผล Order #${resolvedNo}` };
 
-  const order = JSON.parse(raw) as Order;
+  // A matched order is locked for everyone — creator, matcher, or anyone
+  // tapping the card's Cancel button — so this is checked before ownership:
+  // the matcher used to be told only "not your order".
+  if (order.status === 'matched' || order.status === 'matched_paired') {
+    return { success: false, message: MATCHED_ORDER_LOCKED_TEXT(resolvedNo) };
+  }
   if (order.creatorId !== profile.shortId) {
     return { success: false, message: '⚠️ คุณไม่ใช่เจ้าของแผลนี้ครับ' };
   }
@@ -1118,37 +1200,30 @@ async function cancelOrder(
     return { success: false, message: `⚠️ แผล Order #${resolvedNo} อยู่ในสถานะ ${order.status} ไม่สามารถยกเลิกได้ครับ` };
   }
 
-  // Claim the refund BEFORE crediting anything. The status check above reads
-  // eventually-consistent KV, so on its own it cannot tell "nobody has
-  // cancelled this yet" from "the admin cancelled it a moment ago and the
-  // write has not reached this region". The claim is strongly consistent, so it
-  // can — this is what stops a second, duplicate refund.
-  const refund = await refundOrderOnce(order, env, ctx, 'player_cancel');
+  // The checks above are only for a friendly message. The refund re-checks the
+  // stored order — still unmatched, still this player's — in the same atomic
+  // step that credits the stake, so a match or an admin cancel arriving at the
+  // same moment cannot also go through.
+  const refund = await refundOrderOnce(order, env, ctx, 'player_cancel', {
+    allowedStatuses: ['pending_match', 'pending_hold'],
+    expectCreatorId: profile.shortId,
+  });
 
   if (!refund.refunded) {
+    const now = refund.order?.status;
+    if (refund.reason === 'claim_unavailable') {
+      return { success: false, message: `⚠️ ${LEDGER_UNAVAILABLE_TEXT}` };
+    }
+    if (now === 'matched' || now === 'matched_paired') {
+      return { success: false, message: MATCHED_ORDER_LOCKED_TEXT(resolvedNo) };
+    }
     return {
       success: false,
       message: `⚠️ แผล Order #${resolvedNo} ถูกยกเลิกไปแล้วครับ ไม่สามารถยกเลิกซ้ำได้ (ระบบคืนแต้มให้ครั้งแรกเรียบร้อยแล้ว)`,
     };
   }
 
-  // 1. Mark order cancelled in KV_ORDERS & remove from pending list
-  order.status = 'cancelled';
-  await Promise.all([
-    env.KV_ORDERS.put(`ORDER_${resolvedNo}`, JSON.stringify(order)),
-    removeFromPendingOrdersList(resolvedNo, env),
-  ]);
-
-  // 2. Report the balance as it actually stands now. The old code added to the
-  // in-memory profile it was handed, which could be stale relative to the
-  // authoritative record and printed a number the player never received.
-  const freshRaw = profile.lineUserId
-    ? await state(env).get(`USER_${profile.lineUserId}`)
-    : await state(env).get(`USER_${profile.shortId}`);
-  const currentBalance = freshRaw
-    ? (Number((JSON.parse(freshRaw) as PlayerProfile).balance) || 0)
-    : profile.balance + refund.amount;
-
+  const currentBalance = refund.newCreatorBalance ?? profile.balance + refund.amount;
   return {
     success: true,
     amount: refund.amount,
@@ -1181,7 +1256,7 @@ async function handleSlipUpload(
   const replyToken = event.replyToken;
 
   const nowStr = new Date().toLocaleTimeString('th-TH', { hour12: false });
-  const txId = `TX${Math.floor(100000 + Math.random() * 900000)}`;
+  const txId = `TX${Date.now().toString(36).toUpperCase()}${Math.floor(100 + Math.random() * 900)}`;
 
   const escalate = async (detail: string, playerMessage: string, slipRef = '') => {
     const tx: Transaction = {
@@ -1232,49 +1307,10 @@ async function handleSlipUpload(
   // GUARD 3 — the same slip must never credit twice.
   //
   // The player re-sending a slip, LINE redelivering the webhook, or two uploads
-  // racing would all otherwise credit the same reference again. The claim is
-  // taken BEFORE any money moves and fails closed, so an unavailable Durable
-  // Object means no credit rather than a possible duplicate.
-  const firstUse = await state(env).claimExclusive(
-    `SLIP:${scan.refCode}`,
-    {
-      refCode: scan.refCode,
-      amount: scan.amount,
-      playerId: profile.shortId,
-      lineUserId: profile.lineUserId,
-      messageId,
-      at: Date.now(),
-    },
-    90 * 24 * 60 * 60 * 1000 // 90 days — comfortably past any dispute window
-  );
-
-  if (!firstUse) {
-    await escalate(
-      `Duplicate slip reference ${scan.refCode} — already submitted before`,
-      `⚠️ ตรวจพบสลิปซ้ำในระบบ\nเลขอ้างอิง: ${scan.refCode}\nสลิปนี้เคยถูกใช้งานแล้ว จึงไม่ได้เติมเครดิตซ้ำครับ\n\nหากคุณคิดว่าไม่ถูกต้อง กรุณาแจ้งแอดมินครับ`,
-      scan.refCode
-    );
-    return;
-  }
-
-  // Credit the verified slip amount.
-  profile.balance = (Number(profile.balance) || 0) + scan.amount;
-  await savePlayerProfile(profile, env, ctx);
-
-  // Register the payer's bank details. These are what a later "ถอน x,xxx"
-  // reuses, so a player who has deposited never has to type them again.
-  if (scan.sender?.account && scan.sender.name) {
-    const withBank: PlayerProfile = {
-      ...profile,
-      bankName: profile.bankName || scan.sender.bank || '',
-      accountNumber: profile.accountNumber || scan.sender.account,
-      accountName: profile.accountName || scan.sender.name,
-    };
-    if (withBank.accountNumber !== profile.accountNumber || withBank.accountName !== profile.accountName) {
-      await savePlayerProfile(withBank, env, ctx);
-    }
-  }
-
+  // racing would all otherwise credit the same reference again. The claim on
+  // the slip reference, the credit and the ledger entry are one atomic step:
+  // previously the claim was taken first and the credit written separately, so
+  // a failure in between burned the slip with nothing credited and no record.
   const tx: Transaction = {
     id: txId,
     playerId: profile.shortId,
@@ -1289,7 +1325,57 @@ async function handleSlipUpload(
     type: 'deposit',
     createdAt: Date.now(),
   };
-  await addTransaction(tx, env, ctx);
+  const credit = await ledger(env, {
+    claims: [{
+      key: `SLIP:${scan.refCode}`,
+      payload: {
+        refCode: scan.refCode,
+        amount: scan.amount,
+        playerId: profile.shortId,
+        lineUserId: profile.lineUserId,
+        messageId,
+        at: Date.now(),
+      },
+      ttlMs: 90 * 24 * 60 * 60 * 1000, // 90 days — comfortably past any dispute window
+    }],
+    balances: [{ shortId: profile.shortId, lineUserId: profile.lineUserId, delta: scan.amount }],
+    transactions: [{ id: txId, insert: tx }],
+  }, ctx);
+
+  if (!credit.ok) {
+    if (credit.reason === 'claimed') {
+      await escalate(
+        `Duplicate slip reference ${scan.refCode} — already submitted before`,
+        `⚠️ ตรวจพบสลิปซ้ำในระบบ\nเลขอ้างอิง: ${scan.refCode}\nสลิปนี้เคยถูกใช้งานแล้ว จึงไม่ได้เติมเครดิตซ้ำครับ\n\nหากคุณคิดว่าไม่ถูกต้อง กรุณาแจ้งแอดมินครับ`,
+        scan.refCode
+      );
+    } else {
+      // Nothing was credited and the slip was not consumed; hand it to an admin.
+      await escalate(
+        `Slip ${scan.refCode} verified (${scan.amount}) but auto-credit failed: ${credit.reason} — approve manually`,
+        'ระบบได้รับสลิปแล้ว แต่ไม่สามารถเติมเครดิตอัตโนมัติได้ในขณะนี้\nแอดมินจะตรวจสอบและเติมให้ครับ 🙏',
+        scan.refCode
+      );
+    }
+    return;
+  }
+  profile.balance = balanceAfter(credit, profile.shortId) ?? profile.balance + scan.amount;
+  mirrorTransactionToSheets(tx, env, ctx);
+
+  // Register the payer's bank details. These are what a later "ถอน x,xxx"
+  // reuses, so a player who has deposited never has to type them again.
+  // (savePlayerProfile never writes the balance.)
+  if (scan.sender?.account && scan.sender.name) {
+    const withBank: PlayerProfile = {
+      ...profile,
+      bankName: profile.bankName || scan.sender.bank || '',
+      accountNumber: profile.accountNumber || scan.sender.account,
+      accountName: profile.accountName || scan.sender.name,
+    };
+    if (withBank.accountNumber !== profile.accountNumber || withBank.accountName !== profile.accountName) {
+      await savePlayerProfile(withBank, env, ctx);
+    }
+  }
 
   await deliverPrivateNotice(
     userId,
@@ -1311,34 +1397,21 @@ async function handleSlipUpload(
 export async function clearAllPendingOrders(env: Env, ctx?: ExecutionContext): Promise<{ cleared: number }> {
   let clearedCount = 0;
   try {
+    // Each order is refunded and taken off the board in its own atomic step.
+    // The board used to be blanked first and refunded afterwards: an order
+    // created in between disappeared from the index with its stake held and was
+    // never refunded, and a match landing mid-sweep was overwritten to
+    // "cancelled" after the matcher had paid.
     const pendingOrders = await getPendingOrdersList(env);
-
-    // 1. Immediately reset PENDING_ORDERS_LIST with empty array in KV_CACHE
-    await state(env).put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 });
-
-    // 2. Cancel and refund ONLY pending_match + pending_hold (pre_quote) orders
     for (const item of pendingOrders) {
       if (!item || !item.orderNumber) continue;
-      const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
-      if (!raw) continue;
-      try {
-        const order = JSON.parse(raw) as Order;
-        if (order.status === 'pending_match' || order.status === 'pending_hold' || order.status === 'refunding') {
-          const isRecovering = order.status === 'refunding';
-          order.status = 'refunding';
-          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-
-          // Claimed, so a cancel that already paid out (by the player, by the
-          // admin, or by an earlier sweep) is skipped instead of paid twice.
-          const refund = await refundOrderOnce(order, env, ctx, 'clear_pending');
-
-          order.status = 'cancelled';
-          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-          if (refund.refunded && !isRecovering) clearedCount++;
-        }
-      } catch (_) {}
+      const order = await getOrderRecord(item.orderNumber, env);
+      if (!order) continue;
+      const refund = await refundOrderOnce(order, env, ctx, 'clear_pending', {
+        allowedStatuses: ['pending_match', 'pending_hold', 'refunding'],
+      });
+      if (refund.refunded) clearedCount++;
     }
-
     console.log(`[Worker] clearAllPendingOrders: Cancelled and refunded ${clearedCount} pending unmatched + held pre-quote orders.`);
   } catch (err) {
     console.error('[Worker] clearAllPendingOrders error:', err);
@@ -1363,11 +1436,24 @@ export interface RefundOutcome {
   /** True only for the caller that actually moved the money. */
   refunded: boolean;
   /** Why nothing was credited. */
-  reason?: 'already_refunded' | 'claim_unavailable';
+  reason?: 'already_refunded' | 'claim_unavailable' | 'not_refundable';
   amount: number;
   creatorCredited: boolean;
   matcherCredited: boolean;
   newCreatorBalance?: number;
+  /** The order as stored after the refund (or as found, when refused). */
+  order?: Order;
+}
+
+/** Every status from which an order still holds stake that can be returned. */
+const REFUNDABLE_STATUSES = ['pending_match', 'pending_hold', 'matched', 'refunding'];
+
+export interface RefundConditions {
+  /** Statuses the stored order must be in. Defaults to every refundable one. */
+  allowedStatuses?: string[];
+  expectFields?: Record<string, unknown>;
+  expectMissingFields?: string[];
+  expectCreatorId?: string;
 }
 
 /**
@@ -1375,68 +1461,86 @@ export interface RefundOutcome {
  *
  * Every way an order can be cancelled — the player typing "ยกเลิก", the Admin
  * Console cancel button, clearing the pending board, auto-cancelling held
- * pre-quote orders, voiding the round — funnels through here, and only the
- * caller that wins the Durable Object claim is allowed to credit anybody.
+ * pre-quote orders, voiding the round — funnels through here.
  *
- * Before this existed each path did its own `read status → refund`, against an
- * eventually-consistent KV record. Two paths could both read a cancellable
- * status and both refund, which is exactly how a 100pt order came to credit the
- * player 200pt: the admin cancelled (refunding silently, no notification), and
- * the player's own cancel then sailed through the `pending_match` guard a few
- * seconds later because the admin's write had not propagated to LINE's region.
+ * It is one atomic ledger step: the STORED order must still be refundable,
+ * then it is marked cancelled, both stakes are credited from the stored amount
+ * and parties, and it leaves both board lists. Deciding from the caller's copy
+ * was the defect behind two separate losses: a settled order could be
+ * "cancelled" by an admin and both players refunded on top of the payout, and
+ * a creator's cancel could land between someone matching the order and the
+ * match being written — refunding the creator while the matcher's stake stayed
+ * charged.
  *
- * `matcherId` decides whether the matcher is refunded too, which matches what
- * every call site did individually: pending orders have no matcher, so
- * creator-only is automatic, and matched/voided orders refund both sides.
+ * The legacy REFUND claim is still taken in the same step, so an order that an
+ * earlier version of this code already refunded can never be refunded again.
  */
 export async function refundOrderOnce(
   order: Order,
   env: Env,
   ctx?: ExecutionContext,
-  source = 'unknown'
+  source = 'unknown',
+  conditions: RefundConditions = {}
 ): Promise<RefundOutcome> {
-  const amount = Number(order.amount) || 0;
   const claimKey = refundClaimKey(order);
+  const res = await ledger(env, {
+    claims: [{
+      key: `REFUND:${claimKey}`,
+      payload: {
+        orderNumber: order.orderNumber,
+        createdAt: Number(order.createdAt) || 0,
+        amount: Number(order.amount) || 0,
+        creatorId: order.creatorId || null,
+        matcherId: order.matcherId || null,
+        source,
+        claimedAt: Date.now(),
+      },
+    }],
+    orders: [{
+      orderNumber: order.orderNumber,
+      expectCreatedAt: Number(order.createdAt) || 0,
+      expectStatus: conditions.allowedStatuses || REFUNDABLE_STATUSES,
+      expectFields: conditions.expectFields,
+      expectMissingFields: conditions.expectMissingFields,
+      expectCreatorId: conditions.expectCreatorId,
+      refund: true,
+      patch: { refundSource: source },
+    }],
+    lists: [
+      { key: 'PENDING_ORDERS_LIST', op: 'remove', orderNumber: order.orderNumber },
+      { key: 'MATCHED_ORDERS_LIST', op: 'remove', orderNumber: order.orderNumber },
+    ],
+  }, ctx);
 
-  const claimed = await state(env).claimExclusive(`REFUND:${claimKey}`, {
-    orderNumber: order.orderNumber,
-    createdAt: Number(order.createdAt) || 0,
-    amount,
-    creatorId: order.creatorId || null,
-    matcherId: order.matcherId || null,
-    source,
-    claimedAt: Date.now(),
-  });
-
-  if (!claimed) {
-    // Either a previous cancellation already refunded this order, or the claim
-    // could not be taken (Durable Object unavailable) — in which case we refuse
-    // rather than risk paying twice. Either way: no credit.
+  if (!res.ok) {
     return {
       refunded: false,
-      reason: 'already_refunded',
-      amount,
+      reason: res.reason === 'unavailable' || res.reason === 'error'
+        ? 'claim_unavailable'
+        : res.reason === 'claimed' ? 'already_refunded' : 'not_refundable',
+      amount: Number(res.current?.amount ?? order.amount) || 0,
       creatorCredited: false,
       matcherCredited: false,
+      order: res.current as Order | undefined,
     };
   }
 
-  if (!(amount > 0)) {
-    return { refunded: true, amount: 0, creatorCredited: false, matcherCredited: false };
-  }
-
-  const creatorCredited = order.creatorId
-    ? await refundPlayerPoints(order.creatorId, order.creatorLineUserId, amount, env, ctx)
-    : false;
-  const matcherCredited = order.matcherId
-    ? await refundPlayerPoints(order.matcherId, order.matcherLineUserId || undefined, amount, env, ctx)
-    : false;
-
-  return { refunded: true, amount, creatorCredited, matcherCredited };
+  const stored = res.orders[order.orderNumber] as Order;
+  Object.assign(order, stored);
+  const amount = Number(stored.amount) || 0;
+  return {
+    refunded: true,
+    amount,
+    creatorCredited: amount > 0 && Boolean(stored.creatorId),
+    matcherCredited: amount > 0 && Boolean(stored.matcherId),
+    newCreatorBalance: balanceAfter(res, stored.creatorId),
+    order: stored,
+  };
 }
 
 /**
- * Safely credits/refunds points to a player profile across USER_${lineId}, USER_${shortId}, and PLAYERS_LIST.
+ * Credit (or debit) a player outside of any order — kept for callers that move
+ * credit on their own. Atomic; returns false when nothing moved.
  */
 export async function refundPlayerPoints(
   shortId: string,
@@ -1446,103 +1550,9 @@ export async function refundPlayerPoints(
   ctx?: ExecutionContext
 ): Promise<boolean> {
   if (amount <= 0) return true;
-  try {
-    const rawLine = (await state(env).get(`RAW_LINE_${shortId}`)) || lineUserId || (shortId.startsWith('U') ? shortId : '');
-    const effectiveShort = shortId.startsWith('PL') ? shortId : (rawLine ? `PL${rawLine.slice(-6).toUpperCase()}` : shortId);
-
-    const [rawByLine, rawByPassedLine, rawByShort, listRaw] = await Promise.all([
-      rawLine ? state(env).get(`USER_${rawLine}`) : Promise.resolve(null),
-      lineUserId && lineUserId !== rawLine ? state(env).get(`USER_${lineUserId}`) : Promise.resolve(null),
-      effectiveShort ? state(env).get(`USER_${effectiveShort}`) : Promise.resolve(null),
-      state(env).get('PLAYERS_LIST'),
-    ]);
-
-    const candidates: PlayerProfile[] = [];
-    for (const raw of [rawByLine, rawByPassedLine, rawByShort]) {
-      if (!raw) continue;
-      try {
-        const parsed = JSON.parse(raw) as PlayerProfile;
-        if (parsed && typeof parsed === 'object') candidates.push(parsed);
-      } catch (_) {}
-    }
-
-    if (listRaw) {
-      try {
-        const list = JSON.parse(listRaw) as any[];
-        const matches = list.filter(
-          (x: any) =>
-            x &&
-            (x.id === effectiveShort ||
-              x.shortId === effectiveShort ||
-              x.id === shortId ||
-              x.shortId === shortId ||
-              (rawLine && (x.lineUserId === rawLine || x.id === rawLine)) ||
-              (lineUserId && (x.lineUserId === lineUserId || x.id === lineUserId)))
-        );
-        for (const m of matches) {
-          candidates.push({
-            shortId: m.shortId || effectiveShort,
-            lineUserId: m.lineUserId || rawLine || lineUserId || effectiveShort,
-            displayName: m.displayName || m.name || 'ผู้เล่น',
-            balance: Number(m.balance) || 0,
-            bankName: m.bankName || '',
-            accountNumber: m.accountNumber || m.bankAccount || '',
-            accountName: m.accountName || m.displayName || m.name || '',
-            registeredAt: Number(m.registeredAt) || 0,
-            updatedAt: Number(m.updatedAt) || 0,
-          });
-        }
-      } catch (_) {}
-    }
-
-    if (candidates.length === 0) return false;
-
-    // Select the authoritative candidate with the newest updatedAt timestamp
-    let best = candidates[0];
-    for (let i = 1; i < candidates.length; i++) {
-      const c = candidates[i];
-      const bestAt = Number(best.updatedAt) || 0;
-      const cAt = Number(c.updatedAt) || 0;
-      if (cAt > bestAt) {
-        best = {
-          ...c,
-          ...best,
-          balance: Number(c.balance) || 0,
-          updatedAt: cAt,
-          shortId: c.shortId || best.shortId || effectiveShort,
-          lineUserId: (c.lineUserId && c.lineUserId.startsWith('U')) ? c.lineUserId : ((best.lineUserId && best.lineUserId.startsWith('U')) ? best.lineUserId : (rawLine || lineUserId || effectiveShort)),
-          displayName: c.displayName || best.displayName || 'ผู้เล่น',
-          bankName: c.bankName || best.bankName || '',
-          accountNumber: c.accountNumber || best.accountNumber || '',
-          accountName: c.accountName || best.accountName || '',
-        };
-      } else {
-        best = {
-          ...c,
-          ...best,
-          balance: Number(best.balance) || 0,
-          updatedAt: bestAt,
-          shortId: best.shortId || c.shortId || effectiveShort,
-          lineUserId: (best.lineUserId && best.lineUserId.startsWith('U')) ? best.lineUserId : ((c.lineUserId && c.lineUserId.startsWith('U')) ? c.lineUserId : (rawLine || lineUserId || effectiveShort)),
-          displayName: best.displayName || c.displayName || 'ผู้เล่น',
-          bankName: best.bankName || c.bankName || '',
-          accountNumber: best.accountNumber || c.accountNumber || '',
-          accountName: best.accountName || c.accountName || '',
-        };
-      }
-    }
-
-    best.shortId = best.shortId || effectiveShort;
-    best.lineUserId = (best.lineUserId && best.lineUserId.startsWith('U'))
-      ? best.lineUserId
-      : (rawLine || lineUserId || best.shortId);
-    best.balance = (Number(best.balance) || 0) + amount;
-    await savePlayerProfile(best, env, ctx);
-    return true;
-  } catch (err) {
-    console.error('[Worker] refundPlayerPoints error:', err);
-    return false;
-  }
+  const res = await ledger(env, { balances: [{ shortId, lineUserId, delta: amount }] }, ctx);
+  if (!res.ok) console.error(`[Worker] refundPlayerPoints ${shortId} +${amount} failed: ${res.reason}`);
+  return res.ok;
 }
 
 /**
@@ -1592,27 +1602,21 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
       candidates.push(o);
     }
 
-    const remainingPending = pendingList.filter((o) => !isUnquotedPreQuote(o));
-    const remainingMatched = matchedList.filter((o) => !isUnquotedPreQuote(o));
-
     for (const item of candidates) {
-      const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
-      if (!raw) continue;
       try {
-        const order = JSON.parse(raw) as Order;
-        if (order.betType !== 'pre_quote' || order.offsetConfirmedAt) continue;
-        if (order.status !== 'pending_hold' && order.status !== 'matched') continue;
-
+        const order = await getOrderRecord(item.orderNumber, env);
+        if (!order) continue;
         const amt = Number(order.amount) || 0;
-        const hadMatcher = Boolean(order.matcherId);
 
-        // Claim first: if the player or the admin already cancelled this order,
-        // do not notify them about a refund that is not happening. For a
-        // matched order this also credits BOTH sides, exactly once.
-        const refund = await refundOrderOnce(order, env, ctx, 'cancel_held_pre_quote');
-
-        order.status = 'cancelled';
-        await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
+        // Atomic: still an unquoted pre-quote, still open or matched — then
+        // cancelled, BOTH sides credited from the stored order, and removed from
+        // both lists. If the player or admin already cancelled it, nothing moves
+        // and nobody is told about a refund that is not happening.
+        const refund = await refundOrderOnce(order, env, ctx, 'cancel_held_pre_quote', {
+          allowedStatuses: ['pending_hold', 'matched'],
+          expectFields: { betType: 'pre_quote' },
+          expectMissingFields: ['offsetConfirmedAt'],
+        });
         if (!refund.refunded) continue;
         cancelledCount++;
         cancelledOrderNumbers.push(order.orderNumber);
@@ -1622,8 +1626,8 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
         const parties: Array<{ id: string; lineId?: string | null; name?: string | null }> = [
           { id: order.creatorId, lineId: order.creatorLineUserId, name: order.creatorName },
         ];
-        if (hadMatcher) {
-          parties.push({ id: order.matcherId!, lineId: order.matcherLineUserId, name: order.matcherName });
+        if (order.matcherId) {
+          parties.push({ id: order.matcherId, lineId: order.matcherLineUserId, name: order.matcherName });
         }
 
         await Promise.all(parties.map(async (p) => {
@@ -1643,13 +1647,11 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
             p.name || undefined
           );
         }));
-      } catch (_) {}
+      } catch (err) {
+        console.error(`[Worker] cancelHeldPreQuoteOrders #${item.orderNumber}:`, err);
+      }
     }
 
-    await Promise.all([
-      state(env).put('PENDING_ORDERS_LIST', JSON.stringify(remainingPending), { expirationTtl: 1800 }),
-      state(env).put('MATCHED_ORDERS_LIST', JSON.stringify(remainingMatched), { expirationTtl: 1800 }),
-    ]);
     console.log(`[Worker] cancelHeldPreQuoteOrders: Cancelled + refunded ${cancelledCount} pre-quote orders.`);
   } catch (err) {
     console.error('[Worker] cancelHeldPreQuoteOrders error:', err);
@@ -1674,71 +1676,64 @@ export async function releaseHeldPreQuoteOrders(
   const bandMin = Number(minVal) || 330;
   const bandMax = Number(maxVal) || 380;
   const rName = (rocketName && typeof rocketName === 'string') ? rocketName : 'บั้งไฟสด';
-  const pending = await getPendingOrdersList(env);
-  const held = pending.filter((o) => o && o.status === 'pending_hold' && o.betType === 'pre_quote');
-  const nonHeld = pending.filter((o) => !(o && o.status === 'pending_hold' && o.betType === 'pre_quote'));
+  const [pending, matchedNow] = await Promise.all([getPendingOrdersList(env), getMatchedOrdersList(env)]);
+  const candidates = new Set<string>();
+  for (const o of [...pending, ...matchedNow]) {
+    if (o && o.orderNumber && o.betType === 'pre_quote') candidates.add(o.orderNumber);
+  }
 
   let converted = 0;
   let confirmedMatched = 0;
   const convertedOrders: Order[] = [];
-
-  for (const item of held) {
-    const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
-    if (!raw) continue;
-    try {
-      const order = JSON.parse(raw) as Order;
-      if (order.status === 'pending_hold' && order.betType === 'pre_quote') {
-        const offset = Number(order.offset) || 0;
-        order.betType = 'range';
-        order.rangeMin = bandMin + offset;
-        order.rangeMax = bandMax + offset;
-        order.rocketName = rName;
-        order.status = 'pending_match';
-        await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-        convertedOrders.push(order);
-        converted++;
-      }
-    } catch (_) {}
-  }
-
-  // A pre-quote order can already be MATCHED when the quote arrives, because it
-  // is matchable before the price is announced. Such an order still holds only
-  // an offset — no real range — so it has to be given one now or it can never be
-  // settled. It keeps its `pre_quote` betType: that is what
-  // cancelHeldPreQuoteOrders looks for, and a matched order must never re-enter
-  // the pending board.
-  const matchedPreQuote = (await getMatchedOrdersList(env)).filter(
-    (o) => o && o.betType === 'pre_quote'
-  );
   const confirmedMatchedOrders: Order[] = [];
-  for (const item of matchedPreQuote) {
-    const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
-    if (!raw) continue;
-    try {
-      const order = JSON.parse(raw) as Order;
-      if (order.betType !== 'pre_quote') continue;
+
+  // Each order is moved by a compare-and-set on its STORED status, so a match
+  // landing at the same moment is never overwritten back to the pending board.
+  // An order that is matched between our read and our write is retried once as
+  // a matched pre-quote, which still needs its real range.
+  for (const orderNumber of candidates) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const order = await getOrderRecord(orderNumber, env);
+      if (!order || order.betType !== 'pre_quote') break;
       const offset = Number(order.offset) || 0;
-      order.rangeMin = bandMin + offset;
-      order.rangeMax = bandMax + offset;
-      order.rocketName = rName;
-      order.offsetConfirmedAt = Date.now();
-      await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-      confirmedMatchedOrders.push(order);
-      confirmedMatched++;
-    } catch (_) {}
-  }
+      const range = { rangeMin: bandMin + offset, rangeMax: bandMax + offset, rocketName: rName };
 
-  // Update MATCHED_ORDERS_LIST with confirmed pre-quotes so subsequent reads have range and offsetConfirmedAt
-  if (confirmedMatchedOrders.length > 0) {
-    const fullMatchedList = await getMatchedOrdersList(env);
-    const confirmedMap = new Map(confirmedMatchedOrders.map((o) => [o.orderNumber, o]));
-    const updatedMatched = fullMatchedList.map((o) => (o && confirmedMap.has(o.orderNumber) ? confirmedMap.get(o.orderNumber)! : o));
-    await state(env).put('MATCHED_ORDERS_LIST', JSON.stringify(updatedMatched), { expirationTtl: 86400 });
-  }
+      if (order.status === 'pending_hold') {
+        // Not yet taken: becomes an ordinary range order on the board.
+        const res = await ledger(env, {
+          orders: [{
+            orderNumber,
+            expectCreatedAt: Number(order.createdAt) || 0,
+            expectStatus: ['pending_hold'],
+            expectFields: { betType: 'pre_quote' },
+            patch: { ...range, betType: 'range', status: 'pending_match' },
+          }],
+          lists: [{ key: 'PENDING_ORDERS_LIST', op: 'upsert', orderNumber }],
+        }, ctx);
+        if (res.ok) { convertedOrders.push(res.orders[orderNumber]); converted++; break; }
+        if (res.reason === 'order_status') continue;
+        break;
+      }
 
-  // Update PENDING_ORDERS_LIST with newly converted pending_match orders
-  const updatedPending = [...convertedOrders, ...nonHeld].slice(0, 300);
-  await state(env).put('PENDING_ORDERS_LIST', JSON.stringify(updatedPending), { expirationTtl: 1800 });
+      if (order.status === 'matched') {
+        // Already matched before the price: keeps betType 'pre_quote' (that is
+        // how cancelHeldPreQuoteOrders recognises it) and gains its range. A
+        // corrected re-quote re-applies the range, as before.
+        const res = await ledger(env, {
+          orders: [{
+            orderNumber,
+            expectCreatedAt: Number(order.createdAt) || 0,
+            expectStatus: ['matched'],
+            expectFields: { betType: 'pre_quote' },
+            patch: { ...range, offsetConfirmedAt: Date.now() },
+          }],
+          lists: [{ key: 'MATCHED_ORDERS_LIST', op: 'upsert', orderNumber }],
+        }, ctx);
+        if (res.ok) { confirmedMatchedOrders.push(res.orders[orderNumber]); confirmedMatched++; }
+      }
+      break;
+    }
+  }
 
   // Auto-match same-amount opposite-side pairs
   const matched = await autoMatchPendingPairs(env, ctx);
@@ -1802,7 +1797,6 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
     }
 
     let paired = 0;
-    const removedNumbers = new Set<string>();
 
     for (const [, group] of byKey) {
       const lows = group.filter((o) => o.side === 'low').sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
@@ -1815,51 +1809,62 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
         if (!high) continue;
         usedHighs.add(high.orderNumber);
 
-        // Mark low as the primary matched order, high is the matcher
-        low.status = 'matched';
-        low.matcherId = high.creatorId;
-        low.matcherName = high.creatorName;
-        low.matcherLineUserId = high.creatorLineUserId;
-        low.matchedAt = Date.now();
-        low.playerLowId = low.creatorId;
-        low.playerLowName = low.creatorName;
-        low.playerHighId = high.creatorId;
-        low.playerHighName = high.creatorName;
+        // Both orders flip in ONE compare-and-set: each must still be open on
+        // its stored record. Without it a player taking either order by hand at
+        // the same moment produced two matches over the same stakes. The low
+        // order becomes the settled record (matcher = the high creator); the
+        // high order is kept as its mirror, `matched_paired`, and never settles.
+        // No credit moves: both creators already paid their stake.
+        const now = Date.now();
+        const lowPatch = {
+          status: 'matched',
+          matcherId: high.creatorId,
+          matcherName: high.creatorName,
+          matcherLineUserId: high.creatorLineUserId,
+          matchedAt: now,
+          playerLowId: low.creatorId,
+          playerLowName: low.creatorName,
+          playerHighId: high.creatorId,
+          playerHighName: high.creatorName,
+        };
+        const highPatch = {
+          status: 'matched_paired',
+          matcherId: low.creatorId,
+          matcherName: low.creatorName,
+          matcherLineUserId: low.creatorLineUserId,
+          matchedAt: now,
+          playerLowId: low.creatorId,
+          playerLowName: low.creatorName,
+          playerHighId: high.creatorId,
+          playerHighName: high.creatorName,
+        };
+        const res = await ledger(env, {
+          orders: [
+            { orderNumber: low.orderNumber, expectCreatedAt: Number(low.createdAt) || 0, expectStatus: ['pending_match'], expectAmount: Number(low.amount), patch: lowPatch },
+            { orderNumber: high.orderNumber, expectCreatedAt: Number(high.createdAt) || 0, expectStatus: ['pending_match'], expectAmount: Number(high.amount), patch: highPatch },
+          ],
+          lists: [
+            { key: 'PENDING_ORDERS_LIST', op: 'remove', orderNumber: low.orderNumber },
+            { key: 'PENDING_ORDERS_LIST', op: 'remove', orderNumber: high.orderNumber },
+            { key: 'MATCHED_ORDERS_LIST', op: 'upsert', orderNumber: low.orderNumber },
+          ],
+        }, ctx);
+        if (!res.ok) {
+          // One of them was taken or cancelled meanwhile; leave both as they are.
+          usedHighs.delete(high.orderNumber);
+          continue;
+        }
+        const matchedLow = res.orders[low.orderNumber] as Order;
 
-        // High mirrors as matched for settlement bookkeeping (keeping both records)
-        high.status = 'matched_paired';
-        high.matcherId = low.creatorId;
-        high.matcherName = low.creatorName;
-        high.matcherLineUserId = low.creatorLineUserId;
-        high.matchedAt = Date.now();
-        high.playerLowId = low.creatorId;
-        high.playerLowName = low.creatorName;
-        high.playerHighId = high.creatorId;
-        high.playerHighName = high.creatorName;
-
-        removedNumbers.add(low.orderNumber);
-        removedNumbers.add(high.orderNumber);
-
-        const matchFlex = generateMatchNotificationFlex(low);
+        const matchFlex = generateMatchNotificationFlex(matchedLow);
         const lowNotify = (await state(env).get(`RAW_LINE_${low.creatorId}`)) || low.creatorLineUserId || low.creatorId;
         const highNotify = (await state(env).get(`RAW_LINE_${high.creatorId}`)) || high.creatorLineUserId || high.creatorId;
-
         await Promise.all([
-          env.KV_ORDERS.put(`ORDER_${low.orderNumber}`, JSON.stringify(low)),
-          env.KV_ORDERS.put(`ORDER_${high.orderNumber}`, JSON.stringify(high)),
-          addToMatchedOrdersList(low, env),
           pushToLine(lowNotify, matchFlex, env),
           pushToLine(highNotify, matchFlex, env),
         ]);
-        if (ctx) ctx.waitUntil(Promise.resolve());
         paired++;
       }
-    }
-
-    if (removedNumbers.size > 0) {
-      const currentPending = await getPendingOrdersList(env);
-      const filteredPending = currentPending.filter((o) => o && !removedNumbers.has(o.orderNumber));
-      await state(env).put('PENDING_ORDERS_LIST', JSON.stringify(filteredPending), { expirationTtl: 1800 });
     }
 
     console.log(`[Worker] autoMatchPendingPairs: auto-matched ${paired} pairs.`);
@@ -1882,38 +1887,16 @@ export async function voidAllRoundOrders(env: Env, ctx?: ExecutionContext): Prom
       getMatchedOrdersList(env),
     ]);
 
-    await Promise.all([
-      state(env).put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 }),
-      state(env).put('MATCHED_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 1800 }),
-    ]);
-
-    const allRoundOrders = [...pendingList, ...matchedList];
     const seen = new Set<string>();
-
-    for (const item of allRoundOrders) {
+    for (const item of [...pendingList, ...matchedList]) {
       if (!item || !item.orderNumber || seen.has(item.orderNumber)) continue;
       seen.add(item.orderNumber);
-
-      const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
-      if (!raw) continue;
-      try {
-        const order = JSON.parse(raw) as Order;
-        if (order.status === 'pending_match' || order.status === 'matched' || order.status === 'pending_hold' || order.status === 'refunding') {
-          const isRecovering = order.status === 'refunding';
-
-          order.status = 'refunding';
-          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-
-          // One claim covers both sides. Refunding creator and matcher inline
-          // (as this path used to) meant it could re-pay a cancellation that
-          // another path had already settled.
-          const refund = await refundOrderOnce(order, env, ctx, 'void_round');
-
-          order.status = 'cancelled';
-          await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-          if (refund.refunded && !isRecovering) voidedCount++;
-        }
-      } catch (_) {}
+      const order = await getOrderRecord(item.orderNumber, env);
+      if (!order) continue;
+      // One atomic step per order: refunds both sides from the stored record
+      // and removes it from both lists.
+      const refund = await refundOrderOnce(order, env, ctx, 'void_round');
+      if (refund.refunded) voidedCount++;
     }
 
     console.log(`[Worker] voidAllRoundOrders: Voided and refunded ${voidedCount} orders 100%.`);
@@ -1939,46 +1922,29 @@ export async function getPendingOrdersList(env: Env): Promise<Order[]> {
   }
 }
 
+// Index-list helpers. Each is one atomic list edit inside the Durable Object
+// (a read-modify-write here lost entries when two orders changed in the same
+// moment), and none expire: an index entry that silently expired took a held
+// stake with it.
+async function editOrderList(key: string, op: 'upsert' | 'remove', orderNumber: string, env: Env, cap?: number): Promise<void> {
+  const res = await ledger(env, { lists: [{ key, op, orderNumber: orderNumber.trim().replace(/^#/, ''), cap }] });
+  if (!res.ok) console.error(`[Worker] ${key} ${op} #${orderNumber} failed: ${res.reason}`);
+}
+
 export async function addToPendingOrdersList(order: Order, env: Env): Promise<void> {
-  try {
-    const list = await getPendingOrdersList(env);
-    const updated = [order, ...list.filter((o) => o.orderNumber !== order.orderNumber)].slice(0, 300);
-    await state(env).put('PENDING_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
-  } catch (err) {
-    console.error('[Worker] addToPendingOrdersList error:', err);
-  }
+  await editOrderList('PENDING_ORDERS_LIST', 'upsert', order.orderNumber, env);
 }
 
 export async function removeFromPendingOrdersList(orderNo: string, env: Env): Promise<void> {
-  try {
-    const cleanNo = orderNo.trim().replace(/^#/, '');
-    const list = await getPendingOrdersList(env);
-    const updated = list.filter((o) => o.orderNumber !== cleanNo);
-    await state(env).put('PENDING_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
-  } catch (err) {
-    console.error('[Worker] removeFromPendingOrdersList error:', err);
-  }
+  await editOrderList('PENDING_ORDERS_LIST', 'remove', orderNo, env);
 }
 
 export async function addToMatchedOrdersList(order: Order, env: Env): Promise<void> {
-  try {
-    const list = await getMatchedOrdersList(env);
-    const updated = [order, ...list.filter((o) => o.orderNumber !== order.orderNumber)].slice(0, 300);
-    await state(env).put('MATCHED_ORDERS_LIST', JSON.stringify(updated), { expirationTtl: 86400 });
-  } catch (err) {
-    console.error('[Worker] addToMatchedOrdersList error:', err);
-  }
+  await editOrderList('MATCHED_ORDERS_LIST', 'upsert', order.orderNumber, env);
 }
 
 export async function removeFromMatchedOrdersList(orderNo: string, env: Env): Promise<void> {
-  try {
-    const cleanNo = orderNo.trim().replace(/^#/, '');
-    const list = await getMatchedOrdersList(env);
-    const updated = list.filter((o) => o.orderNumber !== cleanNo);
-    await state(env).put('MATCHED_ORDERS_LIST', JSON.stringify(updated));
-  } catch (err) {
-    console.error('[Worker] removeFromMatchedOrdersList error:', err);
-  }
+  await editOrderList('MATCHED_ORDERS_LIST', 'remove', orderNo, env);
 }
 
 export async function getMatchedOrdersList(env: Env): Promise<Order[]> {
@@ -2011,6 +1977,33 @@ export async function saveInFlightRounds(rounds: InFlightRound[], env: Env): Pro
   }
 }
 
+/** A fresh, unique rocket-round ID. Every path that opens a new rocket must use one. */
+export function newRoundId(): string {
+  return `RND_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+/** Calendar day in Thailand (UTC+7, no DST), e.g. "2026-10-25". */
+export function bangkokDay(ts: number = Date.now()): string {
+  return new Date(ts + 7 * 3600_000).toISOString().slice(0, 10);
+}
+
+/** Index key of every order settled on one Thai calendar day. */
+export function dailySettledKey(day: string): string {
+  return `SETTLED_DAY_${day}`;
+}
+
+/** Orders settled on `day`, newest first. */
+export async function getDailySettledOrders(day: string, env: Env): Promise<Order[]> {
+  try {
+    const raw = await state(env).get(dailySettledKey(day));
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter((o: any) => o && o.status === 'settled') : [];
+  } catch (err) {
+    console.error('[Worker] getDailySettledOrders error:', err);
+    return [];
+  }
+}
+
 /**
  * Parks the current rocket round (Rocket A) and its locked matched orders into
  * `IN_FLIGHT_ROUNDS` so that the active betting board (`ACTIVE_ROUND`,
@@ -2032,6 +2025,20 @@ export async function parkCurrentRoundToInFlight(
     ? JSON.parse(roundStr)
     : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380, status: 'ACTIVE', isChotoy: false, quoteReleased: false, updatedAt: Date.now() };
 
+  // A forced park records the rocket as in flight even with no matched orders.
+  // Only a rocket that is open or past Final Call can be in flight: forcing it
+  // after the round was already RESOLVED / VOID left an empty parked round the
+  // admin then had to void by hand.
+  const mayForce = forcePark && (round.status === 'ACTIVE' || round.status === 'CLOSED');
+
+  // Lock Rocket A before touching its orders. Parking used to run with the
+  // round still ACTIVE, so a "ต" landing mid-park matched an order of Rocket A
+  // into the list that then became Rocket B's — and it settled on Rocket B's
+  // flight time. The caller opens the next round afterwards.
+  if (round.status === 'ACTIVE') {
+    await state(env).put('ACTIVE_ROUND', JSON.stringify({ ...round, status: 'CLOSED', updatedAt: Date.now() }));
+  }
+
   let refundedUnquoted = 0;
   if (round.quoteReleased !== true) {
     const unq = await cancelHeldPreQuoteOrders(env, ctx);
@@ -2041,47 +2048,19 @@ export async function parkCurrentRoundToInFlight(
   const pendingRes = await clearAllPendingOrders(env, ctx);
   const refundedPending = pendingRes.cleared;
 
-  const matchedOrders = await getMatchedOrdersList(env);
-  const existingInFlight = await getInFlightRounds(env);
-
-  // Clear active board lists so Rocket B starts with an isolated, empty board
-  await Promise.all([
-    state(env).put('PENDING_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 86400 }),
-    state(env).put('MATCHED_ORDERS_LIST', JSON.stringify([]), { expirationTtl: 86400 }),
-  ]);
-
   const roundId = `FLT_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`;
-  const rocketLabel = round.name || 'บั้งไฟสด';
-
-  const stampedOrders: Order[] = [];
-  for (const item of matchedOrders) {
-    if (!item || !item.orderNumber) continue;
-    const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
-    const fresh: Order = raw ? JSON.parse(raw) : item;
-    if (fresh.status !== 'matched') continue;
-    fresh.inFlightRoundId = roundId;
-    fresh.rocketName = fresh.rocketName || rocketLabel;
-    await env.KV_ORDERS.put(`ORDER_${fresh.orderNumber}`, JSON.stringify(fresh));
-    stampedOrders.push(fresh);
-  }
-
-  if (stampedOrders.length === 0 && !forcePark) {
-    return { parkedRound: null, refundedPending, refundedUnquoted };
-  }
-
-  const inFlightEntry: InFlightRound = {
+  // Every still-matched order moves into the parked round and the matched
+  // board is emptied, in one atomic step inside the Durable Object.
+  const parkedRound = (await state(env).parkMatched({
     roundId,
-    name: rocketLabel,
+    name: round.name || 'บั้งไฟสด',
     targetMin: Number(round.targetMin) || 330,
     targetMax: Number(round.targetMax) || 380,
     isChotoy: Boolean(round.isChotoy),
     quoteReleased: Boolean(round.quoteReleased),
-    launchedAt: Date.now(),
-    matchedOrders: stampedOrders,
-  };
+  }, mayForce)) as InFlightRound | null;
 
-  await saveInFlightRounds([...existingInFlight, inFlightEntry], env);
-  return { parkedRound: inFlightEntry, refundedPending, refundedUnquoted };
+  return { parkedRound, refundedPending, refundedUnquoted };
 }
 
 /**
@@ -2100,25 +2079,21 @@ export async function voidInFlightRound(
     return { found: false, voided: 0 };
   }
 
-  const remaining = inFlightList.filter((r) => r.roundId !== roundId);
-  await saveInFlightRounds(remaining, env);
-
+  // Refund first, remove the round last. In the other order a failure part-way
+  // left orders with stakes held and no round left to void or settle them.
+  // Each refund is idempotent, so retrying a half-finished void is safe.
   let voidedCount = 0;
   for (const item of target.matchedOrders || []) {
     if (!item || !item.orderNumber) continue;
-    const raw = await env.KV_ORDERS.get(`ORDER_${item.orderNumber}`);
-    const order: Order = raw ? JSON.parse(raw) : item;
-    if (order.status === 'matched' || order.status === 'refunding') {
-      const isRecovering = order.status === 'refunding';
-      order.status = 'refunding';
-      await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-      const refund = await refundOrderOnce(order, env, ctx, 'void_in_flight');
-      order.status = 'cancelled';
-      await env.KV_ORDERS.put(`ORDER_${order.orderNumber}`, JSON.stringify(order));
-      if (refund.refunded && !isRecovering) voidedCount++;
-    }
+    // The parked snapshot's createdAt pins the refund to THIS order even if its
+    // number has since been reused; the amounts come from the stored record.
+    const refund = await refundOrderOnce(item, env, ctx, 'void_in_flight', {
+      allowedStatuses: ['matched', 'refunding'],
+    });
+    if (refund.refunded) voidedCount++;
   }
 
+  await state(env).removeInFlight(roundId);
   return { found: true, voided: voidedCount, roundName: target.name };
 }
 
@@ -2138,7 +2113,7 @@ async function resolveOrderNumber(
   const cleanNo = inputNo.trim().replace(/^#/, '');
 
   // 1. Direct KV lookup
-  const direct = await env.KV_ORDERS.get(`ORDER_${cleanNo}`);
+  const direct = await getOrderRecord(cleanNo, env);
   if (direct) return cleanNo;
 
   // 2. Pending list exact match
@@ -2339,32 +2314,70 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
       await state(env).put('PLAYERS_LIST', JSON.stringify(updatedList.slice(-500)));
     }
 
-    // Offload sync to Google Sheets in background — throttled to 1 write/min/user
-    if (env.GAS_FALLBACK_URL && profile.lineUserId) {
-      const gasUrl = env.GAS_FALLBACK_URL;
-      const runGasSync = async () => {
-        if (!(await isGasSyncThrottled('SAVE', profile.lineUserId, env))) {
-          await fetch(gasUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({
-              functionName: 'adminSetPlayerBalance',
-              args: [profile.lineUserId, profile.balance, profile.displayName, true],
-              apiKey: env.ADMIN_API_KEY,
-            }),
-          }).catch((e) => console.warn('[Worker] Sheets player balance sync error:', e));
-        }
-      };
-      if (ctx) {
-        ctx.waitUntil(runGasSync());
-      } else {
-        runGasSync().catch(() => {});
-      }
-    }
+    syncBalanceToSheets(env, profile, ctx);
   } catch (err) {
     console.error('[Worker] savePlayerProfile error:', err);
   }
 }
+
+/** Offload a balance to the Google Sheets mirror in the background — throttled per user. */
+function syncBalanceToSheets(
+  env: Env,
+  p: { lineUserId?: string; balance?: number; after?: number; displayName?: string },
+  ctx?: ExecutionContext
+): void {
+  if (!env.GAS_FALLBACK_URL || !p.lineUserId) return;
+  const gasUrl = env.GAS_FALLBACK_URL;
+  const lineUserId = p.lineUserId;
+  const balance = p.after ?? p.balance;
+  const runGasSync = async () => {
+    if (!(await isGasSyncThrottled('SAVE', lineUserId, env))) {
+      await fetch(gasUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          functionName: 'adminSetPlayerBalance',
+          args: [lineUserId, balance, p.displayName, true],
+          apiKey: env.ADMIN_API_KEY,
+        }),
+      }).catch((e) => console.warn('[Worker] Sheets player balance sync error:', e));
+    }
+  };
+  if (ctx) {
+    ctx.waitUntil(runGasSync());
+  } else {
+    runGasSync().catch(() => {});
+  }
+}
+
+/**
+ * Run one atomic ledger transaction (see RocketStateDO.txn). This is the ONLY
+ * way player credit may change: the balance check and the debit/credit happen
+ * in the same indivisible step as the order or ledger change they belong to.
+ */
+export async function ledger(env: Env, spec: TxnSpec, ctx?: ExecutionContext): Promise<TxnResult> {
+  const res = await state(env).txn(spec);
+  if (res.ok) {
+    for (const b of res.balances) syncBalanceToSheets(env, b, ctx);
+  } else if (res.reason === 'unavailable' || res.reason === 'error') {
+    console.error(`[Worker] ledger txn failed: ${res.reason} ${res.detail || ''}`);
+  }
+  return res;
+}
+
+/** The authoritative order record (Durable Object first, legacy KV_ORDERS adopted on a miss). */
+export async function getOrderRecord(orderNumber: string, env: Env): Promise<Order | null> {
+  return (await state(env).getOrder(orderNumber)) as Order | null;
+}
+
+/** The balance a txn left a player on, from its result. */
+function balanceAfter(res: TxnResult, shortId: string): number | undefined {
+  const b = res.balances.find((x) => x.shortId === shortId);
+  return b ? b.after : undefined;
+}
+
+/** Player-facing text for a ledger failure that is not a business rule. */
+const LEDGER_UNAVAILABLE_TEXT = 'ระบบกำลังประมวลผลรายการจำนวนมาก กรุณาลองใหม่อีกครั้งในไม่กี่วินาทีครับ 🙏';
 
 /**
  * Per-user GAS sync throttle. Google Sheets is a reporting mirror, not the live
@@ -2439,7 +2452,15 @@ export async function addTransaction(tx: Transaction, env: Env, ctx?: ExecutionC
       const updated = [tx, ...list.filter(t => t.id !== tx.id)].slice(0, 100);
       await state(env).put('TRANSACTIONS_LIST', JSON.stringify(updated));
     }
+    mirrorTransactionToSheets(tx, env, ctx);
+  } catch (err) {
+    console.error('[Worker] addTransaction error:', err);
+  }
+}
 
+/** Copy a ledger entry to the Google Sheets reporting mirror (background, best-effort). */
+export function mirrorTransactionToSheets(tx: Transaction, env: Env, ctx?: ExecutionContext): void {
+  try {
     if (env.GAS_FALLBACK_URL) {
       const syncPromise = fetch(env.GAS_FALLBACK_URL, {
         method: 'POST',
@@ -2467,7 +2488,7 @@ export async function addTransaction(tx: Transaction, env: Env, ctx?: ExecutionC
 
 export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: ExecutionContext): Promise<PlayerProfile> {
   const isShortInput = userId.startsWith('PL');
-  const shortId = isShortInput ? userId.toUpperCase() : `PL${userId.slice(-6).toUpperCase()}`;
+  let shortId = isShortInput ? userId.toUpperCase() : `PL${userId.slice(-6).toUpperCase()}`;
   const resolvedLine = isShortInput
     ? ((await state(env).get(`RAW_LINE_${shortId}`)) || '')
     : userId;
@@ -2482,7 +2503,32 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
   let profile = cachedUser ? (JSON.parse(cachedUser) as PlayerProfile) : null;
   let shortProfile = cachedShort ? (JSON.parse(cachedShort) as PlayerProfile) : null;
 
+  // A stored profile's own short id wins over the derived one (it differs for a
+  // player who was given a longer id because of a collision, below).
+  if (profile?.shortId && profile.shortId !== shortId) {
+    shortId = profile.shortId;
+    const own = await state(env).get(`USER_${shortId}`);
+    shortProfile = own ? (JSON.parse(own) as PlayerProfile) : null;
+  }
+
+  // The derived short id is only the last 6 characters of the LINE id, so two
+  // LINE users can share it. A short-id record that belongs to a DIFFERENT LINE
+  // user must never be returned for this one — that handed a newcomer the
+  // existing player's account and balance.
+  let shortIdTaken = false;
+  if (
+    shortProfile && resolvedLine && resolvedLine.startsWith('U') &&
+    typeof shortProfile.lineUserId === 'string' && shortProfile.lineUserId.startsWith('U') &&
+    shortProfile.lineUserId !== resolvedLine
+  ) {
+    shortProfile = null;
+    shortIdTaken = true;
+  }
+
   // Cross-reconcile direct user key and shortId key strictly by newest updatedAt.
+  // Reconciled in memory only: writing the merged copy back raced with ledger
+  // transactions and could restore a balance from before a bet or payout. The
+  // next ledger txn rewrites both keys together.
   // NEVER use Math.max(shortBal, userBal) — after a bet deduction, the newer balance
   // is LOWER than the old balance, so Math.max would resurrect pre-bet balances!
   if (profile || shortProfile) {
@@ -2503,12 +2549,6 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
           balance: shortBal,
           updatedAt: shortUpdated,
         };
-        const healedJson = JSON.stringify(profile);
-        if (ctx) {
-          ctx.waitUntil(state(env).put(cacheKey, healedJson).catch(() => {}));
-        } else {
-          state(env).put(cacheKey, healedJson).catch(() => {});
-        }
       } else if (userUpdated > shortUpdated || shortBal !== userBal) {
         profile = {
           ...shortProfile,
@@ -2518,12 +2558,6 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
           balance: userBal,
           updatedAt: userUpdated,
         };
-        const healedJson = JSON.stringify(profile);
-        if (ctx) {
-          ctx.waitUntil(state(env).put(`USER_${shortId}`, healedJson).catch(() => {}));
-        } else {
-          state(env).put(`USER_${shortId}`, healedJson).catch(() => {});
-        }
       }
     }
 
@@ -2538,7 +2572,14 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
     const listRaw = await state(env).get('PLAYERS_LIST');
     if (listRaw) {
       const list = JSON.parse(listRaw) as any[];
-      playersListEntry = list.find((p: any) => p.lineUserId === userId || p.shortId === shortId || p.id === shortId || p.id === userId) || null;
+      playersListEntry = list.find((p: any) =>
+        p && (
+          p.lineUserId === userId || p.id === userId ||
+          // A short-id hit only counts when it is not another LINE user's entry.
+          (!shortIdTaken && (p.shortId === shortId || p.id === shortId) &&
+            !(typeof p.lineUserId === 'string' && p.lineUserId.startsWith('U') && p.lineUserId !== userId))
+        )
+      ) || null;
     }
   } catch (_) {}
 
@@ -2554,13 +2595,24 @@ export async function getOrCreatePlayerProfile(userId: string, env: Env, ctx?: E
       updatedAt: Number(playersListEntry.updatedAt) || Date.now(),
       registeredAt: Number(playersListEntry.registeredAt) || Date.now(),
     };
-    await state(env).put(cacheKey, JSON.stringify(restoredProfile));
-    await state(env).put(`USER_${shortId}`, JSON.stringify(restoredProfile));
-    await state(env).put(`RAW_LINE_${shortId}`, userId);
+    // Put-if-absent: a ledger txn may already have written these keys from the
+    // same directory entry, with a newer balance.
+    await state(env).putIfAbsent(cacheKey, JSON.stringify(restoredProfile));
+    await state(env).putIfAbsent(`USER_${shortId}`, JSON.stringify(restoredProfile));
+    await state(env).putIfAbsent(`RAW_LINE_${shortId}`, userId);
     return restoredProfile;
   }
 
   // 3. Truly new player: initialize immediately with fast fallback name (0ms blocking latency!)
+  // On a short-id collision take a longer suffix of the LINE id instead.
+  if (shortIdTaken && !isShortInput) {
+    for (const len of [8, 10, 12, 16, 33]) {
+      const candidate = `PL${userId.slice(-len).toUpperCase()}`;
+      const owner = await state(env).get(`USER_${candidate}`);
+      const ownerLine = owner ? (JSON.parse(owner) as PlayerProfile).lineUserId : '';
+      if (!owner || ownerLine === userId) { shortId = candidate; break; }
+    }
+  }
   const displayName = `ผู้เล่น #${shortId.slice(-4)}`;
   const newProfile: PlayerProfile = {
     shortId,
@@ -2855,13 +2907,7 @@ async function deliverPrivateNotice(
 }
 
 export async function addToSettledOrdersList(order: Order, env: Env): Promise<void> {
-  try {
-    const list = await getSettledOrdersList(env);
-    const updated = [order, ...list.filter((o) => o.orderNumber !== order.orderNumber)].slice(0, 100);
-    await state(env).put('SETTLED_ORDERS_LIST', JSON.stringify(updated));
-  } catch (err) {
-    console.error('[Worker] addToSettledOrdersList error:', err);
-  }
+  await editOrderList('SETTLED_ORDERS_LIST', 'upsert', order.orderNumber, env, 100);
 }
 
 export async function getSettledOrdersList(env: Env): Promise<Order[]> {

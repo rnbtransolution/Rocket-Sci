@@ -122,7 +122,11 @@ export function generateOrderFlex(order: Order): any {
   const matchFloor = Math.max(MIN_MATCH_POINTS, Math.round(numAmount * MIN_MATCH_RATIO));
 
   // Partial options (< 100% of numAmount) go in Row 1 (up to 3 buttons: 20%, 40%, 80%).
-  // The full 100% button sits in Row 2 alongside Cancel so buttons have generous spacing.
+  // The full 100% button gets Row 2 to itself, and Cancel sits apart below a
+  // separator. LINE's 'sm' is 4px: rows that close, with ~26px-tall buttons,
+  // made a tap land on the neighbouring amount, or on Cancel next to Accept.
+  // Buttons are now ~40px tall with 12px between them.
+  const btnPad = { paddingTop: '10px', paddingBottom: '10px', paddingStart: '4px', paddingEnd: '4px' };
   const takeOptions = [0.20, 0.40, 0.80]
     .map((r) => Math.round(numAmount * r))
     .filter((v) => v >= matchFloor && v < numAmount)
@@ -202,72 +206,74 @@ export function generateOrderFlex(order: Order): any {
             ? [{
                 type: 'box',
                 layout: 'horizontal',
-                spacing: 'md',
-                margin: 'sm',
+                spacing: 'lg',
+                margin: 'lg',
                 contents: takeOptions.map((val) => ({
                   type: 'box',
                   layout: 'vertical',
                   flex: 1,
                   backgroundColor: '#BAE6FD',
-                  cornerRadius: 'sm',
-                  paddingTop: '5px',
-                  paddingBottom: '5px',
-                  paddingStart: '4px',
-                  paddingEnd: '4px',
+                  cornerRadius: 'md',
+                  ...btnPad,
                   action: {
                     type: 'message',
                     label: `${val}`,
                     text: `ต ${orderNumber} ${val}`,
                   },
                   contents: [
-                    { type: 'text', text: `${val}`, color: '#0369A1', weight: 'bold', size: 'xs', align: 'center', wrap: true },
+                    { type: 'text', text: `${val}`, color: '#0369A1', weight: 'bold', size: 'sm', align: 'center', wrap: true },
                   ],
                 })),
               }]
             : []),
-          // Row 2: 100% Full Take & Cancel Buttons with distinct spacing
+          // Row 2: 100% Full Take on its own row
           {
             type: 'box',
             layout: 'horizontal',
-            spacing: 'md',
-            margin: 'sm',
+            margin: 'lg',
             contents: [
               {
                 type: 'box',
                 layout: 'vertical',
                 flex: 1,
                 backgroundColor: '#BBF7D0',
-                cornerRadius: 'sm',
-                paddingTop: '5px',
-                paddingBottom: '5px',
-                paddingStart: '4px',
-                paddingEnd: '4px',
+                cornerRadius: 'md',
+                ...btnPad,
                 action: {
                   type: 'message',
                   label: `${amt100}`,
                   text: `ต ${orderNumber} ${amt100}`,
                 },
                 contents: [
-                  { type: 'text', text: `${amt100}`, color: '#15803D', weight: 'bold', size: 'xs', align: 'center', wrap: true },
+                  { type: 'text', text: `✅ รับเต็ม ${amt100.toLocaleString()}`, color: '#15803D', weight: 'bold', size: 'sm', align: 'center', wrap: true },
                 ],
               },
+            ],
+          },
+          { type: 'separator', margin: 'xl', color: '#E2E8F0' },
+          // Row 3: Cancel, set apart from every accept button
+          {
+            type: 'box',
+            layout: 'horizontal',
+            margin: 'lg',
+            paddingStart: '25%',
+            paddingEnd: '25%',
+            contents: [
               {
                 type: 'box',
                 layout: 'vertical',
                 flex: 1,
                 backgroundColor: '#FECDD3',
-                cornerRadius: 'sm',
-                paddingTop: '5px',
-                paddingBottom: '5px',
-                paddingStart: '4px',
-                paddingEnd: '4px',
+                cornerRadius: 'md',
+                paddingTop: '8px',
+                paddingBottom: '8px',
                 action: {
                   type: 'message',
                   label: '⛔ ยกเลิก',
                   text: `ยกเลิก ${orderNumber}`,
                 },
                 contents: [
-                  { type: 'text', text: '⛔ ยกเลิก', color: '#9F1239', weight: 'bold', size: 'xs', align: 'center', wrap: true },
+                  { type: 'text', text: '⛔ ยกเลิก (เฉพาะเจ้าของแผล)', color: '#9F1239', weight: 'bold', size: 'xxs', align: 'center', wrap: true },
                 ],
               },
             ],
@@ -1147,20 +1153,19 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
             },
           ],
         },
-        // Row 3: Prominent High-Contrast Accept Deal Button
+        // Row 3: Prominent High-Contrast Accept Deal Button (~40px tall)
         {
           type: 'box',
           layout: 'horizontal',
-          spacing: 'xs',
-          margin: 'sm',
+          margin: 'md',
           contents: [
             {
               type: 'box',
               layout: 'vertical',
               backgroundColor: '#0284C7',
-              cornerRadius: 'sm',
-              paddingTop: '6px',
-              paddingBottom: '6px',
+              cornerRadius: 'md',
+              paddingTop: '10px',
+              paddingBottom: '10px',
               flex: 1,
               action: {
                 type: 'message',
@@ -1173,7 +1178,7 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
                   text: `⚡ รับดวล Order #${b.orderNumber}`,
                   color: '#FFFFFF',
                   weight: 'bold',
-                  size: 'xs',
+                  size: 'sm',
                   align: 'center',
                 },
               ],
@@ -1253,7 +1258,9 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
       body: {
         type: 'box',
         layout: 'vertical',
-        spacing: 'sm',
+        // 16px between orders. At 4px the accept button of one order sat
+        // right against the next order's card, so a slip took the wrong order.
+        spacing: 'xl',
         paddingAll: 'md',
         contents: [
           ...itemBoxes,
@@ -2310,3 +2317,130 @@ export function generateBankRegistrationFlex(pendingAmount?: number): any {
   };
 }
 
+
+// ── Daily Duel Summary (one card per rocket round) ──
+
+/** LINE rejects a Flex message over 50KB; stay clear of it. */
+const DAILY_SUMMARY_MAX_BYTES = 45_000;
+/** A carousel holds at most 12 bubbles. */
+const DAILY_SUMMARY_MAX_ROUNDS = 12;
+
+/**
+ * Every duel settled on `day`, grouped by rocket round, each pair showing the
+ * winner and loser (or a draw) with the stake and payout.
+ *
+ * Rounds are keyed on `roundId`, then the in-flight parking ID, and only then
+ * on the rocket's name — names repeat ("บั้งไฟสด"), so two rockets with the
+ * same name would otherwise merge into one card.
+ */
+export function generateDailySummaryFlex(day: string, orders: Order[]): any {
+  const rounds = new Map<string, Order[]>();
+  for (const o of orders) {
+    const key = o.roundId || o.inFlightRoundId || `name:${o.rocketName || 'บั้งไฟสด'}`;
+    if (!rounds.has(key)) rounds.set(key, []);
+    rounds.get(key)!.push(o);
+  }
+  // Oldest rocket first, pairs in settlement order within each.
+  const groups = [...rounds.values()]
+    .map((list) => list.slice().sort((a, b) => (Number(a.settledAt) || 0) - (Number(b.settledAt) || 0)))
+    .sort((a, b) => (Number(a[0].settledAt) || 0) - (Number(b[0].settledAt) || 0));
+
+  if (groups.length === 0) {
+    return generateNoticeFlex(`📅 สรุปผลดวลประจำวัน ${day}`, 'ยังไม่มีคู่ดวลที่ตัดสินผลในวันนี้ครับ', 'info');
+  }
+
+  const pairRow = (o: Order) => {
+    const draw = o.winnerSide === 'draw';
+    const creatorWins = o.winnerSide === o.side;
+    const winName = draw ? o.creatorName : (creatorWins ? o.creatorName : o.matcherName);
+    const loseName = draw ? o.matcherName : (creatorWins ? o.matcherName : o.creatorName);
+    const range = o.rangeMin !== undefined && o.rangeMax !== undefined ? `${o.rangeMin}-${o.rangeMax}s` : '-';
+    return {
+      type: 'box',
+      layout: 'vertical',
+      margin: 'md',
+      paddingAll: 'sm',
+      cornerRadius: 'sm',
+      backgroundColor: draw ? '#F1F5F9' : '#F0FDF4',
+      contents: [
+        {
+          type: 'box',
+          layout: 'horizontal',
+          contents: [
+            { type: 'text', text: `#${o.orderNumber} · ${range}`, size: 'xxs', color: '#64748B', flex: 6 },
+            { type: 'text', text: `${(Number(o.amount) || 0).toLocaleString()} pt`, size: 'xs', color: '#0F172A', weight: 'bold', align: 'end', flex: 4 },
+          ],
+        },
+        {
+          type: 'box',
+          layout: 'horizontal',
+          margin: 'xs',
+          contents: [
+            { type: 'text', text: `${draw ? '🤝' : '👑'} ${String(winName || '-').slice(0, 16)}`, size: 'xs', color: draw ? '#475569' : '#059669', weight: 'bold', flex: 1, wrap: true },
+            { type: 'text', text: `${draw ? '🤝' : '💥'} ${String(loseName || '-').slice(0, 16)}`, size: 'xs', color: draw ? '#475569' : '#DC2626', align: 'end', flex: 1, wrap: true },
+          ],
+        },
+        draw
+          ? { type: 'text', text: 'เสมอ — คืนเงินทั้งสองฝ่าย', size: 'xxs', color: '#64748B', align: 'end' }
+          : { type: 'text', text: `ผู้ชนะรับ +${(Number(o.payout) || 0).toLocaleString()} pt (ค่าธรรมเนียม ${(Number(o.commission) || 0).toLocaleString()})`, size: 'xxs', color: '#64748B', align: 'end' },
+      ],
+    };
+  };
+
+  const build = (rowsPerRound: number) => {
+    const bubbles = groups.slice(0, DAILY_SUMMARY_MAX_ROUNDS).map((list) => {
+      const first = list[0];
+      const fees = list.reduce((sum, o) => sum + (Number(o.commission) || 0), 0);
+      const volume = list.reduce((sum, o) => sum + (Number(o.amount) || 0), 0);
+      const hidden = list.length - rowsPerRound;
+      return {
+        type: 'bubble',
+        size: 'mega',
+        header: {
+          type: 'box',
+          layout: 'vertical',
+          backgroundColor: '#0F172A',
+          paddingAll: 'md',
+          contents: [
+            { type: 'text', text: `📅 สรุปผลประจำวัน ${day}`, size: 'xs', color: '#FDE047', align: 'center', weight: 'bold' },
+            { type: 'text', text: `🚀 ${first.rocketName || 'บั้งไฟสด'}`, size: 'md', color: '#FFFFFF', align: 'center', weight: 'bold', margin: 'xs', wrap: true },
+            { type: 'text', text: `⏱️ เวลาบิน ${first.finalTime ?? '-'} วิ · ${list.length} คู่`, size: 'xs', color: '#38BDF8', align: 'center', margin: 'xs' },
+          ],
+        },
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          paddingAll: 'md',
+          contents: [
+            ...list.slice(0, rowsPerRound).map(pairRow),
+            ...(hidden > 0
+              ? [{ type: 'text', text: `… และอีก ${hidden} คู่ (ดูครบในหน้าแอดมิน)`, size: 'xs', color: '#64748B', align: 'center', margin: 'md' }]
+              : []),
+          ],
+        },
+        footer: {
+          type: 'box',
+          layout: 'vertical',
+          paddingAll: 'sm',
+          contents: [
+            { type: 'text', text: `ยอดดวลรวม ${volume.toLocaleString()} pt · ค่าธรรมเนียม ${fees.toLocaleString()} pt`, size: 'xxs', color: '#64748B', align: 'center', wrap: true },
+          ],
+        },
+      };
+    });
+    return {
+      type: 'flex',
+      altText: `📅 สรุปผลดวลประจำวัน ${day} (${orders.length} คู่)`,
+      contents: bubbles.length === 1 ? bubbles[0] : { type: 'carousel', contents: bubbles },
+    };
+  };
+
+  // Fewer rows per card until the whole message fits LINE's size limit.
+  let rows = 20;
+  let msg = build(rows);
+  while (rows > 3 && new TextEncoder().encode(JSON.stringify(msg.contents)).length > DAILY_SUMMARY_MAX_BYTES) {
+    rows -= 1;
+    msg = build(rows);
+  }
+  return msg;
+}

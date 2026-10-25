@@ -371,6 +371,11 @@ export default function App() {
   // Dashboard & Navigation controls (default to quote setup first)
   const [adminTab, setAdminTab] = useState('quote'); // 'quote' | 'settle' | 'bets' | 'review' | 'players' | 'logs' | 'broadcast' | 'bank'
   const [customBroadcastText, setCustomBroadcastText] = useState('');
+  // Daily duel summary: the Thai calendar day to summarise, and its preview.
+  const bangkokToday = () => new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+  const [summaryDay, setSummaryDay] = useState(bangkokToday);
+  const [summaryPreview, setSummaryPreview] = useState(null);
+  const [summaryBusy, setSummaryBusy] = useState(false);
   const [isSendingBroadcast, setIsSendingBroadcast] = useState(false);
   const [betStatusFilter, setBetStatusFilter] = useState('all'); // 'all' | 'matched' | 'pending_match' | 'cancelled' | 'resolved'
   const [betSearchQuery, setBetSearchQuery] = useState('');
@@ -3404,7 +3409,7 @@ export default function App() {
                   <span className="text-[10px] text-slate-400 font-sans">ส่งการ์ด Flex แจ้งเตือนด่วนเข้ากลุ่ม LINE ทันที</span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {/* Combined Rocket Launched + Final Call Card */}
                   <div className="bg-gradient-to-br from-orange-50 via-amber-50/80 to-orange-100/70 border-2 border-orange-300 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between shadow-xs">
                     <div className="space-y-1">
@@ -3503,6 +3508,90 @@ export default function App() {
                     >
                       <span>📖 ส่งคู่มือกติกาเข้ากลุ่ม</span>
                     </button>
+                  </div>
+
+                  {/* Daily Duel Summary */}
+                  <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-indigo-900 font-heading">📅 สรุปผลประจำวัน</span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-200 text-indigo-900 rounded-md">Summary</span>
+                      </div>
+                      <p className="text-[10.5px] text-indigo-800/80 font-sans leading-relaxed">
+                        ส่ง Flex สรุปคู่ดวลที่ตัดสินผลแล้วของวัน แยกตามบั้งไฟแต่ละลำ พร้อมผู้ชนะ/ผู้แพ้ทุกคู่
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <input
+                        type="date"
+                        value={summaryDay}
+                        max={bangkokToday()}
+                        onChange={(e) => { setSummaryDay(e.target.value); setSummaryPreview(null); }}
+                        className="w-full py-1.5 px-2 bg-white border border-indigo-200 rounded-lg text-[11px] font-bold text-indigo-950"
+                      />
+                      {summaryPreview && (
+                        <div className="bg-white/90 border border-indigo-100 rounded-lg p-2 space-y-1 max-h-40 overflow-y-auto">
+                          {summaryPreview.count === 0 ? (
+                            <p className="text-[10.5px] text-slate-500 text-center">ยังไม่มีคู่ดวลที่ตัดสินผลในวันนี้</p>
+                          ) : (
+                            summaryPreview.rounds.map((r) => (
+                              <div key={r.key} className="flex items-center justify-between text-[10.5px] gap-2">
+                                <span className="font-bold text-indigo-950 truncate">🚀 {r.name}</span>
+                                <span className="text-slate-500 shrink-0">{r.pairs} คู่ · ค่าธรรมเนียม {r.fees.toLocaleString()}</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                      <button
+                        disabled={summaryBusy}
+                        onClick={async () => {
+                          setSummaryBusy(true);
+                          try {
+                            const res = await runBackendFunction('adminGetDailySummary', [summaryDay]);
+                            if (!res || res.success === false) {
+                              addToast(`⚠️ โหลดสรุปไม่สำเร็จ: ${res?.error || 'ไม่ทราบสาเหตุ'}`, 'warning');
+                            } else {
+                              const byRound = new Map();
+                              for (const o of res.orders || []) {
+                                const key = o.roundId || o.inFlightRoundId || `name:${o.rocketName || 'บั้งไฟสด'}`;
+                                const r = byRound.get(key) || { key, name: o.rocketName || 'บั้งไฟสด', pairs: 0, fees: 0 };
+                                r.pairs += 1;
+                                r.fees += Number(o.commission) || 0;
+                                byRound.set(key, r);
+                              }
+                              setSummaryPreview({ count: res.count || 0, rounds: [...byRound.values()] });
+                            }
+                          } catch {
+                            addToast('❌ โหลดสรุปไม่สำเร็จ', 'danger');
+                          } finally {
+                            setSummaryBusy(false);
+                          }
+                        }}
+                        className="w-full py-1.5 px-2.5 bg-white/90 hover:bg-white text-indigo-900 border border-indigo-300 rounded-lg text-[10.5px] font-extrabold transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-60"
+                      >
+                        <span>🔍 ดูตัวอย่างสรุป</span>
+                      </button>
+                      <button
+                        disabled={summaryBusy}
+                        onClick={async () => {
+                          if (!window.confirm(`📅 ส่งสรุปผลดวลประจำวัน ${summaryDay} เข้ากลุ่ม LINE?`)) return;
+                          setSummaryBusy(true);
+                          try {
+                            const res = await runBackendFunction('adminBroadcastDailySummary', [summaryDay, broadcastTargetGroup || 'ALL']);
+                            if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
+                            else addToast(`📅 ส่งสรุปผลประจำวันแล้ว (${res?.count ?? 0} คู่)`, 'info');
+                          } catch {
+                            addToast('❌ ส่งไม่สำเร็จ', 'danger');
+                          } finally {
+                            setSummaryBusy(false);
+                          }
+                        }}
+                        className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
+                      >
+                        <span>📅 ส่งสรุปผลเข้ากลุ่ม</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

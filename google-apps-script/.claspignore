@@ -1,2 +1,6 @@
 Code_backup.gs
 Index_backup.html
+
+# The admin UI is no longer served from GAS (google.script.run exposure).
+index.html
+Index.html

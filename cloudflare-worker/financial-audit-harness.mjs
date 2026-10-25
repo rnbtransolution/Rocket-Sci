@@ -328,10 +328,22 @@ try {
     bals = await getPlayerBalances(env, ctx);
     assert.equal(bals.PLC76E26, 0, 'ITT balance after opening 300pt order should be 0');
 
-    // 5. Simulate Durable Object hitting Free Tier quota right before partial match & settlement!
+    // 5. Simulate the Durable Object hitting its quota right before the partial match.
+    //    Money operations FAIL CLOSED: the match is refused and nothing moves.
+    //    (A KV fallback cannot check-and-debit atomically — that is how stakes
+    //    were lost and refunds doubled under burst traffic.)
     env.ROCKET_STATE.setFailAfterCalls(0);
+    await sendGroupLineEvent(env, ctx, AK_ID, `ต #${order3.orderNumber} 240`);
+    env.ROCKET_STATE.setFailAfterCalls(Infinity);
+    // StateStore keeps its circuit open for 15s after a quota error; step past it.
+    const realNow = Date.now;
+    Date.now = () => realNow() + 16_000;
+    bals = await getPlayerBalances(env, ctx);
+    assert.equal(bals.PLC76E26, 0, 'ITT balance must be unchanged while the ledger is unavailable');
+    assert.equal(bals.PL214A1E, 300, 'A-K must not be debited while the ledger is unavailable');
 
-    // A-K partially matches Order 3 for 240 pt (80% of 300 pt); 60 pt refunded to ITT
+    // Once the Durable Object is back, the same partial match succeeds exactly once:
+    // A-K takes 240 pt (80% of 300 pt); the untaken 60 pt is refunded to ITT.
     await sendGroupLineEvent(env, ctx, AK_ID, `ต #${order3.orderNumber} 240`);
     bals = await getPlayerBalances(env, ctx);
     assert.equal(bals.PLC76E26, 60, 'ITT balance after 60pt partial-match remainder refund must be 60');
@@ -375,6 +387,7 @@ try {
     }
 
     console.log('  ✅ PASS: ITT = 440 pt, A-K = 1,466 pt, Commission = 94 pt (Total = 2,000 pt, 0 discrepancy)\n');
+    Date.now = realNow;
   }
 
   // ---------------------------------------------------------------------------
@@ -453,8 +466,8 @@ try {
   // TEST 4: Double-Cancel & Double-Match Race Protection (KV Fallback Mode)
   // ---------------------------------------------------------------------------
   {
-    console.log('▶ TEST 4: Idempotent Refund & Exclusive Match Protection under KV Fallback Mode');
-    const env = makeEnv({ failAfterCalls: 0 }); // Force KV fallback mode from start
+    console.log('▶ TEST 4: Idempotent Refund & Exclusive Match Protection, and Fail-Closed under DO Outage');
+    const env = makeEnv();
     const ctx = makeCtx();
     await env.KV_CACHE.put('ACTIVE_GROUP_ID', TEST_GROUP_ID);
     await rpc(env, ctx, 'adminOpenRound', ['บั้งไฟทดสอบ Race', 330, 380]);
@@ -467,10 +480,12 @@ try {
     const dash = await rpc(env, ctx, 'getDashboardData', ['full']);
     const ord = dash.bets.find((b) => b.amount === 500);
 
-    // Player cancels AND Admin cancels the same order back-to-back
-    await sendGroupLineEvent(env, ctx, ITT_ID, `ยกเลิก ${ord.orderNumber}`);
-    await rpc(env, ctx, 'adminRequestCancelBet', [ord.orderNumber]);
-    await rpc(env, ctx, 'adminClearPendingOrders', ['ALL']);
+    // Player cancels AND Admin cancels AND the board is cleared, all for the same order
+    await Promise.all([
+      sendGroupLineEvent(env, ctx, ITT_ID, `ยกเลิก ${ord.orderNumber}`),
+      rpc(env, ctx, 'adminRequestCancelBet', [ord.orderNumber]),
+      rpc(env, ctx, 'clearPendingBets', []),
+    ]);
 
     let bals = await getPlayerBalances(env, ctx);
     assert.equal(bals.PLC76E26, 1000, `ITT must be refunded exactly once (1000), got ${bals.PLC76E26}`);
@@ -489,7 +504,18 @@ try {
     // Exactly one of A-K or PlayerThree should be deducted 500; the other stays at 1000
     const matcherBals = [bals.PL214A1E, bals.PL111111].sort((a, b) => a - b);
     assert.deepEqual(matcherBals, [500, 1000], `Exactly one matcher must take the order, got ${matcherBals}`);
-    console.log('  ✅ PASS: Zero double-refunds and zero double-matches in KV fallback mode\n');
+
+    // DO outage: a new bet is refused outright and no credit moves.
+    const before = await getPlayerBalances(env, ctx);
+    env.ROCKET_STATE.setFailAfterCalls(0);
+    await sendGroupLineEvent(env, ctx, AK_ID, 'ชล100');
+    env.ROCKET_STATE.setFailAfterCalls(Infinity);
+    const realNow = Date.now;
+    Date.now = () => realNow() + 16_000;
+    const after = await getPlayerBalances(env, ctx);
+    Date.now = realNow;
+    assert.deepEqual(after, before, 'No balance may change while the ledger is unavailable');
+    console.log('  ✅ PASS: Zero double-refunds, zero double-matches, and no money moves during a DO outage\n');
   }
 
   // ---------------------------------------------------------------------------

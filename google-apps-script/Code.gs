@@ -7,21 +7,10 @@
 // Required keys: LINE_CHANNEL_ACCESS_TOKEN, SLIP_API_KEY, ADMIN_API_KEY
 // Optional: LINE_CHANNEL_SECRET, ALLOW_LINE_WEBHOOK (=true only if GAS is the LINE webhook)
 function getScriptSecret_(key) {
+  // No literal fallbacks: this file is in a public repository. A missing
+  // property must fail closed, never silently fall back to a known value.
   var props = PropertiesService.getScriptProperties();
-  var val = (props.getProperty(key) || '').toString().trim();
-  if (!val) {
-    var DEFAULTS = {
-      ADMIN_API_KEY: '_UeYlCflMEmsARuvt4KIHo1JhhXSz0-qz7KxLj6U6IFA1rbj',
-      LINE_CHANNEL_ACCESS_TOKEN: '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU=',
-      LINE_CHANNEL_SECRET: '8b03265380a42a02b934a80527c9ba5c',
-      SLIP_API_KEY: 'WNsIQaS1CqRpyHwPHb0SA5wcdh55sQYZT6cSNLSSssY='
-    };
-    if (DEFAULTS[key]) {
-      val = DEFAULTS[key];
-      props.setProperty(key, val);
-    }
-  }
-  return val;
+  return (props.getProperty(key) || '').toString().trim();
 }
 
 function getLineToken_() {
@@ -56,18 +45,22 @@ try {
  * writing a shared secret from a network-reachable endpoint would let anyone who
  * learned the key overwrite the mirror's configuration.
  */
-function bootstrapScriptSecrets(lineToken, slipKey, adminKey, lineSecret, admin1Key) {
+function bootstrapScriptSecrets_(lineToken, slipKey, adminKey, lineSecret, admin1Key) {
+  // Private (trailing underscore) so google.script.run can never reach it —
+  // as a public function it let anyone overwrite ADMIN_API_KEY. Set the values
+  // in Project Settings → Script properties instead.
+  if (!lineToken || !slipKey || !adminKey) throw new Error('lineToken, slipKey and adminKey are required');
   var props = PropertiesService.getScriptProperties();
-  props.setProperty('LINE_CHANNEL_ACCESS_TOKEN', String(lineToken || '03Rpw5vvp7hvCWW0gUsvoRGKrUfSLxdkyJg5lnsZ3BR4wmVRsuhIW06AK24fsX5lKeTOnaDgag59kOZe6Hxfv2UQrswlZc7mL4ZeZi5qIz+cuGuOEm3tja0Zx66srJgLREY5dbnaegtCoFZgromcvwdB04t89/1O/w1cDnyilFU='));
-  props.setProperty('SLIP_API_KEY', String(slipKey || 'WNsIQaS1CqRpyHwPHb0SA5wcdh55sQYZT6cSNLSSssY='));
-  props.setProperty('ADMIN_API_KEY', String(adminKey || '_UeYlCflMEmsARuvt4KIHo1JhhXSz0-qz7KxLj6U6IFA1rbj'));
-  props.setProperty('LINE_CHANNEL_SECRET', String(lineSecret || '8b03265380a42a02b934a80527c9ba5c'));
+  props.setProperty('LINE_CHANNEL_ACCESS_TOKEN', String(lineToken));
+  props.setProperty('SLIP_API_KEY', String(slipKey));
+  props.setProperty('ADMIN_API_KEY', String(adminKey));
+  if (lineSecret) props.setProperty('LINE_CHANNEL_SECRET', String(lineSecret));
   if (admin1Key) props.setProperty('ADMIN1_API_KEY', String(admin1Key));
   props.setProperty('ALLOW_LINE_WEBHOOK', 'false'); // Node is the single LINE writer
   return { ok: true, keys: Object.keys(props.getProperties()) };
 }
 
-function pruneDeadLineGroupsFromProperties() {
+function pruneDeadLineGroupsFromProperties_() {
   var props = PropertiesService.getScriptProperties();
   props.setProperty('ACTIVE_GROUP_ID', 'C61efb2aa1ad6fc26fefdc41fb710b431');
   var groupsJson = props.getProperty('LINE_GROUPS') || '[]';
@@ -467,10 +460,10 @@ function adminCloseRound() {
 }
 
 /**
- * HTTP GET: Serves the bundled React Admin & Simulator UI, or JSON API for external clients.
+ * HTTP GET: read-only JSON API for external clients. No HTML is served (see below).
  */
 function doGet(e) {
-  // Read-only JSON API for external clients (mutations must use authenticated POST / google.script.run)
+  // Read-only JSON API for external clients (mutations must use authenticated POST)
   if (e && e.parameter && (e.parameter.action === 'getDashboardData' || e.parameter.api === '1')) {
     var providedKey = (e.parameter.apiKey || e.parameter.adminKey || '').toString().trim();
     var expectedKey = getAdminApiKey_();
@@ -504,20 +497,18 @@ function doGet(e) {
     // Block unauthenticated mutating GET actions (legacy dual-writer path)
     return ContentService.createTextOutput(JSON.stringify({
       success: false,
-      error: 'Mutating GET actions are disabled. Use the Node backend or authenticated google.script.run.'
+      error: 'Mutating GET actions are disabled. Use the authenticated POST API.'
     })).setMimeType(ContentService.MimeType.JSON);
   }
 
-  var html;
-  try {
-    html = HtmlService.createHtmlOutputFromFile('index');
-  } catch(_) {
-    html = HtmlService.createHtmlOutputFromFile('Index');
-  }
-  return html
-    .setTitle('Bang Fai Commander - ระบบดูแลบิลลิงและควบคุม')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  // The bundled admin UI is no longer served from GAS. Any page this web app
+  // serves can call every public top-level function through google.script.run
+  // without an API key, and the web app is open to anonymous users. The admin
+  // console lives on the Worker; GAS is only an API-key-protected Sheets mirror.
+  return ContentService.createTextOutput(JSON.stringify({
+    success: false,
+    error: 'This endpoint is an API-only Sheets mirror. Use the Admin Console on the Worker.'
+  })).setMimeType(ContentService.MimeType.JSON);
 }
 
 function invalidateDashboardCache() {
@@ -628,7 +619,7 @@ function executeAdminAction(functionName, args, adminKey) {
       return { success: false, error: 'No secret provided' };
     case 'adminLogin':
       return adminLogin(args[0], args[1]);
-    case 'pruneDeadLineGroupsFromProperties': return pruneDeadLineGroupsFromProperties();
+    case 'pruneDeadLineGroupsFromProperties': return pruneDeadLineGroupsFromProperties_();
     default: return { error: 'Unknown function: ' + functionName };
   }
 }
