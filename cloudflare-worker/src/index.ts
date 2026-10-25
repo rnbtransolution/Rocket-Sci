@@ -78,6 +78,7 @@ import {
   generateNoticeFlex,
   generateVoidRoundFlex,
   generateSettlementFlex,
+  setPublicBaseUrl,
 } from './flexTemplates.js';
 
 function formatTime(timestamp?: number): string {
@@ -236,6 +237,23 @@ async function settleOrdersAtomically(
   return { settled, failed };
 }
 
+/**
+ * Every settled order of a round, for the group's result card. A retry after a
+ * partial failure only settles what was left, so the card is rebuilt from the
+ * stored records of the whole round rather than from that call's results —
+ * otherwise the group would get one card per attempt, each missing pairs.
+ */
+async function roundSettledOrders(orderNumbers: Iterable<string>, justSettled: Order[], env: Env): Promise<Order[]> {
+  const byNumber = new Map(justSettled.map((o) => [o.orderNumber, o]));
+  const out: Order[] = [];
+  for (const n of new Set(orderNumbers)) {
+    if (!n) continue;
+    const o = byNumber.get(n) || (await getOrderRecord(n, env));
+    if (o && o.status === 'settled') out.push(o);
+  }
+  return out.sort((a, b) => (Number(a.settledAt) || 0) - (Number(b.settledAt) || 0));
+}
+
 /** A flight time the admin actually entered. `Number('') || 0` settled every order as a low-side win. */
 function parseFlightSeconds(v: unknown): number | null {
   const n = Number(v);
@@ -286,6 +304,7 @@ export default {
    */
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    setPublicBaseUrl(env.PUBLIC_BASE_URL, url.origin);
 
     // ── CORS Headers for Admin Web Portal ──
     //
@@ -2222,16 +2241,38 @@ if (
           // A partly-failed settlement stays CLOSED, not RESOLVED: a RESOLVED
           // round is what a new quote reopens, and the unsettled orders would
           // then settle on the next rocket's time. Retrying is safe.
+          // Settled orders leave the matched list, so a retry cannot see the
+          // ones an earlier attempt paid. Remember them on the round (keyed by
+          // its roundId, since the round object is copied into the next rocket)
+          // so the one group card sent at the end still lists every pair.
+          const roundKey = activeRound.roundId ?? null;
+          const earlier: string[] = activeRound.partialSettlement?.roundId === roundKey
+            ? activeRound.partialSettlement.orderNumbers || []
+            : [];
+          const settledSoFar = [...earlier, ...resolvedOrders.map((o) => o.orderNumber)];
+
           activeRound.status = settleFailures.length > 0 ? 'CLOSED' : 'RESOLVED';
           activeRound.finalTime = finalSeconds;
           activeRound.updatedAt = Date.now();
+          if (settleFailures.length > 0) {
+            activeRound.partialSettlement = { roundId: roundKey, orderNumbers: [...new Set(settledSoFar)] };
+          } else {
+            delete activeRound.partialSettlement;
+          }
           await state(env).put('ACTIVE_ROUND', JSON.stringify(activeRound));
 
-          const targets = await resolveTargetGroupIds('ALL', env);
+          // The group hears the result once, when every pair is paid. A card
+          // after a partial failure told the group the round was over while
+          // some players were still unpaid, and the retry then sent a second.
+          // The admin sees the failure in the console response below.
+          const targets = settleFailures.length === 0 ? await resolveTargetGroupIds('ALL', env) : [];
           if (targets.length > 0) {
             const roundName = activeRound.name || 'บั้งไฟสด';
+            const cardOrders = earlier.length > 0
+              ? await roundSettledOrders(settledSoFar, resolvedOrders, env)
+              : resolvedOrders;
             // Flight time and every pair's winner and loser, in one card.
-            const settleFlex = generateSettlementFlex(roundName, finalSeconds, tMin, tMax, resolvedOrders);
+            const settleFlex = generateSettlementFlex(roundName, finalSeconds, tMin, tMax, cardOrders);
             await Promise.all(targets.map((to) => pushToLine(to, settleFlex, env)));
           }
 
@@ -2239,7 +2280,7 @@ if (
             success: settleFailures.length === 0,
             resolvedCount: resolvedOrders.length,
             finalTime: finalSeconds,
-            ...(settleFailures.length > 0 ? { error: `ตัดสินผลไม่สำเร็จ ${settleFailures.length} แผล — กดตัดสินผลซ้ำได้อย่างปลอดภัย (แผลที่จ่ายแล้วจะไม่ถูกจ่ายซ้ำ)`, failed: settleFailures, ledgerFailure: true } : {}),
+            ...(settleFailures.length > 0 ? { error: `ตัดสินผลไม่สำเร็จ ${settleFailures.length} แผล — ยังไม่ประกาศผลในกลุ่ม กดตัดสินผลซ้ำได้อย่างปลอดภัย (แผลที่จ่ายแล้วจะไม่ถูกจ่ายซ้ำ)`, failed: settleFailures, ledgerFailure: true } : {}),
           };
         } else if (functionName === 'adminGetDailySummary' || functionName === 'adminBroadcastDailySummary') {
           // Daily duel summary, one card per rocket round. args: [day?, target?]
@@ -2320,11 +2361,18 @@ if (
             if (settleFailures.length === 0) await state(env).removeInFlight(targetRound.roundId);
             const remaining = await getInFlightRounds(env);
 
-            const targets = await resolveTargetGroupIds('ALL', env);
+            // The group hears the result once, when every pair is paid (see
+            // adminResolveBets). The parked round keeps its full order list,
+            // so pairs paid by an earlier attempt are read back from it.
+            const targets = settleFailures.length === 0 ? await resolveTargetGroupIds('ALL', env) : [];
             if (targets.length > 0) {
               const roundName = targetRound.name || 'บั้งไฟสด';
+              const roundOrders = (targetRound.matchedOrders || [])
+                .map((o) => o?.orderNumber)
+                .filter((n): n is string => !!n && !unquoted.has(n));
+              const cardOrders = await roundSettledOrders(roundOrders, resolvedOrders, env);
               // Flight time and every pair's winner and loser, in one card.
-              const settleFlex = generateSettlementFlex(roundName, finalSeconds, tMin, tMax, resolvedOrders);
+              const settleFlex = generateSettlementFlex(roundName, finalSeconds, tMin, tMax, cardOrders);
               await Promise.all(targets.map((to) => pushToLine(to, settleFlex, env)));
             }
 
@@ -2335,7 +2383,7 @@ if (
               resolvedCount: resolvedOrders.length,
               finalTime: finalSeconds,
               inFlightRounds: remaining,
-              ...(settleFailures.length > 0 ? { error: `ตัดสินผลไม่สำเร็จ ${settleFailures.length} แผล — กดตัดสินผลซ้ำได้อย่างปลอดภัย`, failed: settleFailures, ledgerFailure: true } : {}),
+              ...(settleFailures.length > 0 ? { error: `ตัดสินผลไม่สำเร็จ ${settleFailures.length} แผล — ยังไม่ประกาศผลในกลุ่ม กดตัดสินผลซ้ำได้อย่างปลอดภัย`, failed: settleFailures, ledgerFailure: true } : {}),
             };
           }
         } else if (functionName === 'simulateTextMessageFromDashboard') {

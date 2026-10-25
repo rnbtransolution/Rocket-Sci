@@ -36,6 +36,8 @@ export interface Env {
   SLIP_API_KEY?: string;
   SLIP_API_URL?: string;
   ADMIN_LINE_USER_IDS?: string;
+  /** Public https origin of this deployment (card icons). Defaults to the request's origin. */
+  PUBLIC_BASE_URL?: string;
 }
 
 // ── Queue Message Structure ──

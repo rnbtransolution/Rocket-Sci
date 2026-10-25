@@ -63,6 +63,7 @@ const mf = new Miniflare({
     ADMIN_API_KEY: ADMIN_KEY, SESSION_SECRET: 'test_session_secret_0123456789',
     LINE_CHANNEL_SECRET: CH, LINE_CHANNEL_ACCESS_TOKEN: 't',
     ADMIN_USERNAME: 'admin', ENVIRONMENT: 'test', ADMIN_LINE_USER_IDS: ADM.lineUserId,
+    PUBLIC_BASE_URL: 'https://rocket.example/',
   },
 });
 
@@ -216,6 +217,8 @@ check('broadcast endpoint resolves the group and counts the duels', Array.isArra
   check('unknown icon is 404', missing.status === 404, `status=${missing.status}`);
   const iconUrls = JSON.stringify(sum?.flex).match(/\/icons\/([a-z]+)\.png/g) || [];
   check('summary card carries a header icon', iconUrls.length > 0);
+  check('icon URL uses PUBLIC_BASE_URL, not a hard-coded host',
+    /"url":"https:\/\/rocket\.example\/icons\/[a-z]+\.png/.test(JSON.stringify(sum?.flex)) && !JSON.stringify(sum?.flex).includes('workers.dev'));
 }
 
 // ── [6] Unauthenticated callers see the public board only ──────────────────
