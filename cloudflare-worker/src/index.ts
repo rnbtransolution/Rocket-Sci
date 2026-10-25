@@ -56,6 +56,10 @@ import {
   getInFlightRounds,
   saveInFlightRounds,
   parkCurrentRoundToInFlight,
+  newRoundId,
+  bangkokDay,
+  dailySettledKey,
+  getDailySettledOrders,
   voidInFlightRound,
 } from './queueHandler.js';
 import {
@@ -68,11 +72,36 @@ import {
   generateWithdrawalFlex,
   generateOrderFlex,
   generateRocketLaunchedFlex,
+  generateDailySummaryFlex,
 } from './flexTemplates.js';
 
 function formatTime(timestamp?: number): string {
   const d = timestamp ? new Date(timestamp) : new Date();
   return d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+
+/**
+ * An order as an unauthenticated caller may see it: the fields the LINE group
+ * already shows. No player IDs, LINE user IDs, group IDs or settlement money.
+ */
+function publicOrderView(b: Order): any {
+  const f = formatOrderForDashboard(b);
+  return {
+    id: f.id,
+    orderNumber: f.orderNumber,
+    side: f.side,
+    playerLowName: f.playerLowName,
+    playerHighName: f.playerHighName,
+    amount: f.amount,
+    type: f.type,
+    betType: f.betType,
+    rangeMin: f.rangeMin,
+    rangeMax: f.rangeMax,
+    rocketName: f.rocketName ?? null,
+    status: f.status,
+    createdAt: f.createdAt,
+    timestamp: f.timestamp,
+  };
 }
 
 function formatOrderForDashboard(b: Order): any {
@@ -171,6 +200,9 @@ async function settleOrdersAtomically(
   const settled: Order[] = [];
   const failed: Array<{ orderNumber: string; reason: string }> = [];
   const seen = new Set<string>();
+  // The daily summary's source. SETTLED_ORDERS_LIST keeps only the latest 100
+  // and is wiped by "ปิดรอบพอร์ทัล", so it cannot back a whole day of duels.
+  const dayKey = dailySettledKey(bangkokDay());
   for (const item of candidates) {
     if (!item || !item.orderNumber || seen.has(item.orderNumber) || skip.has(item.orderNumber)) continue;
     seen.add(item.orderNumber);
@@ -184,6 +216,7 @@ async function settleOrdersAtomically(
       lists: [
         { key: 'MATCHED_ORDERS_LIST', op: 'remove', orderNumber: item.orderNumber },
         { key: 'SETTLED_ORDERS_LIST', op: 'upsert', orderNumber: item.orderNumber, cap: 100 },
+        { key: dayKey, op: 'append', orderNumber: item.orderNumber, cap: 1000 },
       ],
     }, ctx);
     if (res.ok) {
@@ -462,10 +495,11 @@ if (
   );
 }
 
-const isPublicAllowed =
+// getP2PResults is admin-only: it lists every duel with commission and
+        // payout, and nothing outside the Admin Console reads it.
+        const isPublicAllowed =
           functionName === 'getDashboardData' ||
           functionName === 'adminLogin' ||
-          functionName === 'getP2PResults' ||
           functionName === 'adminResetPasswordWithRecoveryCode';
         if (!isPublicAllowed && !isAdmin) {
           return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -570,63 +604,32 @@ const isPublicAllowed =
               lineQuota,
             };
           } else {
-            const requestedUserId = args[0] ? String(args[0]).trim() : null;
-            if (requestedUserId) {
-              const matchedPlayer = players.find((p: any) => p.id === requestedUserId || p.lineUserId === requestedUserId);
-              const userTransactions = transactions.filter((t: any) => t.playerId === requestedUserId);
-              const formattedBets = pendingBets.map(formatOrderForDashboard);
-              const userBets = formattedBets.filter((b: any) =>
-                b.playerLowId === requestedUserId ||
-                b.playerHighId === requestedUserId ||
-                b.creatorId === requestedUserId ||
-                b.creatorLineUserId === requestedUserId ||
-                b.matcherId === requestedUserId ||
-                b.matcherLineUserId === requestedUserId
-              );
-              const userChatLogs = chatLogs.filter((l: any) => l.userId === requestedUserId);
-              result = {
-                players: matchedPlayer ? [matchedPlayer] : [],
-                transactions: userTransactions,
-                bets: userBets,
-                inFlightRounds: formattedInFlightRounds,
-                chatLogs: userChatLogs,
-                activeGroupId: validActiveGroupId,
-                lineGroups: [],
-                activeRound: roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380, status: 'ACTIVE' },
-                roundStatus: roundStr ? (JSON.parse(roundStr).status || 'ACTIVE') : 'ACTIVE',
-                serverTime: new Date().toISOString(),
-              };
-            } else {
-              result = {
-                players: [],
-                transactions: [],
-                bets: pendingBets.filter((b: any) => b.status === 'pending_match').map((b: any) => {
-                  const f = formatOrderForDashboard(b);
-                  return {
-                    id: f.id,
-                    orderNumber: f.orderNumber,
-                    side: f.side,
-                    playerLowName: f.playerLowName,
-                    playerHighName: f.playerHighName,
-                    amount: f.amount,
-                    type: f.type,
-                    betType: f.betType,
-                    rangeMin: f.rangeMin,
-                    rangeMax: f.rangeMax,
-                    status: f.status,
-                    createdAt: f.createdAt,
-                    timestamp: f.timestamp,
-                  };
-                }),
-                inFlightRounds: formattedInFlightRounds,
-                chatLogs: [],
-                activeGroupId: validActiveGroupId,
-                lineGroups: [],
-                activeRound: roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380, status: 'ACTIVE' },
-                roundStatus: roundStr ? (JSON.parse(roundStr).status || 'ACTIVE') : 'ACTIVE',
-                serverTime: new Date().toISOString(),
-              };
-            }
+            // Unauthenticated callers get the public board only — what the
+            // LINE group already sees. There used to be a per-player view
+            // keyed on args[0]: anyone who sent a PL code got that player's
+            // balance, transactions and chat log with no login. And the
+            // in-flight rounds went out whole, LINE user IDs and all.
+            result = {
+              players: [],
+              transactions: [],
+              bets: pendingBets.filter((b: any) => b.status === 'pending_match').map(publicOrderView),
+              inFlightRounds: (inFlightRounds || []).map((r: InFlightRound) => ({
+                roundId: r.roundId,
+                name: r.name,
+                targetMin: r.targetMin,
+                targetMax: r.targetMax,
+                isChotoy: r.isChotoy,
+                quoteReleased: r.quoteReleased,
+                launchedAt: r.launchedAt,
+                matchedOrders: (r.matchedOrders || []).map(publicOrderView),
+              })),
+              chatLogs: [],
+              activeGroupId: '',
+              lineGroups: [],
+              activeRound: roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380, status: 'ACTIVE' },
+              roundStatus: roundStr ? (JSON.parse(roundStr).status || 'ACTIVE') : 'ACTIVE',
+              serverTime: new Date().toISOString(),
+            };
           }
         } else if (functionName === 'getP2PResults') {
           const settledOrders = await getSettledOrdersList(env);
@@ -1075,7 +1078,13 @@ const isPublicAllowed =
             // exclude just `cancelled` and `resolved`, so a SETTLED order could be
             // cancelled after payout and both players refunded on top of it.
             // refundOrderOnce re-checks the stored status atomically.
-            const refund = await refundOrderOnce(order, env, ctx, 'admin_cancel');
+            // A matched order is locked: not even an admin may cancel it one
+            // by one. Voiding the whole round remains the only refund for a
+            // matched duel. The status is re-checked atomically here, so a
+            // match landing at the same moment is refused too.
+            const refund = await refundOrderOnce(order, env, ctx, 'admin_cancel', {
+              allowedStatuses: ['pending_match', 'pending_hold', 'refunding'],
+            });
 
             if (!refund.refunded) {
               const now = refund.order?.status || order.status;
@@ -1088,7 +1097,9 @@ const isPublicAllowed =
                       alreadyRefunded: true,
                       message: `แผล Order #${orderNo} ถูกยกเลิก/คืนแต้มไปแล้ว — ไม่ได้คืนแต้มซ้ำ`,
                     }
-                  : { success: false, error: `แผล Order #${orderNo} อยู่ในสถานะ ${now} แล้ว — ไม่สามารถยกเลิก/คืนแต้มได้` };
+                  : now === 'matched'
+                    ? { success: false, locked: true, error: `แผล Order #${orderNo} ต่อติดแล้ว — ระบบล็อก ไม่สามารถยกเลิกรายแผลได้ (คืนเงินได้ทางเดียวคือ "โมฆะรอบ")` }
+                    : { success: false, error: `แผล Order #${orderNo} อยู่ในสถานะ ${now} แล้ว — ไม่สามารถยกเลิก/คืนแต้มได้` };
             } else {
               // Tell the player. A silent refund is indistinguishable from a
               // failed one, and the player has no way to know the order is gone.
@@ -1348,6 +1359,7 @@ const isPublicAllowed =
           const targetMax = Number(args[2]) || 380;
           const parked = await parkCurrentRoundToInFlight(env, ctx, false);
           await state(env).put('ACTIVE_ROUND', JSON.stringify({
+            roundId: newRoundId(),
             name: roundName,
             targetMin,
             targetMax,
@@ -1380,6 +1392,7 @@ const isPublicAllowed =
           const parked = await parkCurrentRoundToInFlight(env, ctx, true);
 
           const roundData = {
+            roundId: newRoundId(),
             name: nextName,
             targetMin: min,
             targetMax: max,
@@ -1531,6 +1544,7 @@ const isPublicAllowed =
           await Promise.all([
             state(env).put('SETTLED_ORDERS_LIST', JSON.stringify([])),
             state(env).put('ACTIVE_ROUND', JSON.stringify({
+              roundId: newRoundId(),
               name: 'บั้งไฟสด',
               targetMin: 330,
               targetMax: 380,
@@ -1819,7 +1833,17 @@ const isPublicAllowed =
                 await clearAllPendingOrders(env, ctx);
               } else if (clean.startsWith('เปิดรอบ') || clean.startsWith('เปิดรับดวล')) {
                 const roundStr = await state(env).get('ACTIVE_ROUND');
-                const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
+                let round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
+                // Reopening a CLOSED round un-does a Final Call on the same rocket.
+                // A RESOLVED or VOID round is finished: anything still on its
+                // board is parked and a new rocket round starts, so it cannot
+                // settle on the next rocket's flight time.
+                if (round.status === 'RESOLVED' || round.status === 'VOID') {
+                  await parkCurrentRoundToInFlight(env, ctx, false);
+                  round = { ...round, roundId: newRoundId(), quoteReleased: false };
+                } else if (!round.roundId) {
+                  round.roundId = newRoundId();
+                }
                 round.status = 'ACTIVE';
                 round.updatedAt = Date.now();
                 await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
@@ -1919,7 +1943,16 @@ const isPublicAllowed =
             );
           }
 
+          // Pricing the rocket that is open (or locked by Final Call) keeps its
+          // round. Quoting after a RESOLVED / VOID round starts a new rocket:
+          // park whatever is left on the old board first — e.g. orders whose
+          // settlement failed — so they never settle on this rocket's time.
+          const continuesRound = Boolean(existing && existing.roundId && (existing.status === 'ACTIVE' || existing.status === 'CLOSED'));
+          if (existing && !continuesRound && (existing.status === 'RESOLVED' || existing.status === 'VOID')) {
+            await parkCurrentRoundToInFlight(env, ctx, false);
+          }
           const roundData = {
+            roundId: continuesRound ? existing.roundId : newRoundId(),
             name,
             targetMin: min,
             targetMax: max,
@@ -2251,7 +2284,10 @@ const isPublicAllowed =
             matchedOrders, finalSeconds, tMin, tMax, env, ctx, voidedThisSettlement
           );
 
-          activeRound.status = 'RESOLVED';
+          // A partly-failed settlement stays CLOSED, not RESOLVED: a RESOLVED
+          // round is what a new quote reopens, and the unsettled orders would
+          // then settle on the next rocket's time. Retrying is safe.
+          activeRound.status = settleFailures.length > 0 ? 'CLOSED' : 'RESOLVED';
           activeRound.finalTime = finalSeconds;
           activeRound.updatedAt = Date.now();
           await state(env).put('ACTIVE_ROUND', JSON.stringify(activeRound));
@@ -2343,6 +2379,41 @@ const isPublicAllowed =
             finalTime: finalSeconds,
             ...(settleFailures.length > 0 ? { error: `ตัดสินผลไม่สำเร็จ ${settleFailures.length} แผล — กดตัดสินผลซ้ำได้อย่างปลอดภัย (แผลที่จ่ายแล้วจะไม่ถูกจ่ายซ้ำ)`, failed: settleFailures, ledgerFailure: true } : {}),
           };
+        } else if (functionName === 'adminGetDailySummary' || functionName === 'adminBroadcastDailySummary') {
+          // Daily duel summary, one card per rocket round. args: [day?, target?]
+          const day = /^\d{4}-\d{2}-\d{2}$/.test(String(args[0] || '')) ? String(args[0]) : bangkokDay();
+          const orders = await getDailySettledOrders(day, env);
+          const flex = generateDailySummaryFlex(day, orders);
+          if (functionName === 'adminGetDailySummary') {
+            result = { success: true, day, count: orders.length, orders: orders.map(formatOrderForDashboard), flex };
+          } else {
+            const targets = await resolveTargetGroupIds(args[1] || 'ALL', env);
+            if (targets.length === 0) {
+              result = { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ' };
+            } else {
+              const sendResults = await Promise.all(targets.map((to) => pushToLine(to, flex, env)));
+              const allSuccess = sendResults.every((r) => r.success);
+              const quotaError = sendResults.find((r) => r.code === 429);
+              await appendChatLog(env, {
+                timestamp: formatTime(),
+                userId: targets[0],
+                displayName: 'ระบบ',
+                sender: 'admin',
+                text: `[📅 สรุปผลดวลประจำวัน ${day} (${orders.length} คู่)]`,
+                type: 'flex',
+              });
+              result = {
+                success: allSuccess,
+                day,
+                count: orders.length,
+                targets,
+                error: allSuccess ? undefined : (quotaError?.error || 'ส่งเข้าบางกลุ่มไม่สำเร็จ'),
+                code: quotaError ? 429 : (allSuccess ? 200 : 400),
+                isQuotaExhausted: !!quotaError,
+                results: sendResults,
+              };
+            }
+          }
         } else if (functionName === 'adminResolveInFlightRound') {
           const requestedRoundId = args[0] ? String(args[0]).trim() : '';
           const finalSecondsParsed = parseFlightSeconds(args[1]);

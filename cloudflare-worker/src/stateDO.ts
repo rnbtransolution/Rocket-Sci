@@ -142,7 +142,12 @@ export interface TxnOrderOp {
 
 export interface TxnListOp {
   key: string;
-  op: 'upsert' | 'remove';
+  /**
+   * `upsert` keeps one entry per order number. `append` keeps one entry per
+   * order (number + createdAt): order numbers are reused, so a history index
+   * keyed on the number alone would drop the earlier order of the two.
+   */
+  op: 'upsert' | 'remove' | 'append';
   orderNumber: string;
   cap?: number;
 }
@@ -171,7 +176,8 @@ export interface TxnSpec {
    * adopted yet, and the directory copy can be older.
    */
   allowDirectoryFallback?: boolean;
-  round?: { expectStatus?: string[]; expectQuoteReleased?: boolean };
+  /** `expectRoundId` pins the commit to one rocket round, so a round swapped mid-flight refuses it. */
+  round?: { expectStatus?: string[]; expectQuoteReleased?: boolean; expectRoundId?: string };
   claims?: TxnClaimOp[];
   orders?: TxnOrderOp[];
   balances?: TxnBalanceOp[];
@@ -868,6 +874,9 @@ export class RocketStateDO extends DurableObject<Env> {
         if (typeof spec.round.expectQuoteReleased === 'boolean' && spec.round.expectQuoteReleased !== quoteReleased) {
           throw new TxnAbort('round_changed', `quoteReleased=${quoteReleased}`, round);
         }
+        if (spec.round.expectRoundId !== undefined && (round?.roundId ?? null) !== spec.round.expectRoundId) {
+          throw new TxnAbort('round_changed', `roundId=${round?.roundId ?? null}`, round);
+        }
       }
 
       // 2. Claims (single-use keys — slip refs, legacy refund/settle claims).
@@ -1060,11 +1069,11 @@ export class RocketStateDO extends DurableObject<Env> {
             if (!Array.isArray(arr)) arr = [];
             lists.set(l.key, arr);
           }
-          const filtered = arr.filter((o) => o && o.orderNumber !== l.orderNumber);
-          if (l.op === 'upsert') {
-            const value = orders.get(l.orderNumber) ?? this.liveJson(`ORDER_${l.orderNumber}`);
-            if (value) filtered.unshift(value);
-          }
+          const value = l.op === 'remove' ? null : (orders.get(l.orderNumber) ?? this.liveJson<any>(`ORDER_${l.orderNumber}`));
+          const filtered = l.op === 'append'
+            ? arr.filter((o) => o && !(o.orderNumber === l.orderNumber && Number(o.createdAt) === Number(value?.createdAt)))
+            : arr.filter((o) => o && o.orderNumber !== l.orderNumber);
+          if (value) filtered.unshift(value);
           const cap = UNCAPPED_LISTS.has(l.key) ? 0 : (Number(l.cap) || 0);
           lists.set(l.key, cap > 0 ? filtered.slice(0, cap) : filtered);
         }

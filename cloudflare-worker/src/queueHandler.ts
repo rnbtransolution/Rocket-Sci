@@ -25,6 +25,7 @@ import {
   generateWithdrawalSuccessFlex,
   generateSlipReceivedFlex,
   generateSlipCreditedFlex,
+  generateDailySummaryFlex,
 } from './flexTemplates.js';
 
 export const RULE_GUIDE_TEXT = `📖 [กติกาการเล่น]
@@ -465,7 +466,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     }
 
     // ── 5. Admin Commands (e.g. "เปิด [ชื่อ]", "ปิดรอบ") ──
-    const openRoundRegex = /^(เปิด|เปิดรอบ|รอบ)\s*(.+)$/;
+    const openRoundRegex = /^(เปิดรอบ|เปิด|รอบ)\s*(.+)$/; // longest first, or "เปิดรอบ X" is named "รอบ X"
     if (openRoundRegex.test(text)) {
       if (!(await isSenderLineAdmin(userId, env))) {
         const unauthFlex = generateNoticeFlex('⚠️ สิทธิ์ไม่เพียงพอ', 'คำสั่งเปิดรอบสงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นครับ', 'warning');
@@ -474,7 +475,13 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       }
       const match = text.match(openRoundRegex);
       const roundName = match ? match[2].trim() : 'รอบดวลสด';
+      // Park the previous rocket first, exactly as the Admin Console does. This
+      // used to overwrite ACTIVE_ROUND in place: the previous rocket's matched
+      // orders stayed on the board and settled on the NEXT rocket's flight
+      // time, and its unpriced pre-quote orders took the next rocket's quote.
+      const parked = await parkCurrentRoundToInFlight(env, ctx, false);
       await state(env).put('ACTIVE_ROUND', JSON.stringify({
+        roundId: newRoundId(),
         name: roundName,
         targetMin: 330,
         targetMax: 380,
@@ -484,9 +491,14 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         updatedAt: Date.now(),
       }));
       if (replyToken) {
+        // The quote is not released yet, so no price is shown: plain ชล/ชถ
+        // orders wait for it, and only self-priced ranges are live now.
+        const parkedNote = parked.parkedRound
+          ? `\n🛰️ รอบก่อนหน้า (${parked.parkedRound.name}) ${parked.parkedRound.matchedOrders.length} คู่ รอตัดสินผลแยกต่างหาก`
+          : '';
         const openFlex = generateNoticeFlex(
           `🚀 เปิดรอบดวล: ${roundName}`,
-          `ราคาช่าง 330-380 วินาที\nพร้อมเปิดรับคำสั่งดวลแล้วครับ 🚀`,
+          `รอแอดมินประกาศราคาช่าง (เปิดราคาเองได้ เช่น 300-350ล500)\nพร้อมเปิดรับคำสั่งดวลแล้วครับ 🚀${parkedNote}`,
           'success'
         );
         await replyToLine(replyToken, openFlex, env, !isGroup);
@@ -502,23 +514,44 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       }
       const roundStr = await state(env).get('ACTIVE_ROUND');
       let roundName = 'รอบดวลสด';
+      let quoteReleased = false;
       if (roundStr) {
         const round = JSON.parse(roundStr) as RocketRound;
         round.status = 'CLOSED';
         roundName = round.name;
+        quoteReleased = round.quoteReleased === true;
         await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
       }
-      // Also clear pending unmatched orders so board resets cleanly for next round
-      await clearAllPendingOrders(env);
+      // Same as the Admin Console's Final Call: with no quote announced, every
+      // pre-quote order — matched ones included — is cancelled and both sides
+      // refunded. This path used to skip that, leaving matched pre-quote orders
+      // with no price to settle on.
+      if (!quoteReleased) await cancelHeldPreQuoteOrders(env, ctx);
+      const { cleared } = await clearAllPendingOrders(env, ctx);
       const closeFlex = generateNoticeFlex(
         `⛔ ปิดรับดวลรอบ: ${roundName}`,
-        `ล็อครอบเรียบร้อย (ล้างกระดานรอคู่ 0 แผล)\nรอลุ้นผลการแข่งขันครับ 💥`,
+        `ล็อครอบเรียบร้อย (ล้างกระดานรอคู่ ${cleared} แผล)\nรอลุ้นผลการแข่งขันครับ 💥`,
         'warning'
       );
       if (replyToken) {
         await replyToLine(replyToken, closeFlex, env, !isGroup);
       } else {
         await pushToLine(userId, closeFlex, env);
+      }
+      return;
+    }
+
+    // ── Admin: daily duel summary ("สรุปวันนี้", "สรุปผลวันนี้", "สรุปรายวัน") ──
+    if (clean === 'สรุปวันนี้' || clean === 'สรุปผลวันนี้' || clean === 'สรุปรายวัน') {
+      if (!(await isSenderLineAdmin(userId, env))) {
+        const unauthFlex = generateNoticeFlex('⚠️ สิทธิ์ไม่เพียงพอ', 'คำสั่งสรุปผลประจำวันสงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นครับ', 'warning');
+        if (replyToken) await replyToLine(replyToken, unauthFlex, env, !isGroup);
+        return;
+      }
+      const day = bangkokDay();
+      const summary = generateDailySummaryFlex(day, await getDailySettledOrders(day, env));
+      if (!(replyToken && (await replyToLine(replyToken, summary, env, !isGroup)))) {
+        await pushToLine(groupId || userId, summary, env);
       }
       return;
     }
@@ -617,6 +650,7 @@ async function handleCreateOrder(
     getInFlightRounds(env),
   ]);
   let round = roundStr ? (JSON.parse(roundStr) as RocketRound) : null;
+  let roundPinnable = round !== null;
 
   // Auto-initialise ONLY when there is no round at all (fresh install, or the key
   // was never written). This previously also revived VOID and RESOLVED rounds,
@@ -626,6 +660,7 @@ async function handleCreateOrder(
   // adminOpenRound); nothing a player does may reopen it.
   if (!round) {
     round = {
+      roundId: newRoundId(),
       name: 'ช่างบั้งไฟสด',
       targetMin: 330,
       targetMax: 380,
@@ -764,6 +799,7 @@ async function handleCreateOrder(
       groupId: targetGroupId,
       userTypedCmd: text,
       rocketName: round?.name || null,
+      roundId: round?.roundId ?? null,
       offset: isPreQuote ? offsetDelta : undefined,
       createdAt: Date.now(),
       id: `bet_${orderNumber}`,
@@ -777,7 +813,9 @@ async function handleCreateOrder(
       // The round is re-checked inside the commit: a Final Call landing while
       // this message was in flight must still refuse it, and a quote released
       // in the meantime must not leave a pre-quote order stranded on hold.
-      round: { expectStatus: ['ACTIVE'], expectQuoteReleased: quoteReleased },
+      // Not pinned on the very first order of a fresh install: the auto-created
+      // round above is still being written in the background.
+      round: { expectStatus: ['ACTIVE'], expectQuoteReleased: quoteReleased, ...(roundPinnable && round?.roundId ? { expectRoundId: round.roundId } : {}) },
       orders: [{ orderNumber, create: newOrder }],
       balances: [{ shortId: profile.shortId, lineUserId: profile.lineUserId, delta: -amount, requireSufficient: true }],
       lists: [{ key: 'PENDING_ORDERS_LIST', op: 'upsert', orderNumber }],
@@ -785,7 +823,7 @@ async function handleCreateOrder(
 
     if (res.ok) { committed = res; break; }
     if (res.reason === 'order_exists') { existingNumbers.add(orderNumber); continue; }
-    if (res.reason === 'round_changed' && res.current) { round = res.current as RocketRound; continue; }
+    if (res.reason === 'round_changed' && res.current) { round = res.current as RocketRound; roundPinnable = true; continue; }
 
     let failFlex: any;
     if (res.reason === 'round_closed') {
@@ -931,8 +969,11 @@ async function handleMatchOrder(
     // existed.
     let reason: string;
     let hint: string;
-    if (order.status === 'matched') {
+    if (order.status === 'matched' || order.status === 'matched_paired') {
       reason = 'แผลนี้มีคู่ดวลแล้วครับ';
+      hint = 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ';
+    } else if (order.status === 'settled' || order.status === 'resolved') {
+      reason = 'แผลนี้ตัดสินผลไปแล้วครับ';
       hint = 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่างอยู่ครับ';
     } else {
       reason = 'แผลนี้ถูกยกเลิกไปแล้วครับ';
@@ -1022,12 +1063,18 @@ async function handleMatchOrder(
     playerHighName: order.side === 'high' ? order.creatorName : profile.displayName,
   };
 
+  // Bound to the current rocket: the round must still be the one read above,
+  // and the order must belong to it. An order carried over from a previous
+  // rocket can otherwise be matched now and settle on this rocket's time.
+  const roundId = round?.roundId;
   const res = await ledger(env, {
-    round: { expectStatus: ['ACTIVE'] },
+    round: { expectStatus: ['ACTIVE'], ...(roundId ? { expectRoundId: roundId } : {}) },
     orders: [{
       orderNumber: resolvedNo,
       expectCreatedAt: Number(order.createdAt) || 0,
       expectStatus: ['pending_match', 'pending_hold'],
+      // Orders from before round IDs carry none and are not pinned.
+      ...(roundId && order.roundId ? { expectFields: { roundId } } : {}),
       expectAmount: originalAmount,
       rejectCreatorId: profile.shortId,
       patch: matchPatch as Record<string, unknown>,
@@ -1048,6 +1095,10 @@ async function handleMatchOrder(
     const curStatus = res.current?.status;
     if (res.reason === 'round_closed') {
       msg = 'ปิดรับดวลรอบนี้แล้วครับ (ล็อครอบระหว่างการแข่งขัน)';
+    } else if (res.reason === 'round_changed') {
+      msg = 'เปลี่ยนรอบบั้งไฟระหว่างทำรายการ กรุณาลองใหม่ครับ';
+    } else if (res.reason === 'order_field') {
+      msg = 'แผลนี้เป็นของบั้งไฟรอบก่อน รับดวลในรอบนี้ไม่ได้ครับ';
     } else if (res.reason === 'order_status' && (curStatus === 'matched' || curStatus === 'matched_paired')) {
       msg = 'แผลนี้ถูกรับไปโดยผู้เล่นอื่นแล้วครับ';
     } else if (res.reason === 'order_status') {
@@ -1120,6 +1171,10 @@ async function handleMatchOrder(
   }
 }
 
+/** Why a matched order cannot be cancelled. Sent to the player's DM, never the group. */
+export const MATCHED_ORDER_LOCKED_TEXT = (orderNo: string) =>
+  `🔒 แผล Order #${orderNo} ต่อติดแล้ว ระบบล็อกไว้ ไม่สามารถยกเลิกได้ทุกกรณีครับ\nรอผลการแข่งขันและสรุปผลตามเวลาบั้งไฟครับ 🚀`;
+
 async function cancelOrder(
   orderNo: string,
   profile: PlayerProfile,
@@ -1132,6 +1187,12 @@ async function cancelOrder(
   const order = await getOrderRecord(resolvedNo, env);
   if (!order) return { success: false, message: `🚫 ไม่พบแผล Order #${resolvedNo}` };
 
+  // A matched order is locked for everyone — creator, matcher, or anyone
+  // tapping the card's Cancel button — so this is checked before ownership:
+  // the matcher used to be told only "not your order".
+  if (order.status === 'matched' || order.status === 'matched_paired') {
+    return { success: false, message: MATCHED_ORDER_LOCKED_TEXT(resolvedNo) };
+  }
   if (order.creatorId !== profile.shortId) {
     return { success: false, message: '⚠️ คุณไม่ใช่เจ้าของแผลนี้ครับ' };
   }
@@ -1154,7 +1215,7 @@ async function cancelOrder(
       return { success: false, message: `⚠️ ${LEDGER_UNAVAILABLE_TEXT}` };
     }
     if (now === 'matched' || now === 'matched_paired') {
-      return { success: false, message: `⚠️ แผล Order #${resolvedNo} มีคู่ดวลแล้ว ไม่สามารถยกเลิกได้ครับ` };
+      return { success: false, message: MATCHED_ORDER_LOCKED_TEXT(resolvedNo) };
     }
     return {
       success: false,
@@ -1916,6 +1977,33 @@ export async function saveInFlightRounds(rounds: InFlightRound[], env: Env): Pro
   }
 }
 
+/** A fresh, unique rocket-round ID. Every path that opens a new rocket must use one. */
+export function newRoundId(): string {
+  return `RND_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+/** Calendar day in Thailand (UTC+7, no DST), e.g. "2026-10-25". */
+export function bangkokDay(ts: number = Date.now()): string {
+  return new Date(ts + 7 * 3600_000).toISOString().slice(0, 10);
+}
+
+/** Index key of every order settled on one Thai calendar day. */
+export function dailySettledKey(day: string): string {
+  return `SETTLED_DAY_${day}`;
+}
+
+/** Orders settled on `day`, newest first. */
+export async function getDailySettledOrders(day: string, env: Env): Promise<Order[]> {
+  try {
+    const raw = await state(env).get(dailySettledKey(day));
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter((o: any) => o && o.status === 'settled') : [];
+  } catch (err) {
+    console.error('[Worker] getDailySettledOrders error:', err);
+    return [];
+  }
+}
+
 /**
  * Parks the current rocket round (Rocket A) and its locked matched orders into
  * `IN_FLIGHT_ROUNDS` so that the active betting board (`ACTIVE_ROUND`,
@@ -1936,6 +2024,12 @@ export async function parkCurrentRoundToInFlight(
   const round: RocketRound = roundStr
     ? JSON.parse(roundStr)
     : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380, status: 'ACTIVE', isChotoy: false, quoteReleased: false, updatedAt: Date.now() };
+
+  // A forced park records the rocket as in flight even with no matched orders.
+  // Only a rocket that is open or past Final Call can be in flight: forcing it
+  // after the round was already RESOLVED / VOID left an empty parked round the
+  // admin then had to void by hand.
+  const mayForce = forcePark && (round.status === 'ACTIVE' || round.status === 'CLOSED');
 
   // Lock Rocket A before touching its orders. Parking used to run with the
   // round still ACTIVE, so a "ต" landing mid-park matched an order of Rocket A
@@ -1964,7 +2058,7 @@ export async function parkCurrentRoundToInFlight(
     targetMax: Number(round.targetMax) || 380,
     isChotoy: Boolean(round.isChotoy),
     quoteReleased: Boolean(round.quoteReleased),
-  }, forcePark)) as InFlightRound | null;
+  }, mayForce)) as InFlightRound | null;
 
   return { parkedRound, refundedPending, refundedUnquoted };
 }

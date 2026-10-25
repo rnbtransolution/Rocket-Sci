@@ -141,6 +141,12 @@ export interface Order {
    * `grossWinAmount` less `commission` — i.e. 1.9x for a decisive result.
    */
   payout?: number;
+  /**
+   * The rocket round this order was opened in (`RocketRound.roundId`). Matching
+   * checks it, so an order left over from a previous rocket can never be taken
+   * into, or settled on, the next one. Absent on orders from before round IDs.
+   */
+  roundId?: string | null;
   /** ID of the in-flight round snapshot when this order is parked while Rocket B opens. */
   inFlightRoundId?: string | null;
 }
@@ -184,6 +190,8 @@ export interface Transaction {
 }
 
 export interface RocketRound {
+  /** Unique per rocket. Names repeat ("บั้งไฟสด"), so they cannot identify a round. */
+  roundId?: string;
   name: string;
   targetMin: number;
   targetMax: number;
