@@ -199,6 +199,7 @@ check('one card per rocket round', bubbles.length === 2, `bubbles=${bubbles.leng
 const text = JSON.stringify(sum?.flex);
 check('cards name each rocket', text.includes('SEED') && text.includes('ROCKET_A'));
 check('rocket A card shows winner and loser', text.includes(`👑 ${P2.name}`) && text.includes(`💥 ${P1.name}`));
+check('cards show no stake, payout, fee or volume', !/\bpt\b|ค่าธรรมเนียม|ยอด|ผู้ชนะรับ|คืนเงิน/.test(text), text.match(/[^"]*(\bpt\b|ค่าธรรมเนียม|ยอด|ผู้ชนะรับ|คืนเงิน)[^"]*/)?.[0]);
 check('message is under LINE\'s 50KB limit', new TextEncoder().encode(JSON.stringify(sum.flex.contents)).length < 50_000);
 const bc = await rpc('adminBroadcastDailySummary', []);
 check('broadcast endpoint resolves the group and counts the duels', Array.isArray(bc?.targets) && bc.targets.length > 0 && bc.count === 2, JSON.stringify(bc && { targets: bc.targets, count: bc.count, error: bc.error }));

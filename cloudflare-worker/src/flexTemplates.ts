@@ -2327,7 +2327,8 @@ const DAILY_SUMMARY_MAX_ROUNDS = 12;
 
 /**
  * Every duel settled on `day`, grouped by rocket round, each pair showing the
- * winner and loser (or a draw) with the stake and payout.
+ * winner and loser (or a draw). Points are real money, so the card carries no
+ * stake, payout, fee or volume — it must not reveal who won or lost how much.
  *
  * Rounds are keyed on `roundId`, then the in-flight parking ID, and only then
  * on the rocket's name — names repeat ("บั้งไฟสด"), so two rockets with the
@@ -2367,8 +2368,7 @@ export function generateDailySummaryFlex(day: string, orders: Order[]): any {
           type: 'box',
           layout: 'horizontal',
           contents: [
-            { type: 'text', text: `#${o.orderNumber} · ${range}`, size: 'xxs', color: '#64748B', flex: 6 },
-            { type: 'text', text: `${(Number(o.amount) || 0).toLocaleString()} pt`, size: 'xs', color: '#0F172A', weight: 'bold', align: 'end', flex: 4 },
+            { type: 'text', text: `#${o.orderNumber} · ${range}`, size: 'xxs', color: '#64748B' },
           ],
         },
         {
@@ -2380,9 +2380,7 @@ export function generateDailySummaryFlex(day: string, orders: Order[]): any {
             { type: 'text', text: `${draw ? '🤝' : '💥'} ${String(loseName || '-').slice(0, 16)}`, size: 'xs', color: draw ? '#475569' : '#DC2626', align: 'end', flex: 1, wrap: true },
           ],
         },
-        draw
-          ? { type: 'text', text: 'เสมอ — คืนเงินทั้งสองฝ่าย', size: 'xxs', color: '#64748B', align: 'end' }
-          : { type: 'text', text: `ผู้ชนะรับ +${(Number(o.payout) || 0).toLocaleString()} pt (ค่าธรรมเนียม ${(Number(o.commission) || 0).toLocaleString()})`, size: 'xxs', color: '#64748B', align: 'end' },
+        ...(draw ? [{ type: 'text', text: 'เสมอ', size: 'xxs', color: '#64748B', align: 'end' }] : []),
       ],
     };
   };
@@ -2390,8 +2388,6 @@ export function generateDailySummaryFlex(day: string, orders: Order[]): any {
   const build = (rowsPerRound: number) => {
     const bubbles = groups.slice(0, DAILY_SUMMARY_MAX_ROUNDS).map((list) => {
       const first = list[0];
-      const fees = list.reduce((sum, o) => sum + (Number(o.commission) || 0), 0);
-      const volume = list.reduce((sum, o) => sum + (Number(o.amount) || 0), 0);
       const hidden = list.length - rowsPerRound;
       return {
         type: 'bubble',
@@ -2416,14 +2412,6 @@ export function generateDailySummaryFlex(day: string, orders: Order[]): any {
             ...(hidden > 0
               ? [{ type: 'text', text: `… และอีก ${hidden} คู่ (ดูครบในหน้าแอดมิน)`, size: 'xs', color: '#64748B', align: 'center', margin: 'md' }]
               : []),
-          ],
-        },
-        footer: {
-          type: 'box',
-          layout: 'vertical',
-          paddingAll: 'sm',
-          contents: [
-            { type: 'text', text: `ยอดดวลรวม ${volume.toLocaleString()} pt · ค่าธรรมเนียม ${fees.toLocaleString()} pt`, size: 'xxs', color: '#64748B', align: 'center', wrap: true },
           ],
         },
       };
