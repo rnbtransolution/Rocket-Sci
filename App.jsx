@@ -14,12 +14,10 @@ import {
   Users,
   FileText,
   RefreshCw,
-  TrendingUp,
   RotateCcw,
   ShieldCheck,
   Zap,
   Info,
-  Wallet,
   ShieldAlert,
   Trophy,
   Search,
@@ -1031,23 +1029,31 @@ export default function App() {
   }, []);
 
   // Cancel Bet Request
-  const handleRequestCancelBet = (betId) => {
-    runBackendFunction('adminRequestCancelBet', [betId])
-      .then(() => {
-        addToast('ขอยกเลิกแผลสดในฐานข้อมูลสำเร็จ รอคู่ตอบรับ...', 'info');
-        if (typeof window !== 'undefined' && typeof window.forceSyncFreshData === 'function') {
-          window.forceSyncFreshData();
-        }
-      })
-      .catch((err) => {
-        console.error('[Cancel Bet Error]:', err);
-        // Local state rollback/toast
-        const bet = bets.find(b => b.id === betId);
-        if (bet) {
-          setBets(prev => prev.map(b => b.id === betId ? { ...b, status: 'pending_cancel' } : b));
-        }
-        addToast('เกิดข้อผิดพลาดในการยกเลิกแผลสด:' + (err.message || err), 'error');
-      });
+  const handleRequestCancelBet = async (betId) => {
+    const bet = bets.find(b => b.id === betId);
+    const ok = await ask({
+      title: `ยกเลิกออเดอร์ #${bet?.orderNumber ?? betId}?`,
+      items: [
+        `คืนเงิน ${(bet?.amount || 0).toLocaleString()} pt ให้ ${bet?.creatorName || 'เจ้าของแผล'}`,
+        'ผู้เล่นจะได้รับแจ้งทาง LINE',
+      ],
+      confirmLabel: `ยกเลิกและคืน ${(bet?.amount || 0).toLocaleString()} pt`,
+    });
+    if (!ok) return;
+    try {
+      const res = await runBackendFunction('adminRequestCancelBet', [betId]);
+      if (res && res.success === false) {
+        addToast(`ยกเลิกไม่สำเร็จ: ${res.message || res.error || 'ไม่ทราบสาเหตุ'}`, 'error');
+        return;
+      }
+      addToast(`ยกเลิกออเดอร์ #${bet?.orderNumber ?? betId} แล้ว`, 'success');
+      if (typeof window !== 'undefined' && typeof window.forceSyncFreshData === 'function') {
+        window.forceSyncFreshData();
+      }
+    } catch (err) {
+      console.error('[Cancel Bet Error]:', err);
+      addToast('ยกเลิกไม่สำเร็จ: ' + (err.message || err), 'error');
+    }
   };
 
   // Admin Manual Slip Reviews
@@ -1535,6 +1541,27 @@ export default function App() {
     ? (activeRoundObj?.quoteReleased ? 'เปิดราคาแล้ว' : 'รอราคาช่าง')
     : roundStatus === 'CLOSED' ? 'ปิดรับแทง' : roundStatus === 'IDLE' || !roundStatus ? 'ยังไม่เปิดรอบ' : roundStatus;
   const headerBtn = 'min-h-[40px] px-3 rounded-md border border-[#C3C9D1] bg-white text-[13px] font-medium text-[#16191D] hover:bg-[#F3F4F6] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0';
+  // Shared console styles for redesigned pages.
+  const ui = {
+    panel: 'bg-white border border-[#D9DDE2] rounded-lg',
+    panelHead: 'flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 border-b border-[#D9DDE2]',
+    h2: 'm-0 text-base font-semibold text-[#16191D]',
+    sub: 'text-[13px] text-[#5B636E]',
+    label: 'text-[13px] font-medium text-[#16191D]',
+    input: 'w-full min-h-[44px] px-3 rounded-md border border-[#C3C9D1] bg-white text-[15px] text-[#16191D] outline-none focus:border-[#1E4DB7] focus:ring-2 focus:ring-[#1E4DB7]/20',
+    primary: 'min-h-[44px] px-4 rounded-md border border-[#1E4DB7] bg-[#1E4DB7] hover:bg-[#163A8A] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50',
+    secondary: 'min-h-[36px] px-3 rounded-md border border-[#C3C9D1] bg-white hover:bg-[#F3F4F6] text-[13px] font-medium text-[#16191D] inline-flex items-center gap-1.5 cursor-pointer',
+    th: 'py-2.5 px-3 text-[12px] font-medium text-[#5B636E] whitespace-nowrap',
+    td: 'py-3 px-3 text-sm text-[#16191D] whitespace-nowrap',
+    chip: 'inline-flex items-center px-2 py-0.5 rounded text-[12px] font-semibold',
+  };
+  const STATUS_CHIP = {
+    pending_match: { label: 'รอคู่', cls: 'bg-[#EEF0F2] text-[#3B424C]' },
+    matched: { label: 'ต่อติด รอผล', cls: 'bg-[#E3EAFB] text-[#1E4DB7]' },
+    pending_cancel: { label: 'รอยกเลิก', cls: 'bg-[#FDF1E1] text-[#8A4B00]' },
+    cancelled: { label: 'ยกเลิกแล้ว', cls: 'bg-[#F3F4F6] text-[#8A929D]' },
+    resolved: { label: 'ตัดสินแล้ว', cls: 'bg-[#E2F2E9] text-[#1B6E43]' },
+  };
 
   return (
     <div className="min-h-screen bg-[#EEF0F2] lg:pl-[240px] flex flex-col">
@@ -1738,84 +1765,24 @@ export default function App() {
 
         {/* Main Sandbox Grid (Standardized to corporate light 100% width column) */}
         <main className="w-full space-y-5">
-          {/* Top metrics bar stretching 100% width - Cloud PMS Style */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
-            <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                  ยอดฝากเครดิตรวม
+          {/* Summary numbers */}
+          <section aria-label="ตัวเลขสรุป" className="grid grid-cols-2 md:grid-cols-4 gap-px bg-[#D9DDE2] border border-[#D9DDE2] rounded-lg overflow-hidden">
+            {[
+              { label: 'ยอดฝากเครดิตรวม', value: transactions.filter(t => t.status === 'success').reduce((acc, t) => acc + t.actualAmount, 0).toLocaleString(), unit: 'บาท' },
+              { label: 'สลิปรอตรวจ', value: transactions.filter(t => t.status === 'escalated').length, unit: 'รายการ', attention: transactions.some(t => t.status === 'escalated') },
+              { label: 'ต่อติด รอผล', value: bets.filter(b => b.status === 'matched').length, unit: 'คู่', note: inFlightRounds.length > 0 ? `บั้งไฟบนฟ้า ${inFlightRounds.length} ลำ` : null },
+              { label: 'ผู้เล่น', value: players.length, unit: 'บัญชี' },
+            ].map((m) => (
+              <div key={m.label} className="bg-white px-4 py-3.5 flex flex-col gap-1 min-w-0">
+                <span className="text-[12px] text-[#5B636E]">{m.label}</span>
+                <span className="flex items-baseline gap-1.5 flex-wrap">
+                  <span className={`text-2xl font-medium font-mono tabular-nums ${m.attention ? 'text-[#8A4B00]' : 'text-[#16191D]'}`}>{m.value}</span>
+                  <span className="text-[12px] text-[#5B636E]">{m.unit}</span>
                 </span>
-                <span className="p-1.5 rounded-lg bg-sky-50 text-sky-600 border border-sky-100">
-                  <Wallet size={15} />
-                </span>
+                {m.note && <span className="text-[12px] text-[#8A4B00]">{m.note}</span>}
               </div>
-              <div className="mt-2.5 flex items-baseline gap-1.5">
-                <span className="text-2xl font-black text-slate-900 font-mono tracking-tight">
-                  {transactions.filter(t => t.status === 'success').reduce((acc, t) => acc + t.actualAmount, 0).toLocaleString()}
-                </span>
-                <span className="text-xs font-bold text-slate-400">THB</span>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors relative">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                  รอตรวจหลักฐาน
-                </span>
-                <span className="p-1.5 rounded-lg bg-amber-50 text-amber-600 border border-amber-100 relative">
-                  <ShieldAlert size={15} />
-                  {transactions.filter(t => t.status === 'escalated').length > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
-                  )}
-                </span>
-              </div>
-              <div className="mt-2.5 flex items-baseline gap-1.5">
-                <span className="text-2xl font-black text-amber-600 font-mono tracking-tight">
-                  {transactions.filter(t => t.status === 'escalated').length}
-                </span>
-                <span className="text-xs font-bold text-slate-400">บิลค้าง</span>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                  แผลจับคู่สด / บนฟ้า
-                </span>
-                <span className="p-1.5 rounded-lg bg-sky-50 text-sky-600 border border-sky-100">
-                  <Layers size={15} />
-                </span>
-              </div>
-              <div className="mt-2.5 flex items-baseline gap-1.5">
-                <span className="text-2xl font-black text-sky-600 font-mono tracking-tight">
-                  {bets.filter(b => b.status === 'matched').length}
-                </span>
-                <span className="text-xs font-bold text-slate-400">ดีลคู่</span>
-                {inFlightRounds.length > 0 && (
-                  <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 border border-orange-200 font-black">
-                    {inFlightRounds.length} บั้งไฟบนฟ้า
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between hover:border-slate-300 transition-colors">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                  บัญชีผู้เล่น
-                </span>
-                <span className="p-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
-                  <Users size={15} />
-                </span>
-              </div>
-              <div className="mt-2.5 flex items-baseline gap-1.5">
-                <span className="text-2xl font-black text-slate-900 font-mono tracking-tight">
-                  {players.length}
-                </span>
-                <span className="text-xs font-bold text-slate-400">บัญชี</span>
-              </div>
-            </div>
-          </div>
+            ))}
+          </section>
 
           {/* Tab panels contents container */}
           <div className="w-full space-y-6">
@@ -2169,31 +2136,16 @@ export default function App() {
 
           {/* TAB 1: ONSITE TELEMETRY RECEIVER & MECHANIC QUOTE SETUP */}
           {(adminTab === 'quote' || adminTab === 'rocket') && (
-            <div className="glass-panel p-5 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
-                <div>
-                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
-                    <Layers size={18} className="text-sky-600" />
-                    ออกราคาช่างเปิดรับดวล
-                  </h3>
-                  <p className="text-xs text-slate-500 font-sans mt-0.5">
-                    ตั้งค่าชื่อค่ายช่าง บั้งไฟ และช่วงราคาเปิด (Min - Max) เพื่อบรอดแคสต์ลงกลุ่มดวลสด
-                  </p>
+            <section aria-labelledby="quote-title" className={ui.panel}>
+              <div className={ui.panelHead}>
+                <div className="flex flex-col gap-0.5">
+                  <h2 id="quote-title" className={ui.h2}>ประกาศราคาช่าง</h2>
+                  <span className={ui.sub}>ตั้งชื่อบั้งไฟและช่วงราคา แล้วประกาศลงกลุ่มดวล ราคาที่แอดมินเปิดไม่ใช้แต้ม</span>
                 </div>
-                <span className="self-start sm:self-auto text-[10px] text-emerald-700 font-extrabold bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                  LINE Broadcast Ready
-                </span>
-              </div>
-
-              {/* Connected Channel Header */}
-              <div className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 flex justify-between items-center text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span className="text-[11px] font-bold text-slate-700 font-heading">
-                    กลุ่มเป้าหมายปัจจุบัน:
-                  </span>
+                <span className={ui.sub}>
+                  กลุ่มปัจจุบัน:{' '}
                   {activeGroupId ? (
-                    <span className="px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded text-[11px] font-mono font-bold flex items-center gap-1">
+                    <span className="font-medium text-[#16191D]">
                       {(() => {
                         const activeObj = lineGroups.find(g => g.id === activeGroupId);
                         const isRaw = !activeObj || !activeObj.name || activeObj.name.startsWith('C') || activeObj.name.includes(activeGroupId) || !isNaN(activeObj.name);
@@ -2201,151 +2153,111 @@ export default function App() {
                       })()}
                     </span>
                   ) : (
-                    <span className="px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 rounded text-[10.5px] font-semibold">
-                      ยังไม่มีกลุ่มที่เชื่อมต่อ
-                    </span>
+                    <span className="font-medium text-[#8A4B00]">ยังไม่มีกลุ่มที่เชื่อมต่อ</span>
                   )}
-                </div>
-                <span className="text-[10px] text-slate-400 font-mono">Channel: Onsite-Radio-V2</span>
+                </span>
               </div>
 
-              {/* Form Card */}
-              <div className="p-4 bg-slate-50/50 rounded-xl border border-slate-200 space-y-3.5">
-
-                {/* Form Fields: Rocket Name & Range Min/Max */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1 font-heading">
-                      <Rocket size={13} className="text-amber-600" />
-                      ชื่อบั้งไฟ / ชื่อช่าง:
-                    </label>
-                    <input 
+              <div className="p-4 flex flex-col gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="quote-name" className={ui.label}>ชื่อบั้งไฟ / ชื่อช่าง</label>
+                    <input
+                      id="quote-name"
                       type="text"
                       value={rocketName}
                       onChange={(e) => { markTouched('rocketName'); setRocketName(e.target.value); }}
-                      className="w-full bg-white border border-slate-200 text-slate-900 font-bold px-3 py-2 rounded-xl text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                      placeholder="กรอกชื่อช่าง / บั้งไฟ (เช่น โชคน้องกวาง)"
+                      className={ui.input}
+                      placeholder="เช่น โชคน้องกวาง"
                     />
                   </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1 font-heading">
-                      <TrendingUp size={13} className="text-sky-500" />
-                      ราคาช่าง Min (ต่ำ / เกิบ):
-                    </label>
-                    <div className="flex items-center gap-1">
-                      <input 
-                        type="number"
-                        step="1"
-                        value={targetMin}
-                        onChange={(e) => { markTouched('targetMin'); setTargetMin(e.target.value); }}
-                        className="w-full bg-white border border-slate-200 text-slate-900 font-bold px-3 py-2 rounded-xl text-xs font-mono"
-                        placeholder="เช่น 330"
-                      />
-                      <span className="text-xs text-slate-500 font-mono font-bold">s</span>
-                    </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="quote-min" className={ui.label}>ราคาต่ำสุด (วินาที)</label>
+                    <input
+                      id="quote-min"
+                      type="number"
+                      inputMode="numeric"
+                      step="1"
+                      value={targetMin}
+                      onChange={(e) => { markTouched('targetMin'); setTargetMin(e.target.value); }}
+                      className={`${ui.input} font-mono tabular-nums`}
+                      placeholder="330"
+                    />
                   </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1 font-heading">
-                      <TrendingUp size={13} className="text-rose-500" />
-                      ราคาช่าง Max (สูง / หมวก):
-                    </label>
-                    <div className="flex items-center gap-1">
-                      <input 
-                        type="number"
-                        step="1"
-                        value={targetMax}
-                        onChange={(e) => { markTouched('targetMax'); setTargetMax(e.target.value); }}
-                        className="w-full bg-white border border-slate-200 text-slate-900 font-bold px-3 py-2 rounded-xl text-xs font-mono"
-                        placeholder="เช่น 380"
-                      />
-                      <span className="text-xs text-slate-500 font-mono font-bold">s</span>
-                    </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="quote-max" className={ui.label}>ราคาสูงสุด (วินาที)</label>
+                    <input
+                      id="quote-max"
+                      type="number"
+                      inputMode="numeric"
+                      step="1"
+                      value={targetMax}
+                      onChange={(e) => { markTouched('targetMax'); setTargetMax(e.target.value); }}
+                      className={`${ui.input} font-mono tabular-nums`}
+                      placeholder="380"
+                    />
                   </div>
                 </div>
 
-                {/* Bet Amount & Chotoy Option Row */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                  <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-emerald-200">
-                    <span className="text-[11px] font-bold text-slate-600 whitespace-nowrap">แต้มดวลเริ่มต้น:</span>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="quote-amount" className={ui.label}>แต้มดวลเริ่มต้น (pt)</label>
                     <input
+                      id="quote-amount"
                       type="number"
+                      inputMode="numeric"
                       step="50"
                       value={quoteBetAmount}
                       onChange={(e) => setQuoteBetAmount(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold px-2 py-1 rounded-lg text-xs font-mono"
+                      className={`${ui.input} font-mono tabular-nums`}
                       placeholder="500"
                     />
-                    <span className="text-xs text-slate-500 font-mono font-bold">pt</span>
                   </div>
-
-                  <label className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-emerald-200 cursor-pointer hover:bg-emerald-50/50 transition-all">
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="quote-target" className={ui.label}>ประกาศลงกลุ่ม</label>
+                    <select
+                      id="quote-target"
+                      value={broadcastTargetGroup}
+                      onChange={(e) => setBroadcastTargetGroup(e.target.value)}
+                      className={ui.input}
+                    >
+                      <option value="ALL">ทุกกลุ่มดวล</option>
+                      {lineGroups.map((g, idx) => {
+                        const isRawId = !g.name || g.name.startsWith('C') || g.name.includes(g.id) || !isNaN(g.name);
+                        const displayName = !isRawId ? g.name : `กลุ่มดวลสด #${idx + 1} (${g.id.slice(-4)})`;
+                        return <option key={g.id} value={g.id}>เฉพาะ {displayName}</option>;
+                      })}
+                    </select>
+                  </div>
+                  <label htmlFor="quote-chotoy" className="min-h-[44px] flex items-center gap-2.5 px-3 rounded-md border border-[#C3C9D1] bg-white cursor-pointer">
                     <input
+                      id="quote-chotoy"
                       type="checkbox"
                       checked={quoteIsChotoy}
                       onChange={(e) => setQuoteIsChotoy(e.target.checked)}
-                      className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
+                      className="w-4 h-4 accent-[#1E4DB7]"
                     />
-                    <span className="text-xs font-extrabold text-amber-900">
-                      เผื่อช่างไม่ต่อย (ชตย: ช่างต่อยยุติ) Option
-                    </span>
+                    <span className="text-sm text-[#16191D]">ชตย (ช่างต่อยยกเลิก)</span>
                   </label>
                 </div>
 
-
-                {/* Target Group Broadcast Selector */}
-                <div className="bg-white p-2.5 rounded-xl border border-emerald-200 space-y-1">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1 font-heading">
-                      <Users size={13} className="text-emerald-600" />
-                      กลุ่มเป้าหมายที่จะบรอดแคสต์ (Broadcast Target Group):
-                    </label>
-                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                      {broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่มดวลสด (All)' : 'เฉพาะกลุ่มที่เลือก'}
-                    </span>
-                  </div>
-                  <select
-                    value={broadcastTargetGroup}
-                    onChange={(e) => setBroadcastTargetGroup(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 text-slate-900 font-bold px-3 py-2 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  >
-                    <option value="ALL">กระจายทุกกลุ่มดวลสดพร้อมกัน (Broadcast All Groups - One Shot)</option>
-                    {lineGroups.map((g, idx) => {
-                      const isRawId = !g.name || g.name.startsWith('C') || g.name.includes(g.id) || !isNaN(g.name);
-                      const displayName = !isRawId ? g.name : `กลุ่มดวลสด #${idx + 1} (${g.id.slice(-4)})`;
-                      return (
-                        <option key={g.id} value={g.id}>
-                          เฉพาะกลุ่ม: {displayName}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-
-
-                {/* Broadcast Quote Primary Button */}
-                <button
-                  onClick={() => handleBroadcastFastQuote()}
-                  className="w-full py-3 px-4 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg text-xs transition-all active:scale-95 flex items-center justify-center gap-2 font-heading tracking-wide cursor-pointer"
-                >
-                  <Send size={15} />
-                  <span>ประกาศราคาช่าง {targetMin && targetMax ? `${targetMin}-${targetMax}s` : ''} ลง{broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่มดวลสด' : 'กลุ่มที่เลือก'}</span>
-                </button>
-
-                {/* Tab 1 Footer Note & Shortcut to Broadcast Tab */}
-                <div className="pt-2 border-t border-emerald-100 flex items-center justify-between text-[11px] font-sans flex-wrap gap-2">
-                  <span className="text-emerald-700 font-bold">ราคาช่างเปิดจากแอดมินไม่ต้องใช้แต้ม</span>
-                  <button 
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                  <button
+                    type="button"
                     onClick={() => setAdminTab('broadcast')}
-                    className="text-purple-700 hover:text-purple-900 font-bold underline flex items-center gap-1 transition-all active:scale-95"
+                    className="text-[13px] font-medium text-[#1E4DB7] hover:underline cursor-pointer"
                   >
-                    <Radio size={13} className="text-purple-600" />
-                    <span>ไปยังศูนย์บรอดแคสต์ & คีย์ลัดแอดมิน </span>
+                    ประกาศอื่นและสรุปรายวัน
+                  </button>
+                  <button type="button" onClick={() => handleBroadcastFastQuote()} className={ui.primary}>
+                    <Send size={15} />
+                    <span>
+                      ประกาศราคา{targetMin && targetMax ? ` ${targetMin}–${targetMax} วิ` : ''} ลง{broadcastTargetGroup === 'ALL' ? 'ทุกกลุ่ม' : 'กลุ่มที่เลือก'}
+                    </span>
                   </button>
                 </div>
               </div>
-            </div>
+            </section>
           )}
 
           {/* TAB 2: FINAL RESULT TELEMETRY & ROUND SETTLEMENT */}
@@ -2569,225 +2481,129 @@ export default function App() {
             const resolvedCount = bets.filter(b => b.status === 'resolved').length;
             const totalBetVolume = bets.reduce((sum, b) => sum + (b.amount || 0), 0);
 
+            const filters = [
+              { id: 'all', label: 'ทั้งหมด', count: bets.length },
+              { id: 'pending_match', label: 'รอคู่', count: pendingCount },
+              { id: 'matched', label: 'ต่อติด รอผล', count: matchedCount },
+              { id: 'resolved', label: 'ตัดสินแล้ว', count: resolvedCount },
+              { id: 'cancelled', label: 'ยกเลิก', count: cancelCount },
+            ];
+            const heldPt = bets.filter(b => b.status === 'pending_match' || b.status === 'matched').reduce((sum, b) => sum + (b.amount || 0), 0);
+
             return (
-              <div className="glass-panel p-5 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
-                  <div>
-                    <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
-                      <Trophy size={18} className="text-indigo-600" />
-                      กระดานดวลสด & สัญญาแข่งขัน
-                    </h3>
-                    <p className="text-xs text-slate-500 font-sans mt-0.5">
-                      ตรวจสอบคู่ดวลที่จับคู่แล้ว บิลที่รอคู่ดวล หรือถอนแผลคืนแต้มให้ผู้เล่น
-                    </p>
+              <section aria-labelledby="board-title" className={ui.panel}>
+                <div className={ui.panelHead}>
+                  <div className="flex flex-col gap-0.5">
+                    <h2 id="board-title" className={ui.h2}>กระดานดวล</h2>
+                    <span className={ui.sub}>
+                      รอคู่ {pendingCount} · ต่อติด {matchedCount} · เครดิตที่ถูกกันไว้ <span className="font-mono tabular-nums">{heldPt.toLocaleString()}</span> pt · ยอดดวลทั้งหมด <span className="font-mono tabular-nums">{totalBetVolume.toLocaleString()}</span> pt
+                    </span>
+                  </div>
+                  <div className="relative w-full sm:w-64">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8A929D]" />
+                    <label htmlFor="board-search" className="sr-only">ค้นหา</label>
+                    <input
+                      id="board-search"
+                      type="text"
+                      placeholder="ค้นหาเลขออเดอร์หรือชื่อผู้เล่น"
+                      value={betSearchQuery}
+                      onChange={(e) => setBetSearchQuery(e.target.value)}
+                      className={`${ui.input} min-h-[36px] pl-9 text-sm`}
+                    />
                   </div>
                 </div>
 
-                  {/* Summary Metric Cards */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-sans">
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase block">สัญญาทั้งหมด</span>
-                      <span className="text-lg font-black text-slate-800 font-mono">{bets.length}</span>
-                      <span className="text-[10px] text-slate-500 block">รายการ</span>
-                    </div>
-                    <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-3 text-center">
-                      <span className="text-[10px] text-indigo-600 font-bold uppercase block">กำลังดวลสด</span>
-                      <span className="text-lg font-black text-indigo-900 font-mono">{matchedCount}</span>
-                      <span className="text-[10px] text-indigo-500 block">คู่ดวล</span>
-                    </div>
-                    <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 text-center">
-                      <span className="text-[10px] text-amber-600 font-bold uppercase block">รอคู่ดวล</span>
-                      <span className="text-lg font-black text-amber-900 font-mono">{pendingCount}</span>
-                      <span className="text-[10px] text-amber-500 block">รอรับแผล</span>
-                    </div>
-                    <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 text-center">
-                      <span className="text-[10px] text-emerald-600 font-bold uppercase block">มูลค่าดวลรวม</span>
-                      <span className="text-lg font-black text-emerald-900 font-mono">{totalBetVolume.toLocaleString()}</span>
-                      <span className="text-[10px] text-emerald-600 block">แต้ม (pt)</span>
-                    </div>
+                <div className="px-4 pt-3">
+                  <div role="group" aria-label="กรองสถานะ" className="inline-flex flex-wrap gap-1 p-1 rounded-md bg-[#EEF0F2]">
+                    {filters.map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        aria-pressed={betStatusFilter === f.id}
+                        onClick={() => setBetStatusFilter(f.id)}
+                        className={`min-h-[32px] px-3 rounded text-[13px] cursor-pointer ${
+                          betStatusFilter === f.id ? 'bg-white text-[#16191D] font-medium' : 'text-[#3B424C] hover:text-[#16191D]'
+                        }`}
+                      >
+                        {f.label} <span className="font-mono tabular-nums">{f.count}</span>
+                      </button>
+                    ))}
                   </div>
+                </div>
 
-                  {/* Filter & Search Bar */}
-                  <div className="flex items-center justify-between gap-3 flex-wrap bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    <div className="flex items-center gap-1.5 flex-wrap text-xs font-bold font-sans">
-                      <span className="text-slate-400 text-[11px] uppercase tracking-wider mr-1">สถานะ:</span>
-                      <button
-                        onClick={() => setBetStatusFilter('all')}
-                        className={`px-2.5 py-1 rounded-lg transition-all ${betStatusFilter === 'all' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}`}
-                      >
-                        ทั้งหมด ({bets.length})
-                      </button>
-                      <button
-                        onClick={() => setBetStatusFilter('matched')}
-                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${betStatusFilter === 'matched' ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-50'}`}
-                      >
-                        <span>ดวลกันอยู่</span>
-                        {matchedCount > 0 && <span className="bg-indigo-200 text-indigo-950 text-[10px] px-1.5 py-0.2 rounded-full font-black">{matchedCount}</span>}
-                      </button>
-                      <button
-                        onClick={() => setBetStatusFilter('pending_match')}
-                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${betStatusFilter === 'pending_match' ? 'bg-amber-600 text-white' : 'bg-white text-amber-700 border border-amber-200 hover:bg-amber-50'}`}
-                      >
-                        <span>รอคู่ดวล</span>
-                        {pendingCount > 0 && <span className="bg-amber-200 text-amber-950 text-[10px] px-1.5 py-0.2 rounded-full font-black">{pendingCount}</span>}
-                      </button>
-                      <button
-                        onClick={() => setBetStatusFilter('resolved')}
-                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${betStatusFilter === 'resolved' ? 'bg-emerald-600 text-white' : 'bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50'}`}
-                      >
-                        สรุปผลแล้ว ({resolvedCount})
-                      </button>
-                      <button
-                        onClick={() => setBetStatusFilter('cancelled')}
-                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${betStatusFilter === 'cancelled' ? 'bg-rose-600 text-white' : 'bg-white text-rose-700 border border-rose-200 hover:bg-rose-50'}`}
-                      >
-                        ขอยกเลิก ({cancelCount})
-                      </button>
-                    </div>
-
-                    <div className="relative w-full sm:w-64">
-                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                      <input
-                        type="text"
-                        placeholder="ค้นหา Order # หรือชื่อผู้เล่น..."
-                        value={betSearchQuery}
-                        onChange={(e) => setBetSearchQuery(e.target.value)}
-                        className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Bets Table */}
-                  <div className="overflow-x-auto rounded-xl border border-slate-200">
-                    <table className="w-full text-left font-sans text-xs border-collapse min-w-[700px]">
-                      <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
+                <div className="overflow-x-auto mt-3">
+                  <table className="w-full text-left border-collapse min-w-[760px]">
+                    <thead className="border-b border-[#D9DDE2]">
+                      <tr>
+                        <th className={ui.th}>ออเดอร์</th>
+                        <th className={ui.th}>ฝั่งต่ำ (ชถ)</th>
+                        <th className={ui.th}>ฝั่งสูง (ชล)</th>
+                        <th className={`${ui.th} text-right`}>ยอด</th>
+                        <th className={ui.th}>ช่าง</th>
+                        <th className={ui.th}>สถานะ</th>
+                        <th className={ui.th}><span className="sr-only">จัดการ</span></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#E6E9ED]">
+                      {filteredBets.length === 0 ? (
                         <tr>
-                          <th className="py-2.5 px-3">Order #</th>
-                          <th className="py-2.5 px-3">ฝั่งต่ำ (Low / ชถ)</th>
-                          <th className="py-2.5 px-3">ฝั่งสูง (High / ชล)</th>
-                          <th className="py-2.5 px-3 text-right">ยอดดวล</th>
-                          <th className="py-2.5 px-3 text-center">ประเภทราคา</th>
-                          <th className="py-2.5 px-3 text-center">สถานะ</th>
-                          <th className="py-2.5 px-3 text-right">จัดการแผล</th>
+                          <td colSpan={7} className="py-10 text-center text-sm text-[#5B636E]">ไม่มีออเดอร์ที่ตรงกับตัวกรอง</td>
                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-slate-700">
-                        {filteredBets.length === 0 ? (
-                          <tr>
-                            <td colSpan={7} className="py-10 text-center text-slate-400 text-xs italic">
-                              -- ไม่พบบันทึกการดวลที่ตรงกับเงื่อนไข --
-                            </td>
-                          </tr>
-                        ) : (
-                          filteredBets.slice().reverse().map(b => {
+                      ) : (
+                        filteredBets.slice().reverse().map(b => {
                           const isLow = b.side === 'low';
                           const pLowName = b.playerLowName || (isLow ? b.creatorName : b.matcherName);
                           const pLowId = b.playerLowId || (isLow ? (b.creatorId || b.creatorLineUserId) : (b.matcherId || b.matcherLineUserId));
                           const pHighName = b.playerHighName || (!isLow && b.side === 'high' ? b.creatorName : b.matcherName);
                           const pHighId = b.playerHighId || (!isLow && b.side === 'high' ? (b.creatorId || b.creatorLineUserId) : (b.matcherId || b.matcherLineUserId));
-
+                          const chip = STATUS_CHIP[b.status] || { label: b.status, cls: 'bg-[#EEF0F2] text-[#3B424C]' };
+                          const player = (name, id) => name ? (
+                            <span className="flex flex-col">
+                              <span>{name}</span>
+                              {id && <span className="text-[12px] text-[#8A929D] font-mono">{id}</span>}
+                            </span>
+                          ) : <span className="text-[#8A929D]">—</span>;
                           return (
-                            <tr key={b.id || `bet_${b.orderNumber}`} className="hover:bg-indigo-50/20 transition-colors">
-                              <td className="py-3 px-3 font-bold text-slate-800 font-mono">
-                                Order #{b.orderNumber}
-                                <div className="text-[10px] text-slate-400 font-sans font-normal">{b.timestamp || ''}</div>
+                            <tr key={b.id || `bet_${b.orderNumber}`} className="hover:bg-[#F7F8F9]">
+                              <td className={ui.td}>
+                                <span className="font-mono font-medium">#{b.orderNumber}</span>
+                                {b.timestamp && <span className="block text-[12px] text-[#8A929D]">{b.timestamp}</span>}
                               </td>
-                              <td className="py-3 px-3">
-                                {pLowName ? (
-                                  <div className="flex flex-col gap-0.5">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="w-2 h-2 rounded-full bg-sky-500 shrink-0"></span>
-                                      <span className="text-sky-800 font-black">{pLowName}</span>
-                                    </div>
-                                    {pLowId && (
-                                      <span className="text-[10px] text-slate-500 font-mono font-bold pl-3.5 flex items-center gap-1">
-                                        <span className="px-1.5 py-0.2 bg-sky-50 border border-sky-200 text-sky-700 rounded text-[9.5px]">ID: {pLowId}</span>
-                                      </span>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-slate-300 italic font-sans">-- รอผู้เล่น --</span>
+                              <td className={ui.td}>{player(pLowName, pLowId)}</td>
+                              <td className={ui.td}>{player(pHighName, pHighId)}</td>
+                              <td className={`${ui.td} text-right font-mono tabular-nums`}>{b.amount?.toLocaleString()}</td>
+                              <td className={`${ui.td} font-mono tabular-nums text-[#3B424C]`}>
+                                {b.type === 'range'
+                                  ? `${b.rangeMin > 1000 ? (b.rangeMin / 100) : b.rangeMin}–${b.rangeMax > 1000 ? (b.rangeMax / 100) : b.rangeMax}`
+                                  : <span className="font-sans">ราคาช่าง {targetMin && targetMax ? `${targetMin}–${targetMax}` : ''}</span>}
+                              </td>
+                              <td className={ui.td}>
+                                <span className={`${ui.chip} ${chip.cls}`}>{chip.label}</span>
+                                {b.status === 'resolved' && b.winnerName && (
+                                  <span className="block text-[12px] text-[#5B636E] mt-0.5">ชนะ: {b.winnerName}</span>
                                 )}
                               </td>
-                              <td className="py-3 px-3">
-                                {pHighName ? (
-                                  <div className="flex flex-col gap-0.5">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0"></span>
-                                      <span className="text-rose-800 font-black">{pHighName}</span>
-                                    </div>
-                                    {pHighId && (
-                                      <span className="text-[10px] text-slate-500 font-mono font-bold pl-3.5 flex items-center gap-1">
-                                        <span className="px-1.5 py-0.2 bg-rose-50 border border-rose-200 text-rose-700 rounded text-[9.5px]">ID: {pHighId}</span>
-                                      </span>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-slate-300 italic font-sans">-- รอผู้เล่น --</span>
-                                )}
-                              </td>
-                              <td className="py-3 px-3 text-right font-black text-slate-900 font-mono text-sm">
-                                {b.amount?.toLocaleString()} <span className="text-[10px] text-slate-400 font-normal">pt</span>
-                              </td>
-                              <td className="py-3 px-3 text-center font-mono">
-                                {b.type === 'range' ? (
-                                  <span className="px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 font-extrabold rounded text-[10.5px]">
-                                    P2P ({b.rangeMin > 1000 ? (b.rangeMin/100) : b.rangeMin}-{b.rangeMax > 1000 ? (b.rangeMax/100) : b.rangeMax}s)
-                                  </span>
-                                ) : (
-                                  <span className="px-2 py-0.5 bg-sky-50 border border-sky-200 text-sky-800 font-bold rounded text-[10.5px]">
-                                    ราคาช่าง ({targetMin}-{targetMax}s)
-                                  </span>
-                                )}
-                              </td>
-                              <td className="py-3 px-3 text-center font-sans font-bold text-[10.5px]">
-                                {b.status === 'matched' && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-full font-bold">
-                                    ดวลกันอยู่
-                                  </span>
-                                )}
-                                {b.status === 'pending_match' && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-full font-bold animate-pulse">
-                                    รอคู่ดวล
-                                  </span>
-                                )}
-                                {b.status === 'pending_cancel' && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-full font-bold">
-                                    รอถอนแผล
-                                  </span>
-                                )}
-                                {b.status === 'cancelled' && (
-                                  <span className="px-2 py-0.5 text-slate-400 line-through font-mono">
-                                    ✕ ขอยกเลิก
-                                  </span>
-                                )}
-                                {b.status === 'resolved' && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-bold">
-                                    {b.winnerName ? b.winnerName.split('')[0] : 'จบแล้ว'}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="py-3 px-3 text-right">
-                                {(b.status === 'matched' || b.status === 'pending_match' || b.status === 'pending_cancel') ? (
-                                  <button
-                                    onClick={() => handleRequestCancelBet(b.id)}
-                                    className="px-2.5 py-1 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-700 text-[10.5px] rounded-lg font-bold transition-all active:scale-95"
-                                    title="ยกเลิกการดวลและคืนแต้มเข้าบัญชี"
-                                  >
-                                    ถอนดีลสด
+                              <td className={`${ui.td} text-right`}>
+                                {/* A matched duel can't be cancelled on its own: voiding the round is the only refund. */}
+                                {b.status === 'pending_match' || b.status === 'pending_cancel' ? (
+                                  <button type="button" onClick={() => handleRequestCancelBet(b.id)} className={ui.secondary}>
+                                    ยกเลิกและคืนเงิน
                                   </button>
-                                ) : (
-                                  <span className="text-slate-300 text-[11px]">—</span>
-                                )}
+                                ) : b.status === 'matched' ? (
+                                  <span className="text-[12px] text-[#8A929D]">ล็อกจนตัดสินผล</span>
+                                ) : null}
                               </td>
                             </tr>
                           );
                         })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-              </div>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="m-0 px-4 py-3 text-[13px] text-[#5B636E] border-t border-[#E6E9ED]">
+                  แผลที่ต่อติดแล้วยกเลิกทีละแผลไม่ได้ ใช้ “โมฆะรอบ” ในหน้าประกาศเพื่อคืนเงินทั้งรอบ
+                </p>
+              </section>
             );
           })()}
 

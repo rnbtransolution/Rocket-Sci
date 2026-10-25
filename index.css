@@ -222,8 +222,8 @@ html, body, button, input, select, textarea, [class*="font-sans"], .font-sans {
 /* Clean Corporate SaaS Cards (Flat with Crisp Hairline Borders) */
 .glass-panel, .pms-card {
   background-color: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border: 1px solid #D9DDE2;
+  border-radius: 8px;
   transition: border-color 0.15s ease-in-out;
 }
 
