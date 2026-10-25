@@ -237,18 +237,18 @@ async function settleOrdersAtomically(
   return { settled, failed };
 }
 
+/** A flight time the admin actually entered. `Number('') || 0` settled every order as a low-side win. */
+function parseFlightSeconds(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 /** The refusal for a danger-PIN check that failed (unset → 409, wrong / locked out → 403). */
 function pinRefusal(verdict: Exclude<PinVerdict, { ok: true }>, headers: Record<string, string>): Response {
   return new Response(
     JSON.stringify({ error: verdict.error, code: verdict.code }),
     { status: verdict.code === 'not_configured' ? 409 : 403, headers: { 'Content-Type': 'application/json', ...headers } }
   );
-}
-
-/** A flight time the admin actually entered. `Number('') || 0` settled every order as a low-side win. */
-function parseFlightSeconds(v: unknown): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 async function hashPayload(payload: unknown): Promise<string> {
