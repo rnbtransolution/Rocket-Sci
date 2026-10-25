@@ -1,3 +1,4 @@
+import { LINE_ICONS } from './lineIcons.js';
 import { Env, LineWebhookPayload, QueueMessage, LineEvent, PlayerProfile, Order, InFlightRound } from './types.js';
 import { verifyLineSignature } from './signature.js';
 import { state } from './state.js';
@@ -73,6 +74,10 @@ import {
   generateOrderFlex,
   generateRocketLaunchedFlex,
   generateDailySummaryFlex,
+  generateQuoteFlex,
+  generateNoticeFlex,
+  generateVoidRoundFlex,
+  generateSettlementFlex,
 } from './flexTemplates.js';
 
 function formatTime(timestamp?: number): string {
@@ -308,6 +313,17 @@ export default {
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders });
+    }
+
+    // ── 0. LINE card watermark icons (public, immutable) ──
+    const iconMatch = request.method === 'GET' ? url.pathname.match(/^\/icons\/([a-z]+)\.png$/) : null;
+    if (iconMatch) {
+      const b64 = (LINE_ICONS as Record<string, string>)[iconMatch[1]];
+      if (!b64) return new Response('Not found', { status: 404 });
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      return new Response(bytes, {
+        headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000, immutable' },
+      });
     }
 
     // ── 1. Health Check Endpoint ──
@@ -1003,8 +1019,8 @@ if (
 
               if (effectiveLine && effectiveLine.startsWith('U')) {
                 const text = isWithdrawal
-                  ? `💸 [ถอนเงินสำเร็จ]: ยอด ${requested.toLocaleString()} บาท แอดมินได้โอนเข้าบัญชีของคุณเรียบร้อยแล้วครับ 🚀`
-                  : `✅ อนุมัติยอดเงินฝาก ${requested.toLocaleString()} บาท เรียบร้อยแล้วครับ!\nแต้มคงเหลือปัจจุบัน: ${(credited?.after ?? 0).toLocaleString()} pt 🚀`;
+                  ? generateNoticeFlex('โอนเงินถอนแล้ว', `โอน ${requested.toLocaleString()} บาท เข้าบัญชีของคุณแล้ว`, 'out')
+                  : generateNoticeFlex('เติมเครดิตแล้ว', `ฝาก ${requested.toLocaleString()} บาท\nยอดคงเหลือ ${(credited?.after ?? 0).toLocaleString()} pt`, 'in');
                 ctx?.waitUntil(pushToLine(effectiveLine, text, env).catch(e => console.error(e)));
               }
               result = {
@@ -1053,8 +1069,8 @@ if (
 
               if (effectiveLine && effectiveLine.startsWith('U')) {
                 const text = isWithdrawal
-                  ? `❌ [ปฏิเสธการถอนเงิน]: ยอด ${requested.toLocaleString()} pt (สาเหตุ: ${reason})\nระบบได้คืนแต้มเข้ากระเป๋าเรียบร้อย แต้มคงเหลือ: ${(credited?.after ?? 0).toLocaleString()} pt 🚀`
-                  : `❌ [ปฏิเสธการฝากเงิน]: ยอด ${requested.toLocaleString()} บาท (สาเหตุ: ${reason})`;
+                  ? generateNoticeFlex('คำขอถอนถูกปฏิเสธ', `เหตุผล: ${reason}\nคืน ${requested.toLocaleString()} pt เข้ากระเป๋าแล้ว ยอดคงเหลือ ${(credited?.after ?? 0).toLocaleString()} pt`, 'error')
+                  : generateNoticeFlex('รายการฝากถูกปฏิเสธ', `ยอด ${requested.toLocaleString()} บาท\nเหตุผล: ${reason}`, 'error');
                 ctx?.waitUntil(pushToLine(effectiveLine, text, env).catch(e => console.error(e)));
               }
               result = { success: true, txId };
@@ -1108,7 +1124,7 @@ if (
               if (refund.amount > 0 && notifyTargets.length > 0) {
                 const notify = Promise.all(notifyTargets.map((to) => pushToLine(
                   to,
-                  `🚫 แอดมินยกเลิก Order #${orderNo}\n💰 คืนแต้ม: +${refund.amount.toLocaleString()} pt เข้ากระเป๋าเรียบร้อยแล้วครับ 🚀`,
+                  generateNoticeFlex(`แอดมินยกเลิกออเดอร์ #${orderNo}`, `คืนเครดิต +${refund.amount.toLocaleString()} pt เข้ากระเป๋าแล้ว`, 'in'),
                   env
                 ))).catch((e) => console.error('[Worker] admin cancel notice failed:', e));
                 if (ctx) ctx.waitUntil(notify);
@@ -1409,35 +1425,8 @@ if (
             targets = await resolveTargetGroupIds(target, env);
             if (targets.length > 0) {
               const payload = mode === 'quote'
-                ? {
-                    type: 'flex',
-                    altText: `🚀 บั้งไฟ [${nextName}] | ช่วงราคา ${min}-${max} วิ${isChotoy ? ' (ชตย)' : ''}`,
-                    contents: {
-                      type: 'bubble',
-                      size: 'mega',
-                      header: {
-                        type: 'box',
-                        layout: 'vertical',
-                        backgroundColor: '#0284C7',
-                        paddingAll: 'md',
-                        contents: [
-                          { type: 'text', text: '🚀 เปิดราคาดวลบั้งไฟ (ลำถัดไป) 🚀', weight: 'bold', color: '#FFFFFF', size: 'md', align: 'center', wrap: true },
-                          { type: 'text', text: nextName, color: '#FFFFFFE6', size: 'sm', align: 'center', margin: 'xs', weight: 'bold', wrap: true },
-                        ],
-                      },
-                      body: {
-                        type: 'box',
-                        layout: 'vertical',
-                        spacing: 'md',
-                        contents: [
-                          { type: 'text', text: `⏱️ ช่วงราคา: ${min}-${max} วิ${isChotoy ? ' (ชตย)' : ''}`, weight: 'bold', color: '#0284C7', size: 'sm', align: 'center', wrap: true },
-                          { type: 'text', text: '⚡ รูปแบบ: [ปรับราคา] ชล/ชถ จำนวนแต้ม', color: '#334155', size: 'xs', align: 'center', wrap: true, weight: 'bold' },
-                          { type: 'text', text: 'เช่น  ชล500  ·  +10ชล500  ·  -5ชถ1,000', color: '#64748B', size: 'xs', align: 'center', wrap: true },
-                        ],
-                      },
-                    },
-                  }
-                : `🎯 บั้งไฟ ${nextName} พร้อมแล้ว เปิดแผลเล่นได้เลยครับ 🚀`;
+                ? generateQuoteFlex(nextName, min, max, isChotoy, true)
+                : generateNoticeFlex(`บั้งไฟ ${nextName} พร้อมแล้ว`, 'เปิดแผลได้เลย ราคาช่างจะประกาศตามมา', 'info');
               sendResults = await Promise.all(targets.map((to) => pushToLine(to, payload, env)));
               await appendChatLog(env, {
                 timestamp: formatTime(),
@@ -1446,8 +1435,8 @@ if (
                 sender: 'admin',
                 text: mode === 'quote'
                   ? `[เปิดราคาบั้งไฟถัดไป: ${nextName} (${min}-${max}s)]`
-                  : `🎯 บั้งไฟ ${nextName} พร้อมแล้ว เปิดแผลเล่นได้เลยครับ 🚀`,
-                type: mode === 'quote' ? 'flex' : 'text',
+                  : `[บั้งไฟ ${nextName} พร้อมแล้ว]`,
+                type: 'flex',
               });
             }
           }
@@ -1473,32 +1462,7 @@ if (
           } else {
             const targets = await resolveTargetGroupIds(target, env);
             if (targets.length > 0) {
-              const voidFlex = {
-                type: 'flex',
-                altText: `⛔ ช่าง ⛔ (โมฆะรอบ ${voidRes.roundName || ''})`,
-                contents: {
-                  type: 'bubble',
-                  size: 'kilo',
-                  header: {
-                    type: 'box',
-                    layout: 'vertical',
-                    backgroundColor: '#FECDD3',
-                    paddingAll: 'md',
-                    contents: [
-                      { type: 'text', text: `⛔ ช่าง ⛔ (โมฆะรอบ ${voidRes.roundName || 'บั้งไฟ'})`, weight: 'bold', color: '#9F1239', size: 'sm', align: 'center', wrap: true },
-                    ],
-                  },
-                  body: {
-                    type: 'box',
-                    layout: 'vertical',
-                    backgroundColor: '#FFF1F2',
-                    spacing: 'xs',
-                    contents: [
-                      { type: 'text', text: `ยกเลิกและคืนแต้มแผลดวลของ [${voidRes.roundName || 'บั้งไฟ'}] 100% เรียบร้อยครับ 🚀`, weight: 'bold', color: '#BE123C', size: 'xs', align: 'center', wrap: true },
-                    ],
-                  },
-                },
-              };
+              const voidFlex = generateVoidRoundFlex(voidRes.roundName);
               await Promise.all(targets.map((to) => pushToLine(to, voidFlex, env)));
             }
             result = {
@@ -1965,39 +1929,7 @@ if (
 
           await releaseHeldPreQuoteOrders(min, max, env, ctx, name);
 
-          const quoteFlex = {
-            type: 'flex',
-            altText: `🚀 บั้งไฟ [${name}] | ช่วงราคา ${min}-${max} วิ${isChotoy ? ' (ชตย)' : ''}`,
-            contents: {
-              type: 'bubble',
-              size: 'mega',
-              header: {
-                type: 'box',
-                layout: 'vertical',
-                backgroundColor: '#0284C7',
-                paddingAll: 'md',
-                contents: [
-                  { type: 'text', text: '🚀 เปิดราคาดวลบั้งไฟ 🚀', weight: 'bold', color: '#FFFFFF', size: 'md', align: 'center', wrap: true },
-                  { type: 'text', text: name, color: '#FFFFFFE6', size: 'sm', align: 'center', margin: 'xs', weight: 'bold', wrap: true },
-                ],
-              },
-              body: {
-                type: 'box',
-                layout: 'vertical',
-                spacing: 'md',
-                contents: [
-                  { type: 'text', text: `⏱️ ช่วงราคา: ${min}-${max} วิ${isChotoy ? ' (ชตย)' : ''}`, weight: 'bold', color: '#0284C7', size: 'sm', align: 'center', wrap: true },
-                  // The full syntax, not just the keywords. "พิมพ์ ชล / ชถ
-                  // (±5, ±10)" never showed that the stake goes in the same
-                  // message or where the offset sits, so the only way to learn
-                  // it was to guess. Stating the shape as three ordered parts
-                  // and giving one worked example removes the guess.
-                  { type: 'text', text: '⚡ รูปแบบ: [ปรับราคา] ชล/ชถ จำนวนแต้ม', color: '#334155', size: 'xs', align: 'center', wrap: true, weight: 'bold' },
-                  { type: 'text', text: 'เช่น  ชล500  ·  +10ชล500  ·  -5ชถ1,000', color: '#64748B', size: 'xs', align: 'center', wrap: true },
-                ],
-              },
-            },
-          };
+          const quoteFlex = generateQuoteFlex(name, min, max, isChotoy);
 
           const targets = await resolveTargetGroupIds(target, env);
           if (targets.length === 0) {
@@ -2034,32 +1966,7 @@ if (
           round.updatedAt = Date.now();
           await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
 
-          const voidFlex = {
-            type: 'flex',
-            altText: '⛔ ช่าง ⛔ (โมฆะรอบ)',
-            contents: {
-              type: 'bubble',
-              size: 'kilo',
-              header: {
-                type: 'box',
-                layout: 'vertical',
-                backgroundColor: '#FECDD3',
-                paddingAll: 'md',
-                contents: [
-                  { type: 'text', text: '⛔ ช่าง ⛔ (โมฆะรอบ)', weight: 'bold', color: '#9F1239', size: 'sm', align: 'center', wrap: true },
-                ],
-              },
-              body: {
-                type: 'box',
-                layout: 'vertical',
-                backgroundColor: '#FFF1F2',
-                spacing: 'xs',
-                contents: [
-                  { type: 'text', text: 'ยกเลิกและคืนแต้มทุกแผลดวล 100% เรียบร้อยครับ 🚀', weight: 'bold', color: '#BE123C', size: 'xs', align: 'center', wrap: true },
-                ],
-              },
-            },
-          };
+          const voidFlex = generateVoidRoundFlex();
 
           await voidAllRoundOrders(env, ctx);
 
@@ -2155,7 +2062,7 @@ if (
             result = { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ — กรุณาตรวจสอบ Active Group ID' };
           } else {
             const timeStr = formatTime();
-            const msg = `🔔 ทดสอบการส่งข้อความแจ้งเตือนจากระบบ Admin Web Portal (เวลา: ${timeStr}) 🚀\nสถานะการเชื่อมต่อ: สมบูรณ์ 100% 🟢`;
+            const msg = `ทดสอบการส่งข้อความจาก Admin Console\nเวลา ${timeStr} · การเชื่อมต่อปกติ`;
             const sendResults = await Promise.all(targets.map((to) => pushToLine(to, msg, env)));
             const allSuccess = sendResults.every((r) => r.success);
             const quotaError = sendResults.find((r) => r.code === 429);
@@ -2294,83 +2201,10 @@ if (
 
           const targets = await resolveTargetGroupIds('ALL', env);
           if (targets.length > 0) {
-            const settleFlex = {
-              type: 'flex',
-              altText: `🏁 สรุปผลเวลาบิน [${activeRound.name || 'บั้งไฟสด'}] เวลา ${finalSeconds} วินาที`,
-              contents: {
-                type: 'bubble',
-                size: 'mega',
-                header: {
-                  type: 'box',
-                  layout: 'vertical',
-                  backgroundColor: '#0F172A',
-                  paddingAll: 'md',
-                  contents: [
-                    { type: 'text', text: '🏁 สรุปผลการแข่งขัน 🏁', weight: 'bold', color: '#FDE047', size: 'sm', align: 'center' },
-                    { type: 'text', text: `บั้งไฟ [${activeRound.name || 'บั้งไฟสด'}]`, color: '#FFFFFF', size: 'md', weight: 'bold', align: 'center', margin: 'xs' },
-                    { type: 'text', text: `⏱️ เวลาบินจริง: ${finalSeconds} วินาที`, color: '#38BDF8', size: 'lg', weight: 'bold', align: 'center', margin: 'xs' },
-                  ],
-                },
-                body: {
-                  type: 'box',
-                  layout: 'vertical',
-                  spacing: 'sm',
-                  contents: [
-                    { type: 'text', text: `ช่วงราคาเป้าหมาย: ${tMin}-${tMax} วิ`, size: 'xs', color: '#64748B', align: 'center' },
-                    { type: 'text', text: `ชำระผลตัดสินเรียบร้อย ${resolvedOrders.length} แผลดวล 🚀`, size: 'sm', color: '#059669', weight: 'bold', align: 'center' },
-                  ],
-                },
-              },
-            };
+            const roundName = activeRound.name || 'บั้งไฟสด';
+            // Flight time and every pair's winner and loser, in one card.
+            const settleFlex = generateSettlementFlex(roundName, finalSeconds, tMin, tMax, resolvedOrders);
             await Promise.all(targets.map((to) => pushToLine(to, settleFlex, env)));
-
-            // Task 3: P2P per-pair result breakdown broadcast to active groups
-            const pairBodies: any[] = resolvedOrders
-              .filter((o) => o.winnerSide && o.winnerSide !== 'draw')
-              .slice(0, 20)
-              .map((o) => {
-                const isCreatorWinner = o.winnerSide === o.side;
-                const winName = (isCreatorWinner ? o.creatorName : o.matcherName) || o.winnerName || '-';
-                const loseName = (isCreatorWinner ? o.matcherName : o.creatorName) || '-';
-                return {
-                  type: 'box',
-                  layout: 'horizontal',
-                  spacing: 'sm',
-                  contents: [
-                    { type: 'text', text: `#${o.orderNumber}`, size: 'xs', color: '#64748B', flex: 2, wrap: true },
-                    { type: 'text', text: `💰 ${Number(o.amount).toLocaleString()}`, size: 'xs', color: '#0F172A', weight: 'bold', flex: 2, align: 'end' },
-                    { type: 'text', text: `👑 ${String(winName).slice(0, 14)}`, size: 'xs', color: '#059669', weight: 'bold', flex: 4, wrap: true },
-                    { type: 'text', text: `💥 ${String(loseName).slice(0, 14)}`, size: 'xs', color: '#DC2626', flex: 4, wrap: true },
-                  ],
-                };
-              });
-            if (pairBodies.length > 0) {
-              const p2pFlex = {
-                type: 'flex',
-                altText: `🤝 ผลดวลตัวต่อตัว ${pairBodies.length} แผล`,
-                contents: {
-                  type: 'bubble',
-                  size: 'giga',
-                  header: {
-                    type: 'box',
-                    layout: 'vertical',
-                    backgroundColor: '#064E3B',
-                    paddingAll: 'md',
-                    contents: [
-                      { type: 'text', text: '🤝 ผลดวลตัวต่อตัว (P2P)', weight: 'bold', color: '#FDE047', size: 'sm', align: 'center' },
-                      { type: 'text', text: `รอบ [${activeRound.name || 'บั้งไฟสด'}] | เวลา ${finalSeconds}s`, color: '#FFFFFF', size: 'xs', align: 'center', margin: 'xs' },
-                    ],
-                  },
-                  body: {
-                    type: 'box',
-                    layout: 'vertical',
-                    spacing: 'sm',
-                    contents: pairBodies,
-                  },
-                },
-              };
-              await Promise.all(targets.map((to) => pushToLine(to, p2pFlex, env)));
-            }
           }
 
           result = {
@@ -2460,82 +2294,10 @@ if (
 
             const targets = await resolveTargetGroupIds('ALL', env);
             if (targets.length > 0) {
-              const settleFlex = {
-                type: 'flex',
-                altText: `🏁 สรุปผลเวลาบิน [${targetRound.name || 'บั้งไฟสด'}] เวลา ${finalSeconds} วินาที`,
-                contents: {
-                  type: 'bubble',
-                  size: 'mega',
-                  header: {
-                    type: 'box',
-                    layout: 'vertical',
-                    backgroundColor: '#0F172A',
-                    paddingAll: 'md',
-                    contents: [
-                      { type: 'text', text: '🏁 สรุปผลการแข่งขัน 🏁', weight: 'bold', color: '#FDE047', size: 'sm', align: 'center' },
-                      { type: 'text', text: `บั้งไฟ [${targetRound.name || 'บั้งไฟสด'}]`, color: '#FFFFFF', size: 'md', weight: 'bold', align: 'center', margin: 'xs' },
-                      { type: 'text', text: `⏱️ เวลาบินจริง: ${finalSeconds} วินาที`, color: '#38BDF8', size: 'lg', weight: 'bold', align: 'center', margin: 'xs' },
-                    ],
-                  },
-                  body: {
-                    type: 'box',
-                    layout: 'vertical',
-                    spacing: 'sm',
-                    contents: [
-                      { type: 'text', text: `ช่วงราคาเป้าหมาย: ${tMin}-${tMax} วิ`, size: 'xs', color: '#64748B', align: 'center' },
-                      { type: 'text', text: `ชำระผลตัดสินเรียบร้อย ${resolvedOrders.length} แผลดวล 🚀`, size: 'sm', color: '#059669', weight: 'bold', align: 'center' },
-                    ],
-                  },
-                },
-              };
+              const roundName = targetRound.name || 'บั้งไฟสด';
+              // Flight time and every pair's winner and loser, in one card.
+              const settleFlex = generateSettlementFlex(roundName, finalSeconds, tMin, tMax, resolvedOrders);
               await Promise.all(targets.map((to) => pushToLine(to, settleFlex, env)));
-
-              const pairBodies: any[] = resolvedOrders
-                .filter((o) => o.winnerSide && o.winnerSide !== 'draw')
-                .slice(0, 20)
-                .map((o) => {
-                  const isCreatorWinner = o.winnerSide === o.side;
-                  const winName = (isCreatorWinner ? o.creatorName : o.matcherName) || o.winnerName || '-';
-                  const loseName = (isCreatorWinner ? o.matcherName : o.creatorName) || '-';
-                  return {
-                    type: 'box',
-                    layout: 'horizontal',
-                    spacing: 'sm',
-                    contents: [
-                      { type: 'text', text: `#${o.orderNumber}`, size: 'xs', color: '#64748B', flex: 2, wrap: true },
-                      { type: 'text', text: `💰 ${Number(o.amount).toLocaleString()}`, size: 'xs', color: '#0F172A', weight: 'bold', flex: 2, align: 'end' },
-                      { type: 'text', text: `👑 ${String(winName).slice(0, 14)}`, size: 'xs', color: '#059669', weight: 'bold', flex: 4, wrap: true },
-                      { type: 'text', text: `💥 ${String(loseName).slice(0, 14)}`, size: 'xs', color: '#DC2626', flex: 4, wrap: true },
-                    ],
-                  };
-                });
-              if (pairBodies.length > 0) {
-                const p2pFlex = {
-                  type: 'flex',
-                  altText: `🤝 ผลดวลตัวต่อตัว ${pairBodies.length} แผล`,
-                  contents: {
-                    type: 'bubble',
-                    size: 'giga',
-                    header: {
-                      type: 'box',
-                      layout: 'vertical',
-                      backgroundColor: '#064E3B',
-                      paddingAll: 'md',
-                      contents: [
-                        { type: 'text', text: '🤝 ผลดวลตัวต่อตัว (P2P)', weight: 'bold', color: '#FDE047', size: 'sm', align: 'center' },
-                        { type: 'text', text: `รอบ [${targetRound.name || 'บั้งไฟสด'}] | เวลา ${finalSeconds}s`, color: '#FFFFFF', size: 'xs', align: 'center', margin: 'xs' },
-                      ],
-                    },
-                    body: {
-                      type: 'box',
-                      layout: 'vertical',
-                      spacing: 'sm',
-                      contents: pairBodies,
-                    },
-                  },
-                };
-                await Promise.all(targets.map((to) => pushToLine(to, p2pFlex, env)));
-              }
             }
 
             result = {

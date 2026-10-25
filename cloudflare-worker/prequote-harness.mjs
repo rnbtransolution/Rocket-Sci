@@ -81,6 +81,9 @@ function validate(card, label) {
       (n.contents || []).forEach((c, i) => walk(c, `${path}[${i}]`));
     } else if (n.type === 'separator') {
       // valid leaf
+    } else if (n.type === 'image') {
+      if (!/^https:\/\//.test(n.url || '')) errs.push(`${path}: image url must be https`);
+      if (n.size && !/^(\d+px|\d+%|xxs|xs|sm|md|lg|xl|xxl|[3-5]xl|full)$/.test(n.size)) errs.push(`${path}: bad image size ${n.size}`);
     } else if (n.type === 'bubble') {
       if (n.header) walk(n.header, `${path}.header`);
       if (n.body) walk(n.body, `${path}.body`);

@@ -352,13 +352,13 @@ try {
     // 6. Admin releases official quote 400-450s for บั้งไฟสด 123
     await rpc(env, ctx, 'adminBroadcastQuote', ['ALL', 'บั้งไฟสด 123', 400, 450, false]);
 
-    // Verify unified green แมตช์สำเร็จ card style and strict DM-only routing (never sent to LINE Group)
+    // Verify the จับคู่สำเร็จ card and strict DM-only routing (never sent to LINE Group)
     const allFlexJson = JSON.stringify(sentLinePayloads);
-    assert.ok(allFlexJson.includes(`🤝 แมตช์สำเร็จ! #${order1.orderNumber}`), 'Unified green แมตช์สำเร็จ title must appear for Order 1');
+    assert.ok(allFlexJson.includes(`จับคู่สำเร็จ · #${order1.orderNumber}`), 'จับคู่สำเร็จ card must appear for Order 1');
     assert.ok(!allFlexJson.includes('รับแผลล่วงหน้า'), 'Confusing orange รับแผลล่วงหน้า card must NOT appear');
     assert.ok(!allFlexJson.includes('ยืนยันแผลดวล'), 'Old verbose pre-quote confirmation title must NOT appear');
     const groupMatchSends = sentLinePayloads.filter(
-      (p) => p.body?.to === TEST_GROUP_ID && JSON.stringify(p.body).includes('แมตช์สำเร็จ')
+      (p) => p.to === TEST_GROUP_ID && JSON.stringify(p).includes('จับคู่สำเร็จ')
     );
     assert.equal(groupMatchSends.length, 0, 'Match confirmation cards must NEVER be sent to the LINE Group');
 
@@ -369,6 +369,13 @@ try {
     const settleRes = await rpc(env, ctx, 'adminResolveBets', [320, 400, 450]);
     assert.equal(settleRes.success, true);
     assert.equal(settleRes.resolvedCount, 3, 'All 3 matched orders must be settled');
+
+    // Group result cards name winners and losers only: points are real money.
+    const groupResults = sentLinePayloads.filter(
+      (p) => p.to === TEST_GROUP_ID && JSON.stringify(p).includes('ผลการแข่งขัน')
+    );
+    assert.ok(groupResults.length > 0, 'Per-pair results must be posted to the LINE Group');
+    assert.ok(groupResults.every((p) => !/\d\s*pt\b|ยอด|ค่าธรรมเนียม/.test(JSON.stringify(p))), 'Group result cards must not show stakes or fees');
 
     bals = await getPlayerBalances(env, ctx);
     assert.equal(bals.PLC76E26, 440, `ITT final balance must be 440 pt (60 + 380), got ${bals.PLC76E26}`);

@@ -198,11 +198,25 @@ const bubbles = sum?.flex?.contents?.type === 'carousel' ? sum.flex.contents.con
 check('one card per rocket round', bubbles.length === 2, `bubbles=${bubbles.length}`);
 const text = JSON.stringify(sum?.flex);
 check('cards name each rocket', text.includes('SEED') && text.includes('ROCKET_A'));
-check('rocket A card shows winner and loser', text.includes(`👑 ${P2.name}`) && text.includes(`💥 ${P1.name}`));
+const esc = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// One table row per pair: order, winner, then loser.
+check('rocket A card shows winner and loser', new RegExp(`"text":"${esc(P2.name)}"[^\\]]*"text":"${esc(P1.name)}"`).test(text));
 check('cards show no stake, payout, fee or volume', !/\bpt\b|ค่าธรรมเนียม|ยอด|ผู้ชนะรับ|คืนเงิน/.test(text), text.match(/[^"]*(\bpt\b|ค่าธรรมเนียม|ยอด|ผู้ชนะรับ|คืนเงิน)[^"]*/)?.[0]);
 check('message is under LINE\'s 50KB limit', new TextEncoder().encode(JSON.stringify(sum.flex.contents)).length < 50_000);
 const bc = await rpc('adminBroadcastDailySummary', []);
 check('broadcast endpoint resolves the group and counts the duels', Array.isArray(bc?.targets) && bc.targets.length > 0 && bc.count === 2, JSON.stringify(bc && { targets: bc.targets, count: bc.count, error: bc.error }));
+
+// ── [5b] Card watermark icons are served by the Worker ─────────────────────
+{
+  const icon = await mf.dispatchFetch('http://localhost/icons/rocket.png?v=1');
+  const bytes = new Uint8Array(await icon.arrayBuffer());
+  check('icon route serves a PNG', icon.status === 200 && icon.headers.get('content-type') === 'image/png' && bytes[1] === 0x50 && bytes[2] === 0x4e, `status=${icon.status}`);
+  const missing = await mf.dispatchFetch('http://localhost/icons/nope.png');
+  await missing.arrayBuffer();
+  check('unknown icon is 404', missing.status === 404, `status=${missing.status}`);
+  const iconUrls = JSON.stringify(sum?.flex).match(/\/icons\/([a-z]+)\.png/g) || [];
+  check('summary card carries a header icon', iconUrls.length > 0);
+}
 
 // ── [6] Unauthenticated callers see the public board only ──────────────────
 console.log('\n[6] No player data without a login');

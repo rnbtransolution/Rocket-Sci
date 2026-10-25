@@ -156,7 +156,7 @@ export async function scanSlipImage(messageId: string, env: Env): Promise<SlipSc
       ok: false,
       escalate: true,
       apiFailure: true,
-      message: '📥 ได้รับสลิปเรียบร้อยแล้วครับ\nขณะนี้ระบบสแกนสลิปอัตโนมัติยังไม่ได้เปิดใช้งาน\nบิลของคุณส่งให้แอดมินตรวจสอบแล้ว กรุณารอสักครู่ครับ 🙏',
+      message: 'ระบบสแกนสลิปอัตโนมัติยังไม่เปิดใช้งาน\nส่งให้แอดมินตรวจแล้ว รอสักครู่',
       detail: 'SLIP_API_KEY is not configured on the Worker',
     };
   }
@@ -167,7 +167,7 @@ export async function scanSlipImage(messageId: string, env: Env): Promise<SlipSc
       ok: false,
       escalate: true,
       apiFailure: true,
-      message: '⚠️ ระบบไม่สามารถดาวน์โหลดรูปสลิปได้\nกรุณาส่งสลิปใหม่อีกครั้ง หรือรอแอดมินตรวจสอบให้ครับ',
+      message: 'ดาวน์โหลดรูปสลิปไม่ได้\nส่งสลิปใหม่อีกครั้ง หรือรอแอดมินตรวจ',
       detail: `Could not download LINE message content for ${messageId}`,
     };
   }
@@ -190,7 +190,7 @@ export async function scanSlipImage(messageId: string, env: Env): Promise<SlipSc
       ok: false,
       escalate: true,
       apiFailure: true,
-      message: '⚠️ ระบบเช็คสลิปขัดข้อง\nบิลของคุณส่งให้แอดมินตรวจสอบแล้ว กรุณารอสักครู่ครับ 🙏',
+      message: 'ระบบตรวจสลิปขัดข้อง\nส่งให้แอดมินตรวจแล้ว รอสักครู่',
       detail: `Slip API connectivity failure: ${err?.message || String(err)}`,
     };
   }
@@ -215,10 +215,10 @@ export async function scanSlipImage(messageId: string, env: Env): Promise<SlipSc
       escalate: true,
       apiFailure: true,
       message: isBangkokPending
-        ? '🏦 สลิปธนาคารกรุงเทพอยู่ระหว่างประมวลผล\nธนาคารกรุงเทพอัปเดตข้อมูลช้ากว่าปกติชั่วคราว ระบบจึงยังตรวจสอบไม่ได้\n\nบิลของคุณส่งถึงแอดมินแล้ว และจะเติมเครดิตให้โดยเร็วที่สุดครับ'
+        ? 'ธนาคารกรุงเทพอัปเดตข้อมูลช้ากว่าปกติ ระบบยังตรวจสลิปไม่ได้\nส่งให้แอดมินแล้ว จะเติมเครดิตโดยเร็ว'
         : isExpired
-          ? '📥 ได้รับสลิปเรียบร้อยแล้วครับ\nขณะนี้ระบบสแกนสลิปอัตโนมัติอยู่ระหว่างปรับปรุง\nรายการของคุณส่งให้แอดมินตรวจสอบแล้วครับ 🙏'
-          : `⚠️ ระบบเช็คสลิปขัดข้อง (HTTP ${response.status})\nแอดมินได้รับบิลนี้แล้ว กำลังตรวจสอบให้ครับ`,
+          ? 'ระบบสแกนสลิปอัตโนมัติอยู่ระหว่างปรับปรุง\nส่งให้แอดมินตรวจแล้ว'
+          : `ระบบตรวจสลิปขัดข้อง (HTTP ${response.status})\nส่งให้แอดมินตรวจแล้ว`,
       detail: `Slip API HTTP ${response.status}: ${detail}`,
     };
   }
@@ -231,7 +231,7 @@ export async function scanSlipImage(messageId: string, env: Env): Promise<SlipSc
       ok: false,
       escalate: true,
       apiFailure: true,
-      message: '⚠️ ระบบอ่านผลลัพธ์สลิปไม่สำเร็จ\nบิลของคุณส่งให้แอดมินตรวจสอบแล้วครับ',
+      message: 'อ่านผลตรวจสลิปไม่สำเร็จ\nส่งให้แอดมินตรวจแล้ว',
       detail: `Slip API returned non-JSON: ${responseText.slice(0, 200)}`,
     };
   }
@@ -249,8 +249,8 @@ export async function scanSlipImage(messageId: string, env: Env): Promise<SlipSc
       ok: false,
       escalate: true,
       message: unreadable
-        ? '❌ สแกนสลิปไม่ผ่าน\nไม่พบข้อมูลสลิปในระบบธนาคาร หรือ QR Code ไม่ชัดเจน\n\nระบบส่งบิลนี้ให้แอดมินตรวจสอบแล้วครับ'
-        : `❌ สแกนสลิปไม่ผ่าน\n${apiMessage || 'ไม่สามารถยืนยันสลิปนี้ได้'}\n\nระบบส่งบิลนี้ให้แอดมินตรวจสอบแล้วครับ`,
+        ? 'สแกนสลิปไม่ผ่าน: ไม่พบข้อมูลในระบบธนาคาร หรือ QR ไม่ชัด\nส่งให้แอดมินตรวจแล้ว'
+        : `สแกนสลิปไม่ผ่าน: ${apiMessage || 'ยืนยันสลิปนี้ไม่ได้'}\nส่งให้แอดมินตรวจแล้ว`,
       detail: `Slip API check failed: ${apiMessage || JSON.stringify(payload).slice(0, 200)}`,
     };
   }
@@ -262,7 +262,7 @@ export async function scanSlipImage(messageId: string, env: Env): Promise<SlipSc
       ok: false,
       escalate: true,
       message:
-        '❌ สลิปนี้ไม่มีรหัสอ้างอิงธุรกรรม\nอาจเป็นภาพ Screenshot หรือรูปที่ถูกตัดต่อ\n\nกรุณาส่งสลิปจากแอปธนาคารโดยตรงครับ',
+        'สลิปไม่มีรหัสอ้างอิงธุรกรรม อาจเป็นภาพแคปหน้าจอหรือถูกตัดต่อ\nส่งสลิปจากแอปธนาคารโดยตรง',
       detail: 'Slip has no transaction reference code (screenshot or edited image)',
     };
   }
@@ -273,7 +273,7 @@ export async function scanSlipImage(messageId: string, env: Env): Promise<SlipSc
     return {
       ok: false,
       escalate: true,
-      message: '⚠️ ไม่พบยอดเงินที่ถูกต้องในสลิป\nระบบยืนยันยอดที่โอนไม่ได้ ส่งให้แอดมินตรวจสอบเป็นกรณีพิเศษครับ',
+      message: 'ไม่พบยอดเงินในสลิป\nส่งให้แอดมินตรวจเป็นกรณีพิเศษ',
       detail: `Slip ${refCode} has no verifiable amount`,
     };
   }
@@ -288,7 +288,7 @@ export async function scanSlipImage(messageId: string, env: Env): Promise<SlipSc
         return {
           ok: false,
           escalate: true,
-          message: `⏰ สลิปหมดอายุ\nสลิปนี้มีวันที่ ${dateTime}\nระบบรับเฉพาะสลิปที่โอนภายใน ${SLIP_MAX_AGE_HOURS} ชั่วโมง\n\nกรุณาโอนใหม่และส่งสลิปทันทีครับ`,
+          message: `สลิปหมดอายุ (วันที่ ${dateTime})\nรับเฉพาะสลิปที่โอนภายใน ${SLIP_MAX_AGE_HOURS} ชั่วโมง`,
           detail: `Stale slip rejected: ${dateTime} is older than ${SLIP_MAX_AGE_HOURS}h`,
         };
       }

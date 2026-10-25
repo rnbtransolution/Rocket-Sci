@@ -1,102 +1,278 @@
 import { Order } from './types.js';
+import type { LineIconName } from './lineIcons.js';
 
 /**
- * Pre-compiled, ultra-fast Flex Message generator for Cloudflare Workers.
- * Avoids recursive object re-allocations and heavy serialization overhead.
+ * Flex Message templates for every card the bot sends, in groups and in DMs.
+ *
+ * One visual system. The header colour says what the message is about before a
+ * word is read, so it follows the money, not the mood:
+ *
+ *   in       green   credit arrives — deposit credited, refund, admin top-up
+ *   out      orange  credit leaves — withdrawal, admin deduction
+ *   error    red     refused or failed, round void
+ *   pending  amber   waiting on someone — slip under review, betting closed
+ *   info     blue    round news — quote, result, match, balance
+ *   neutral  slate   reference — board, menu, rules
+ *
+ * Copy is short and plain: no emoji, no slang, left-aligned, one idea per line.
+ * Amounts are the largest text on a card that moves money.
  */
 
-export function generateRocketLaunchedFlex(rocketName?: string): any {
-  const titleSuffix = rocketName ? ` [${rocketName}]` : '';
+type Tone = 'in' | 'out' | 'error' | 'pending' | 'info' | 'neutral';
+
+const TONES: Record<Tone, { head: string; accent: string; tint: string }> = {
+  in: { head: '#0B6B3F', accent: '#0F7B4A', tint: '#EAF5EF' },
+  out: { head: '#B4400F', accent: '#C2410C', tint: '#FCEFE7' },
+  error: { head: '#A3221A', accent: '#B42318', tint: '#FBEBE9' },
+  pending: { head: '#8A5300', accent: '#9A5B00', tint: '#FDF4E3' },
+  info: { head: '#1C3F94', accent: '#1E4DB7', tint: '#EBF0FB' },
+  neutral: { head: '#2B3138', accent: '#3B424C', tint: '#F2F4F6' },
+};
+
+const INK = '#16191D';
+const BODY = '#3B424C';
+const MUTED = '#5B636E';
+const HAIRLINE = '#E6E9ED';
+const PANEL = '#F5F6F8';
+
+const pt = (n: number) => `${Number(n || 0).toLocaleString()} pt`;
+
+const text = (value: string, o: Record<string, any> = {}) => ({
+  type: 'text',
+  text: value,
+  size: 'sm',
+  color: BODY,
+  wrap: true,
+  ...o,
+});
+
+const divider = (margin = 'md') => ({ type: 'separator', margin, color: HAIRLINE });
+
+const note = (value: string, margin = 'md') => text(value, { size: 'xs', color: MUTED, margin });
+
+/** Label on the left, value on the right. */
+const row = (label: string, value: string, o: { color?: string; size?: string } = {}) => ({
+  type: 'box',
+  layout: 'horizontal',
+  spacing: 'md',
+  contents: [
+    text(label, { size: o.size ?? 'sm', color: MUTED, flex: 4 }),
+    text(value, { size: o.size ?? 'sm', color: o.color ?? INK, weight: 'bold', flex: 6, align: 'end' }),
+  ],
+});
+
+/** The headline number of a money card. */
+const hero = (value: string, color: string, caption?: string) => [
+  text(value, { size: 'xxl', weight: 'bold', color }),
+  ...(caption ? [text(caption, { size: 'xs', color: MUTED })] : []),
+];
+
+const panel = (contents: any[], o: Record<string, any> = {}) => ({
+  type: 'box',
+  layout: 'vertical',
+  backgroundColor: PANEL,
+  cornerRadius: 'md',
+  paddingAll: 'md',
+  spacing: 'sm',
+  contents,
+  ...o,
+});
+
+const button = (label: string, message: string, o: { style?: 'primary' | 'secondary'; color?: string } = {}) => ({
+  type: 'button',
+  style: o.style ?? 'secondary',
+  height: 'sm',
+  ...(o.color ? { color: o.color } : {}),
+  action: { type: 'message', label, text: message },
+});
+
+/** Served by this Worker (see LINE_ICONS); bump `v` when an icon is redrawn. */
+const ICON_BASE = 'https://rocket-science-cf-worker.rnbtransolution.workers.dev/icons';
+const ICON_VERSION = 1;
+
+interface BubbleSpec {
+  tone: Tone;
+  /** Faint line icon in the header's top-right corner, naming the card's subject. */
+  icon?: LineIconName;
+  /** Small line above the title: the category ("เงินเข้า", "ออเดอร์ #1234"). */
+  eyebrow?: string;
+  title: string;
+  /** One line under the title (rocket name, player). */
+  sub?: string;
+  body?: any[];
+  footer?: any[];
+  size?: 'kilo' | 'mega' | 'giga';
+  /**
+   * Tighter padding and a smaller title, for cards posted to the group. Group
+   * chats scroll fast and every card pushes the conversation up, so group
+   * cards trade whitespace for height.
+   */
+  compact?: boolean;
+}
+
+function bubble({ tone, icon, eyebrow, title, sub, body, footer, size = 'kilo', compact = false }: BubbleSpec): any {
   return {
-    type: 'flex',
-    altText: `🚀 บั้งไฟออกแล้ว!${titleSuffix} (⛔ ปิดรับดวลรอบนี้)`,
-    contents: {
-      type: 'bubble',
-      size: 'mega',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#DC2626',
-        paddingAll: 'lg',
-        spacing: 'xs',
-        contents: [
-          {
-            type: 'text',
-            text: '🔥 LIVE ACTION · FINAL CALL 🔥',
-            weight: 'bold',
-            color: '#FEF08A',
-            size: 'xs',
-            align: 'center',
-          },
-          {
-            type: 'text',
-            text: '🚀 บั้งไฟออกแล้ว! 🚀',
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'xl',
-            align: 'center',
-            wrap: true,
-          },
-          ...(rocketName
-            ? [{
-                type: 'text',
-                text: `บั้งไฟ: ${rocketName}`,
-                weight: 'bold',
-                color: '#FEE2E2',
-                size: 'sm',
-                align: 'center',
-                wrap: true,
-              }]
-            : []),
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#FFF7ED',
-        paddingAll: 'md',
-        spacing: 'sm',
-        contents: [
-          {
+    type: 'bubble',
+    size,
+    header: {
+      type: 'box',
+      layout: 'vertical',
+      backgroundColor: TONES[tone].head,
+      paddingAll: compact ? 'md' : 'lg',
+      paddingStart: compact ? 'lg' : undefined,
+      paddingEnd: compact ? 'lg' : undefined,
+      spacing: compact ? 'none' : 'xs',
+      contents: [
+        // First, so the text draws over it.
+        ...(icon
+          ? [{
+              type: 'image',
+              url: `${ICON_BASE}/${icon}.png?v=${ICON_VERSION}`,
+              position: 'absolute',
+              offsetTop: compact ? '4px' : '8px',
+              offsetEnd: '10px',
+              size: compact ? '44px' : '56px',
+              aspectRatio: '1:1',
+              aspectMode: 'fit',
+            }]
+          : []),
+        ...(eyebrow ? [text(eyebrow, { size: 'xs', color: '#FFFFFFB3', weight: 'bold' })] : []),
+        text(title, { size: compact ? 'md' : 'lg', color: '#FFFFFF', weight: 'bold' }),
+        ...(sub ? [text(sub, { size: 'xs', color: '#FFFFFFCC' })] : []),
+      ],
+    },
+    ...(body && body.length > 0
+      ? {
+          body: {
             type: 'box',
             layout: 'vertical',
-            backgroundColor: '#FFEDD5',
-            cornerRadius: 'md',
-            paddingAll: 'sm',
-            spacing: 'xs',
-            contents: [
-              {
-                type: 'text',
-                text: '⚡ พุ่งทะยานสู่ท้องฟ้า · ⛔ ปิดรับดวลรอบนี้แล้ว!',
-                weight: 'bold',
-                color: '#C2410C',
-                size: 'xs',
-                align: 'center',
-                wrap: true,
-              },
-              {
-                type: 'text',
-                text: '🔒 แผลเปิดที่ไม่ติดคู่ดวล ถูกยกเลิกและคืนแต้มอัตโนมัติ',
-                color: '#475569',
-                size: 'xs',
-                align: 'center',
-                wrap: true,
-              },
-              {
-                type: 'text',
-                text: '⏱️ รอลุ้นเวลาและสรุปผลหลังบั้งไฟลง 💥',
-                weight: 'bold',
-                color: '#9A3412',
-                size: 'xs',
-                align: 'center',
-                wrap: true,
-              },
-            ],
+            paddingAll: compact ? 'md' : 'lg',
+            paddingStart: compact ? 'lg' : undefined,
+            paddingEnd: compact ? 'lg' : undefined,
+            spacing: 'sm',
+            contents: body,
           },
-        ],
-      },
-    },
+        }
+      : {}),
+    ...(footer && footer.length > 0
+      ? { footer: { type: 'box', layout: 'vertical', paddingAll: compact ? 'sm' : 'md', spacing: 'sm', contents: footer } }
+      : {}),
   };
+}
+
+const flex = (altText: string, contents: any) => ({ type: 'flex', altText, contents });
+
+// ── Round announcements (group) ──
+
+export function generateRocketLaunchedFlex(rocketName?: string): any {
+  return flex(
+    `บั้งไฟขึ้นแล้ว${rocketName ? ` · ${rocketName}` : ''} · ปิดรับแทง`,
+    bubble({
+      tone: 'pending',
+      icon: 'rocket',
+      compact: true,
+      eyebrow: 'ปิดรับแทง',
+      title: `บั้งไฟขึ้นแล้ว${rocketName ? ` · ${rocketName}` : ''}`,
+      body: [text('แผลที่ยังไม่มีคู่ คืนเครดิตอัตโนมัติ\nประกาศเวลาบินหลังบั้งไฟลง', { size: 'xs' })],
+    })
+  );
+}
+
+/** Quote released for the open rocket, or for the next one (`nextRocket`). */
+export function generateQuoteFlex(name: string, min: number, max: number, isChotoy: boolean, nextRocket = false): any {
+  const range = `${min}–${max} วิ${isChotoy ? ' (ชตย)' : ''}`;
+  return flex(
+    `เปิดราคา ${name} · ${min}-${max} วิ${isChotoy ? ' (ชตย)' : ''}`,
+    bubble({
+      tone: 'info',
+      icon: 'stopwatch',
+      compact: true,
+      eyebrow: nextRocket ? `เปิดราคา · ลำถัดไป · ${name}` : `เปิดราคา · ${name}`,
+      title: `ช่าง ${range}`,
+      body: [
+        text('[ปรับราคา] ชล/ชถ จำนวนแต้ม', { size: 'xs', color: INK, weight: 'bold' }),
+        text('เช่น ชล500 · +10ชล500 · -5ชถ1,000', { size: 'xs', color: MUTED, margin: 'none' }),
+      ],
+    })
+  );
+}
+
+export function generateVoidRoundFlex(roundName?: string): any {
+  return flex(
+    `โมฆะรอบ${roundName ? ` ${roundName}` : ''} · คืนเครดิตแล้ว`,
+    bubble({
+      tone: 'error',
+      icon: 'ban',
+      compact: true,
+      eyebrow: 'โมฆะรอบ',
+      title: roundName || 'บั้งไฟ',
+      body: [text('ยกเลิกทุกแผลดวลของรอบนี้ และคืนเครดิตเต็มจำนวนแล้ว', { size: 'xs' })],
+    })
+  );
+}
+
+/**
+ * Winners and losers as a three-column table, one line per pair. Group-safe:
+ * points are real money, so it never shows a stake or payout. A pair-per-block
+ * layout took four lines per duel and buried the chat under a busy round.
+ */
+const duelTable = (orders: Order[]) => {
+  const cell = (value: string, o: Record<string, any> = {}) => text(value, { size: 'xs', wrap: false, ...o });
+  const head = {
+    type: 'box',
+    layout: 'horizontal',
+    spacing: 'sm',
+    contents: [
+      cell('ออเดอร์', { color: MUTED, flex: 3 }),
+      cell('ชนะ', { color: MUTED, flex: 5 }),
+      cell('แพ้', { color: MUTED, flex: 5 }),
+    ],
+  };
+  const rowOf = (o: Order) => {
+    const draw = o.winnerSide === 'draw';
+    const creatorWins = o.winnerSide === o.side;
+    const winName = String((draw || creatorWins ? o.creatorName : o.matcherName) || (o as any).winnerName || '-');
+    const loseName = String((draw || creatorWins ? o.matcherName : o.creatorName) || '-');
+    return {
+      type: 'box',
+      layout: 'horizontal',
+      spacing: 'sm',
+      contents: draw
+        ? [cell(`#${o.orderNumber}`, { color: MUTED, flex: 3 }), cell(`เสมอ · ${winName} · ${loseName}`, { color: BODY, flex: 10 })]
+        : [
+            cell(`#${o.orderNumber}`, { color: MUTED, flex: 3 }),
+            cell(winName, { color: TONES.in.accent, weight: 'bold', flex: 5 }),
+            cell(loseName, { color: TONES.error.accent, flex: 5 }),
+          ],
+    };
+  };
+  return [head, divider('xs'), ...orders.map(rowOf)];
+};
+
+/**
+ * The result of a rocket, posted to the group once: flight time, range and
+ * every pair's winner and loser in one card (it used to be two).
+ */
+export function generateSettlementFlex(name: string, finalSeconds: number, tMin: number, tMax: number, orders: Order[]): any {
+  const shown = orders.slice(0, 25);
+  return flex(
+    `ผลการแข่งขัน ${name} · ${finalSeconds} วิ · ${orders.length} คู่`,
+    bubble({
+      tone: 'info',
+      icon: 'flag',
+      size: 'mega',
+      compact: true,
+      eyebrow: `ผลการแข่งขัน · ${name}`,
+      title: `เวลาบิน ${finalSeconds} วิ`,
+      sub: `ช่าง ${tMin}–${tMax} วิ · ตัดสินผล ${orders.length} คู่`,
+      body: shown.length > 0
+        ? [
+            ...duelTable(shown),
+            ...(orders.length > shown.length ? [note(`และอีก ${orders.length - shown.length} คู่`, 'sm')] : []),
+          ]
+        : undefined,
+    })
+  );
 }
 
 // ── 1. Order Creation Card (Open for Matching in Group Chat) ──
@@ -125,7 +301,7 @@ export function generateOrderFlex(order: Order): any {
   // The full 100% button gets Row 2 to itself, and Cancel sits apart below a
   // separator. LINE's 'sm' is 4px: rows that close, with ~26px-tall buttons,
   // made a tap land on the neighbouring amount, or on Cancel next to Accept.
-  // Buttons are now ~40px tall with 12px between them.
+  // Buttons are ~40px tall with 12px between them.
   const btnPad = { paddingTop: '10px', paddingBottom: '10px', paddingStart: '4px', paddingEnd: '4px' };
   const takeOptions = [0.20, 0.40, 0.80]
     .map((r) => Math.round(numAmount * r))
@@ -133,165 +309,56 @@ export function generateOrderFlex(order: Order): any {
     .filter((v, i, arr) => arr.indexOf(v) === i); // rounding can collide
   const amt100 = numAmount;
 
-  return {
-    type: 'flex',
-    altText: `🚀 เปิดดวล #${orderNumber} [${cardTitle}] ${numAmount.toLocaleString()}pt`,
-    contents: {
-      type: 'bubble',
+  const takeButton = (val: number, full: boolean) => ({
+    type: 'box',
+    layout: 'vertical',
+    flex: 1,
+    backgroundColor: full ? TONES.info.accent : TONES.info.tint,
+    cornerRadius: 'md',
+    ...btnPad,
+    action: { type: 'message', label: `${val}`, text: `ต ${orderNumber} ${val}` },
+    contents: [text(full ? `เต็ม ${val.toLocaleString()}` : val.toLocaleString(), {
+      size: 'sm', color: full ? '#FFFFFF' : TONES.info.accent, weight: 'bold', align: 'center', wrap: false,
+    })],
+  });
+
+  return flex(
+    `ออเดอร์ #${orderNumber} · ${cardTitle} · ${pt(numAmount)}`,
+    bubble({
+      tone: 'info',
+      icon: 'ticket',
       size: 'mega',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#334155',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: `Order #${orderNumber}`,
-            weight: 'bold',
-            color: '#F8FAFC',
-            size: 'xs',
-            align: 'center',
-            wrap: true,
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'md',
-        paddingAll: 'md',
-        contents: [
-          {
-            type: 'text',
-            text: `${cardTitle}${isChotoy ? ' (ชตย)' : ''}`,
-            weight: 'bold',
-            color: '#1E293B',
-            size: 'md',
-            align: 'center',
-            wrap: true,
-          },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            spacing: 'xs',
-            contents: [
-              {
-                type: 'text',
-                text: `👤 ผู้เปิด: ${creatorName || '-'}`,
-                color: '#64748B',
-                size: 'xs',
-                align: 'center',
-                wrap: true,
-                flex: 1,
-              },
-              {
-                type: 'text',
-                text: `🚀 บั้งไฟ: ${rocketName || 'บั้งไฟสด'}`,
-                color: '#64748B',
-                size: 'xs',
-                align: 'center',
-                wrap: true,
-                flex: 1,
-              },
-            ],
-          },
-          {
-            type: 'separator',
-            margin: 'sm',
-            color: '#F1F5F9',
-          },
-          // Row 1: partial Quick Deal Buttons (20%, 40%, 80%), filtered to what can actually be matched
-          ...(takeOptions.length > 0
-            ? [{
-                type: 'box',
-                layout: 'horizontal',
-                spacing: 'lg',
-                margin: 'lg',
-                contents: takeOptions.map((val) => ({
-                  type: 'box',
-                  layout: 'vertical',
-                  flex: 1,
-                  backgroundColor: '#BAE6FD',
-                  cornerRadius: 'md',
-                  ...btnPad,
-                  action: {
-                    type: 'message',
-                    label: `${val}`,
-                    text: `ต ${orderNumber} ${val}`,
-                  },
-                  contents: [
-                    { type: 'text', text: `${val}`, color: '#0369A1', weight: 'bold', size: 'sm', align: 'center', wrap: true },
-                  ],
-                })),
-              }]
-            : []),
-          // Row 2: 100% Full Take on its own row
-          {
-            type: 'box',
-            layout: 'horizontal',
-            margin: 'lg',
-            contents: [
-              {
-                type: 'box',
-                layout: 'vertical',
-                flex: 1,
-                backgroundColor: '#BBF7D0',
-                cornerRadius: 'md',
-                ...btnPad,
-                action: {
-                  type: 'message',
-                  label: `${amt100}`,
-                  text: `ต ${orderNumber} ${amt100}`,
-                },
-                contents: [
-                  { type: 'text', text: `✅ รับเต็ม ${amt100.toLocaleString()}`, color: '#15803D', weight: 'bold', size: 'sm', align: 'center', wrap: true },
-                ],
-              },
-            ],
-          },
-          { type: 'separator', margin: 'xl', color: '#E2E8F0' },
-          // Row 3: Cancel, set apart from every accept button
-          {
-            type: 'box',
-            layout: 'horizontal',
-            margin: 'lg',
-            paddingStart: '25%',
-            paddingEnd: '25%',
-            contents: [
-              {
-                type: 'box',
-                layout: 'vertical',
-                flex: 1,
-                backgroundColor: '#FECDD3',
-                cornerRadius: 'md',
-                paddingTop: '8px',
-                paddingBottom: '8px',
-                action: {
-                  type: 'message',
-                  label: '⛔ ยกเลิก',
-                  text: `ยกเลิก ${orderNumber}`,
-                },
-                contents: [
-                  { type: 'text', text: '⛔ ยกเลิก (เฉพาะเจ้าของแผล)', color: '#9F1239', weight: 'bold', size: 'xxs', align: 'center', wrap: true },
-                ],
-              },
-            ],
-          },
-          {
-            type: 'text',
-            text: `หรือพิมพ์: ${orderNumber} [จำนวนแต้ม]`,
-            size: 'xs',
-            color: '#2563EB',
-            weight: 'bold',
-            align: 'center',
-            margin: 'sm',
-            wrap: true,
-          },
-        ],
-      },
-    },
-  };
+      compact: true,
+      eyebrow: `ออเดอร์ #${orderNumber} · ${creatorName || '-'} · ${rocketName || 'บั้งไฟสด'}`,
+      title: `${cardTitle}${isChotoy ? ' (ชตย)' : ''}`,
+      body: [
+        // One row: partial takes, then the full take in solid blue. 12px gaps
+        // and ~40px-tall buttons, so a tap does not land on the neighbour.
+        {
+          type: 'box',
+          layout: 'horizontal',
+          spacing: 'lg',
+          contents: [...takeOptions.map((v) => takeButton(v, false)), takeButton(amt100, true)],
+        },
+        // Cancel is a small text link on its own line, away from the accept row.
+        {
+          type: 'box',
+          layout: 'horizontal',
+          margin: 'lg',
+          contents: [
+            text(`หรือพิมพ์ ${orderNumber} [จำนวนแต้ม]`, { size: 'xs', color: MUTED, flex: 7 }),
+            {
+              type: 'box',
+              layout: 'vertical',
+              flex: 3,
+              action: { type: 'message', label: 'ยกเลิก', text: `ยกเลิก ${orderNumber}` },
+              contents: [text('ยกเลิก', { size: 'xs', color: TONES.error.accent, weight: 'bold', align: 'end' })],
+            },
+          ],
+        },
+      ],
+    })
+  );
 }
 
 // ── 2. Match Notification Card (Dispatched via Private DM to Creator & Matcher Only) ──
@@ -300,529 +367,154 @@ export function generateMatchNotificationFlex(order: Order): any {
   const lowName = side === 'low' ? creatorName : (matcherName || '-');
   const highName = side === 'high' ? creatorName : (matcherName || '-');
   const offsetStr = offset ? ` ${offset > 0 ? '+' : ''}${offset}s` : '';
-  const rangeStr = (rangeMin && rangeMax)
-    ? `${rangeMin}-${rangeMax}s`
-    : `ราคาช่าง${offsetStr}`;
+  const rangeStr = (rangeMin && rangeMax) ? `${rangeMin}-${rangeMax}s` : `ราคาช่าง${offsetStr}`;
 
-  const titleText = `🤝 แมตช์สำเร็จ! #${orderNumber}`;
-  const rocketText = `🚀 บั้งไฟ: ${rocketName || 'บั้งไฟสด'} (${rangeStr})`;
-
-  return {
-    type: 'flex',
-    altText: `🤝 จับคู่ดวลสำเร็จ! Order #${orderNumber} (${amount} pt)`,
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#059669',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: titleText,
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'sm',
-            align: 'center',
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'xs',
-        paddingAll: 'md',
-        contents: [
-          {
-            type: 'text',
-            text: `ยอดดวล: ${amount.toLocaleString()} pt`,
-            weight: 'bold',
-            color: '#0F172A',
-            size: 'md',
-            align: 'center',
-          },
-          {
-            type: 'text',
-            text: rocketText,
-            color: '#64748B',
-            size: 'xs',
-            align: 'center',
-          },
-          { type: 'separator', margin: 'xs', color: '#E2E8F0' },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            margin: 'xs',
-            contents: [
-              {
-                type: 'box',
-                layout: 'vertical',
-                flex: 1,
-                backgroundColor: '#EFF6FF',
-                cornerRadius: 'sm',
-                paddingAll: 'xs',
-                contents: [
-                  { type: 'text', text: '🔻 ต่ำ (Low)', color: '#2563EB', weight: 'bold', size: 'xs', align: 'center' },
-                  { type: 'text', text: `@${lowName}`, color: '#1E293B', weight: 'bold', size: 'xs', align: 'center', wrap: true },
-                ],
-              },
-              { type: 'text', text: 'VS', color: '#94A3B8', weight: 'bold', size: 'xs', align: 'center', gravity: 'center', flex: 0 },
-              {
-                type: 'box',
-                layout: 'vertical',
-                flex: 1,
-                backgroundColor: '#FEF2F2',
-                cornerRadius: 'sm',
-                paddingAll: 'xs',
-                contents: [
-                  { type: 'text', text: '🔺 สูง (High)', color: '#DC2626', weight: 'bold', size: 'xs', align: 'center' },
-                  { type: 'text', text: `@${highName}`, color: '#1E293B', weight: 'bold', size: 'xs', align: 'center', wrap: true },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-    },
-  };
+  return flex(
+    `จับคู่สำเร็จ #${orderNumber} · ${pt(amount)}`,
+    bubble({
+      tone: 'info',
+      icon: 'link',
+      eyebrow: `จับคู่สำเร็จ · #${orderNumber}`,
+      title: pt(amount),
+      sub: `${rocketName || 'บั้งไฟสด'} · ${rangeStr}`,
+      body: [
+        row('ฝั่งสูง', highName || '-'),
+        row('ฝั่งต่ำ', lowName || '-'),
+        note('ล็อกแล้ว ยกเลิกทีละแผลไม่ได้ รอประกาศผลหลังบั้งไฟลง'),
+      ],
+    })
+  );
 }
 
-// ── 2b. Match Mismatch / Rejection Card (Red Theme) ──
+// ── 2b. Match Rejection Card ──
 // Shown when a match attempt FAILS: own bet, already matched, cancelled, not found,
 // insufficient balance, or no opposite-side order available.
 export function generateMatchMismatchFlex(orderNo: string | undefined, reason: string, hint?: string): any {
-  const title = orderNo ? `🚫 จับคู่ไม่สำเร็จ #${orderNo}` : '🚫 จับคู่ไม่สำเร็จ';
-  return {
-    type: 'flex',
-    altText: `🚫 จับคู่ไม่สำเร็จ${orderNo ? ` Order #${orderNo}` : ''}`,
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#DC2626',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: title,
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'sm',
-            align: 'center',
-            wrap: true,
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'sm',
-        paddingAll: 'md',
-        contents: [
-          {
-            type: 'text',
-            text: reason,
-            color: '#1E293B',
-            weight: 'bold',
-            size: 'sm',
-            align: 'center',
-            wrap: true,
-          },
-          ...(hint ? [
-            { type: 'separator', margin: 'xs', color: '#E2E8F0' },
-            {
-              type: 'text',
-              text: hint,
-              color: '#64748B',
-              size: 'xs',
-              align: 'center',
-              wrap: true,
-            },
-          ] : []),
-        ],
-      },
-    },
-  };
+  return flex(
+    `จับคู่ไม่สำเร็จ${orderNo ? ` #${orderNo}` : ''}`,
+    bubble({
+      tone: 'error',
+      icon: 'alert',
+      eyebrow: 'จับคู่ไม่สำเร็จ',
+      title: orderNo ? `ออเดอร์ #${orderNo}` : 'รับแผลไม่ได้',
+      body: [text(reason, { color: INK }), ...(hint ? [note(hint)] : [])],
+    })
+  );
 }
 
 // ── 3. Player Balance Card ──
 export function generateBalanceFlex(displayName: string, balance: number): any {
-  return {
-    type: 'flex',
-    altText: `💰 ยอดแต้มคงเหลือ: ${balance.toLocaleString()} pt`,
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#0A3D34',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: '💰 ยอดแต้มคงเหลือ',
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'xs',
-            align: 'center',
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        paddingAll: 'md',
-        spacing: 'xs',
-        contents: [
-          {
-            type: 'text',
-            text: `👤 ผู้เล่น: ${displayName || 'สมาชิก'}`,
-            color: '#64748B',
-            size: 'xs',
-            align: 'center',
-          },
-          {
-            type: 'text',
-            text: `${Number(balance || 0).toLocaleString()} pt`,
-            weight: 'bold',
-            color: '#059669',
-            size: 'xxl',
-            align: 'center',
-            margin: 'xs',
-          },
-          {
-            type: 'text',
-            text: 'แต้มคงเหลือพร้อมใช้งาน',
-            color: '#94A3B8',
-            size: 'xs',
-            align: 'center',
-          },
-        ],
-      },
-    },
-  };
+  return flex(
+    `ยอดคงเหลือ ${pt(balance)}`,
+    bubble({
+      tone: 'info',
+      icon: 'wallet',
+      eyebrow: 'ยอดคงเหลือ',
+      title: displayName || 'สมาชิก',
+      body: hero(pt(balance), INK, 'พร้อมใช้งาน'),
+    })
+  );
 }
 
-// ── 3b. Credit Adjustment Notification Card (แจ้งเตือนปรับยอดเครดิตแมนนวล) ──
+// ── 3b. Manual Credit Adjustment ──
 export function generateCreditAdjustmentFlex(displayName: string, oldBalance: number, newBalance: number): any {
   const delta = newBalance - oldBalance;
-  const isPositive = delta >= 0;
-  const deltaSign = isPositive ? '+' : '';
-  const deltaColor = isPositive ? '#059669' : '#DC2626';
-
-  return {
-    type: 'flex',
-    altText: `💰 แจ้งเตือนปรับยอดเครดิต: ${newBalance.toLocaleString()} pt`,
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#0F172A',
-        paddingAll: 'md',
-        contents: [
-          {
-            type: 'text',
-            text: '💰 แจ้งเตือนปรับยอดเครดิต',
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'sm',
-            align: 'center',
-          },
-          {
-            type: 'text',
-            text: 'แอดมินได้ปรับยอดแต้มคงเหลือของคุณ',
-            color: '#94A3B8',
-            size: 'xs',
-            align: 'center',
-            margin: 'xs',
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        paddingAll: 'md',
-        spacing: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: `👤 คุณ ${displayName}`,
-            color: '#64748B',
-            size: 'xs',
-            weight: 'bold',
-          },
-          {
-            type: 'box',
-            layout: 'vertical',
-            backgroundColor: '#F8FAFC',
-            cornerRadius: 'md',
-            paddingAll: 'sm',
-            margin: 'xs',
-            contents: [
-              {
-                type: 'box',
-                layout: 'horizontal',
-                contents: [
-                  { type: 'text', text: 'ยอดเดิม:', color: '#64748B', size: 'xs' },
-                  { type: 'text', text: `${oldBalance.toLocaleString()} pt`, color: '#64748B', size: 'xs', align: 'end' },
-                ],
-              },
-              {
-                type: 'box',
-                layout: 'horizontal',
-                margin: 'xs',
-                contents: [
-                  { type: 'text', text: 'ยอดปรับ:', color: '#64748B', size: 'xs' },
-                  { type: 'text', text: `${deltaSign}${delta.toLocaleString()} pt`, color: deltaColor, size: 'xs', weight: 'bold', align: 'end' },
-                ],
-              },
-            ],
-          },
-          { type: 'separator', margin: 'sm', color: '#E2E8F0' },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            margin: 'sm',
-            alignItems: 'center',
-            contents: [
-              { type: 'text', text: 'ยอดคงเหลือใหม่', weight: 'bold', color: '#1E293B', size: 'xs' },
-              { type: 'text', text: `${newBalance.toLocaleString()} pt`, weight: 'bold', color: '#059669', size: 'lg', align: 'end' },
-            ],
-          },
-          { type: 'text', text: '💡 พิมพ์ "ฝาก" หรือ "ถอน"', color: '#94A3B8', size: 'xs', wrap: true, margin: 'sm' },
-        ],
-      },
-    },
-  };
+  const tone: Tone = delta >= 0 ? 'in' : 'out';
+  const deltaStr = `${delta >= 0 ? '+' : '-'}${pt(Math.abs(delta))}`;
+  return flex(
+    `ปรับยอดเครดิต ${deltaStr} · คงเหลือ ${pt(newBalance)}`,
+    bubble({
+      tone,
+      icon: delta >= 0 ? 'deposit' : 'withdraw',
+      eyebrow: delta >= 0 ? 'เงินเข้า · ปรับโดยแอดมิน' : 'เงินออก · ปรับโดยแอดมิน',
+      title: 'ปรับยอดเครดิต',
+      sub: displayName || undefined,
+      body: [
+        ...hero(deltaStr, TONES[tone].accent),
+        divider(),
+        row('ยอดเดิม', pt(oldBalance), { color: MUTED }),
+        row('ยอดคงเหลือ', pt(newBalance)),
+      ],
+    })
+  );
 }
 
-// ── 3c. Universal Notice & Status Flex Card (เปลี่ยนข้อความธรรมดาเป็น Flex Card) ──
+// ── 3c. Universal Notice Card ──
 /**
- * Presentation overrides for `generateNoticeFlex`.
- *
- * `align` defaults to 'center' because most notices are one short line where
- * centred reads as a title. A body of several lines must be passed 'start':
- * centring a paragraph makes both edges ragged, the eye loses its place on the
- * return sweep, and on a narrow phone screen it is measurably worse to read.
+ * Presentation overrides for `generateNoticeFlex`. Text is left-aligned by
+ * default; pass 'center' only for a single short line.
  */
 export interface NoticeFlexOptions {
   align?: 'start' | 'center';
-  /** Body text colour. Defaults to #1E293B. */
+  /** Body text colour. Defaults to the body ink. */
   color?: string;
-  /** Colour of the optional trailing hint. Defaults to #64748B. */
+  /** Colour of the optional trailing hint. Defaults to muted grey. */
   hintColor?: string;
 }
 
+/**
+ * `type` picks the header colour: success = green, warning = amber,
+ * error = red, info = blue. Use 'in' / 'out' when the notice is about credit
+ * arriving or leaving, so it matches the money cards.
+ */
 export function generateNoticeFlex(
   title: string,
   message: string,
-  type: 'info' | 'success' | 'warning' | 'error' = 'info',
+  type: 'info' | 'success' | 'warning' | 'error' | 'in' | 'out' = 'info',
   hint?: string,
   options: NoticeFlexOptions = {}
 ): any {
-  const align = options.align ?? 'center';
-  const bodyColor = options.color ?? '#1E293B';
-  const hintColor = options.hintColor ?? '#64748B';
-  const headerColors: Record<string, string> = {
-    info: '#0A3D34',     // Deep Forest Green
-    success: '#059669',  // Emerald Green
-    warning: '#D97706',  // Amber
-    error: '#DC2626',    // Crimson Red
-  };
-
-  const headerColor = headerColors[type] || headerColors.info;
-
-  return {
-    type: 'flex',
-    altText: `🚀 ${title}: ${message.slice(0, 40)}`,
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: headerColor,
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: title,
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'xs',
-            align: 'center',
-            wrap: true,
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'sm',
-        paddingAll: 'md',
-        contents: [
-          {
-            type: 'text',
-            text: message,
-            color: bodyColor,
-            size: 'sm',
-            align,
-            wrap: true,
-          },
-          ...(hint
-            ? [
-                { type: 'separator', margin: 'sm', color: '#E2E8F0' },
-                {
-                  type: 'text',
-                  text: hint,
-                  color: hintColor,
-                  size: 'xs',
-                  align,
-                  wrap: true,
-                },
-              ]
-            : []),
-        ],
-      },
-    },
-  };
+  const tone: Tone = ({ info: 'info', success: 'in', warning: 'pending', error: 'error', in: 'in', out: 'out' } as const)[type] || 'info';
+  const align = options.align ?? 'start';
+  return flex(
+    `${title}: ${message.slice(0, 60)}`,
+    bubble({
+      tone,
+      icon: ({ in: 'check', out: 'withdraw', error: 'alert', pending: 'clock', info: 'info', neutral: 'info' } as const)[tone],
+      title,
+      body: [
+        text(message, { color: options.color ?? INK, align }),
+        ...(hint ? [text(hint, { size: 'xs', color: options.hintColor ?? MUTED, align, margin: 'md' })] : []),
+      ],
+    })
+  );
 }
 
-// ── 3d. Order Cancellation Confirmation Flex Card ──
+// ── 3d. Order Cancellation ──
 export function generateOrderCancelFlex(orderNumber: string, refundAmount: number, currentBalance: number): any {
-  return {
-    type: 'flex',
-    altText: `⛔ ยกเลิก Order #${orderNumber} เรียบร้อยแล้ว`,
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#475569',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: `⛔ ยกเลิก Order #${orderNumber}`,
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'xs',
-            align: 'center',
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'sm',
-        paddingAll: 'md',
-        contents: [
-          {
-            type: 'text',
-            text: 'ยกเลิกแผลดวลเรียบร้อยแล้วครับ',
-            weight: 'bold',
-            color: '#1E293B',
-            size: 'sm',
-            align: 'center',
-          },
-          {
-            type: 'separator',
-            margin: 'xs',
-            color: '#E2E8F0',
-          },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            contents: [
-              { type: 'text', text: 'คืนแต้ม:', color: '#64748B', size: 'xs', flex: 5 },
-              { type: 'text', text: `+${refundAmount.toLocaleString()} pt`, weight: 'bold', color: '#059669', size: 'xs', flex: 5, align: 'end' },
-            ],
-          },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            contents: [
-              { type: 'text', text: 'แต้มคงเหลือ:', color: '#64748B', size: 'xs', flex: 5 },
-              { type: 'text', text: `${currentBalance.toLocaleString()} pt`, weight: 'bold', color: '#0284C7', size: 'xs', flex: 5, align: 'end' },
-            ],
-          },
-        ],
-      },
-    },
-  };
+  return flex(
+    `ยกเลิกออเดอร์ #${orderNumber} · คืน ${pt(refundAmount)}`,
+    bubble({
+      tone: 'in',
+      icon: 'refund',
+      eyebrow: 'เงินเข้า · คืนเครดิต',
+      title: `ยกเลิกออเดอร์ #${orderNumber}`,
+      body: [...hero(`+${pt(refundAmount)}`, TONES.in.accent), divider(), row('ยอดคงเหลือ', pt(currentBalance))],
+    })
+  );
 }
 
-// ── 3e. Insufficient Balance Notice Flex Card ──
+// ── 3e. Insufficient Balance ──
 export function generateInsufficientBalanceFlex(currentBalance: number, neededAmount: number): any {
   const diff = Math.max(0, neededAmount - currentBalance);
-  return {
-    type: 'flex',
-    altText: `⚠️ แต้มไม่พอสำหรับรายการนี้ (ขาด ${diff.toLocaleString()} pt)`,
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#DC2626',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: '⚠️ แต้มคงเหลือไม่พอ',
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'xs',
-            align: 'center',
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'sm',
-        paddingAll: 'md',
-        contents: [
-          {
-            type: 'box',
-            layout: 'horizontal',
-            contents: [
-              { type: 'text', text: 'มีอยู่', color: '#64748B', size: 'xs', flex: 5 },
-              { type: 'text', text: `${currentBalance.toLocaleString()} pt`, weight: 'bold', color: '#1E293B', size: 'xs', flex: 5, align: 'end' },
-            ],
-          },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            contents: [
-              { type: 'text', text: 'ต้องการ', color: '#64748B', size: 'xs', flex: 5 },
-              { type: 'text', text: `${neededAmount.toLocaleString()} pt`, weight: 'bold', color: '#DC2626', size: 'xs', flex: 5, align: 'end' },
-            ],
-          },
-          { type: 'separator', margin: 'xs', color: '#E2E8F0' },
-          {
-            type: 'text',
-            text: `ขาดอีก ${diff.toLocaleString()} pt — พิมพ์ "ฝาก" เพื่อเติมแต้ม`,
-            color: '#64748B',
-            size: 'xs',
-            align: 'center',
-            wrap: true,
-          },
-        ],
-      },
-    },
-  };
+  return flex(
+    `เครดิตไม่พอ · ขาด ${pt(diff)}`,
+    bubble({
+      tone: 'error',
+      icon: 'wallet',
+      eyebrow: 'ทำรายการไม่สำเร็จ',
+      title: 'เครดิตไม่พอ',
+      body: [
+        row('มีอยู่', pt(currentBalance)),
+        row('ต้องใช้', pt(neededAmount)),
+        row('ขาดอีก', pt(diff), { color: TONES.error.accent }),
+        note('พิมพ์ "ฝาก" เพื่อเติมเครดิต'),
+      ],
+    })
+  );
 }
 
-// ── 3f. Withdrawal Requested Confirmation Flex Card ──
+// ── 3f. Withdrawal Requested ──
 export function generateWithdrawalSuccessFlex(
   withdrawAmt: number,
   bankName: string,
@@ -830,681 +522,166 @@ export function generateWithdrawalSuccessFlex(
   accountName: string,
   remainingBalance: number
 ): any {
-  return {
-    type: 'flex',
-    altText: `💸 แจ้งถอนเงิน ${withdrawAmt.toLocaleString()} pt เรียบร้อยแล้ว`,
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#0284C7',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: '💸 ส่งคำขอถอนเงินเรียบร้อย',
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'xs',
-            align: 'center',
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'xs',
-        paddingAll: 'md',
-        contents: [
-          {
-            type: 'text',
-            text: `${withdrawAmt.toLocaleString()} pt`,
-            weight: 'bold',
-            color: '#0284C7',
-            size: 'xl',
-            align: 'center',
-          },
-          { type: 'separator', margin: 'sm', color: '#F1F5F9' },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            margin: 'xs',
-            contents: [
-              { type: 'text', text: '🏦 ธนาคาร', color: '#94A3B8', size: 'xs', flex: 4 },
-              { type: 'text', text: bankName, weight: 'bold', color: '#334155', size: 'xs', flex: 6, align: 'end' },
-            ],
-          },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            contents: [
-              { type: 'text', text: '🔢 เลขบัญชี', color: '#94A3B8', size: 'xs', flex: 4 },
-              { type: 'text', text: accountNumber, weight: 'bold', color: '#334155', size: 'xs', flex: 6, align: 'end' },
-            ],
-          },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            contents: [
-              { type: 'text', text: '👤 ชื่อบัญชี', color: '#94A3B8', size: 'xs', flex: 4 },
-              { type: 'text', text: accountName, weight: 'bold', color: '#334155', size: 'xs', flex: 6, align: 'end' },
-            ],
-          },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            contents: [
-              { type: 'text', text: '💎 แต้มคงเหลือ', color: '#94A3B8', size: 'xs', flex: 4 },
-              { type: 'text', text: `${remainingBalance.toLocaleString()} pt`, weight: 'bold', color: '#059669', size: 'xs', flex: 6, align: 'end' },
-            ],
-          },
-          {
-            type: 'separator',
-            margin: 'sm',
-            color: '#F1F5F9',
-          },
-          {
-            type: 'text',
-            text: '⏳ รอแอดมินโอนเงิน',
-            size: 'xs',
-            color: '#64748B',
-            align: 'center',
-            wrap: true,
-          },
-        ],
-      },
-    },
-  };
+  return flex(
+    `ถอนเงิน -${pt(withdrawAmt)} · รอโอน`,
+    bubble({
+      tone: 'out',
+      icon: 'withdraw',
+      eyebrow: 'เงินออก · ถอนเงิน',
+      title: 'รับคำขอถอนแล้ว',
+      body: [
+        ...hero(`-${pt(withdrawAmt)}`, TONES.out.accent),
+        divider(),
+        row('ธนาคาร', bankName),
+        row('เลขบัญชี', accountNumber),
+        row('ชื่อบัญชี', accountName),
+        row('ยอดคงเหลือ', pt(remainingBalance)),
+        note('แอดมินจะโอนเข้าบัญชีนี้'),
+      ],
+    })
+  );
 }
 
-// ── 3g. Slip Received Notice Flex Card ──
+// ── 3g. Slip Received ──
 export function generateSlipReceivedFlex(txId: string): any {
-  return {
-    type: 'flex',
-    altText: `🧾 ได้รับสลิปโอนเงินแล้ว (#${txId})`,
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#059669',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: '🧾 ได้รับสลิปโอนเงินแล้ว',
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'xs',
-            align: 'center',
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'sm',
-        paddingAll: 'md',
-        contents: [
-          {
-            type: 'text',
-            text: `รหัสรายการ: #${txId}`,
-            weight: 'bold',
-            color: '#1E293B',
-            size: 'sm',
-            align: 'center',
-          },
-          {
-            type: 'text',
-            text: 'ระบบได้ส่งภาพสลิปให้แอดมินตรวจสอบยอดเงินเข้าบัญชีเรียบร้อย เมื่อตรวจสอบสำเร็จแต้มจะเข้ากระเป๋าของคุณทันทีครับ 🙏',
-            color: '#64748B',
-            size: 'xs',
-            align: 'center',
-            wrap: true,
-          },
-        ],
-      },
-    },
-  };
+  return flex(
+    `ได้รับสลิปแล้ว #${txId} · รอตรวจสอบ`,
+    bubble({
+      tone: 'pending',
+      icon: 'receipt',
+      eyebrow: 'ฝากเงิน · รอตรวจสอบ',
+      title: 'ได้รับสลิปแล้ว',
+      body: [row('รหัสรายการ', `#${txId}`), note('แอดมินกำลังตรวจยอด เครดิตจะเข้าทันทีที่ยืนยัน')],
+    })
+  );
 }
 
-// ── 4. Live Betting Board Card (กระดานดวลสด) ──
+// ── 4. Live Betting Board (กระดานดวล) ──
 export function generatePendingBoardFlex(pendingList: Order[]): any {
+  const footer = [
+    {
+      type: 'box',
+      layout: 'horizontal',
+      spacing: 'sm',
+      contents: [button('รีเฟรช', 'กระดานดวล'), button('กติกา', 'กติกา')],
+    },
+  ];
+
   if (!pendingList || pendingList.length === 0) {
-    return {
-      type: 'flex',
-      altText: '📊 กระดานดวลสด: ไม่มีแผลค้าง',
-      contents: {
-        type: 'bubble',
+    return flex(
+      'กระดานดวล · ไม่มีแผลรอคู่',
+      bubble({
+        tone: 'neutral',
+        icon: 'list',
         size: 'mega',
-        header: {
-          type: 'box',
-          layout: 'vertical',
-          backgroundColor: '#0F172A',
-          paddingAll: 'md',
-          contents: [
-            {
-              type: 'box',
-              layout: 'horizontal',
-              contents: [
-                {
-                  type: 'text',
-                  text: '📊 กระดานดวลสด',
-                  weight: 'bold',
-                  color: '#FFFFFF',
-                  size: 'md',
-                  flex: 1,
-                },
-                {
-                  type: 'box',
-                  layout: 'vertical',
-                  backgroundColor: '#334155',
-                  cornerRadius: 'sm',
-                  paddingStart: '8px',
-                  paddingEnd: '8px',
-                  paddingTop: '3px',
-                  paddingBottom: '3px',
-                  contents: [
-                    { type: 'text', text: 'ว่าง 0 แผล', color: '#CBD5E1', size: 'xs', weight: 'bold' },
-                  ],
-                },
-              ],
-            },
-            {
-              type: 'text',
-              text: 'ยังไม่มีแผลเปิดรอคู่ในขณะนี้ 🚀',
-              color: '#CBD5E1',
-              size: 'xs',
-              margin: 'sm',
-            },
-          ],
-        },
-        body: {
-          type: 'box',
-          layout: 'vertical',
-          paddingAll: 'lg',
-          spacing: 'sm',
-          contents: [
-            {
-              type: 'text',
-              text: 'ไม่มีแผลดวลค้างในขณะนี้ 🚀',
-              weight: 'bold',
-              color: '#0F172A',
-              size: 'md',
-              align: 'center',
-            },
-            {
-              type: 'text',
-              text: 'ท่านสามารถพิมพ์ ชล หรือ ชถ ในกลุ่มดวล เพื่อเปิดแผลใหม่ได้ทันทีครับ',
-              color: '#475569',
-              size: 'xs',
-              align: 'center',
-              wrap: true,
-            },
-          ],
-        },
-        footer: {
-          type: 'box',
-          layout: 'horizontal',
-          spacing: 'xs',
-          paddingAll: 'sm',
-          contents: [
-            {
-              type: 'button',
-              style: 'secondary',
-              height: 'sm',
-              color: '#F1F5F9',
-              action: {
-                type: 'message',
-                label: '🔄 รีเฟรช',
-                text: 'กระดานดวล',
-              },
-            },
-            {
-              type: 'button',
-              style: 'secondary',
-              height: 'sm',
-              color: '#F1F5F9',
-              action: {
-                type: 'message',
-                label: '📖 กติกา',
-                text: 'กติกา',
-              },
-            },
-          ],
-        },
-      },
-    };
+        compact: true,
+        eyebrow: 'กระดานดวล',
+        title: 'ยังไม่มีแผลรอคู่',
+        body: [text('พิมพ์ ชล หรือ ชถ เพื่อเปิดแผลใหม่', { size: 'xs' })],
+        footer,
+      })
+    );
   }
 
-  const displayItems = pendingList.slice(0, 8);
-  const itemBoxes = displayItems.map((b) => {
-    const isLow = b.side === 'low';
-    const sideText = isLow ? '🔻 ทายต่ำ' : '🔺 ทายสูง';
-    const sideColor = isLow ? '#DC2626' : '#16A34A';
-    const rangeText = (b.rangeMin && b.rangeMax) ? `(${b.rangeMin}-${b.rangeMax}s)` : '(ราคาช่าง)';
-    const amtStr = Number(b.amount || 0).toLocaleString('th-TH');
-
+  const displayItems = pendingList.slice(0, 10);
+  const itemRows = displayItems.map((b) => {
+    const sideText = b.side === 'low' ? '▼ ต่ำ' : '▲ สูง';
+    const rangeText = (b.rangeMin && b.rangeMax) ? `${b.rangeMin}-${b.rangeMax}s` : 'ราคาช่าง';
     return {
       type: 'box',
-      layout: 'vertical',
-      backgroundColor: '#FFFFFF',
-      borderColor: '#CBD5E1',
-      borderWidth: '1px',
-      cornerRadius: 'md',
-      paddingAll: 'md',
-      spacing: 'xs',
+      layout: 'horizontal',
+      alignItems: 'center',
+      spacing: 'md',
       contents: [
-        // Row 1: Order ID (explicit, without redundant brackets) & Player Name
         {
           type: 'box',
-          layout: 'horizontal',
+          layout: 'vertical',
+          flex: 1,
           contents: [
-            {
-              type: 'text',
-              text: `#${b.orderNumber}`,
-              weight: 'bold',
-              color: '#0F172A',
-              size: 'sm',
-              flex: 6,
-            },
-            {
-              type: 'text',
-              text: `👤 @${b.creatorName || 'ผู้เล่น'}`,
-              weight: 'bold',
-              color: '#334155',
-              size: 'xs',
-              align: 'end',
-              flex: 6,
-              wrap: true,
-            },
+            text(`#${b.orderNumber} · ${pt(Number(b.amount || 0))}`, { size: 'sm', color: INK, weight: 'bold', wrap: false }),
+            text(`${sideText} · ${rangeText} · ${b.creatorName || 'ผู้เล่น'}`, { size: 'xs', color: MUTED, wrap: false }),
           ],
         },
-        // Row 2: Prediction Side/Range & Amount
+        // Accept button, ~36px tall
         {
           type: 'box',
-          layout: 'horizontal',
-          contents: [
-            {
-              type: 'box',
-              layout: 'horizontal',
-              flex: 7,
-              contents: [
-                {
-                  type: 'text',
-                  text: `${sideText} ${rangeText}`,
-                  weight: 'bold',
-                  color: sideColor,
-                  size: 'xs',
-                },
-              ],
-            },
-            {
-              type: 'text',
-              text: `${amtStr} pt`,
-              weight: 'bold',
-              color: '#0284C7',
-              size: 'sm',
-              align: 'end',
-              flex: 5,
-            },
-          ],
-        },
-        // Row 3: Prominent High-Contrast Accept Deal Button (~40px tall)
-        {
-          type: 'box',
-          layout: 'horizontal',
-          margin: 'md',
-          contents: [
-            {
-              type: 'box',
-              layout: 'vertical',
-              backgroundColor: '#0284C7',
-              cornerRadius: 'md',
-              paddingTop: '10px',
-              paddingBottom: '10px',
-              flex: 1,
-              action: {
-                type: 'message',
-                label: `ต ${b.orderNumber}`,
-                text: `ต ${b.orderNumber}`,
-              },
-              contents: [
-                {
-                  type: 'text',
-                  text: `⚡ รับดวล Order #${b.orderNumber}`,
-                  color: '#FFFFFF',
-                  weight: 'bold',
-                  size: 'sm',
-                  align: 'center',
-                },
-              ],
-            },
-          ],
+          layout: 'vertical',
+          width: '72px',
+          backgroundColor: TONES.info.accent,
+          cornerRadius: 'md',
+          paddingTop: '8px',
+          paddingBottom: '8px',
+          action: { type: 'message', label: `ต ${b.orderNumber}`, text: `ต ${b.orderNumber}` },
+          contents: [text('รับดวล', { size: 'sm', color: '#FFFFFF', weight: 'bold', align: 'center', wrap: false })],
         },
       ],
     };
   });
 
-  const overflowNotice = pendingList.length > 8 ? [
-    {
-      type: 'text',
-      text: `... และอีก ${pendingList.length - 8} แผลดวลที่เปิดรอคู่`,
-      size: 'xs',
-      color: '#475569',
-      weight: 'bold',
-      align: 'center',
-      margin: 'sm',
-    },
-  ] : [];
-
-  return {
-    type: 'flex',
-    altText: `📊 กระดานดวลสด (${pendingList.length} แผลค้าง)`,
-    contents: {
-      type: 'bubble',
+  return flex(
+    `กระดานดวล · รอคู่ ${pendingList.length} แผล`,
+    bubble({
+      tone: 'neutral',
+      icon: 'list',
       size: 'mega',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#0F172A',
-        paddingAll: 'md',
-        contents: [
-          {
-            type: 'box',
-            layout: 'horizontal',
-            contents: [
-              {
-                type: 'text',
-                text: '📊 กระดานดวลสด',
-                weight: 'bold',
-                color: '#FFFFFF',
-                size: 'md',
-                flex: 1,
-              },
-              {
-                type: 'box',
-                layout: 'vertical',
-                backgroundColor: '#059669',
-                cornerRadius: 'sm',
-                paddingStart: '8px',
-                paddingEnd: '8px',
-                paddingTop: '3px',
-                paddingBottom: '3px',
-                contents: [
-                  {
-                    type: 'text',
-                    text: `รอคู่ ${pendingList.length} แผล`,
-                    color: '#FFFFFF',
-                    size: 'xs',
-                    weight: 'bold',
-                  },
-                ],
-              },
-            ],
-          },
-          {
-            type: 'text',
-            text: 'แตะปุ่มด้านล่าง หรือพิมพ์ ต [เลข Order] เพื่อรับดวล 🚀',
-            color: '#CBD5E1',
-            size: 'xs',
-            margin: 'sm',
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        // 16px between orders. At 4px the accept button of one order sat
-        // right against the next order's card, so a slip took the wrong order.
-        spacing: 'xl',
-        paddingAll: 'md',
-        contents: [
-          ...itemBoxes,
-          ...overflowNotice,
-        ],
-      },
-      footer: {
-        type: 'box',
-        layout: 'horizontal',
-        spacing: 'xs',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'button',
-            style: 'secondary',
-            height: 'sm',
-            color: '#F1F5F9',
-            action: {
-              type: 'message',
-              label: '🔄 รีเฟรช',
-              text: 'กระดานดวล',
-            },
-          },
-          {
-            type: 'button',
-            style: 'secondary',
-            height: 'sm',
-            color: '#F1F5F9',
-            action: {
-              type: 'message',
-              label: '📖 กติกา',
-              text: 'กติกา',
-            },
-          },
-        ],
-      },
-    },
-  };
+      compact: true,
+      eyebrow: 'กระดานดวล',
+      title: `รอคู่ ${pendingList.length} แผล`,
+      // A hairline between orders, so a tap cannot be read as the next row's.
+      body: [
+        ...itemRows.flatMap((r, i) => (i === 0 ? [r] : [divider('md'), r])),
+        ...(pendingList.length > displayItems.length ? [note(`และอีก ${pendingList.length - displayItems.length} แผลที่รอคู่`)] : []),
+      ],
+      footer,
+    })
+  );
 }
 
-// ── 5. Rule Guide Card (กติกาการเล่น) ──
+// ── 5. Rule Guide (กติกาการเล่น) ──
 export function generateRuleGuideFlex(): any {
-  return {
-    type: 'flex',
-    altText: '📖 กติกาการเล่น 🚀',
-    contents: {
-      type: 'bubble',
+  const heading = (value: string, margin = 'lg') => text(value, { color: INK, weight: 'bold', margin });
+  const lines = (value: string) => text(value, { size: 'xs', color: BODY, margin: 'xs' });
+  return flex(
+    'กติกาการเล่น',
+    bubble({
+      tone: 'neutral',
+      icon: 'book',
       size: 'mega',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#0A3D34',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: '🚀 ROCKET SCIENCE',
-            weight: 'bold',
-            color: '#FDE047',
-            size: 'xs',
-            align: 'center',
-          },
-          {
-            type: 'text',
-            text: '📖 กติกาการเล่น',
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'sm',
-            align: 'center',
-            margin: 'xs',
-            wrap: true,
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'sm',
-        paddingAll: 'md',
-        contents: [
-          {
-            type: 'box',
-            layout: 'vertical',
-            backgroundColor: '#ECFDF5',
-            cornerRadius: 'md',
-            paddingAll: 'sm',
-            contents: [
-              {
-                type: 'text',
-                text: '📌 กฏที่ 1: เล่นราคาช่าง',
-                weight: 'bold',
-                color: '#065F46',
-                size: 'sm',
-                wrap: true,
-              },
-              {
-                type: 'text',
-                text: '🎉 ทายว่าชนะ (สูง):',
-                weight: 'bold',
-                color: '#047857',
-                size: 'xs',
-                margin: 'sm',
-                wrap: true,
-              },
-              {
-                type: 'text',
-                text: '• ช่างไล่ / ชล / ไล่ / ลง\n• +5ชล / +5ล / +5ไล่\n• -5ชล / -5ล / -5ไล่',
-                color: '#047857',
-                size: 'xs',
-                wrap: true,
-                margin: 'xs',
-              },
-              {
-                type: 'text',
-                text: '💵 พิมพ์คีย์เวิร์ดตามด้วยจำนวนเงิน (ตัวเลขเท่านั้น)\nเช่น ชล100 , ชล1000 , ชล10000',
-                color: '#065F46',
-                size: 'xs',
-                wrap: true,
-                margin: 'xs',
-              },
-              {
-                // The keyword list and the amount list were shown separately,
-                // so nothing on screen ever showed that they combine into ONE
-                // message, or that the offset goes in front. Players had to
-                // guess the full syntax. One worked example settles it.
-                type: 'text',
-                text: '✅ รูปแบบเต็ม: [ปรับราคา] คีย์เวิร์ด จำนวนแต้ม\nเช่น +10ชล500 · -5ชถ1,000 · ชล500',
-                color: '#065F46',
-                size: 'xs',
-                weight: 'bold',
-                wrap: true,
-                margin: 'xs',
-              },
-              {
-                type: 'separator',
-                margin: 'sm',
-                color: '#A7F3D0',
-              },
-              {
-                type: 'text',
-                text: '👊 ทายว่าแพ้ (ต่ำ):',
-                weight: 'bold',
-                color: '#047857',
-                size: 'xs',
-                margin: 'sm',
-                wrap: true,
-              },
-              {
-                type: 'text',
-                text: '• ช่างยัง / ช่างถอย / ชย\n• ชถ / ยัง / ย / ถอย / ถ\n• +5ชย / +5ชถ / +5ย / +5ถ\n• -5ชย / -5ชถ / -5ย / -5ถ\nเช่น ชถ100 , ชถ1000\n✅ เต็ม: +10ชย500 · -5ชถ1,000',
-                color: '#047857',
-                size: 'xs',
-                wrap: true,
-                margin: 'xs',
-              },
-            ],
-          },
-          {
-            type: 'box',
-            layout: 'vertical',
-            backgroundColor: '#F0F9FF',
-            cornerRadius: 'md',
-            paddingAll: 'sm',
-            contents: [
-              {
-                type: 'text',
-                text: '📌 กฏที่ 2: การเปิดราคาเอง (กรณีช่างไม่ต่อย / ต้องมีเครดิตพอ)',
-                weight: 'bold',
-                color: '#0369A1',
-                size: 'xs',
-                wrap: true,
-              },
-              {
-                type: 'text',
-                text: '💰 การเปิดราคาเอง (เปิดแผลสดใหม่):',
-                weight: 'bold',
-                color: '#0284C7',
-                size: 'xs',
-                margin: 'sm',
-                wrap: true,
-              },
-              {
-                type: 'text',
-                text: '⚠️ ช่วงราคาต้องห่างกันไม่เกิน 50 วิ เช่น\n• 300-350ล500 | 300-350ถ500\n• 350-400ล500 | 350-400ถ500',
-                color: '#0284C7',
-                size: 'xs',
-                wrap: true,
-                margin: 'xs',
-              },
-              {
-                type: 'separator',
-                margin: 'sm',
-                color: '#BAE6FD',
-              },
-              {
-                type: 'text',
-                text: '⬆️ ช่างต่อยกเลิก (ชตย)',
-                weight: 'bold',
-                color: '#0284C7',
-                size: 'xs',
-                margin: 'sm',
-                wrap: true,
-              },
-              {
-                type: 'text',
-                text: 'ใส่ ชตย หลังจำนวนเงิน เช่น\n• 300-350ล500 ชตย\n• 350-400ถ500 ชตย',
-                color: '#0284C7',
-                size: 'xs',
-                wrap: true,
-                margin: 'xs',
-              },
-            ],
-          },
-        ],
-      },
-      footer: {
-        type: 'box',
-        layout: 'horizontal',
-        paddingAll: 'xs',
-        contents: [
-          {
-            type: 'button',
-            action: {
-              type: 'message',
-              label: '📋 ดูกระดานดวลสด',
-              text: 'กระดานดวล',
-            },
-            style: 'primary',
-            color: '#0A3D34',
-            height: 'sm',
-          },
-        ],
-      },
-    },
-  };
+      eyebrow: 'Rocket Science',
+      title: 'กติกาการเล่น',
+      body: [
+        text('1. เล่นราคาช่าง', { color: TONES.info.accent, weight: 'bold' }),
+        heading('ทายว่าชนะ (สูง)', 'sm'),
+        lines('ช่างไล่ · ชล · ไล่ · ลง\n+5ชล · +5ล · +5ไล่\n-5ชล · -5ล · -5ไล่'),
+        heading('ทายว่าแพ้ (ต่ำ)', 'md'),
+        lines('ช่างยัง · ช่างถอย · ชย\nชถ · ยัง · ย · ถอย · ถ\n+5ชย · +5ชถ · +5ย · +5ถ\n-5ชย · -5ชถ · -5ย · -5ถ'),
+        // The keyword list and the amount were shown separately, so nothing
+        // showed that they combine into ONE message, or that the offset goes
+        // in front. One worked example settles it.
+        panel([
+          text('รูปแบบเต็ม: [ปรับราคา] คีย์เวิร์ด จำนวนแต้ม', { size: 'xs', color: INK, weight: 'bold' }),
+          text('เช่น ชล500 · +10ชล500 · -5ชถ1,000 · ชถ100', { size: 'xs', color: BODY }),
+        ], { margin: 'md' }),
+        divider('lg'),
+        text('2. เปิดราคาเอง', { color: TONES.info.accent, weight: 'bold', margin: 'lg' }),
+        text('กรณีช่างไม่ต่อย · ต้องมีเครดิตพอ', { size: 'xs', color: MUTED }),
+        heading('ช่วงราคาห่างกันไม่เกิน 50 วิ', 'md'),
+        lines('300-350ล500 · 300-350ถ500\n350-400ล500 · 350-400ถ500'),
+        heading('ช่างต่อยกเลิก (ชตย)', 'md'),
+        lines('ใส่ ชตย หลังจำนวนเงิน\n300-350ล500 ชตย · 350-400ถ500 ชตย'),
+      ],
+      footer: [button('ดูกระดานดวล', 'กระดานดวล', { style: 'primary', color: TONES.neutral.accent })],
+    })
+  );
 }
 
-// ── 6. Main Menu Quick Reply (เมนูหลักระบบดวล — Floating at all times) ──
+// ── 6. Main Menu Quick Reply (floating at all times in DMs) ──
 export const MAIN_MENU_QUICK_REPLY_ITEMS = [
-  { type: 'action', action: { type: 'message', label: '💳 เช็คยอด', text: 'เช็คยอด' } },
-  { type: 'action', action: { type: 'message', label: '💰 ฝากเงิน', text: 'ฝากเงิน' } },
-  { type: 'action', action: { type: 'message', label: '💸 ถอนเงิน', text: 'ถอนเงิน' } },
-  { type: 'action', action: { type: 'message', label: '📖 กติกา', text: 'กติกา' } },
-  { type: 'action', action: { type: 'message', label: '📋 กระดานดวล', text: 'กระดานดวล' } },
+  { type: 'action', action: { type: 'message', label: 'เช็คยอด', text: 'เช็คยอด' } },
+  { type: 'action', action: { type: 'message', label: 'ฝากเงิน', text: 'ฝากเงิน' } },
+  { type: 'action', action: { type: 'message', label: 'ถอนเงิน', text: 'ถอนเงิน' } },
+  { type: 'action', action: { type: 'message', label: 'กติกา', text: 'กติกา' } },
+  { type: 'action', action: { type: 'message', label: 'กระดานดวล', text: 'กระดานดวล' } },
 ];
 
 /**
@@ -1514,7 +691,7 @@ export const MAIN_MENU_QUICK_REPLY_ITEMS = [
  */
 export function attachMainMenuQuickReply(payload: any): any {
   if (payload === null || payload === undefined) {
-    const notice = generateNoticeFlex('🚀 Rocket Science', 'ยินดีต้อนรับสู่ระบบดวล Rocket Science');
+    const notice = generateNoticeFlex('Rocket Science', 'ยินดีต้อนรับสู่ระบบดวล Rocket Science');
     return {
       ...notice,
       quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
@@ -1525,16 +702,16 @@ export function attachMainMenuQuickReply(payload: any): any {
   if (typeof payload === 'string' || typeof payload === 'number') {
     const textStr = String(payload).trim();
     const lines = textStr.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    const firstLine = lines[0] || '🚀 แจ้งเตือน';
+    const firstLine = lines[0] || 'แจ้งเตือน';
     const restLines = lines.slice(1).join('\n');
     const title = firstLine.length <= 40 ? firstLine : firstLine.slice(0, 40);
     const bodyMessage = restLines.length > 0 ? restLines : firstLine;
     const isError = textStr.includes('⚠️') || textStr.includes('⛔') || textStr.includes('🚫') || textStr.includes('ไม่พอ') || textStr.includes('ผิดพลาด') || textStr.includes('ไม่พบ');
     const isSuccess = textStr.includes('✅') || textStr.includes('สำเร็จ');
     const variant = isError ? 'warning' : (isSuccess ? 'success' : 'info');
-    const flex = generateNoticeFlex(title, bodyMessage, variant);
+    const notice = generateNoticeFlex(title, bodyMessage, variant);
     return {
-      ...flex,
+      ...notice,
       quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
     };
   }
@@ -1543,7 +720,7 @@ export function attachMainMenuQuickReply(payload: any): any {
   if (typeof payload === 'object') {
     // If it is a raw bubble or carousel container, wrap into a flex message with quickReply
     if (payload.type === 'bubble' || payload.type === 'carousel') {
-      const altText = payload.header?.contents?.[0]?.text || payload.altText || '🚀 Rocket Science';
+      const altText = payload.header?.contents?.[0]?.text || payload.altText || 'Rocket Science';
       return {
         type: 'flex',
         altText,
@@ -1556,13 +733,13 @@ export function attachMainMenuQuickReply(payload: any): any {
     if (payload.type === 'text') {
       const textStr = String(payload.text || '').trim();
       const titleMatch = textStr.match(/^([^\n]+)/);
-      const title = titleMatch ? titleMatch[1].slice(0, 30) : '🚀 แจ้งเตือน';
+      const title = titleMatch ? titleMatch[1].slice(0, 30) : 'แจ้งเตือน';
       const isError = textStr.includes('⚠️') || textStr.includes('⛔') || textStr.includes('🚫');
       const isSuccess = textStr.includes('✅') || textStr.includes('สำเร็จ');
       const variant = isError ? 'warning' : (isSuccess ? 'success' : 'info');
-      const flex = generateNoticeFlex(title, textStr, variant);
+      const notice = generateNoticeFlex(title, textStr, variant);
       return {
-        ...flex,
+        ...notice,
         quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
       };
     }
@@ -1603,185 +780,71 @@ export function stripQuickReply(payload: any): any {
 }
 
 export function generateMainMenuQuickReply(displayName: string, balance: number): any {
-  const flex = generateMainMenuFlex(displayName, balance);
+  const menu = generateMainMenuFlex(displayName, balance);
   return {
-    ...flex,
+    ...menu,
     quickReply: {
       items: [...MAIN_MENU_QUICK_REPLY_ITEMS],
     },
   };
 }
 
-// ── 6. Main Menu Flex Card (เมนูหลักระบบดวล) ──
+// ── 6. Main Menu Card ──
 export function generateMainMenuFlex(displayName: string, balance: number): any {
-  return {
-    type: 'flex',
-    altText: '🚀 เมนูหลักระบบดวลบั้งไฟ',
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#0A3D34',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: '🚀 เมนูหลัก (Rocket Science)',
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'xs',
-            align: 'center',
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'xs',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'box',
-            layout: 'horizontal',
-            contents: [
-              { type: 'text', text: '👤 ผู้เล่น', color: '#64748B', size: 'xs', flex: 4 },
-              { type: 'text', text: displayName || 'ผู้เล่น', weight: 'bold', color: '#1E293B', size: 'xs', flex: 6, align: 'end' },
-            ],
-          },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            margin: 'xs',
-            contents: [
-              { type: 'text', text: '💰 แต้มคงเหลือ', color: '#64748B', size: 'xs', flex: 4 },
-              { type: 'text', text: `${balance.toLocaleString()} pt`, weight: 'bold', color: '#059669', size: 'xs', flex: 6, align: 'end' },
-            ],
-          },
-          {
-            type: 'separator',
-            margin: 'sm',
-            color: '#E2E8F0',
-          },
-          {
-            type: 'text',
-            text: 'เลือกรายการที่ต้องการทำได้เลยครับ',
-            size: 'xs',
-            color: '#94A3B8',
-            align: 'center',
-            margin: 'xs',
-          },
-        ],
-      },
-      footer: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'xs',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'box',
-            layout: 'horizontal',
-            spacing: 'xs',
-            contents: [
-              {
-                type: 'button',
-                style: 'primary',
-                height: 'sm',
-                color: '#10B981',
-                action: {
-                  type: 'message',
-                  label: '💰 ฝากเงิน',
-                  text: 'ฝากเงิน',
-                },
-              },
-              {
-                type: 'button',
-                style: 'primary',
-                height: 'sm',
-                color: '#475569',
-                action: {
-                  type: 'message',
-                  label: '💸 ถอนเงิน',
-                  text: 'ถอนเงิน',
-                },
-              },
-            ],
-          },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            spacing: 'xs',
-            margin: 'xs',
-            contents: [
-              {
-                type: 'button',
-                style: 'secondary',
-                height: 'sm',
-                action: {
-                  type: 'message',
-                  label: '📊 เช็คยอด',
-                  text: 'เช็คยอด',
-                },
-              },
-              {
-                type: 'button',
-                style: 'secondary',
-                height: 'sm',
-                action: {
-                  type: 'message',
-                  label: '📖 กติกา',
-                  text: 'กติกา',
-                },
-              },
-            ],
-          },
-          {
-            type: 'button',
-            style: 'secondary',
-            height: 'sm',
-            margin: 'xs',
-            action: {
-              type: 'message',
-              label: '📋 ดูกระดานดวลสด',
-              text: 'กระดานดวล',
-            },
-          },
-        ],
-      },
-    },
-  };
+  return flex(
+    `เมนูหลัก · ยอดคงเหลือ ${pt(balance)}`,
+    bubble({
+      tone: 'neutral',
+      icon: 'grid',
+      eyebrow: 'เมนูหลัก',
+      title: displayName || 'ผู้เล่น',
+      body: [row('ยอดคงเหลือ', pt(balance))],
+      // Deposit and withdraw carry the same colours as the cards they lead to.
+      footer: [
+        {
+          type: 'box',
+          layout: 'horizontal',
+          spacing: 'sm',
+          contents: [
+            button('ฝากเงิน', 'ฝากเงิน', { style: 'primary', color: TONES.in.accent }),
+            button('ถอนเงิน', 'ถอนเงิน', { style: 'primary', color: TONES.out.accent }),
+          ],
+        },
+        {
+          type: 'box',
+          layout: 'horizontal',
+          spacing: 'sm',
+          contents: [button('เช็คยอด', 'เช็คยอด'), button('กติกา', 'กติกา')],
+        },
+        button('ดูกระดานดวล', 'กระดานดวล'),
+      ],
+    })
+  );
 }
 
-// ── 7. Deposit Instruction Card (วิธีฝาก — โอนแล้วส่งสลิป) ──
+// ── 7. Deposit ──
 /**
- * The whole deposit procedure, in one card.
- *
  * There is deliberately no amount field and no amount buttons. The player
  * transfers whatever they intend and the slip becomes the source of truth: the
  * scanner reads the amount off it and credits exactly that. Asking for a number
  * first only created a way for the two to disagree.
- *
- * Kept deliberately short. The first version spelled the procedure out as three
- * numbered steps plus two footnotes; on a phone that is a wall of text for what
- * is really two facts — where to send the money, and send the slip afterwards.
- * The constraints that used to be stated up front (24h, real bank app, ask an
- * admin) each have their own message at the moment they apply, which is when
- * the player can actually act on it.
  */
-// ── 10b. Typed-Amount Hint (typed "1000" or "ฝาก 1000") ──
+const bankPanel = (bank: { bankName: string; accountNumber: string; accountName: string; note?: string }) =>
+  panel([
+    row('ธนาคาร', bank.bankName),
+    row('เลขบัญชี', bank.accountNumber, { color: TONES.in.accent }),
+    row('ชื่อบัญชี', bank.accountName),
+    ...(bank.note ? [divider('sm'), row('หมายเหตุ', bank.note, { color: TONES.out.accent })] : []),
+  ]);
+
+// ── 7b. Typed-Amount Hint (typed "1000" or "ฝาก 1000") ──
 /**
  * Answer to a player who typed a deposit amount instead of following the
  * no-typing flow. Same facts as `generateDepositFlex`, said a different way:
  * this one leads with "you don't have to", that one leads with the account.
  *
- * Built from real nested boxes rather than one string with `\n` and leading
- * spaces. A single text node can only centre or flush-left it — it cannot make
- * a wrapped line hang under the text it belongs to, so the numbered steps came
- * out as a ragged blob with the continuation lines starting wherever the wrap
- * landed. Here the marker sits in a fixed-width column and the copy sits beside
- * it, so a wrapped line indents under the step instead of under the number.
+ * Steps are real nested boxes: the marker sits in a fixed-width column so a
+ * wrapped line indents under the step instead of under the number.
  */
 export function generateTypedAmountHintFlex(bank: {
   bankName: string;
@@ -1789,127 +852,32 @@ export function generateTypedAmountHintFlex(bank: {
   accountName: string;
   note?: string;
 }): any {
-  /**
-   * One numbered step: marker in a fixed column, content in the rest. The fixed
-   * width is what keeps step 1 and step 2 on the same axis — sizing the column
-   * to its contents would work only while both markers are the same width.
-   */
   const step = (marker: string, content: any[]) => ({
     type: 'box',
     layout: 'horizontal',
     spacing: 'sm',
-    margin: 'xs',
+    margin: 'md',
     contents: [
-      {
-        type: 'box',
-        layout: 'vertical',
-        width: '20px',
-        contents: [
-          {
-            type: 'text',
-            text: marker,
-            weight: 'bold',
-            color: '#000000',
-            size: 'sm',
-            align: 'start',
-          },
-        ],
-      },
-      {
-        type: 'box',
-        layout: 'vertical',
-        flex: 1,
-        spacing: 'xs',
-        contents: content,
-      },
+      { type: 'box', layout: 'vertical', width: '20px', contents: [text(marker, { color: INK, weight: 'bold' })] },
+      { type: 'box', layout: 'vertical', flex: 1, spacing: 'sm', contents: content },
     ],
   });
 
-  /** Label/value pair. Mirrors `detailRow` in `generateDepositFlex`. */
-  const detailRow = (label: string, value: string, valueColor = '#000000') => ({
-    type: 'box',
-    layout: 'horizontal',
-    spacing: 'sm',
-    contents: [
-      { type: 'text', text: label, color: '#64748B', size: 'xs', flex: 4, wrap: true },
-      { type: 'text', text: value, weight: 'bold', color: valueColor, size: 'xs', flex: 6, align: 'end', wrap: true },
-    ],
-  });
-
-  const bodyText = (text: string) => ({
-    type: 'text',
-    text,
-    color: '#000000',
-    size: 'sm',
-    align: 'start',
-    wrap: true,
-  });
-
-  return {
-    type: 'flex',
-    altText: '💡 ไม่ต้องพิมพ์ยอดเงิน — ระบบเติมเครดิตตามยอดในสลิป',
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#0A3D34',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: '💡 ไม่ต้องพิมพ์ยอดเงินครับ',
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'xs',
-            align: 'center',
-            wrap: true,
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'xs',
-        paddingAll: 'md',
-        contents: [
-          bodyText('ระบบเติมเครดิตตามยอดที่ปรากฏบนสลิปจริง'),
-          { type: 'separator', margin: 'md', color: '#E2E8F0' },
-          {
-            type: 'text',
-            text: 'วิธีทำ',
-            weight: 'bold',
-            color: '#000000',
-            size: 'sm',
-            align: 'start',
-          },
-          step('1.', [
-            bodyText('โอนเงินเข้าบัญชีด้านล่าง'),
-            {
-              type: 'box',
-              layout: 'vertical',
-              backgroundColor: '#F8FAFC',
-              cornerRadius: 'md',
-              paddingAll: 'sm',
-              spacing: 'xs',
-              contents: [
-                detailRow('🏦 ธนาคาร', bank.bankName),
-                detailRow('🔢 เลขบัญชี', bank.accountNumber),
-                detailRow('👤 ชื่อบัญชี', bank.accountName),
-                ...(bank.note
-                  ? [{ type: 'separator', margin: 'xs', color: '#E2E8F0' }, detailRow('📌 หมายเหตุ', bank.note, '#EA580C')]
-                  : []),
-              ],
-            },
-          ]),
-          step('2.', [bodyText('ส่งรูปสลิปมาที่แชทนี้')]),
-          { type: 'separator', margin: 'md', color: '#E2E8F0' },
-          bodyText('ระบบจะอ่านสลิปแล้วเติมเครดิตให้อัตโนมัติครับ 🙏'),
-        ],
-      },
-    },
-  };
+  return flex(
+    'ไม่ต้องพิมพ์ยอดเงิน · ระบบเติมเครดิตตามยอดในสลิป',
+    bubble({
+      tone: 'in',
+      icon: 'deposit',
+      eyebrow: 'ฝากเงิน',
+      title: 'ไม่ต้องพิมพ์ยอดเงิน',
+      body: [
+        text('ระบบเติมเครดิตตามยอดบนสลิปจริง', { color: INK }),
+        step('1.', [text('โอนเข้าบัญชีนี้', { color: INK }), bankPanel(bank)]),
+        step('2.', [text('ส่งรูปสลิปในแชตนี้', { color: INK })]),
+        note('ระบบอ่านสลิปและเติมเครดิตให้อัตโนมัติ'),
+      ],
+    })
+  );
 }
 
 export function generateDepositFlex(bank: {
@@ -1918,339 +886,87 @@ export function generateDepositFlex(bank: {
   accountName: string;
   note?: string;
 }): any {
-  const detailRow = (label: string, value: string, valueColor = '#334155') => ({
-    type: 'box',
-    layout: 'horizontal',
-    contents: [
-      { type: 'text', text: label, color: '#94A3B8', size: 'xs', flex: 4 },
-      { type: 'text', text: value, weight: 'bold', color: valueColor, size: 'xs', flex: 6, align: 'end', wrap: true },
-    ],
-  });
-
-  return {
-    type: 'flex',
-    altText: '💰 วิธีฝากเครดิต — โอนเงินแล้วส่งสลิป',
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#10B981',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: '💰 ฝากเครดิต (Deposit)',
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'xs',
-            align: 'center',
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'xs',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'box',
-            layout: 'vertical',
-            backgroundColor: '#F8FAFC',
-            cornerRadius: 'md',
-            paddingAll: 'sm',
-            spacing: 'xs',
-            contents: [
-              detailRow('🏦 ธนาคาร', bank.bankName),
-              detailRow('🔢 เลขบัญชี', bank.accountNumber, '#0369A1'),
-              detailRow('👤 ชื่อบัญชี', bank.accountName),
-              ...(bank.note
-                ? [{ type: 'separator', margin: 'xs', color: '#E2E8F0' }, detailRow('📌 หมายเหตุ', bank.note, '#EA580C')]
-                : []),
-            ],
-          },
-          { type: 'separator', margin: 'sm', color: '#F1F5F9' },
-          {
-            type: 'text',
-            text: 'โอนเงินแล้วส่งรูปสลิปมาที่แชทนี้\nไม่ต้องพิมพ์ยอด — ระบบเติมเครดิตตามยอดในสลิป',
-            // Brick orange rather than the slate it replaced. This is the one
-            // line the player has to act on, and at #334155 on a white bubble it
-            // rendered as grey mush in LINE on a phone. Warm orange also keeps
-            // it distinct from the account number directly above it, which is
-            // already blue and is data rather than instruction.
-            color: '#C2410C',
-            weight: 'bold',
-            size: 'xs',
-            wrap: true,
-            align: 'center',
-          },
-        ],
-      },
-    },
-  };
+  return flex(
+    'ฝากเงิน · โอนแล้วส่งสลิป',
+    bubble({
+      tone: 'in',
+      icon: 'deposit',
+      eyebrow: 'ฝากเงิน',
+      title: 'โอนเข้าบัญชีนี้',
+      body: [
+        bankPanel(bank),
+        // The one line the player has to act on: bold ink, not muted grey.
+        text('โอนแล้วส่งรูปสลิปในแชตนี้', { color: INK, weight: 'bold', margin: 'md' }),
+        text('ไม่ต้องพิมพ์ยอด ระบบเติมเครดิตตามยอดในสลิป', { size: 'xs', color: MUTED }),
+      ],
+    })
+  );
 }
 
 /** Slip verified and credited — the player sees the amount the slip proved. */
 export function generateSlipCreditedFlex(amount: number, newBalance: number, refCode: string): any {
   const formattedAmt = Number(amount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const formattedBal = Number(newBalance || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return {
-    type: 'flex',
-    altText: `✅ เติมเครดิต ${formattedAmt} บาทเรียบร้อย`,
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#059669',
-        paddingAll: 'sm',
-        contents: [
-          { type: 'text', text: '✅ เติมเครดิตเรียบร้อย', weight: 'bold', color: '#FFFFFF', size: 'xs', align: 'center' },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'xs',
-        paddingAll: 'md',
-        contents: [
-          {
-            type: 'text',
-            text: `+${formattedAmt} บาท`,
-            weight: 'bold',
-            color: '#059669',
-            size: 'xl',
-            align: 'center',
-          },
-          {
-            type: 'text',
-            text: 'ระบบอ่านยอดจากสลิปของคุณแล้วครับ',
-            color: '#64748B',
-            size: 'xs',
-            align: 'center',
-            wrap: true,
-          },
-          { type: 'separator', margin: 'sm', color: '#F1F5F9' },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            contents: [
-              { type: 'text', text: '💎 แต้มคงเหลือ', color: '#94A3B8', size: 'xs', flex: 4 },
-              { type: 'text', text: `${formattedBal} pt`, weight: 'bold', color: '#0F172A', size: 'xs', flex: 6, align: 'end' },
-            ],
-          },
-          {
-            type: 'box',
-            layout: 'horizontal',
-            contents: [
-              { type: 'text', text: '🔖 เลขอ้างอิง', color: '#94A3B8', size: 'xs', flex: 4 },
-              { type: 'text', text: refCode, color: '#64748B', size: 'xs', flex: 6, align: 'end', wrap: true },
-            ],
-          },
-        ],
-      },
-    },
-  };
+  return flex(
+    `เงินเข้า +${formattedAmt} บาท · คงเหลือ ${formattedBal} pt`,
+    bubble({
+      tone: 'in',
+      icon: 'deposit',
+      eyebrow: 'เงินเข้า · ฝากเงิน',
+      title: 'เติมเครดิตแล้ว',
+      body: [
+        ...hero(`+${formattedAmt} บาท`, TONES.in.accent, 'ยอดตามสลิป'),
+        divider(),
+        row('ยอดคงเหลือ', `${formattedBal} pt`),
+        row('เลขอ้างอิง', refCode, { color: MUTED, size: 'xs' }),
+      ],
+    })
+  );
 }
-// ── 8. Deposit Invoice Card (ใบแจ้งโอนเงินฝาก) ──
+
+// ── 8. Deposit Invoice (ใบแจ้งโอนเงินฝาก) ──
 export function generateDepositInvoiceFlex(depositAmt: number): any {
   const formattedAmt = Number(depositAmt || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return {
-    type: 'flex',
-    altText: `🧾 ใบแจ้งโอนเงินฝาก ${formattedAmt} THB`,
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#10B981',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: '🧾 ใบแจ้งโอนเงินฝาก',
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'xs',
-            align: 'center',
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'xs',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: `${formattedAmt} THB`,
-            weight: 'bold',
-            color: '#059669',
-            size: 'xl',
-            align: 'center',
-          },
-          {
-            type: 'text',
-            text: 'ยอดเงินที่ต้องโอน',
-            color: '#94A3B8',
-            size: 'xs',
-            align: 'center',
-          },
-          {
-            type: 'separator',
-            margin: 'xs',
-            color: '#F1F5F9',
-          },
-          {
-            type: 'box',
-            layout: 'vertical',
-            margin: 'xs',
-            spacing: 'xs',
-            contents: [
-              {
-                type: 'box',
-                layout: 'horizontal',
-                contents: [
-                  { type: 'text', text: '🏦 ธนาคาร', color: '#94A3B8', size: 'xs', flex: 4 },
-                  { type: 'text', text: 'SCB (ไทยพาณิชย์)', weight: 'bold', color: '#334155', size: 'xs', flex: 6, align: 'end' },
-                ],
-              },
-              {
-                type: 'box',
-                layout: 'horizontal',
-                contents: [
-                  { type: 'text', text: '🔢 เลขบัญชี', color: '#94A3B8', size: 'xs', flex: 4 },
-                  { type: 'text', text: '890-1-23456-7', weight: 'bold', color: '#0369A1', size: 'xs', flex: 6, align: 'end' },
-                ],
-              },
-              {
-                type: 'box',
-                layout: 'horizontal',
-                contents: [
-                  { type: 'text', text: '👤 ชื่อบัญชี', color: '#94A3B8', size: 'xs', flex: 4 },
-                  { type: 'text', text: 'Somchai Jongcharoen', weight: 'bold', color: '#334155', size: 'xs', flex: 6, align: 'end' },
-                ],
-              },
-            ],
-          },
-          {
-            type: 'separator',
-            margin: 'xs',
-            color: '#F1F5F9',
-          },
-          {
-            type: 'text',
-            text: '⚠️ โอนเสร็จแล้ว กรุณาส่ง "รูปสลิป" เข้ามาในแชทนี้ได้เลยครับ ระบบจะตรวจสอบและเติมเครดิตให้อัตโนมัติ 🙏',
-            size: 'xs',
-            color: '#EA580C',
-            align: 'center',
-            wrap: true,
-            margin: 'xs',
-          },
-        ],
-      },
-    },
-  };
+  return flex(
+    `ใบแจ้งโอนเงินฝาก ${formattedAmt} บาท`,
+    bubble({
+      tone: 'in',
+      icon: 'receipt',
+      eyebrow: 'ฝากเงิน',
+      title: 'ใบแจ้งโอน',
+      body: [
+        ...hero(`${formattedAmt} บาท`, TONES.in.accent, 'ยอดที่ต้องโอน'),
+        divider(),
+        bankPanel({ bankName: 'SCB (ไทยพาณิชย์)', accountNumber: '890-1-23456-7', accountName: 'Somchai Jongcharoen' }),
+        note('โอนแล้วส่งรูปสลิปในแชตนี้ ระบบตรวจและเติมเครดิตอัตโนมัติ'),
+      ],
+    })
+  );
 }
 
-// ── 9. Withdrawal Card (ถอนเงินคืน) ──
+// ── 9. Withdrawal (ถอนเงิน) ──
 export function generateWithdrawalFlex(bankName: string, accountNumber: string, accountName: string, balance: number): any {
   const formattedBal = Number(balance || 0).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-  return {
-    type: 'flex',
-    altText: '💸 แจ้งถอนเงินคืน',
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#475569',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: '💸 แจ้งถอนเงินคืน',
-            weight: 'bold',
-            color: '#FFFFFF',
-            size: 'xs',
-            align: 'center',
-          },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'xs',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'text',
-            text: `${formattedBal} pt`,
-            weight: 'bold',
-            color: '#059669',
-            size: 'xl',
-            align: 'center',
-          },
-          { type: 'separator', margin: 'sm', color: '#F1F5F9' },
-          {
-            type: 'box',
-            layout: 'vertical',
-            margin: 'xs',
-            spacing: 'xs',
-            contents: [
-              {
-                type: 'box',
-                layout: 'horizontal',
-                contents: [
-                  { type: 'text', text: '🏦 ธนาคาร', color: '#94A3B8', size: 'xs', flex: 4 },
-                  { type: 'text', text: bankName || '-', weight: 'bold', color: '#334155', size: 'xs', flex: 6, align: 'end' },
-                ],
-              },
-              {
-                type: 'box',
-                layout: 'horizontal',
-                contents: [
-                  { type: 'text', text: '🔢 เลขบัญชี', color: '#94A3B8', size: 'xs', flex: 4 },
-                  { type: 'text', text: accountNumber || '-', weight: 'bold', color: '#334155', size: 'xs', flex: 6, align: 'end' },
-                ],
-              },
-              {
-                type: 'box',
-                layout: 'horizontal',
-                contents: [
-                  { type: 'text', text: '👤 ชื่อบัญชี', color: '#94A3B8', size: 'xs', flex: 4 },
-                  { type: 'text', text: accountName || '-', weight: 'bold', color: '#334155', size: 'xs', flex: 6, align: 'end' },
-                ],
-              },
-            ],
-          },
-          {
-            type: 'separator',
-            margin: 'xs',
-            color: '#F1F5F9',
-          },
-          {
-            type: 'text',
-            text: 'พิมพ์ "ถอน [จำนวน]"',
-            size: 'xs',
-            color: '#2563EB',
-            align: 'center',
-            wrap: true,
-            margin: 'xs',
-          },
-        ],
-      },
-    },
-  };
+  return flex(
+    `ถอนเงิน · ถอนได้ ${formattedBal} pt`,
+    bubble({
+      tone: 'out',
+      icon: 'withdraw',
+      eyebrow: 'ถอนเงิน',
+      title: 'แจ้งถอนเงิน',
+      body: [
+        ...hero(`${formattedBal} pt`, INK, 'ยอดที่ถอนได้'),
+        divider(),
+        row('ธนาคาร', bankName || '-'),
+        row('เลขบัญชี', accountNumber || '-'),
+        row('ชื่อบัญชี', accountName || '-'),
+        text('พิมพ์ "ถอน [จำนวน]" เพื่อส่งคำขอ', { color: INK, weight: 'bold', margin: 'md' }),
+      ],
+    })
+  );
 }
 
-// ── 10. Bank Registration Card ──
+// ── 10. Bank Registration ──
 /**
  * Asked to withdraw before their bank details are on file.
  *
@@ -2262,59 +978,25 @@ export function generateWithdrawalFlex(bankName: string, accountNumber: string, 
 export function generateBankRegistrationFlex(pendingAmount?: number): any {
   const retry =
     pendingAmount && pendingAmount > 0
-      ? ` — แล้วพิมพ์ "ถอน ${Number(pendingAmount).toLocaleString('th-TH')}" อีกครั้ง`
-      : '';
+      ? `พิมพ์ "ถอน ${Number(pendingAmount).toLocaleString('th-TH')}" อีกครั้ง`
+      : 'พิมพ์ "ถอน" อีกครั้ง';
 
-  return {
-    type: 'flex',
-    altText: '🏦 ข้อมูลบัญชีธนาคาร',
-    contents: {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#0284C7',
-        paddingAll: 'sm',
-        contents: [
-          { type: 'text', text: '🏦 ข้อมูลบัญชีธนาคาร', weight: 'bold', color: '#FFFFFF', size: 'xs', align: 'center' },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'xs',
-        paddingAll: 'sm',
-        contents: [
-          {
-            type: 'box',
-            layout: 'vertical',
-            backgroundColor: '#F8FAFC',
-            paddingAll: 'sm',
-            cornerRadius: 'sm',
-            contents: [
-              {
-                type: 'text',
-                text: 'บัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ-สกุล]\nเช่น กสิกร 0123456789 สมชาย',
-                size: 'xs',
-                color: '#0369A1',
-                weight: 'bold',
-                wrap: true,
-              },
-            ],
-          },
-          {
-            type: 'text',
-            text: `ยังไม่หักแต้ม — ส่งแล้วพิมพ์ "ถอน" อีกครั้ง${retry}`,
-            size: 'xs',
-            color: '#EA580C',
-            wrap: true,
-            margin: 'xs',
-          },
-        ],
-      },
-    },
-  };
+  return flex(
+    'ถอนเงิน · ลงทะเบียนบัญชีธนาคารก่อน',
+    bubble({
+      tone: 'pending',
+      icon: 'bank',
+      eyebrow: 'ถอนเงิน',
+      title: 'ลงทะเบียนบัญชีก่อน',
+      body: [
+        panel([
+          text('บัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ-สกุล]', { size: 'sm', color: INK, weight: 'bold' }),
+          text('เช่น บัญชี กสิกร 0123456789 สมชาย', { size: 'xs', color: MUTED }),
+        ]),
+        text(`ยังไม่หักเครดิต ส่งข้อมูลแล้ว${retry}`, { size: 'xs', color: BODY, margin: 'md' }),
+      ],
+    })
+  );
 }
 
 
@@ -2347,84 +1029,35 @@ export function generateDailySummaryFlex(day: string, orders: Order[]): any {
     .sort((a, b) => (Number(a[0].settledAt) || 0) - (Number(b[0].settledAt) || 0));
 
   if (groups.length === 0) {
-    return generateNoticeFlex(`📅 สรุปผลดวลประจำวัน ${day}`, 'ยังไม่มีคู่ดวลที่ตัดสินผลในวันนี้ครับ', 'info');
+    return generateNoticeFlex(`สรุปผลวันที่ ${day}`, 'ยังไม่มีคู่ดวลที่ตัดสินผลในวันนี้', 'info');
   }
-
-  const pairRow = (o: Order) => {
-    const draw = o.winnerSide === 'draw';
-    const creatorWins = o.winnerSide === o.side;
-    const winName = draw ? o.creatorName : (creatorWins ? o.creatorName : o.matcherName);
-    const loseName = draw ? o.matcherName : (creatorWins ? o.matcherName : o.creatorName);
-    const range = o.rangeMin !== undefined && o.rangeMax !== undefined ? `${o.rangeMin}-${o.rangeMax}s` : '-';
-    return {
-      type: 'box',
-      layout: 'vertical',
-      margin: 'md',
-      paddingAll: 'sm',
-      cornerRadius: 'sm',
-      backgroundColor: draw ? '#F1F5F9' : '#F0FDF4',
-      contents: [
-        {
-          type: 'box',
-          layout: 'horizontal',
-          contents: [
-            { type: 'text', text: `#${o.orderNumber} · ${range}`, size: 'xxs', color: '#64748B' },
-          ],
-        },
-        {
-          type: 'box',
-          layout: 'horizontal',
-          margin: 'xs',
-          contents: [
-            { type: 'text', text: `${draw ? '🤝' : '👑'} ${String(winName || '-').slice(0, 16)}`, size: 'xs', color: draw ? '#475569' : '#059669', weight: 'bold', flex: 1, wrap: true },
-            { type: 'text', text: `${draw ? '🤝' : '💥'} ${String(loseName || '-').slice(0, 16)}`, size: 'xs', color: draw ? '#475569' : '#DC2626', align: 'end', flex: 1, wrap: true },
-          ],
-        },
-        ...(draw ? [{ type: 'text', text: 'เสมอ', size: 'xxs', color: '#64748B', align: 'end' }] : []),
-      ],
-    };
-  };
 
   const build = (rowsPerRound: number) => {
     const bubbles = groups.slice(0, DAILY_SUMMARY_MAX_ROUNDS).map((list) => {
       const first = list[0];
       const hidden = list.length - rowsPerRound;
-      return {
-        type: 'bubble',
+      return bubble({
+        tone: 'info',
+        icon: 'calendar',
         size: 'mega',
-        header: {
-          type: 'box',
-          layout: 'vertical',
-          backgroundColor: '#0F172A',
-          paddingAll: 'md',
-          contents: [
-            { type: 'text', text: `📅 สรุปผลประจำวัน ${day}`, size: 'xs', color: '#FDE047', align: 'center', weight: 'bold' },
-            { type: 'text', text: `🚀 ${first.rocketName || 'บั้งไฟสด'}`, size: 'md', color: '#FFFFFF', align: 'center', weight: 'bold', margin: 'xs', wrap: true },
-            { type: 'text', text: `⏱️ เวลาบิน ${first.finalTime ?? '-'} วิ · ${list.length} คู่`, size: 'xs', color: '#38BDF8', align: 'center', margin: 'xs' },
-          ],
-        },
-        body: {
-          type: 'box',
-          layout: 'vertical',
-          paddingAll: 'md',
-          contents: [
-            ...list.slice(0, rowsPerRound).map(pairRow),
-            ...(hidden > 0
-              ? [{ type: 'text', text: `… และอีก ${hidden} คู่ (ดูครบในหน้าแอดมิน)`, size: 'xs', color: '#64748B', align: 'center', margin: 'md' }]
-              : []),
-          ],
-        },
-      };
+        compact: true,
+        eyebrow: `สรุปผลวันที่ ${day}`,
+        title: first.rocketName || 'บั้งไฟสด',
+        sub: `เวลาบิน ${first.finalTime ?? '-'} วิ · ${list.length} คู่`,
+        body: [
+          ...duelTable(list.slice(0, rowsPerRound)),
+          ...(hidden > 0 ? [note(`และอีก ${hidden} คู่ ดูครบในหน้าแอดมิน`, 'sm')] : []),
+        ],
+      });
     });
-    return {
-      type: 'flex',
-      altText: `📅 สรุปผลดวลประจำวัน ${day} (${orders.length} คู่)`,
-      contents: bubbles.length === 1 ? bubbles[0] : { type: 'carousel', contents: bubbles },
-    };
+    return flex(
+      `สรุปผลวันที่ ${day} · ${orders.length} คู่`,
+      bubbles.length === 1 ? bubbles[0] : { type: 'carousel', contents: bubbles }
+    );
   };
 
   // Fewer rows per card until the whole message fits LINE's size limit.
-  let rows = 20;
+  let rows = 30;
   let msg = build(rows);
   while (rows > 3 && new TextEncoder().encode(JSON.stringify(msg.contents)).length > DAILY_SUMMARY_MAX_BYTES) {
     rows -= 1;
