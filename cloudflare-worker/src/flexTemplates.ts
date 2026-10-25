@@ -11,8 +11,9 @@ import type { LineIconName } from './lineIcons.js';
  *   out      orange  credit leaves — withdrawal, admin deduction
  *   error    red     refused or failed, round void
  *   pending  amber   waiting on someone — slip under review, betting closed
- *   info     blue    round news — quote, result, match, balance
- *   neutral  slate   reference — board, menu, rules
+ *   info     blue    round news — quote, result, daily summary (kept rare)
+ *   neutral  slate   everything else — orders, matches, balance, board,
+ *                    menu, rules, plain notices
  *
  * Copy is short and plain: no emoji, no slang, left-aligned, one idea per line.
  * Amounts are the largest text on a card that moves money.
@@ -328,7 +329,7 @@ export function generateOrderFlex(order: Order): any {
   return flex(
     `ออเดอร์ #${orderNumber} · ${cardTitle} · ${pt(numAmount)}`,
     bubble({
-      tone: 'info',
+      tone: 'neutral',
       icon: 'ticket',
       size: 'mega',
       compact: true,
@@ -375,7 +376,7 @@ export function generateMatchNotificationFlex(order: Order): any {
   return flex(
     `จับคู่สำเร็จ #${orderNumber} · ${pt(amount)}`,
     bubble({
-      tone: 'info',
+      tone: 'neutral',
       icon: 'link',
       eyebrow: `จับคู่สำเร็จ · #${orderNumber}`,
       title: pt(amount),
@@ -410,7 +411,7 @@ export function generateBalanceFlex(displayName: string, balance: number): any {
   return flex(
     `ยอดคงเหลือ ${pt(balance)}`,
     bubble({
-      tone: 'info',
+      tone: 'neutral',
       icon: 'wallet',
       eyebrow: 'ยอดคงเหลือ',
       title: displayName || 'สมาชิก',
@@ -457,7 +458,7 @@ export interface NoticeFlexOptions {
 
 /**
  * `type` picks the header colour: success = green, warning = amber,
- * error = red, info = blue. Use 'in' / 'out' when the notice is about credit
+ * error = red, info = slate. Use 'in' / 'out' when the notice is about credit
  * arriving or leaving, so it matches the money cards.
  */
 export function generateNoticeFlex(
@@ -467,7 +468,7 @@ export function generateNoticeFlex(
   hint?: string,
   options: NoticeFlexOptions = {}
 ): any {
-  const tone: Tone = ({ info: 'info', success: 'in', warning: 'pending', error: 'error', in: 'in', out: 'out' } as const)[type] || 'info';
+  const tone: Tone = ({ info: 'neutral', success: 'in', warning: 'pending', error: 'error', in: 'in', out: 'out' } as const)[type] || 'info';
   const align = options.align ?? 'start';
   return flex(
     `${title}: ${message.slice(0, 60)}`,
