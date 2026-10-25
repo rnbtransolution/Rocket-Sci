@@ -1811,10 +1811,10 @@ export default function App() {
                 <div>
                   <h3 className="text-base font-semibold text-[#16191D] flex items-center gap-2 font-heading">
                     <Rocket size={18} className="text-[#8A4B00]" />
-                    เปิดบั้งไฟถัดไป (Rocket B) ขณะรอผลบั้งไฟกลางอากาศ (Rocket A)
+                    เปิดบั้งไฟลำถัดไปขณะลำเดิมยังบินอยู่
                   </h3>
                   <p className="text-xs text-[#5B636E] font-sans mt-0.5">
-                    แยกสัญญาคู่ดวลของบั้งไฟที่ปล่อยขึ้นฟ้าแล้วเข้าคิวรอผลเวลา (In-Flight Queue) และเปิดรับออเดอร์บั้งไฟลูกถัดไปได้ทันทีโดยที่เลขแผลและราคาไม่ชนกัน
+                    คู่ดวลของลำที่ขึ้นแล้วย้ายไปรอผลในคิว ลำใหม่รับออเดอร์ได้ทันที เลขออเดอร์และราคาไม่ปนกัน
                   </p>
                 </div>
               </div>
@@ -1824,7 +1824,7 @@ export default function App() {
                 <div className="p-4 rounded-lg bg-[#F7F8F9] border border-[#D9DDE2] space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[12px] font-semibold text-[#5B636E]">
-                      บั้งไฟรอบปัจจุบันที่รับออเดอร์อยู่ (Active Slot)
+                      ลำที่รับออเดอร์อยู่
                     </span>
                     <span
                       className={`px-2 py-0.5 rounded-full text-[12px] font-semibold ${
@@ -1872,14 +1872,14 @@ export default function App() {
                 <div className="p-4 rounded-lg bg-[#FDF1E1] border border-[#E8C48F] space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[12px] font-semibold text-[#8A4B00]">
-                      บั้งไฟที่กำลังบินอยู่บนฟ้า (In-Flight Queue)
+                      ลำที่บินอยู่ รอผล
                     </span>
                     <span className="px-2 py-0.5 rounded-full text-[12px] font-semibold bg-[#FBE5C6] text-[#8A4B00]">
                       {inFlightRounds.length} ลำรอตัดสินผล
                     </span>
                   </div>
                   <p className="text-xs text-[#8A4B00] leading-relaxed">
-                    เมื่อกดเปิดบั้งไฟลูกใหม่ (Rocket B) ด้านล่าง ระบบจะล็อกและย้ายคู่ดวลของบั้งไฟลูกเดิม (Rocket A) มาเก็บในคิวรอผลเวลาบินโดยอัตโนมัติ และรันเลข Order # ไม่ให้ซ้ำกัน 100%
+                    เมื่อเปิดลำใหม่ คู่ดวลของลำเดิมจะย้ายมารอผลที่นี่อัตโนมัติ
                   </p>
                 </div>
               </div>
@@ -1892,18 +1892,18 @@ export default function App() {
                       1
                     </span>
                     <h4 className="text-sm font-semibold text-[#16191D] font-heading">
-                      เปิดรับออเดอร์บั้งไฟลูกถัดไป (Rocket B) ทันที
+                      เปิดลำถัดไป
                     </h4>
                   </div>
                   <span className="text-[12px] font-bold text-[#1E4DB7]">
-                    บั้งไฟลูกปัจจุบันจะถูกพักไว้ในคิวรอผลเวลาอัตโนมัติ (ถ้ามีคู่ดวลค้างอยู่)
+                    ลำปัจจุบันจะย้ายไปรอผลในคิว ถ้ามีคู่ที่ต่อติดอยู่
                   </span>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-bold text-[#3B424C] block mb-1">
-                      ชื่อบั้งไฟลูกถัดไป (Rocket B Name):
+                      ชื่อบั้งไฟลำถัดไป
                     </label>
                     <input
                       type="text"
@@ -1916,7 +1916,7 @@ export default function App() {
 
                   <div>
                     <label className="text-xs font-bold text-[#3B424C] block mb-1">
-                      โหมดการเปิดรับออเดอร์บั้งไฟลูกถัดไป:
+                      วิธีเปิดรับออเดอร์
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       <button
@@ -1945,7 +1945,7 @@ export default function App() {
                       >
                         <div className="font-semibold">ออกราคาช่างทันที</div>
                         <div className={`text-[12px] mt-0.5 ${nextRocketMode === 'quote' ? 'text-[#1B6E43]' : 'text-[#8A929D]'}`}>
-                          กำหนดช่วงเวลา Min-Max พร้อมเปิดดวล
+                          กำหนดช่วงราคาแล้วเปิดดวลเลย
                         </div>
                       </button>
                     </div>
@@ -1956,7 +1956,7 @@ export default function App() {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 bg-[#E2F2E9] border border-[#B9DEC8] rounded-lg">
                     <div>
                       <label className="text-[12px] font-bold text-[#1B6E43] block mb-1">
-                        เวลาต่ำสุด (Min วินาที):
+                        ราคาต่ำสุด (วินาที)
                       </label>
                       <input
                         type="number"
@@ -1968,7 +1968,7 @@ export default function App() {
                     </div>
                     <div>
                       <label className="text-[12px] font-bold text-[#1B6E43] block mb-1">
-                        เวลาสูงสุด (Max วินาที):
+                        ราคาสูงสุด (วินาที)
                       </label>
                       <input
                         type="number"
@@ -2003,7 +2003,7 @@ export default function App() {
                       className="w-4 h-4 accent-[#1E4DB7] rounded"
                     />
                     <span>
-                      ส่งประกาศแจ้งเปิดบั้งไฟลูกใหม่ ({nextRocketName || 'บั้งไฟชุดต่อไป'}) เข้ากลุ่ม LINE ทันที
+                      ประกาศเข้ากลุ่ม LINE
                     </span>
                   </label>
 
@@ -2016,7 +2016,7 @@ export default function App() {
                     <span>
                       {isOpeningNextRocket
                         ? 'กำลังสลับรอบและเปิดบั้งไฟถัดไป...'
-                        : `พักรอบเดิมไว้บนฟ้า & เปิดรับดวล "${nextRocketName || 'บั้งไฟชุดต่อไป'}" ทันที`}
+                        : `เปิดลำถัดไป${nextRocketName ? ` · ${nextRocketName}` : ''}`}
                     </span>
                   </button>
                 </div>
@@ -2030,7 +2030,7 @@ export default function App() {
                       2
                     </span>
                     <h4 className="text-sm font-semibold text-[#16191D] font-heading">
-                      คิวบั้งไฟที่กำลังบินอยู่บนฟ้า รอป้อนผลเวลา (In-Flight Rockets Queue)
+                      คิวบั้งไฟที่บินอยู่ รอป้อนผลเวลา
                     </h4>
                   </div>
                   <span className="text-[12px] font-bold text-[#5B636E]">
@@ -2041,10 +2041,10 @@ export default function App() {
                 {inFlightRounds.length === 0 ? (
                   <div className="p-8 rounded-lg bg-[#F7F8F9] border border-dashed border-[#C3C9D1] text-center space-y-1.5">
                                         <div className="text-xs font-bold text-[#3B424C]">
-                      ขณะนี้ไม่มีบั้งไฟค้างอยู่บนฟ้าในคิว In-Flight
+                      ยังไม่มีบั้งไฟที่บินอยู่
                     </div>
                     <p className="text-[12px] text-[#5B636E] max-w-md mx-auto">
-                      เมื่อบั้งไฟ A ปล่อยขึ้นฟ้าแล้ว และคุณกดเปิดบั้งไฟ B ด้านบน คู่ดวลของบั้งไฟ A จะย้ายมาแสดงที่นี่เพื่อให้คุณกรอกผลเวลาบินเมื่อบั้งไฟ A ตกถึงพื้น
+                      เมื่อเปิดลำถัดไป คู่ดวลของลำเดิมจะมารอป้อนผลเวลาที่นี่
                     </p>
                   </div>
                 ) : (
@@ -3112,7 +3112,7 @@ export default function App() {
                 <div>
                   <h3 className="text-base font-semibold text-[#16191D] flex items-center gap-2 font-heading">
                     <Radio size={18} className="text-[#1E4DB7]" />
-                    ศูนย์บรอดแคสต์ & คีย์ลัดสั่งการสนาม
+                    ประกาศเข้ากลุ่ม LINE
                   </h3>
                   <p className="text-xs text-[#5B636E] font-sans mt-0.5">
                     ควบคุมรอบฉุกเฉิน ปิดรับดวล ส่งคู่มือกติกา ประกาศข้อความสนามเข้ากลุ่ม LINE
@@ -3138,7 +3138,7 @@ export default function App() {
                     onChange={(e) => setBroadcastTargetGroup(e.target.value)}
                     className="w-full bg-white border border-[#C7D3F1] text-[#16191D] font-bold px-3 py-1.5 rounded-lg text-xs focus:ring-2 focus:ring-[#1E4DB7]/30 focus:outline-none"
                   >
-                    <option value="ALL">กระจายทุกกลุ่มดวลสด (All Groups)</option>
+                    <option value="ALL">ทุกกลุ่มดวล</option>
                     {lineGroups.map((g, idx) => {
                       const isRawId = !g.name || g.name.startsWith('C') || g.name.includes(g.id) || !isNaN(g.name);
                       const displayName = !isRawId ? g.name : `กลุ่มดวลสด #${idx + 1} (${g.id.slice(-4)})`;
@@ -3156,24 +3156,24 @@ export default function App() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between border-b border-[#D9DDE2] pb-2">
                   <span className="text-xs font-semibold text-[#16191D] font-heading flex items-center gap-1.5">
-                    <span>1. ปุ่มคีย์ลัดสั่งการสนาม & กฎกติกา</span>
+                    <span>1. คำสั่งด่วน</span>
                   </span>
                   <span className="text-[12px] text-[#8A929D] font-sans">ส่งการ์ด Flex แจ้งเตือนด่วนเข้ากลุ่ม LINE ทันที</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {/* Combined Rocket Launched + Final Call Card */}
-                  <div className="bg-[#F7F8F9] border-2 border-[#E8C48F] rounded-lg p-3.5 space-y-2.5 flex flex-col justify-between">
+                  <div className="bg-white border border-[#D9DDE2] rounded-lg p-3.5 space-y-2.5 flex flex-col justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center justify-between gap-1 flex-wrap">
-                        <span className="text-xs font-semibold text-[#8A4B00] font-heading flex items-center gap-1">
+                        <span className="text-xs font-semibold text-[#16191D] font-heading flex items-center gap-1">
                           <span>บั้งไฟออกแล้ว! (ปิดรับดวล)</span>
                         </span>
                         <span className="text-[12px] font-semibold px-2 py-0.5 bg-[#FBE5C6] text-[#8A4B00] rounded-md">
                           ปิดรับทันที
                         </span>
                       </div>
-                      <p className="text-[12px] text-[#8A4B00] font-sans leading-relaxed">
+                      <p className="text-[12px] text-[#5B636E] font-sans leading-relaxed">
                         ล็อกรอบและประกาศ <strong>&ldquo;บั้งไฟออกแล้ว + ปิดรับดวล&rdquo;</strong> พร้อมกันในคลิกเดียว ยกเลิกแผลเปิดที่ไม่มีคู่และคืนแต้มอัตโนมัติทันที
                       </p>
                     </div>
@@ -3192,7 +3192,7 @@ export default function App() {
                             addToast('ส่งไม่สำเร็จ', 'danger');
                           }
                         }}
-                        style={{ backgroundColor: '#ea580c', color: '#ffffff' }}
+                        style={{ backgroundColor: '#9A5B00', color: '#ffffff' }}
                         className="w-full py-2.5 px-3 bg-[#9A5B00] hover:bg-[#7A4800] text-white rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <span className="text-white font-semibold">บั้งไฟออกแล้ว! (ปิดรับดวลทันที)</span>
@@ -3202,19 +3202,19 @@ export default function App() {
                         className="w-full py-1.5 px-2.5 bg-white hover:bg-white text-[#8A4B00] border border-[#E8C48F] rounded-lg text-[12px] font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer"
                       >
                         <Rocket size={12} className="text-[#8A4B00]" />
-                        <span>เปิดรับบั้งไฟลูกถัดไป (Rocket B) ต่อทันที </span>
+                        <span>เปิดลำถัดไป</span>
                       </button>
                     </div>
                   </div>
 
                   {/* Void Round */}
-                  <div className="bg-[#FBEAE8] border border-[#E7B4AE] rounded-lg p-3.5 space-y-2.5 flex flex-col justify-between">
+                  <div className="bg-white border border-[#D9DDE2] rounded-lg p-3.5 space-y-2.5 flex flex-col justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-[#B42318] font-heading">โมฆะรอบ (ช่าง )</span>
+                        <span className="text-xs font-semibold text-[#16191D] font-heading">โมฆะรอบ</span>
                         <span className="text-[12px] font-bold px-2 py-0.5 bg-[#F6D7D3] text-[#B42318] rounded-md">ฉุกเฉิน</span>
                       </div>
-                      <p className="text-[12px] text-[#B42318] font-sans leading-relaxed">
+                      <p className="text-[12px] text-[#5B636E] font-sans leading-relaxed">
                         กรณีบั้งไฟมีปัญหา ยุติรอบการแข่งขัน ยกเลิกแผลดวลและโอนคืนเครดิตให้ผู้เล่น 100%
                       </p>
                     </div>
@@ -3244,13 +3244,13 @@ export default function App() {
                   </div>
 
                   {/* Rule Guide */}
-                  <div className="bg-[#EEF2FB] border border-[#C7D3F1] rounded-lg p-3.5 space-y-2.5 flex flex-col justify-between">
+                  <div className="bg-white border border-[#D9DDE2] rounded-lg p-3.5 space-y-2.5 flex flex-col justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-semibold text-[#16191D] font-heading">คู่มือกติกา</span>
                         <span className="text-[12px] font-bold px-2 py-0.5 bg-[#E3EAFB] text-[#16191D] rounded-md">กติกา</span>
                       </div>
-                      <p className="text-[12px] text-[#16191D] font-sans leading-relaxed">
+                      <p className="text-[12px] text-[#5B636E] font-sans leading-relaxed">
                         ส่ง Flex Card กฎกติกา คีย์เวิร์ดต่ำ/สูง อัตราต่อรอง และวิธีจับคู่ลงกลุ่มดวลสด
                       </p>
                     </div>
@@ -3271,13 +3271,13 @@ export default function App() {
                   </div>
 
                   {/* Daily Duel Summary */}
-                  <div className="bg-[#EEF2FB] border border-[#C7D3F1] rounded-lg p-3.5 space-y-2.5 flex flex-col justify-between">
+                  <div className="bg-white border border-[#D9DDE2] rounded-lg p-3.5 space-y-2.5 flex flex-col justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-semibold text-[#16191D] font-heading">สรุปผลประจำวัน</span>
                         <span className="text-[12px] font-bold px-2 py-0.5 bg-[#E3EAFB] text-[#16191D] rounded-md">สรุปผล</span>
                       </div>
-                      <p className="text-[12px] text-[#16191D] font-sans leading-relaxed">
+                      <p className="text-[12px] text-[#5B636E] font-sans leading-relaxed">
                         ส่ง Flex สรุปคู่ดวลที่ตัดสินผลแล้วของวัน แยกตามบั้งไฟแต่ละลำ พร้อมผู้ชนะ/ผู้แพ้ทุกคู่
                       </p>
                     </div>
@@ -3477,7 +3477,7 @@ export default function App() {
                     <div className="flex items-center gap-2">
                       <span className={`w-2.5 h-2.5 rounded-full ${activeGroupId ? 'bg-emerald-500' : 'bg-[#9A5B00]'}`}></span>
                       <span className="text-xs font-bold text-[#3B424C]">
-                        สถานะ Active Group ID:
+                        กลุ่มที่ใช้งาน:
                       </span>
                       {activeGroupId ? (
                         <span className="px-2 py-0.5 bg-[#E2F2E9] border border-[#B9DEC8] text-[#1B6E43] rounded font-mono text-[12px] font-bold">
@@ -3622,14 +3622,14 @@ export default function App() {
               <div className="bg-white rounded-lg w-full max-w-md overflow-hidden">
                 <div 
                   className="bg-[#1E4DB7] bg-[#F7F8F9] px-6 py-4"
-                  style={{ backgroundColor: '#0284c7', color: '#ffffff' }}
+                  style={{ backgroundColor: '#16191D', color: '#ffffff' }}
                 >
                   <h3 className="font-bold text-base" style={{ color: '#ffffff' }}>แก้ไขข้อมูลผู้เล่น</h3>
                   <p className="text-xs mt-0.5 font-mono" style={{ color: '#e0f2fe' }}>{playerEditModal.player.id}</p>
                 </div>
                 <div className="px-6 py-5 space-y-4">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-[#3B424C] block">ชื่อผู้เล่น (Display Name)</label>
+                    <label className="text-xs font-bold text-[#3B424C] block">ชื่อผู้เล่น</label>
                     <input
                       type="text"
                       value={playerEditForm.name}
@@ -3638,7 +3638,7 @@ export default function App() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-[#3B424C] block">ยอดเครดิต (Credit Balance)</label>
+                    <label className="text-xs font-bold text-[#3B424C] block">ยอดเครดิต</label>
                     <div className="flex items-center gap-2">
                       <button onClick={() => setPlayerEditForm(f => ({ ...f, balance: Math.max(0, f.balance - 100) }))} className="w-9 h-9 rounded-lg border border-[#D9DDE2] bg-[#F7F8F9] hover:bg-[#EEF0F2] font-bold text-[#3B424C] text-lg flex items-center justify-center transition-all">−</button>
                       <input
@@ -3700,7 +3700,7 @@ export default function App() {
                 {/* Modal Header */}
                 <div 
                   className="bg-[#1E4DB7] bg-[#F7F8F9] px-6 py-4"
-                  style={{ backgroundColor: '#0f766e', color: '#ffffff' }}
+                  style={{ backgroundColor: '#16191D', color: '#ffffff' }}
                 >
                   <h3 className="font-bold text-base" style={{ color: '#ffffff' }}>ลงทะเบียนบัญชีธนาคาร</h3>
                   <p className="text-xs mt-0.5" style={{ color: '#ccfbf1' }}>
@@ -3716,7 +3716,7 @@ export default function App() {
 
                   {/* Bank name */}
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-[#3B424C] block">ธนาคาร (Bank)</label>
+                    <label className="text-xs font-bold text-[#3B424C] block">ธนาคาร</label>
                     <select
                       value={bankEditForm.bankName}
                       onChange={e => setBankEditForm(f => ({ ...f, bankName: e.target.value }))}
@@ -3744,7 +3744,7 @@ export default function App() {
 
                   {/* Account holder name */}
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-[#3B424C] block">ชื่อเจ้าของบัญชี (Account Name)</label>
+                    <label className="text-xs font-bold text-[#3B424C] block">ชื่อเจ้าของบัญชี</label>
                     <input
                       type="text"
                       placeholder="เช่น Somchai Jongcharoen"
@@ -3807,7 +3807,7 @@ export default function App() {
               <div className="bg-white rounded-lg w-full max-w-md overflow-hidden">
                 <div 
                   className="bg-[#1E4DB7] bg-[#F7F8F9] px-6 py-4"
-                  style={{ backgroundColor: '#0f766e', color: '#ffffff' }}
+                  style={{ backgroundColor: '#16191D', color: '#ffffff' }}
                 >
                   <h3 className="font-bold text-base" style={{ color: '#ffffff' }}>＋ เพิ่มผู้เล่นใหม่</h3>
                   <p className="text-xs mt-0.5" style={{ color: '#ccfbf1' }}>สร้างบัญชีผู้เล่นใหม่ในระบบ</p>
@@ -3945,7 +3945,7 @@ export default function App() {
                   {/* Modal Header */}
                   <div 
                     className={`px-6 py-4 flex items-center justify-between text-white ${isWithdrawal ? 'bg-[#B42318] bg-[#F7F8F9]' : 'bg-[#1E4DB7] bg-[#F7F8F9]'}`}
-                    style={{ backgroundColor: isWithdrawal ? '#be123c' : '#047857', color: '#ffffff' }}
+                    style={{ backgroundColor: isWithdrawal ? '#B4400F' : '#0B6B3F', color: '#ffffff' }}
                   >
                     <div>
                       <h3 className="font-semibold text-base flex items-center gap-2" style={{ color: '#ffffff' }}>
@@ -4071,7 +4071,7 @@ export default function App() {
               <h3 className="text-lg font-semibold text-[#16191D] font-heading">
                 สรุปผลการจับเวลาบั้งไฟ ({settlementResult.rocketName || 'ค่ายบั้งไฟ'})
               </h3>
-              <p className="text-xs text-[#5B636E]">ผลการบินเปรียบเทียบเกณฑ์เส้นแบ่งราคาช่าง (Bang Fai Commander)</p>
+              <p className="text-xs text-[#5B636E]">ผลการบินเทียบกับช่วงราคาช่าง</p>
             </div>
             
             <div className="grid grid-cols-2 gap-3 bg-[#F7F8F9] p-4 rounded-lg border border-[#E6E9ED] text-center font-mono">
@@ -4096,10 +4096,10 @@ export default function App() {
             }`}>
               ผลตัดสินฝั่งชนะ: {
                 settlementResult.outcome === 'LOW' 
-                  ? 'ต่ำ (LOW)' 
-                  : settlementResult.outcome === 'HIGH' 
-                  ? 'สูง (HIGH)' 
-                  : 'ในราคาช่าง (RANGE) '
+                  ? 'ฝั่งต่ำ'
+                  : settlementResult.outcome === 'HIGH'
+                  ? 'ฝั่งสูง'
+                  : 'เสมอ (ในราคาช่าง)'
               }
             </div>
 
@@ -4278,7 +4278,7 @@ function PlayerDashboard({ player, transactions, bets, playerUserId, players }) 
                     const isOrderLow = b.side === 'low';
                     const lowId = b.playerLowId || (isOrderLow ? (b.creatorId || b.creatorLineUserId) : (b.matcherId || b.matcherLineUserId));
                     const isLow = lowId === playerUserId || (isOrderLow && (b.creatorId === playerUserId || b.creatorLineUserId === playerUserId));
-                    const sideText = isLow ? 'ต่ำ (LOW)' : 'สูง (HIGH)';
+                    const sideText = isLow ? 'ฝั่งต่ำ' : 'ฝั่งสูง';
                     const lowName = b.playerLowName || (isOrderLow ? b.creatorName : b.matcherName);
                     const highName = b.playerHighName || (!isOrderLow ? b.creatorName : b.matcherName);
                     const opponentText = isLow ? highName : lowName;
