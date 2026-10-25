@@ -521,7 +521,7 @@ export default function App() {
     }
   };
   const [customRocketTime, setCustomRocketTime] = useState(''); // Manual entry by admin (blank default)
-  const [flightLogs, setFlightLogs] = useState([]);
+  const [, setFlightLogs] = useState([]);
   const [settlementResult, setSettlementResult] = useState(null); // Settle results popup summary
   const [activeGroupId, setActiveGroupId] = useState(null); // Active connected LINE Group ID
   const [lineGroups, setLineGroups] = useState([]); // List of active connected LINE Groups
@@ -1147,6 +1147,52 @@ export default function App() {
     resolveMatchedBets(finalTime);
   };
 
+  /**
+   * What settlement will do to every matched duel at `timeSec`, mirroring the
+   * Worker's rules: below the order's range the low side wins, above it the
+   * high side wins, inside it is a draw refunded in full. The winner gets their
+   * stake back plus the loser's stake less a 10% fee (Math.round).
+   */
+  const computePayouts = (timeSec, tMin, tMax) => bets.filter(b => b.status === 'matched').map(b => {
+    const minSec = Number.isFinite(Number(b.rangeMin)) && Number(b.rangeMin) > 0 ? Number(b.rangeMin) : tMin;
+    const maxSec = Number.isFinite(Number(b.rangeMax)) && Number(b.rangeMax) > 0 ? Number(b.rangeMax) : tMax;
+    const isLowOrder = b.side === 'low';
+    const lowName = b.playerLowName || (isLowOrder ? b.creatorName : b.matcherName) || 'ฝั่งต่ำ';
+    const highName = b.playerHighName || (!isLowOrder ? b.creatorName : b.matcherName) || 'ฝั่งสูง';
+    const winnerSide = timeSec < minSec ? 'low' : timeSec > maxSec ? 'high' : 'draw';
+    const amt = Number(b.amount) || 0;
+    const commission = winnerSide !== 'draw' ? Math.round(amt * 0.10) : 0;
+    const payout = winnerSide !== 'draw' ? amt + (amt - commission) : amt;
+    return {
+      orderNumber: b.orderNumber,
+      winnerSide,
+      winnerName: winnerSide === 'low' ? lowName : winnerSide === 'high' ? highName : `เสมอ (${lowName} & ${highName} คืนทุน)`,
+      loserName: winnerSide === 'low' ? highName : winnerSide === 'high' ? lowName : '',
+      lowName,
+      highName,
+      rangeMin: minSec,
+      rangeMax: maxSec,
+      amount: amt,
+      commission,
+      payout,
+    };
+  });
+
+  // Settling pays real money: state the totals and ask before calling the Worker.
+  const handleConfirmSettle = async (timeSec, preview, totals) => {
+    const ok = await ask({
+      title: `ยืนยันผล ${timeSec} วิ?`,
+      items: [
+        `ตัดสินผล ${preview.length} คู่ของรอบ ${activeRoundObj?.name || rocketName || 'ปัจจุบัน'}`,
+        `จ่ายผู้ชนะรวม ${totals.paid.toLocaleString()} pt · คืนคู่เสมอ ${totals.refund.toLocaleString()} pt`,
+        `ค่าธรรมเนียมรวม ${totals.fee.toLocaleString()} pt`,
+        'ประกาศผลเข้ากลุ่ม LINE ทันที',
+      ],
+      confirmLabel: `ยืนยันและจ่าย ${preview.length} คู่`,
+    });
+    if (ok) handleSubmitOnsiteResult(timeSec);
+  };
+
   // Settle bets and calculate payouts (instant, no animations)
   const resolveMatchedBets = async (finalTime) => {
     const timeSec = Number(finalTime);
@@ -1156,43 +1202,7 @@ export default function App() {
 
     setFlightLogs(prev => [`Telemetry link settled. Final Air Time: ${finalTime}s.`, ...prev]);
 
-    // Calculate payouts details from currently matched bets for the popup modal
-    const previouslyMatched = bets.filter(b => b.status === 'matched');
-    const payouts = previouslyMatched.map(b => {
-      const minSec = Number.isFinite(Number(b.rangeMin)) && Number(b.rangeMin) > 0 ? Number(b.rangeMin) : tMin;
-      const maxSec = Number.isFinite(Number(b.rangeMax)) && Number(b.rangeMax) > 0 ? Number(b.rangeMax) : tMax;
-
-      const isLowOrder = b.side === 'low';
-      const lowWinnerName = b.playerLowName || (isLowOrder ? b.creatorName : b.matcherName) || 'ฝั่งต่ำ';
-      const highWinnerName = b.playerHighName || (!isLowOrder ? b.creatorName : b.matcherName) || 'ฝั่งสูง';
-
-      let winnerSide = 'draw';
-      if (timeSec < minSec) {
-        winnerSide = 'low';
-      } else if (timeSec > maxSec) {
-        winnerSide = 'high';
-      }
-
-      const amt = Number(b.amount) || 0;
-      const commission = winnerSide !== 'draw' ? Math.round(amt * 0.10) : 0;
-      const payout = winnerSide !== 'draw' ? amt + (amt - commission) : amt;
-      const winnerName = winnerSide === 'low'
-        ? lowWinnerName
-        : winnerSide === 'high'
-          ? highWinnerName
-          : `เสมอ (${lowWinnerName} & ${highWinnerName} คืนทุน)`;
-
-      return {
-        orderNumber: b.orderNumber,
-        winnerName: winnerName,
-        winnerSide: winnerSide,
-        rangeMin: minSec,
-        rangeMax: maxSec,
-        amount: amt,
-        commission: commission,
-        payout: payout
-      };
-    });
+    const payouts = computePayouts(timeSec, tMin, tMax);
 
     setSettlementResult({
       rocketName: name,
@@ -1205,6 +1215,12 @@ export default function App() {
 
     try {
       const data = await runBackendFunction('adminResolveBets', [finalTime, tMin, tMax]);
+      if (data && data.success === false) {
+        // Partly settled or refused: nothing is paid twice, so a retry is safe.
+        addToast(`ตัดสินผลไม่สำเร็จ: ${data.error || data.message || 'ไม่ทราบสาเหตุ'}`, 'error');
+        forceSyncFreshData();
+        return;
+      }
       // The round is over and a new one will be opened: release the fields so
       // the live poll may populate them again from the next round's quote.
       clearTouched();
@@ -1213,7 +1229,8 @@ export default function App() {
         if (data.players) setPlayers(deduplicatePlayersList(data.players));
         if (data.transactions) setTransactions(data.transactions);
       }
-      addToast(`เคลียร์ผลรางวัลรอบ [${name}] เวลา ${finalTime}s (ช่วง ${tMin}-${tMax}s) และบรอดแคสต์ลงกลุ่มเรียบร้อย!`, 'success');
+      forceSyncFreshData();
+      addToast(`ตัดสินผล ${name} ที่ ${finalTime} วิ แล้ว (${data?.resolvedCount ?? payouts.length} คู่)`, 'success');
     } catch (e) {
       console.error('Settlement backend error:', e);
       addToast(`เกิดข้อผิดพลาดในการบันทึกผลการตัดสิน: ${e?.message || 'ระบบหลังบ้านไม่ตอบสนอง'}`, 'error');
@@ -2261,195 +2278,205 @@ export default function App() {
           )}
 
           {/* TAB 2: FINAL RESULT TELEMETRY & ROUND SETTLEMENT */}
-          {adminTab === 'settle' && (
-            <div className="glass-panel p-5 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
-                <div>
-                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2 font-heading">
-                    <Zap size={18} className="text-sky-600" />
-                    ป้อนผลเวลาบินจริง & สรุปผลรอบ
-                  </h3>
-                  <p className="text-xs text-slate-500 font-sans mt-0.5">
-                    ป้อนเวลาวินาทีที่บั้งไฟทะยานขึ้นจริง เพื่อคำนวณผู้ชนะและโอนจ่ายแต้มผลการดวลทั้งหมดในรอบนี้
-                  </p>
-                </div>
-                <span className="self-start sm:self-auto text-[10px] text-sky-700 font-extrabold bg-sky-50 px-2.5 py-1 rounded-full border border-sky-200">
-                  Telemetry Engine
-                </span>
+          {adminTab === 'settle' && (() => {
+            const tMinNum = Number(targetMin) || 0;
+            const tMaxNum = Number(targetMax) || 0;
+            const hasTime = customRocketTime !== '' && Number(customRocketTime) > 0;
+            const timeSec = Number(customRocketTime);
+            const preview = hasTime ? computePayouts(timeSec, tMinNum || 330, tMaxNum || 380) : [];
+            const totals = preview.reduce((acc, p) => {
+              if (p.winnerSide === 'draw') acc.refund += p.amount * 2;
+              else { acc.paid += p.payout; acc.fee += p.commission; }
+              return acc;
+            }, { paid: 0, refund: 0, fee: 0 });
+            const zone = !hasTime ? null : timeSec < tMinNum ? 'low' : timeSec > tMaxNum ? 'high' : 'draw';
+            const matchedCount = bets.filter(b => b.status === 'matched').length;
+            const zoneCell = (id, range, text) => (
+              <div className={`px-3 py-2.5 flex flex-col gap-0.5 ${zone === id ? 'bg-[#E3EAFB]' : 'bg-white'}`}>
+                <span className="text-[12px] text-[#5B636E] font-mono">{range}</span>
+                <span className={`text-[13px] ${zone === id ? 'font-semibold text-[#1E4DB7]' : 'text-[#3B424C]'}`}>{text}</span>
               </div>
+            );
 
-              {/* In-Flight Rockets Queue (Rocket A in the air while Rocket B is open) */}
-              {inFlightRounds.length > 0 && (
-                <div className="p-4 rounded-xl bg-amber-50/80 border-2 border-amber-300 space-y-3">
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <span className="text-xs font-black text-amber-950 font-heading flex items-center gap-1.5">
-                      <Rocket size={15} className="text-orange-600" />
-                      <span>คิวบั้งไฟบนฟ้าที่รอตัดสินผล ({inFlightRounds.length} ลำ) — ตัดสินแยกโดยไม่กระทบแผลรอบใหม่</span>
-                    </span>
-                    <button
-                      onClick={() => setAdminTab('next_rocket')}
-                      className="text-[11px] font-bold text-orange-700 hover:text-orange-900 underline cursor-pointer"
-                    >
-                      จัดการคิวบั้งไฟถัดไป 
-                    </button>
-                  </div>
-                  <div className="space-y-2.5">
-                    {inFlightRounds.map((flt, idx) => {
-                      const inputTime = inFlightTimes[flt.roundId] || '';
-                      const isSettlingThis = settlingInFlightId === flt.roundId;
-                      return (
-                        <div key={flt.roundId} className="p-3 rounded-xl bg-white border border-amber-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                          <div>
-                            <div className="text-xs font-black text-slate-900 flex items-center gap-2">
-                              <span className="px-2 py-0.5 rounded bg-orange-600 text-white font-mono text-[10px]">ลำ #{idx + 1}</span>
-                              <span>{flt.name}</span>
-                              <span className="text-[11px] font-mono text-slate-500">
-                                ({flt.quoteReleased ? `${flt.targetMin}-${flt.targetMax}s` : 'P2P'} · {flt.matchedCount || (flt.matchedOrders || []).length} คู่ดวล)
+            return (
+              <div className="flex flex-col gap-5">
+                {inFlightRounds.length > 0 && (
+                  <section aria-labelledby="inflight-title" className={`${ui.panel} border-[#E8C48F]`}>
+                    <div className={ui.panelHead}>
+                      <div className="flex flex-col gap-0.5">
+                        <h2 id="inflight-title" className={ui.h2}>บั้งไฟบนฟ้ารอตัดสินผล · {inFlightRounds.length} ลำ</h2>
+                        <span className={ui.sub}>ตัดสินแยกจากรอบที่เปิดอยู่ ไม่กระทบแผลของรอบใหม่</span>
+                      </div>
+                      <button type="button" onClick={() => setAdminTab('next_rocket')} className="text-[13px] font-medium text-[#1E4DB7] hover:underline cursor-pointer">
+                        จัดการคิว
+                      </button>
+                    </div>
+                    <div className="divide-y divide-[#E6E9ED]">
+                      {inFlightRounds.map((flt) => {
+                        const inputTime = inFlightTimes[flt.roundId] || '';
+                        const isSettlingThis = settlingInFlightId === flt.roundId;
+                        return (
+                          <div key={flt.roundId} className="px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium text-[#16191D]">{flt.name}</span>
+                              <span className="text-[12px] text-[#5B636E]">
+                                {flt.quoteReleased ? `ช่าง ${flt.targetMin}–${flt.targetMax} วิ` : 'ราคาเปิดเอง'} · {flt.matchedCount || (flt.matchedOrders || []).length} คู่
                               </span>
                             </div>
+                            <div className="flex items-center gap-2">
+                              <label htmlFor={`flt-${flt.roundId}`} className="sr-only">เวลาบินของ {flt.name}</label>
+                              <input
+                                id={`flt-${flt.roundId}`}
+                                type="number"
+                                inputMode="decimal"
+                                step="0.1"
+                                value={inputTime}
+                                onChange={e => setInFlightTimes(prev => ({ ...prev, [flt.roundId]: e.target.value }))}
+                                placeholder="เวลาบิน (วิ)"
+                                className={`${ui.input} w-36 font-mono tabular-nums`}
+                              />
+                              <button type="button" onClick={() => handleSettleInFlightRound(flt)} disabled={isSettlingThis} className={ui.primary}>
+                                {isSettlingThis ? 'กำลังตัดสิน' : 'ตัดสินผล'}
+                              </button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="number"
-                              step="0.1"
-                              value={inputTime}
-                              onChange={e => setInFlightTimes(prev => ({ ...prev, [flt.roundId]: e.target.value }))}
-                              placeholder="เวลาบิน (วินาที)"
-                              className="w-36 px-2.5 py-1.5 bg-amber-50/50 border border-amber-300 rounded-lg text-xs font-mono font-black text-slate-900"
-                            />
-                            <button
-                              onClick={() => handleSettleInFlightRound(flt)}
-                              disabled={isSettlingThis}
-                              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold cursor-pointer whitespace-nowrap"
-                            >
-                              {isSettlingThis ? '...' : `ตัดสิน "${flt.name}"`}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+                        );
+                      })}
+                    </div>
+                  </section>
+                )}
 
-              {/* Settlement Form Card */}
-              <div className="p-4 bg-slate-50/50 rounded-xl border border-slate-200 space-y-3.5">
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                  {/* Actual Air Time Input */}
-                  <div className="space-y-1 bg-white p-3.5 rounded-xl border border-slate-200">
-                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1 font-heading">
-                      <Clock size={14} className="text-sky-600" />
-                      ผลยิงจริงในสนาม (Actual Air Time in Seconds):
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input 
+                <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5 items-start">
+                  <section aria-labelledby="settle-title" className={`${ui.panel} p-4 flex flex-col gap-4`}>
+                    <div className="flex flex-col gap-0.5">
+                      <h2 id="settle-title" className={ui.h2}>{activeRoundObj?.name || rocketName || 'รอบปัจจุบัน'}</h2>
+                      <span className={ui.sub}>ต่อติดรอผล {matchedCount} คู่</span>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label htmlFor="settle-time" className={ui.label}>เวลาบิน (วินาที)</label>
+                      <input
+                        id="settle-time"
                         type="number"
+                        inputMode="decimal"
                         step="0.1"
                         value={customRocketTime}
                         onChange={(e) => setCustomRocketTime(e.target.value)}
-                        className="w-full bg-sky-50/50 border border-sky-200 text-sky-950 font-black px-3 py-2 rounded-lg text-base font-mono focus:ring-2 focus:ring-sky-500 focus:outline-none"
-                        placeholder="เช่น 355.0"
+                        className="w-full min-h-[64px] px-4 rounded-md border-2 border-[#1E4DB7] bg-white font-mono text-[32px] font-medium text-[#16191D] outline-none tabular-nums"
+                        placeholder="0"
                       />
-                      <span className="text-sm text-sky-700 font-mono font-black">s</span>
                     </div>
-                  </div>
-
-                  {/* Live Outcome Preview */}
-                  <div className="p-3.5 bg-white rounded-xl border border-slate-200 flex flex-col justify-center space-y-1.5">
-                    <div className="flex justify-between items-center text-xs font-bold text-slate-600">
-                      <span>ราคาช่างเปรียบเทียบ:</span>
-                      <div className="flex items-center gap-1 font-mono">
-                        <input
-                          type="number"
-                          step="1"
-                          value={targetMin}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="settle-min" className={ui.label}>ช่างต่ำสุด</label>
+                        <input id="settle-min" type="number" step="1" value={targetMin}
                           onChange={(e) => { markTouched('targetMin'); setTargetMin(e.target.value); }}
-                          className="w-14 bg-slate-50 border border-slate-300 text-slate-900 font-bold px-1.5 py-0.5 rounded text-xs text-center focus:ring-1 focus:ring-sky-500 focus:outline-none"
-                          placeholder="330"
-                        />
-                        <span className="text-slate-400">-</span>
-                        <input
-                          type="number"
-                          step="1"
-                          value={targetMax}
+                          className={`${ui.input} font-mono tabular-nums`} placeholder="330" />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="settle-max" className={ui.label}>ช่างสูงสุด</label>
+                        <input id="settle-max" type="number" step="1" value={targetMax}
                           onChange={(e) => { markTouched('targetMax'); setTargetMax(e.target.value); }}
-                          className="w-14 bg-slate-50 border border-slate-300 text-slate-900 font-bold px-1.5 py-0.5 rounded text-xs text-center focus:ring-1 focus:ring-sky-500 focus:outline-none"
-                          placeholder="380"
-                        />
-                        <span className="text-slate-500 font-bold">s</span>
+                          className={`${ui.input} font-mono tabular-nums`} placeholder="380" />
                       </div>
                     </div>
-                    <div className="flex justify-between items-center text-xs font-bold">
-                      <span>คาดการณ์ผลชนะ:</span>
-                      {Number(customRocketTime || 0) < Number(targetMin || 330) ? (
-                        <span className="px-2.5 py-1 bg-blue-100 text-blue-800 font-black rounded-lg text-xs flex items-center gap-1">ฝั่งต่ำ (LOW / ชถ) ชนะ</span>
-                      ) : Number(customRocketTime || 0) > Number(targetMax || 380) ? (
-                        <span className="px-2.5 py-1 bg-rose-100 text-rose-800 font-black rounded-lg text-xs flex items-center gap-1">ฝั่งสูง (HIGH / ชล) ชนะ</span>
-                      ) : (
-                        <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-black rounded-lg text-xs flex items-center gap-1">ในราคาช่าง (RANGE)</span>
-                      )}
+                    <div className="grid grid-cols-3 gap-px bg-[#D9DDE2] border border-[#D9DDE2] rounded-md overflow-hidden">
+                      {zoneCell('low', `< ${tMinNum || '-'}`, 'ต่ำชนะ')}
+                      {zoneCell('draw', `${tMinNum || '-'}–${tMaxNum || '-'}`, 'เสมอ คืนเต็ม')}
+                      {zoneCell('high', `> ${tMaxNum || '-'}`, 'สูงชนะ')}
                     </div>
-                  </div>
-                </div>
+                    <p className="m-0 text-[12px] text-[#5B636E]">ออเดอร์ที่เปิดราคาเองใช้ช่วงราคาของออเดอร์นั้น</p>
+                  </section>
 
-                {/* Settle Round Primary Button */}
-                <button
-                  onClick={() => handleSubmitOnsiteResult(Number(customRocketTime) || 355)}
-                  className="w-full py-3.5 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider rounded-lg flex items-center justify-center gap-2 active:scale-95 transition-all font-heading cursor-pointer"
-                >
-                  <CheckCircle size={16} />
-                  <span>สรุปผลและชำระแต้มดีลทั้งหมด / SETTLE ONSITE ROUND (ผลลัพธ์ยิงจริง: {customRocketTime || 0}s)</span>
-                </button>
-              </div>
+                  <section aria-labelledby="preview-title" className={ui.panel}>
+                    <div className={ui.panelHead}>
+                      <h2 id="preview-title" className={ui.h2}>ผลที่จะเกิดขึ้น</h2>
+                      <span className={ui.sub}>{hasTime ? 'ยังไม่ได้จ่าย' : 'กรอกเวลาบินเพื่อดูผล'}</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse min-w-[620px]">
+                        <thead className="border-b border-[#D9DDE2]">
+                          <tr>
+                            <th className={ui.th}>ออเดอร์</th>
+                            <th className={ui.th}>ช่าง</th>
+                            <th className={ui.th}>ชนะ</th>
+                            <th className={ui.th}>แพ้</th>
+                            <th className={`${ui.th} text-right`}>ยอดคู่ละ</th>
+                            <th className={`${ui.th} text-right`}>ค่าธรรมเนียม</th>
+                            <th className={`${ui.th} text-right`}>ผู้ชนะได้รับ</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#E6E9ED]">
+                          {preview.length === 0 ? (
+                            <tr>
+                              <td colSpan={7} className="py-10 text-center text-sm text-[#5B636E]">
+                                {matchedCount === 0 ? 'ไม่มีคู่ที่ต่อติดรอผล' : 'กรอกเวลาบินเพื่อดูผลของแต่ละคู่'}
+                              </td>
+                            </tr>
+                          ) : preview.map((p) => (
+                            <tr key={p.orderNumber}>
+                              <td className={`${ui.td} font-mono font-medium`}>#{p.orderNumber}</td>
+                              <td className={`${ui.td} font-mono tabular-nums text-[#3B424C]`}>{p.rangeMin}–{p.rangeMax}</td>
+                              {p.winnerSide === 'draw' ? (
+                                <td className={`${ui.td} text-[#5B636E]`} colSpan={2}>เสมอ · {p.lowName} · {p.highName}</td>
+                              ) : (
+                                <>
+                                  <td className={`${ui.td} font-medium text-[#1B6E43]`}>{p.winnerName} <span className="text-[#8A929D] font-normal">· {p.winnerSide === 'low' ? 'ถ' : 'ชล'}</span></td>
+                                  <td className={`${ui.td} text-[#B42318]`}>{p.loserName}</td>
+                                </>
+                              )}
+                              <td className={`${ui.td} text-right font-mono tabular-nums`}>{p.amount.toLocaleString()}</td>
+                              <td className={`${ui.td} text-right font-mono tabular-nums`}>{p.commission.toLocaleString()}</td>
+                              <td className={`${ui.td} text-right font-mono tabular-nums font-semibold`}>
+                                {p.winnerSide === 'draw' ? `คืน ${p.amount.toLocaleString()}` : p.payout.toLocaleString()}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
 
-              {/* Logs and Flight Histories in Light Mode */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-mono text-[11px]">
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col" style={{ minHeight: '160px', maxHeight: '220px' }}>
-                  <span className="text-[11px] font-bold text-slate-800 border-b border-slate-200 pb-1.5 mb-2 flex items-center justify-between font-sans shrink-0">
-                    <span>LAUNCH ENGINE LOGS</span>
-                    <Clock size={12} className="text-slate-400" />
-                  </span>
-                  <div className="flex-1 overflow-y-auto space-y-1 pr-1" style={{ wordBreak: 'break-all' }}>
-                    {flightLogs.length === 0 ? (
-                      <span className="text-slate-400 italic text-[11px]">-- ไม่มีข้อมูลบันทึกในเซสชันนี้ --</span>
-                    ) : (
-                      flightLogs.map((l, i) => (
-                        <div key={i} className={`text-[11px] ${l.includes('') || l.includes('SUCCESS') ? 'text-emerald-600 font-bold' : l.includes('') || l.includes('terminated') ? 'text-rose-600 font-bold' : 'text-slate-600'}`}>
-                          {l}
+                    <div className="m-4 p-4 rounded-md bg-[#F7F8F9] grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {[
+                        ['จ่ายผู้ชนะรวม', totals.paid],
+                        ['คืนคู่เสมอ', totals.refund],
+                        ['ค่าธรรมเนียมรวม', totals.fee],
+                      ].map(([label, value]) => (
+                        <div key={label} className="flex flex-col gap-0.5">
+                          <span className="text-[12px] text-[#5B636E]">{label}</span>
+                          <span className="font-mono tabular-nums text-xl font-medium text-[#16191D]">{value.toLocaleString()} pt</span>
                         </div>
-                      ))
-                    )}
-                  </div>
+                      ))}
+                    </div>
+
+                    <div className="px-4 pb-4 flex flex-wrap items-center justify-end gap-3">
+                      <span className="text-[13px] text-[#5B636E] mr-auto">กดซ้ำได้ปลอดภัย คู่ที่จ่ายแล้วจะไม่ถูกจ่ายซ้ำ</span>
+                      <button type="button" onClick={() => handleConfirmSettle(timeSec, preview, totals)} disabled={!hasTime || preview.length === 0} className={ui.primary}>
+                        {hasTime ? `ยืนยันผล ${timeSec} วิ · จ่าย ${preview.length} คู่` : 'กรอกเวลาบินก่อน'}
+                      </button>
+                    </div>
+                  </section>
                 </div>
 
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col" style={{ minHeight: '160px', maxHeight: '220px' }}>
-                  <span className="text-[11px] font-bold text-slate-800 border-b border-slate-200 pb-1.5 mb-2 flex justify-between font-sans shrink-0">
-                    <span>ประวัติออกผล</span>
-                    <span className="text-[11px] text-slate-400">รวม {flights.length} รอบ</span>
-                  </span>
-                  <div className="flex-1 overflow-y-auto space-y-1 pr-1" style={{ wordBreak: 'break-all' }}>
-                    {flights.length === 0 ? (
-                      <span className="text-slate-400 italic block text-[11px]">-- ไม่มีประวัติผล --</span>
-                    ) : (
-                      flights.map(f => (
-                        <div key={f.id} className="flex justify-between items-center p-1.5 rounded bg-white border border-slate-100 text-[11px] font-mono">
-                          <span className="text-slate-400">{f.timestamp}</span>
-                          <span className="font-bold text-slate-800">เวลา: {f.duration}s</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                            f.duration < (Number(targetMin) || 330) ? 'bg-sky-50 text-sky-700 border border-sky-100' : 'bg-rose-50 text-rose-700 border border-rose-100'
-                          }`}>
-                            {f.duration < (Number(targetMin) || 330) ? 'LOW' : 'HIGH'}
-                          </span>
-                          <span className="text-slate-500">เคลียร์ {f.betsResolved} บิล</span>
+                {flights.length > 0 && (
+                  <section aria-labelledby="history-title" className={ui.panel}>
+                    <div className={ui.panelHead}>
+                      <h2 id="history-title" className={ui.h2}>ประวัติออกผลในเซสชันนี้</h2>
+                      <span className={ui.sub}>{flights.length} รอบ</span>
+                    </div>
+                    <div className="divide-y divide-[#E6E9ED]">
+                      {flights.map(f => (
+                        <div key={f.id} className="px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-sm">
+                          <span className="text-[#8A929D] font-mono">{f.timestamp}</span>
+                          <span className="font-mono tabular-nums text-[#16191D]">{f.duration} วิ</span>
+                          <span className="text-[#5B636E]">ตัดสิน {f.betsResolved} คู่</span>
                         </div>
-                      ))
-                    )}
-                  </div>
-                </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* TAB 3: DEDICATED LIVE BETS & GAME CONTRACTS BOARD */}
           {adminTab === 'bets' && (() => {
