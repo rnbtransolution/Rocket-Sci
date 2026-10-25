@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import AdminLockScreen from './AdminLockScreen.jsx';
 import PasswordPanel from './PasswordPanel.jsx';
+import { useAdminDialog } from './AdminDialog.jsx';
 import { 
   Send, 
   CheckCircle, 
@@ -279,14 +280,14 @@ export default function App() {
     }
   }, [runBackendFunction]);
 
-  const handleAdminLogout = () => {    if (window.confirm('🔒 คุณต้องการออกจากระบบแอดมินใช่หรือไม่?')) {
-      // Drops the session token too, so a shared machine keeps nothing usable.
-      clearAdminSession();
-      setAdminAuthenticated(false);
-      setAdminRole('admin');
-      setPasswordInput('');
-      addToast('🔒 ออกจากระบบเรียบร้อย', 'info');
-    }
+  // Logging out is reversible, so it no longer asks first.
+  const handleAdminLogout = () => {
+    // Drops the session token too, so a shared machine keeps nothing usable.
+    clearAdminSession();
+    setAdminAuthenticated(false);
+    setAdminRole('admin');
+    setPasswordInput('');
+    addToast('ออกจากระบบแล้ว', 'info');
   };
 
   const getInitialCache = () => {
@@ -380,6 +381,7 @@ export default function App() {
   const [betStatusFilter, setBetStatusFilter] = useState('all'); // 'all' | 'matched' | 'pending_match' | 'cancelled' | 'resolved'
   const [betSearchQuery, setBetSearchQuery] = useState('');
   const [toasts, setToasts] = useState([]);
+  const { ask, dialog } = useAdminDialog();
 
   // Transaction filtering & search & detail modal states
   const [txSearchQuery, setTxSearchQuery] = useState('');
@@ -730,13 +732,17 @@ export default function App() {
     };
   }, [isGAS, isLiveBackend, isGitHubPages, API_BASE_URL, adminAuthenticated, playerUserId]);
 
-  // Toast Notification manager (auto-dismiss in 2 seconds)
-  const addToast = (msg, type = 'info', duration = 2000) => {
+  // Toast notifications. Success/info hide after 4s and warnings after 6s;
+  // errors stay until clicked so they can be read. At most 3 are shown.
+  const TOAST_DURATION = { success: 4000, info: 4000, warning: 6000 };
+  const addToast = (msg, type = 'info', duration = TOAST_DURATION[type] ?? 0) => {
     const id = Date.now() + Math.random();
-    setToasts(prev => [...prev, { id, msg, type }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, duration);
+    setToasts(prev => [...prev, { id, msg, type }].slice(-3));
+    if (duration > 0) {
+      setTimeout(() => {
+        setToasts(prev => prev.filter(t => t.id !== id));
+      }, duration);
+    }
     return id;
   };
 
@@ -748,26 +754,22 @@ export default function App() {
   // Safe portal close & round-reset function (preserves player data & transaction history)
   const handleClosePortal = async () => {
     const activeMatched = bets.filter(b => b.status === 'matched');
-    if (activeMatched.length > 0) {
-      if (!window.confirm(
-        `⚠️ ยังมีแผลดวลจับคู่สดค้างอยู่ ${activeMatched.length} แผลที่ยังไม่ได้ตัดสินผล!\n\n` +
-        `หากดำเนินการปิดรอบ ระบบจะยกเลิกและคืนแต้ม 100% ให้ผู้เล่นทั้งสองฝ่ายทันที\n\n` +
-        `คุณแน่ใจว่าต้องการปิดรอบและคืนแต้มใช่หรือไม่?`
-      )) {
-        return;
-      }
-    } else {
-      if (!window.confirm(
-        "🔒 คุณต้องการปิดและรีเซ็ตพอร์ทัลรอบปัจจุบันใช่หรือไม่?\n\n" +
-        "ระบบจะ:\n" +
-        "  ✅ คืนแต้มแผลที่ยังค้างอยู่ให้ผู้เล่นทุกคน\n" +
-        "  ✅ ล้างกระดานดวลและสรุปผลรอบนี้\n" +
-        "  ✅ เปิดรอบใหม่พร้อมรับออเดอร์ทันที\n\n" +
-        "  ❌ ไม่ลบข้อมูลผู้เล่น ยอดเครดิต หรือประวัติธุรกรรมใดๆ"
-      )) {
-        return;
-      }
-    }
+    const pending = bets.filter(b => b.status === 'pending_match');
+    const pendingPt = pending.reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+    const ok = await ask({
+      title: `ปิดรอบ “${activeRoundObj?.name || rocketName || 'รอบปัจจุบัน'}”?`,
+      tone: activeMatched.length > 0 ? 'danger' : 'primary',
+      items: [
+        ...(activeMatched.length > 0
+          ? [`แผลที่ต่อติดแล้ว ${activeMatched.length} แผลยังไม่ได้ตัดสินผล จะถูกยกเลิกและคืนเงินทั้งสองฝ่าย 100%`]
+          : []),
+        `คืนเงินแผลที่รอคู่ ${pending.length} แผล · ${pendingPt.toLocaleString()} pt`,
+        'ล้างกระดานและเปิดรอบใหม่ทันที',
+        'ข้อมูลผู้เล่น ยอดเครดิต และประวัติธุรกรรมไม่ถูกลบ',
+      ],
+      confirmLabel: activeMatched.length > 0 ? 'ปิดรอบและคืนเงินทุกแผล' : 'ปิดรอบ',
+    });
+    if (!ok) return;
 
     const loadingToastId = addToast('⏳ กำลังปิดรอบและรีเซ็ตระบบ...', 'info');
     try {
@@ -813,31 +815,24 @@ export default function App() {
       return;
     }
 
-    // Previously a single window.confirm. A browser dialog is advisory only —
-    // anything able to drive this portal can dismiss it just as easily, and the
-    // reset is irreversible with no backup (the GAS mirror is unreachable).
-    // This now requires typing the phrase AND the PIN; the PIN is re-checked
-    // server-side, so the dialog is a speed bump rather than the actual lock.
-    const phrase = window.prompt(
-      "⚠️ การล้างระเบียนข้อมูลระบบ (Factory Reset)\n\n" +
-      "การกระทำนี้จะลบถาวรข้อมูลผู้เล่น ยอดเครดิต ธุรกรรม ประวัติการเดิมพัน และบันทึกแชททั้งหมด\n" +
-      "ไม่มีการสำรองข้อมูล และย้อนกลับไม่ได้\n\n" +
-      "กรุณาพิมพ์คำว่า DELETE เพื่อยืนยันการล้างข้อมูล:"
-    );
-    if (phrase === null) return;
-    if (phrase.trim().toUpperCase() !== 'DELETE') {
-      addToast('ยกเลิกการล้างข้อมูล: คำยืนยันไม่ถูกต้อง', 'warning');
-      return;
-    }
-
-    const pin = window.prompt(
-      "🔒 กรอก PIN สำหรับการล้างข้อมูลระบบ\n\n" +
-      "PIN นี้ถูกตั้งค่าไว้ในหัวข้อ \"ความปลอดภัย\" และไม่เกี่ยวข้องกับรหัสผ่านของคุณ"
-    );
-    if (pin === null) {
-      addToast('ยกเลิกการล้างข้อมูล', 'warning');
-      return;
-    }
+    // The reset is irreversible with no backup (the GAS mirror is unreachable),
+    // so it requires typing the phrase AND the PIN. The PIN is re-checked
+    // server-side: the dialog is a speed bump rather than the actual lock.
+    const ok = await ask({
+      title: 'ล้างข้อมูลทั้งระบบ (Factory Reset)',
+      tone: 'danger',
+      body: 'ลบถาวรข้อมูลผู้เล่น ยอดเครดิต ธุรกรรม ประวัติการเดิมพัน และบันทึกแชททั้งหมด ไม่มีการสำรองข้อมูลและย้อนกลับไม่ได้',
+      typeToConfirm: 'DELETE',
+      fields: [{
+        name: 'pin',
+        label: 'PIN ล้างข้อมูล (ตั้งไว้ในหัวข้อ “ความปลอดภัย” ไม่ใช่รหัสผ่าน)',
+        type: 'password',
+        validate: (v) => (v.trim() ? null : 'กรุณากรอก PIN'),
+      }],
+      confirmLabel: 'ลบข้อมูลทั้งหมด',
+    });
+    if (!ok) return;
+    const pin = ok.values.pin;
 
     setSettlementResult(null);
 
@@ -998,9 +993,17 @@ export default function App() {
   };
 
   const handleVoidInFlightRound = async (flt) => {
-    if (!window.confirm(`⛔ ยืนยันสั่งโมฆะเฉพาะบั้งไฟ "${flt.name}" และคืนแต้มทั้ง ${flt.matchedCount || (flt.matchedOrders || []).length} คู่ดวล 100% หรือไม่?\n\n(ออเดอร์ของบั้งไฟรอบใหม่ที่กำลังเปิดรับอยู่จะไม่ได้รับผลกระทบ)`)) {
-      return;
-    }
+    const ok = await ask({
+      title: `โมฆะบั้งไฟ “${flt.name}”`,
+      tone: 'danger',
+      items: [
+        `คืนเงิน ${flt.matchedCount || (flt.matchedOrders || []).length} คู่ดวลของบั้งไฟนี้ 100% และย้อนกลับไม่ได้`,
+        'ออเดอร์ของบั้งไฟรอบใหม่ที่กำลังเปิดรับอยู่ไม่ได้รับผลกระทบ',
+      ],
+      typeToConfirm: flt.name,
+      confirmLabel: 'โมฆะและคืนเงิน',
+    });
+    if (!ok) return;
     setSettlingInFlightId(flt.roundId);
     try {
       const res = await runBackendFunction('adminVoidInFlightRound', [flt.roundId, broadcastTargetGroup || 'ALL']);
@@ -1540,6 +1543,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-100/80 lg:pl-[260px] flex flex-col">
+      {dialog}
       {/* Toast Manager */}
       <div className="fixed top-4 right-4 z-[999999] flex flex-col gap-2 max-w-sm w-80 pointer-events-none">
         {toasts.map(t => (
@@ -3468,11 +3472,19 @@ export default function App() {
                     </div>
                     <button
                       onClick={async () => {
-                        if (!window.confirm("⛔ ยืนยันโมฆะรอบและยกเลิกคืนแต้มทั้งหมด?")) return;
+                        const roundLabel = activeRoundObj?.name || rocketName || 'โมฆะ';
+                        const ok = await ask({
+                          title: `โมฆะรอบ “${roundLabel}”`,
+                          tone: 'danger',
+                          body: 'ยกเลิกทุกแผลในรอบนี้และคืนเงินผู้เล่น 100% ย้อนกลับไม่ได้ และจะแจ้งเข้ากลุ่ม LINE',
+                          typeToConfirm: roundLabel,
+                          confirmLabel: 'โมฆะและคืนเงิน',
+                        });
+                        if (!ok) return;
                         try {
                           const res = await runBackendFunction('adminBroadcastVoidRound', [broadcastTargetGroup || 'ALL']);
                           if (res && res.success === false) addToast(`⚠️ ส่งไม่สำเร็จ: ${res.error || 'โควตาเต็ม'}`, 'warning');
-                          else addToast('⛔ โมฆะรอบและคืนแต้มแล้ว', 'danger');
+                          else addToast('โมฆะรอบและคืนเงินแล้ว', 'success');
                         } catch {
                           addToast('❌ ส่งไม่สำเร็จ', 'danger');
                         }
@@ -3575,7 +3587,12 @@ export default function App() {
                       <button
                         disabled={summaryBusy}
                         onClick={async () => {
-                          if (!window.confirm(`📅 ส่งสรุปผลดวลประจำวัน ${summaryDay} เข้ากลุ่ม LINE?`)) return;
+                          const ok = await ask({
+                            title: `ส่งสรุปผลวันที่ ${summaryDay} เข้ากลุ่ม LINE?`,
+                            items: ['การ์ดแสดงผู้ชนะและผู้แพ้ของแต่ละออเดอร์ ไม่มียอดเงิน', 'ส่งแล้วยกเลิกไม่ได้'],
+                            confirmLabel: 'ส่งเข้ากลุ่ม',
+                          });
+                          if (!ok) return;
                           setSummaryBusy(true);
                           try {
                             const res = await runBackendFunction('adminBroadcastDailySummary', [summaryDay, broadcastTargetGroup || 'ALL']);
@@ -3729,8 +3746,19 @@ export default function App() {
                       {activeGroupId && (
                         <button
                           onClick={async () => {
-                            const gid = window.prompt('เปลี่ยน Group ID (วาง LINE Group ID ใหม่):', activeGroupId);
-                            if (gid && gid.trim().length > 5) {
+                            const ok = await ask({
+                              title: 'เปลี่ยนกลุ่ม LINE ที่ใช้งาน',
+                              body: 'ประกาศ กระดาน และสรุปผลจะถูกส่งเข้ากลุ่มใหม่นี้',
+                              fields: [{
+                                name: 'gid',
+                                label: 'LINE Group ID',
+                                defaultValue: activeGroupId,
+                                validate: (v) => (v.trim().length > 5 ? null : 'Group ID สั้นเกินไป'),
+                              }],
+                              confirmLabel: 'บันทึก',
+                            });
+                            const gid = ok?.values.gid;
+                            if (gid && gid !== activeGroupId) {
                               await runBackendFunction('adminSetActiveGroupId', [gid.trim()]);
                               const dash = await runBackendFunction('getDashboardData', []);
                               if (dash) { setActiveGroupId(dash.activeGroupId); setLineGroups(dash.lineGroups || []); }
