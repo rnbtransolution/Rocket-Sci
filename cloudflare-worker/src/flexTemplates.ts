@@ -1048,8 +1048,28 @@ export function generateDailySummaryFlex(day: string, orders: Order[]): any {
     return generateNoticeFlex(`สรุปผลวันที่ ${day}`, 'ยังไม่มีคู่ดวลที่ตัดสินผลในวันนี้', 'info');
   }
 
+  // More rounds than a carousel holds: show the latest ones and give the last
+  // slot to a card saying how many earlier rounds were left out. Slicing the
+  // first 12 used to drop the day's newest rounds without a word.
+  const overflow = groups.length > DAILY_SUMMARY_MAX_ROUNDS;
+  const shownGroups = overflow ? groups.slice(groups.length - (DAILY_SUMMARY_MAX_ROUNDS - 1)) : groups;
+  const hiddenGroups = groups.slice(0, groups.length - shownGroups.length);
+  const hiddenPairs = hiddenGroups.reduce((n, list) => n + list.length, 0);
+  const hiddenBubble = overflow
+    ? bubble({
+        tone: 'neutral',
+        icon: 'calendar',
+        size: 'mega',
+        compact: true,
+        eyebrow: `สรุปผลวันที่ ${day}`,
+        title: `อีก ${hiddenGroups.length} รอบก่อนหน้า`,
+        sub: `${hiddenPairs} คู่`,
+        body: [note('ดูผลครบทุกรอบได้ในหน้าแอดมิน', 'sm')],
+      })
+    : null;
+
   const build = (rowsPerRound: number) => {
-    const bubbles = groups.slice(0, DAILY_SUMMARY_MAX_ROUNDS).map((list) => {
+    const roundBubbles = shownGroups.map((list) => {
       const first = list[0];
       const hidden = list.length - rowsPerRound;
       return bubble({
@@ -1066,6 +1086,7 @@ export function generateDailySummaryFlex(day: string, orders: Order[]): any {
         ],
       });
     });
+    const bubbles = hiddenBubble ? [hiddenBubble, ...roundBubbles] : roundBubbles;
     return flex(
       `สรุปผลวันที่ ${day} · ${orders.length} คู่`,
       bubbles.length === 1 ? bubbles[0] : { type: 'carousel', contents: bubbles }
