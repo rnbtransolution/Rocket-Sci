@@ -88,8 +88,20 @@ const button = (label: string, message: string, o: { style?: 'primary' | 'second
 });
 
 /** Served by this Worker (see LINE_ICONS); bump `v` when an icon is redrawn. */
-const ICON_BASE = 'https://rocket-science-cf-worker.rnbtransolution.workers.dev/icons';
 const ICON_VERSION = 1;
+/**
+ * Public origin of this deployment, set per request by `setPublicBaseUrl`.
+ * It used to be one hard-coded workers.dev host, so every other deployment
+ * (staging, a custom domain, another account) pointed its cards at that one.
+ */
+let iconBase = '';
+
+/** `PUBLIC_BASE_URL` when configured, else the origin the request came in on. */
+export function setPublicBaseUrl(configured: string | undefined, requestOrigin: string): void {
+  const base = (configured || requestOrigin || '').trim().replace(/\/+$/, '');
+  // LINE only loads https images; a card without the faint icon beats a broken one.
+  iconBase = base.startsWith('https://') ? `${base}/icons` : '';
+}
 
 interface BubbleSpec {
   tone: Tone;
@@ -125,10 +137,10 @@ function bubble({ tone, icon, eyebrow, title, sub, body, footer, size = 'kilo', 
       spacing: compact ? 'none' : 'xs',
       contents: [
         // First, so the text draws over it.
-        ...(icon
+        ...(icon && iconBase
           ? [{
               type: 'image',
-              url: `${ICON_BASE}/${icon}.png?v=${ICON_VERSION}`,
+              url: `${iconBase}/${icon}.png?v=${ICON_VERSION}`,
               position: 'absolute',
               offsetTop: compact ? '4px' : '8px',
               offsetEnd: '10px',
