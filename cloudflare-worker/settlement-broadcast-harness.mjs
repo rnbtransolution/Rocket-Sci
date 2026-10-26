@@ -120,9 +120,9 @@ async function scenario(label, { inFlight }) {
     await kvC.put('MATCHED_ORDERS_LIST', JSON.stringify([okOrder, badOrder]));
     await kvC.put('ACTIVE_ROUND', JSON.stringify({ roundId, name: 'ACTIVE', targetMin: 350, targetMax: 400, status: 'ACTIVE' }));
   }
-  const settle = () => inFlight
-    ? rpc('adminResolveInFlightRound', [roundId, 300])
-    : rpc('adminResolveBets', [300, 350, 400]);
+  const settle = (time = 300, tMin = 350, tMax = 400) => inFlight
+    ? rpc('adminResolveInFlightRound', [roundId, time])
+    : rpc('adminResolveBets', [time, tMin, tMax]);
 
   // ── attempt 1: partial failure ──
   const first = await settle();
@@ -138,6 +138,18 @@ async function scenario(label, { inFlight }) {
   // ── the cause is fixed, then the admin retries ──
   for (const k of [`USER_${GHOST.lineUserId}`, `USER_${GHOST.shortId}`]) await kvC.put(k, JSON.stringify(prof(GHOST, 1000 - STAKE)));
   await kvC.put(`RAW_LINE_${GHOST.shortId}`, GHOST.lineUserId);
+  // ── a retry on a different flight time (or range) is refused ──
+  const p1Before = Number(((await rpc('getDashboardData', [])).players || []).find((x) => x.shortId === P1.shortId)?.balance);
+  const wrongTime = await settle(450);
+  check('retry with a different flight time is refused', wrongTime?.success === false && wrongTime?.lockedFinalTime === 300, JSON.stringify(wrongTime));
+  if (!inFlight) {
+    const wrongRange = await settle(300, 330, 380);
+    check('retry with a different range is refused', wrongRange?.success === false && wrongRange?.lockedFinalTime === 300, JSON.stringify(wrongRange));
+  }
+  const p1After = Number(((await rpc('getDashboardData', [])).players || []).find((x) => x.shortId === P1.shortId)?.balance);
+  check('a refused retry moves no money', p1Before === p1After, `${p1Before} -> ${p1After}`);
+  check('a refused retry pushes no card', resultCards().length === 0, `${resultCards().length} card(s)`);
+
   const second = await settle();
   await new Promise((r) => setTimeout(r, 300));
   check('retry succeeds', second?.success === true, JSON.stringify(second));
