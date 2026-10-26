@@ -18,6 +18,7 @@ import {
   verifyDangerPin,
   isPinConfigured,
   validatePinFormat,
+  type PinVerdict,
 } from './dangerPin.js';
 import { RocketStateDO } from './stateDO.js';
 import {
@@ -270,6 +271,14 @@ function settleRetryRefusal(error: string, lockedFinalTime: number, headers: Rec
 function parseFlightSeconds(v: unknown): number | null {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** The refusal for a danger-PIN check that failed (unset → 409, wrong / locked out → 403). */
+function pinRefusal(verdict: Exclude<PinVerdict, { ok: true }>, headers: Record<string, string>): Response {
+  return new Response(
+    JSON.stringify({ error: verdict.error, code: verdict.code }),
+    { status: verdict.code === 'not_configured' ? 409 : 403, headers: { 'Content-Type': 'application/json', ...headers } }
+  );
 }
 
 async function hashPayload(payload: unknown): Promise<string> {
@@ -1487,6 +1496,13 @@ if (
         } else if (functionName === 'adminVoidInFlightRound') {
           const roundId = String(args[0] || '').trim();
           const target = args[1] || 'ALL';
+          // Voiding refunds every duel of the rocket and cannot be undone, so it
+          // takes the danger PIN, checked here rather than in the dialog.
+          const pinVerdict = await verifyDangerPin(state(env), args[2]);
+          if (!pinVerdict.ok) {
+            console.warn('[Worker] in-flight void refused:', pinVerdict.code);
+            return pinRefusal(pinVerdict, corsHeaders);
+          }
           const voidRes = await voidInFlightRound(roundId, env, ctx);
           if (!voidRes.found) {
             result = { success: false, error: 'ไม่พบรอบบั้งไฟที่กำลังลอยอยู่' };
@@ -1584,7 +1600,7 @@ if (
             });
           }
           await setDangerPin(state(env), String(args[0]));
-          result = { success: true, message: 'ตั้งค่า PIN สำหรับการล้างข้อมูลเรียบร้อย' };
+          result = { success: true, message: 'ตั้งค่า PIN ยืนยันเรียบร้อย' };
 
         } else if (functionName === 'adminGetDangerPinStatus') {
           if (adminRole !== 'superadmin') {
@@ -2019,6 +2035,12 @@ if (
           }
         } else if (functionName === 'adminBroadcastVoidRound') {
           const target = args[0];
+          // Same lock as an in-flight void: every duel of the round is refunded.
+          const pinVerdict = await verifyDangerPin(state(env), args[1]);
+          if (!pinVerdict.ok) {
+            console.warn('[Worker] round void refused:', pinVerdict.code);
+            return pinRefusal(pinVerdict, corsHeaders);
+          }
           const roundStr = await state(env).get('ACTIVE_ROUND');
           const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
           round.status = 'VOID';

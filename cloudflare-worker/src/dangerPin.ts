@@ -1,6 +1,6 @@
 /**
  * ─────────────────────────────────────────────────────────────────────────────
- * Second-factor PIN for irreversible operations (Factory Reset)
+ * Second-factor PIN for irreversible operations (Factory Reset, voiding a round)
  * ─────────────────────────────────────────────────────────────────────────────
  *
  * WHY THIS EXISTS
@@ -213,7 +213,7 @@ export async function verifyDangerPin(state: StateStore, presented: unknown): Pr
     return {
       ok: false,
       code: 'not_configured',
-      error: 'ยังไม่ได้ตั้ง PIN สำหรับการล้างข้อมูล — กรุณาตั้งค่า PIN ก่อนใช้งาน',
+      error: 'ยังไม่ได้ตั้ง PIN ยืนยัน — กรุณาตั้งค่าในหัวข้อ “ความปลอดภัย” ก่อนใช้งาน',
     };
   }
 
