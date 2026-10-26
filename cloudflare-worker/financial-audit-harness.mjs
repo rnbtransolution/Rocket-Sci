@@ -77,6 +77,18 @@ function makeFakeDONamespace(kvCache, opts = { failAfterCalls: Infinity }) {
               if (q.startsWith('SELECT k, v, exp FROM state')) {
                 return { toArray: () => Array.from(sqlRows.values()) };
               }
+              // Cold keys (ORDER_, SETTLED_DAY_, CLAIM_) are read straight from SQLite.
+              if (q.startsWith('SELECT v, exp FROM state WHERE k = ?')) {
+                const row = sqlRows.get(params[0]);
+                return { toArray: () => (row ? [{ v: row.v, exp: row.exp }] : []) };
+              }
+              if (q.startsWith('SELECT k, exp FROM state WHERE')) {
+                const [len, prefix] = params;
+                const cold = ['ORDER_', 'SETTLED_DAY_', 'CLAIM_'];
+                return { toArray: () => Array.from(sqlRows.values())
+                  .filter((r) => cold.some((p) => r.k.startsWith(p)) && r.k.slice(0, len) === prefix)
+                  .map((r) => ({ k: r.k, exp: r.exp })) };
+              }
               if (q.startsWith("SELECT v FROM meta WHERE k = 'bootstrapped'")) {
                 const v = metaRows.get('bootstrapped');
                 return { toArray: () => (v ? [{ v }] : []) };
