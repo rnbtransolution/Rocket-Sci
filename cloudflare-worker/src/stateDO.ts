@@ -48,29 +48,6 @@ const STATE_DDL = `
   );
 `;
 
-/**
- * Keys copied from the legacy KV namespace the first time this object boots.
- * These are the aggregate keys the platform cannot function without; player
- * profiles are adopted lazily per-key by the read-miss fallback in state.ts.
- */
-const BOOTSTRAP_KEYS = [
-  'PLAYERS_LIST',
-  'TRANSACTIONS_LIST',
-  'CHAT_LOGS',
-  'PENDING_ORDERS_LIST',
-  'MATCHED_ORDERS_LIST',
-  'SETTLED_ORDERS_LIST',
-  'ACTIVE_ROUND',
-  'ACTIVE_GROUP_ID',
-  'LINE_GROUPS',
-];
-
-/**
- * Credential keys are adopted by PREFIX rather than by name, since one exists
- * per admin. Losing these would lock every admin out of the console, so they
- * must be restored from the KV mirror when the Durable Object is rebuilt.
- */
-const BOOTSTRAP_PREFIXES = ['ADMIN_CRED_'];
 
 interface StateRow {
   v: string;
@@ -92,8 +69,7 @@ const isCold = (key: string) => COLD_PREFIXES.some((p) => key.startsWith(p));
 /**
  * Finished orders and daily summaries are kept this long, then dropped from
  * the Durable Object (confirmed with the owner: 30 days). They stay in the
- * KV_ORDERS / KV_CACHE mirrors and Sheets, and a read of an older one adopts
- * it back from KV until the next sweep. Claims are never swept: they are what
+ * KV_ORDERS / KV_CACHE mirrors and Sheets for audit. Claims are never swept: they are what
  * stops a slip or refund from being credited twice.
  */
 const RETENTION_DAYS = 30;
@@ -396,33 +372,23 @@ export class RocketStateDO extends DurableObject<Env> {
       try {
         const done = sql.exec("SELECT v FROM meta WHERE k = 'bootstrapped'").toArray() as any[];
         if (!done || done.length === 0) {
+          // Copy every lasting key once: KV_CACHE (players, lists, round,
+          // settings, admin credentials) and KV_ORDERS (orders). Keys that
+          // carry a KV expiry are short-lived bookkeeping and are skipped. This
+          // is the ONLY time KV is read into the DO: reads used to adopt a KV
+          // value whenever the DO missed, and since KV keeps serving a deleted
+          // value for up to a minute, a key deleted here (Factory Reset) came
+          // straight back from the stale mirror.
           let adopted = 0;
-          for (const key of BOOTSTRAP_KEYS) {
-            if (this.cache.has(key)) continue; // never clobber existing DO state
-            const legacy = await this.env.KV_CACHE.get(key);
-            if (legacy !== null && legacy !== undefined) {
-              this.cache.set(key, { v: legacy, exp: 0 });
-              sql.exec(
-                'INSERT INTO state (k, v, exp) VALUES (?, ?, 0) ON CONFLICT(k) DO UPDATE SET v = excluded.v;',
-                key,
-                legacy
-              );
-              adopted++;
-            }
-          }
-          // Admin credentials: restore by prefix so admins are not locked out if the
-          // Durable Object is rebuilt. Missing these would leave the console
-          // unreachable with no way back except a deploy-time secret reset.
-          for (const prefix of BOOTSTRAP_PREFIXES) {
+          for (const ns of [this.env.KV_CACHE, this.env.KV_ORDERS]) {
+            if (!ns) continue;
             let cursor: string | undefined;
             do {
-              const page: any = await this.env.KV_CACHE.list({
-                prefix,
-                ...(cursor ? { cursor } : {}),
-              } as any);
+              const page: any = await ns.list({ ...(cursor ? { cursor } : {}) } as any);
               for (const k of page.keys || []) {
-                if (this.cache.has(k.name)) continue;
-                const value = await this.env.KV_CACHE.get(k.name);
+                if (k.expiration) continue;
+                if (this.cache.has(k.name)) continue; // never clobber existing DO state
+                const value = await ns.get(k.name);
                 if (value === null || value === undefined) continue;
                 this.cache.set(k.name, { v: value, exp: 0 });
                 sql.exec(

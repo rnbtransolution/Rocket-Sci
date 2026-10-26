@@ -170,26 +170,12 @@ export class StateStore {
       return this.env.KV_CACHE.get(key);
     }
 
-    // Miss inside the DO — this is expected for every pre-existing key during
-    // the migration window. Adopt the legacy KV value so the switch is seamless.
-    if (isEphemeral(key)) return null;
-    try {
-      const legacy = await this.env.KV_CACHE.get(key);
-      if (legacy !== null && legacy !== undefined) {
-        // Put-if-absent, never a blind put: between our miss and this write a
-        // ledger txn may already have committed a newer value for the key, and
-        // the stale KV copy must not overwrite it.
-        try {
-          return await stub.putIfAbsent(key, legacy);
-        } catch (_) {
-          return legacy;
-        }
-      }
-      return legacy ?? null;
-    } catch (err) {
-      console.warn(`[StateStore] KV fallback read failed for ${key}:`, err);
-      return null;
-    }
+    // A miss in the DO means the key does not exist. Reads used to adopt the
+    // KV value on a miss (a KV → DO migration aid), but KV keeps serving a
+    // deleted value for up to a minute, so a deleted key — every player after
+    // a Factory Reset — came back from the stale mirror. KV is copied into a
+    // fresh DO once, at its first boot (see RocketStateDO), and never again.
+    return null;
   }
 
   /**
@@ -367,7 +353,6 @@ export class StateStore {
     if (!stub) return false;
     try {
       const p0 = profile as any;
-      await this.warmProfile(p0?.shortId, p0?.lineUserId);
       const saved = await stub.saveProfile(JSON.stringify(profile), JSON.stringify(entry));
       if (!saved) return false;
       // The DO keeps the stored balance; reflect it back to the caller's object.
@@ -402,37 +387,18 @@ export class StateStore {
   // ── Atomic ledger ────────────────────────────────────────────────────────
 
   /**
-   * Make sure a player's records live in the Durable Object. `get` adopts a
-   * legacy KV value on a miss, which is what lets a txn find a player who has
-   * not been touched since the KV → DO migration.
-   */
-  async warmProfile(shortId?: string | null, lineUserId?: string | null): Promise<void> {
-    const tasks: Promise<unknown>[] = [];
-    if (typeof lineUserId === 'string' && lineUserId.startsWith('U')) tasks.push(this.get(`USER_${lineUserId}`));
-    if (typeof shortId === 'string' && shortId) {
-      tasks.push(this.get(`USER_${shortId}`));
-      tasks.push(this.get(`RAW_LINE_${shortId}`));
-    }
-    await Promise.all(tasks);
-  }
-
-  /**
    * The authoritative order record. Orders used to live only in KV_ORDERS,
    * which is eventually consistent — a status written in one region could read
    * back stale in another for up to a minute, which is how an order could be
-   * both matched and cancelled. The DO copy is now the record; KV_ORDERS is
-   * adopted once on a miss and kept as an audit mirror.
+   * both matched and cancelled. The DO copy is now the record; KV_ORDERS is an
+   * audit mirror only and is never read back into the DO (see `get`).
    */
   async getOrder(orderNumber: string): Promise<any | null> {
     const key = `ORDER_${orderNumber}`;
     const stub = this.stub();
     if (stub) {
       try {
-        let raw = await stub.get(key);
-        if (raw === null || raw === undefined) {
-          const legacy = await this.env.KV_ORDERS.get(key);
-          if (legacy) raw = await stub.putIfAbsent(key, legacy);
-        }
+        const raw = await stub.get(key);
         return raw ? JSON.parse(raw) : null;
       } catch (err) {
         this.tripCircuit(err);
@@ -460,11 +426,10 @@ export class StateStore {
       // Fast path: one RPC. Records already live in the Durable Object.
       let result = JSON.parse(await stub.txn(JSON.stringify(spec))) as TxnResult;
 
-      // A record the DO has never seen may still exist only in legacy KV (not
-      // yet touched since the KV → DO migration). Adopt the parties involved
-      // and retry once; the retry re-runs every check from scratch.
-      if (!result.ok && (result.reason === 'player_not_found' || result.reason === 'order_not_found')) {
-        await this.warmForTxn(spec);
+      // A player missing their USER_ keys may still be listed in PLAYERS_LIST:
+      // retry once letting the DO resolve them from that directory. The retry
+      // re-runs every check from scratch.
+      if (!result.ok && result.reason === 'player_not_found') {
         result = JSON.parse(await stub.txn(JSON.stringify({ ...spec, allowDirectoryFallback: true }))) as TxnResult;
       }
 
@@ -475,30 +440,6 @@ export class StateStore {
       console.error('[StateStore] txn failed:', err);
       return fail('unavailable', String((err as Error)?.message || err));
     }
-  }
-
-  /** Adopt every legacy record a txn may touch (see `get` / `getOrder`). */
-  private async warmForTxn(spec: TxnSpec): Promise<void> {
-    const warm: Promise<unknown>[] = [];
-    for (const b of spec.balances || []) warm.push(this.warmProfile(b.shortId, b.lineUserId));
-    for (const o of spec.orders || []) {
-      if (o.create) continue;
-      warm.push(this.getOrder(o.orderNumber).then((ord) => Promise.all([
-        ord ? this.warmProfile(ord.creatorId, ord.creatorLineUserId) : null,
-        ord && ord.matcherId ? this.warmProfile(ord.matcherId, ord.matcherLineUserId) : null,
-      ])));
-    }
-    if ((spec.transactions || []).some((t) => !t.insert)) {
-      warm.push(this.get('TRANSACTIONS_LIST').then(async (raw) => {
-        const list = raw ? (JSON.parse(raw) as any[]) : [];
-        for (const t of spec.transactions || []) {
-          const tx = list.find((x) => x && x.id === t.id);
-          if (tx) await this.warmProfile(tx.playerId, tx.lineUserId);
-        }
-      }));
-    }
-    warm.push(this.get('PLAYERS_LIST'));
-    await Promise.all(warm);
   }
 
   /** Copy committed rows to KV: orders awaited (audit tools read KV_ORDERS), the rest best-effort. */
