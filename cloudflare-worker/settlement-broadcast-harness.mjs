@@ -136,8 +136,11 @@ async function scenario(label, { inFlight }) {
   }
 
   // ── the cause is fixed, then the admin retries ──
-  for (const k of [`USER_${GHOST.lineUserId}`, `USER_${GHOST.shortId}`]) await kvC.put(k, JSON.stringify(prof(GHOST, 1000 - STAKE)));
+  // The DO never reads KV back after its first boot, so the missing player is
+  // created the way an admin would: through the console.
   await kvC.put(`RAW_LINE_${GHOST.shortId}`, GHOST.lineUserId);
+  const fix = await rpc('adminSetPlayerBalance', [GHOST.lineUserId, 1000 - STAKE, GHOST.name]);
+  check('missing player created via the console', fix?.success === true, JSON.stringify(fix));
   // ── a retry on a different flight time (or range) is refused ──
   const p1Before = Number(((await rpc('getDashboardData', [])).players || []).find((x) => x.shortId === P1.shortId)?.balance);
   const wrongTime = await settle(450);
