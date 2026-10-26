@@ -77,6 +77,77 @@ interface StateRow {
   exp: number;
 }
 
+/**
+ * Keys that grow with every order, day or claim and are only ever read one at
+ * a time. They live in SQLite alone, not in the in-memory mirror: the mirror
+ * used to hold every order ever placed, so memory and cold-start time grew
+ * without limit until the object hit its 128 MB ceiling. SQLite in a Durable
+ * Object is local; a primary-key read is microseconds and stays synchronous,
+ * so a ledger txn is exactly as atomic as before.
+ */
+const COLD_PREFIXES = ['ORDER_', 'SETTLED_DAY_', 'CLAIM_'];
+const COLD_GLOB = COLD_PREFIXES.map((p) => `k GLOB '${p}*'`).join(' OR ');
+const isCold = (key: string) => COLD_PREFIXES.some((p) => key.startsWith(p));
+
+/**
+ * Finished orders and daily summaries are kept this long, then dropped from
+ * the Durable Object (confirmed with the owner: 30 days). They stay in the
+ * KV_ORDERS / KV_CACHE mirrors and Sheets, and a read of an older one adopts
+ * it back from KV until the next sweep. Claims are never swept: they are what
+ * stops a slip or refund from being credited twice.
+ */
+const RETENTION_DAYS = 30;
+const RETENTION_MS = RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+/**
+ * The in-memory mirror, Map-shaped so call sites read as before. Hot keys are
+ * held in memory; cold keys pass straight through to SQLite. Every write path
+ * already writes SQLite alongside `set`, so a cold `set` has nothing to do.
+ */
+class StateRows {
+  private hot = new Map<string, StateRow>();
+  constructor(private sql: SqlStorage) {}
+
+  get(key: string): StateRow | undefined {
+    if (!isCold(key)) return this.hot.get(key);
+    const rows = this.sql.exec('SELECT v, exp FROM state WHERE k = ?;', key).toArray() as unknown as StateRow[];
+    const row = rows[0];
+    return row ? { v: String(row.v), exp: Number(row.exp) || 0 } : undefined;
+  }
+
+  has(key: string): boolean {
+    return this.get(key) !== undefined;
+  }
+
+  set(key: string, row: StateRow): void {
+    if (!isCold(key)) this.hot.set(key, row);
+  }
+
+  /** Forget a key in memory (callers delete the SQLite row themselves). */
+  delete(key: string): boolean {
+    return isCold(key) ? this.has(key) : this.hot.delete(key);
+  }
+
+  /** Hot rows, then cold key names matching `prefix` straight from SQLite. */
+  *entries(prefix = ''): IterableIterator<[string, StateRow]> {
+    yield* this.hot.entries();
+    if (prefix && !COLD_PREFIXES.some((p) => prefix.startsWith(p) || p.startsWith(prefix))) return;
+    const rows = this.sql
+      .exec(`SELECT k, exp FROM state WHERE (${COLD_GLOB}) AND substr(k, 1, ?) = ?;`, prefix.length, prefix)
+      .toArray() as unknown as Array<{ k: string; exp: number }>;
+    for (const r of rows) yield [String(r.k), { v: '', exp: Number(r.exp) || 0 }];
+  }
+
+  clear(): void {
+    this.hot.clear();
+  }
+
+  /** Keys held in memory. */
+  get size(): number {
+    return this.hot.size;
+  }
+}
+
 // ── Atomic ledger transaction types ─────────────────────────────────────────
 //
 // Every movement of player credit, and every order status change that decides
@@ -284,8 +355,8 @@ function dedupeProfiles(list: any[]): any[] {
 }
 
 export class RocketStateDO extends DurableObject<Env> {
-  /** Hot in-memory mirror of the persisted state (authoritative while loaded). */
-  private cache = new Map<string, StateRow>();
+  /** In-memory mirror of the hot keys; cold keys read through to SQLite (see StateRows). */
+  private cache!: StateRows; // assigned first thing in the constructor
   /** Resolves once the in-memory mirror has been fully hydrated from SQLite. */
   private ready: Promise<void>;
 
@@ -298,12 +369,13 @@ export class RocketStateDO extends DurableObject<Env> {
 
     const sql = ctx.storage.sql;
     sql.exec(STATE_DDL);
+    this.cache = new StateRows(sql);
 
     this.ready = (async () => {
       try {
         const now = Date.now();
         const rows = sql
-          .exec('SELECT k, v, exp FROM state')
+          .exec(`SELECT k, v, exp FROM state WHERE NOT (${COLD_GLOB})`)
           .toArray() as unknown as Array<{ k: string; v: string; exp: number }>;
         for (const row of rows) {
           if (!row || typeof row.k !== 'string' || typeof row.v !== 'string') continue;
@@ -418,7 +490,7 @@ export class RocketStateDO extends DurableObject<Env> {
     await this.ready;
     const now = Date.now();
     const out: string[] = [];
-    for (const [key, row] of this.cache.entries()) {
+    for (const [key, row] of this.cache.entries(prefix || '')) {
       if (row.exp && row.exp <= now) {
         this.cache.delete(key);
         continue;
@@ -1227,9 +1299,45 @@ export class RocketStateDO extends DurableObject<Env> {
       this.ctx.storage.sql.exec('DELETE FROM state WHERE exp > 0 AND exp <= ?;', now);
     } catch (err) {
       console.error('[RocketStateDO] alarm purge error:', err);
+    }
+    try {
+      await this.sweepRetention();
+    } catch (err) {
+      console.error('[RocketStateDO] retention sweep error:', err);
     } finally {
       this.ctx.storage.setAlarm(Date.now() + 60 * 60 * 1000);
     }
+  }
+
+  /**
+   * Drop finished orders and daily summaries older than RETENTION_DAYS. Only
+   * terminal orders go: anything pending or matched still holds a stake. The
+   * age is taken from when the order finished, falling back to when it was
+   * created. Rows that are not valid JSON are left alone.
+   */
+  async sweepRetention(now: number = Date.now()): Promise<{ orders: number; days: number }> {
+    await this.ready;
+    const sql = this.ctx.storage.sql;
+    const cutoff = now - RETENTION_MS;
+    const terminal = [...TERMINAL_ORDER_STATUSES].map((st) => `'${st}'`).join(', ');
+    const orders = sql.exec(
+      `DELETE FROM state
+        WHERE k GLOB 'ORDER_*' AND json_valid(v)
+          AND json_extract(v, '$.status') IN (${terminal})
+          AND COALESCE(json_extract(v, '$.settledAt'), json_extract(v, '$.refundedAt'),
+                       json_extract(v, '$.cancelledAt'), json_extract(v, '$.updatedAt'),
+                       json_extract(v, '$.createdAt'), ?) < ?;`,
+      now,
+      cutoff
+    ).rowsWritten;
+    // SETTLED_DAY_<YYYY-MM-DD>: ISO dates compare as strings.
+    const cutoffDay = new Date(cutoff).toISOString().slice(0, 10);
+    const days = sql.exec(
+      "DELETE FROM state WHERE k GLOB 'SETTLED_DAY_*' AND substr(k, 13) < ?;",
+      cutoffDay
+    ).rowsWritten;
+    if (orders || days) console.log(`[RocketStateDO] retention: dropped ${orders} orders, ${days} daily summaries older than ${RETENTION_DAYS} days`);
+    return { orders, days };
   }
 
   /** Operational introspection surfaced through the admin debug panel. */
