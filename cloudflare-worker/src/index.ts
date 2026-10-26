@@ -1,7 +1,7 @@
 import { LINE_ICONS } from './lineIcons.js';
 import { Env, LineWebhookPayload, QueueMessage, LineEvent, PlayerProfile, Order, InFlightRound } from './types.js';
 import { verifyLineSignature } from './signature.js';
-import { state } from './state.js';
+import { state, type TxnSpec } from './state.js';
 import { getPaymentBank, setPaymentBank } from './paymentBank.js';
 import {
   setAdminPassword,
@@ -184,14 +184,28 @@ async function resolveTargetGroupIds(target: string | undefined, env: Env): Prom
 const PLATFORM_COMMISSION_RATE = 0.10;
 
 /**
- * Settle orders against a flight time, each in its own atomic ledger step.
+ * Orders settled per ledger step. One step per order made a 100-duel round 100
+ * sequential Worker→DO round trips plus 100 awaited KV mirrors — 10s or more
+ * while the admin waits on the button. A step stays small so its write set and
+ * the GAS balance syncs it triggers stay modest.
+ */
+const SETTLE_BATCH_SIZE = 20;
+
+/**
+ * Settle orders against a flight time in atomic ledger steps of up to
+ * SETTLE_BATCH_SIZE orders.
  *
- * The Durable Object re-reads the stored order, refuses anything no longer
+ * The Durable Object re-reads each stored order, refuses anything no longer
  * `matched`, computes the winner and the 10% fee from the STORED amount and
  * parties, credits the winner (or both stakes on a draw), and moves the order
  * from the matched list to the settled list — all at once. Settlement used to
  * check a KV copy and then pay in separate writes, so a second "settle" click,
  * or a cancel landing in between, could pay the same order twice.
+ *
+ * A step is all-or-nothing: one order that is no longer `matched` (or cannot
+ * be paid) aborts the whole batch with nothing written. That batch is then
+ * settled one order at a time, which skips or reports exactly that order and
+ * pays the rest — the same outcome as settling every order on its own.
  */
 async function settleOrdersAtomically(
   candidates: Order[],
@@ -208,29 +222,46 @@ async function settleOrdersAtomically(
   // The daily summary's source. SETTLED_ORDERS_LIST keeps only the latest 100
   // and is wiped by "ปิดรอบพอร์ทัล", so it cannot back a whole day of duels.
   const dayKey = dailySettledKey(bangkokDay());
+  const queue: Order[] = [];
   for (const item of candidates) {
     if (!item || !item.orderNumber || seen.has(item.orderNumber) || skip.has(item.orderNumber)) continue;
     seen.add(item.orderNumber);
-    const res = await ledger(env, {
-      orders: [{
-        orderNumber: item.orderNumber,
-        ...(item.createdAt ? { expectCreatedAt: Number(item.createdAt) } : {}),
-        expectStatus: ['matched'],
-        settle: { finalSeconds, tMin, tMax, commissionRate: PLATFORM_COMMISSION_RATE },
-      }],
-      lists: [
-        { key: 'MATCHED_ORDERS_LIST', op: 'remove', orderNumber: item.orderNumber },
-        { key: 'SETTLED_ORDERS_LIST', op: 'upsert', orderNumber: item.orderNumber, cap: 100 },
-        { key: dayKey, op: 'append', orderNumber: item.orderNumber, cap: 1000 },
-      ],
-    }, ctx);
-    if (res.ok) {
-      settled.push(res.orders[item.orderNumber] as Order);
-    } else if (res.reason === 'order_status') {
-      console.warn(`[Worker] skipping order #${item.orderNumber} at settlement: status is "${res.current?.status}", not "matched"`);
-    } else {
-      console.error(`[Worker] settlement of #${item.orderNumber} failed: ${res.reason} ${res.detail || ''}`);
-      failed.push({ orderNumber: item.orderNumber, reason: String(res.reason) });
+    queue.push(item);
+  }
+  const spec = (items: Order[]): TxnSpec => ({
+    orders: items.map((item) => ({
+      orderNumber: item.orderNumber,
+      ...(item.createdAt ? { expectCreatedAt: Number(item.createdAt) } : {}),
+      expectStatus: ['matched'],
+      settle: { finalSeconds, tMin, tMax, commissionRate: PLATFORM_COMMISSION_RATE },
+    })),
+    lists: items.flatMap((item) => [
+      { key: 'MATCHED_ORDERS_LIST', op: 'remove' as const, orderNumber: item.orderNumber },
+      { key: 'SETTLED_ORDERS_LIST', op: 'upsert' as const, orderNumber: item.orderNumber, cap: 100 },
+      { key: dayKey, op: 'append' as const, orderNumber: item.orderNumber, cap: 1000 },
+    ]),
+  });
+
+  for (let i = 0; i < queue.length; i += SETTLE_BATCH_SIZE) {
+    const batch = queue.slice(i, i + SETTLE_BATCH_SIZE);
+    if (batch.length > 1) {
+      const res = await ledger(env, spec(batch), ctx);
+      if (res.ok) {
+        for (const item of batch) settled.push(res.orders[item.orderNumber] as Order);
+        continue;
+      }
+      console.warn(`[Worker] settlement batch of ${batch.length} refused (${res.reason} ${res.detail || ''}); settling one by one`);
+    }
+    for (const item of batch) {
+      const res = await ledger(env, spec([item]), ctx);
+      if (res.ok) {
+        settled.push(res.orders[item.orderNumber] as Order);
+      } else if (res.reason === 'order_status') {
+        console.warn(`[Worker] skipping order #${item.orderNumber} at settlement: status is "${res.current?.status}", not "matched"`);
+      } else {
+        console.error(`[Worker] settlement of #${item.orderNumber} failed: ${res.reason} ${res.detail || ''}`);
+        failed.push({ orderNumber: item.orderNumber, reason: String(res.reason) });
+      }
     }
   }
   return { settled, failed };
