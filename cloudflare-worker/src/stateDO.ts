@@ -3,7 +3,7 @@ import { Env } from './types.js';
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
- * RocketStateDO — strongly-consistent authoritative state for Rocket Science
+ * RocketStateDO — strongly-consistent authoritative state for Bangfai Commander
  * ─────────────────────────────────────────────────────────────────────────────
  *
  * WHY THIS EXISTS

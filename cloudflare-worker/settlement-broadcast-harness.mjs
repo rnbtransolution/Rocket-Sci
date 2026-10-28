@@ -12,7 +12,8 @@
  * ASSERTED HERE, for both the active round and a parked in-flight round:
  *  * a partial failure pushes no result card to the group;
  *  * the retry pushes exactly one card, listing every pair of the round;
- *  * the pair paid by the first attempt is not paid again.
+ *  * the pair paid by the first attempt is not paid again;
+ *  * a round with no matched pair still settles and reports its flight time.
  *
  * The failure is real, not mocked: one order's matcher has no profile anywhere,
  * so the ledger refuses it (player_not_found) until the profile is added.
@@ -173,11 +174,70 @@ async function scenario(label, { inFlight }) {
   await mf.dispose();
 }
 
+// The admin reports a flight time even when nobody matched in that round.
+async function emptyRound(label, { inFlight }) {
+  const pushes = [];
+  const mf = new Miniflare({
+    modules: true, scriptPath: bundlePath, modulesRoot: outDir,
+    compatibilityDate: '2024-09-01', compatibilityFlags: ['nodejs_compat'],
+    kvNamespaces: { KV_CACHE: `sb-c-${label}`, KV_ORDERS: `sb-o-${label}` },
+    durableObjects: { ROCKET_STATE: { className: 'RocketStateDO', useSQLite: true } },
+    outboundService: async (req) => {
+      if (req.url.includes('/v2/bot/message/push')) pushes.push(await req.json());
+      return new Response('{}', { status: 200 });
+    },
+    bindings: {
+      ADMIN_API_KEY: ADMIN_KEY, SESSION_SECRET: 'test_session_secret_0123456789',
+      LINE_CHANNEL_SECRET: 's', LINE_CHANNEL_ACCESS_TOKEN: 't',
+      ADMIN_USERNAME: 'admin', ENVIRONMENT: 'test',
+    },
+  });
+  const kvC = await mf.getKVNamespace('KV_CACHE');
+  const rpc = async (functionName, args) => (await (await mf.dispatchFetch('http://localhost/api/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-key': ADMIN_KEY },
+    body: JSON.stringify({ functionName, args }),
+  })).json())?.data;
+  const roundId = `R_${label}`;
+  await kvC.put('ACTIVE_GROUP_ID', GROUP);
+  if (inFlight) {
+    await kvC.put('IN_FLIGHT_ROUNDS', JSON.stringify([{
+      roundId, name: 'EMPTY', targetMin: 350, targetMax: 400, isChotoy: false,
+      quoteReleased: true, launchedAt: CREATED_AT, matchedOrders: [],
+    }]));
+    await kvC.put('ACTIVE_ROUND', JSON.stringify({ roundId: 'R_NEXT', name: 'NEXT', targetMin: 350, targetMax: 400, status: 'ACTIVE' }));
+  } else {
+    await kvC.put('ACTIVE_ROUND', JSON.stringify({ roundId, name: 'EMPTY', targetMin: 350, targetMax: 400, status: 'ACTIVE' }));
+  }
+  const res = inFlight
+    ? await rpc('adminResolveInFlightRound', [roundId, 372])
+    : await rpc('adminResolveBets', [372, 350, 400]);
+  await new Promise((r) => setTimeout(r, 300));
+  check('empty round settles', res?.success === true && res?.resolvedCount === 0, JSON.stringify(res));
+  const cards = pushes.filter((p) => p.to === GROUP).flatMap((p) => p.messages || [])
+    .filter((m) => String(m.altText || '').startsWith('ผลการแข่งขัน'));
+  const text = JSON.stringify(cards[0] || {});
+  check('one result card reaches the group', cards.length === 1, `${cards.length} card(s)`);
+  check('the card shows the flight time', text.includes('เวลาบิน 372 วิ'));
+  check('the card says there was no duel', text.includes('ไม่มีคู่ดวล') && !text.includes('0 คู่'));
+  if (inFlight) {
+    check('the parked round leaves the queue', (res?.inFlightRounds || []).length === 0, JSON.stringify(res?.inFlightRounds));
+  } else {
+    const round = (await rpc('getDashboardData', []))?.activeRound;
+    check('round is RESOLVED', round?.status === 'RESOLVED', round?.status);
+  }
+  await mf.dispose();
+}
+
 console.log('SETTLEMENT BROADCAST HARNESS\n');
 console.log('[1] Active round: partial failure, then retry');
 await scenario('active', { inFlight: false });
 console.log('\n[2] Parked in-flight round: partial failure, then retry');
 await scenario('inflight', { inFlight: true });
+console.log('\n[3] Active round with no matched pair');
+await emptyRound('empty-active', { inFlight: false });
+console.log('\n[4] Parked in-flight round with no matched pair');
+await emptyRound('empty-inflight', { inFlight: true });
 
 rmSync(outDir, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);

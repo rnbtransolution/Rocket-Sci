@@ -1,6 +1,6 @@
 // =========================================================================
 // GOOGLE APPS SCRIPT WEBHOOK, TELEMETRY & DB CONTROLLER (Code.gs)
-// Project: Rocket Science Billing & Telemetry System
+// Project: Bangfai Commander Billing & Telemetry System
 // =========================================================================
 
 // Secrets live in Script Properties (Project Settings → Script properties).
@@ -2583,18 +2583,18 @@ function replyToLine(replyToken, text, userId, attachQuickReply) {
   
   if (typeof processed === 'object' && processed !== null) {
     if (processed.type === 'text') {
-      messageObj = { type: 'text', text: processed.text || '🚀 Rocket Science', quickReply: isDM ? processed.quickReply : undefined };
+      messageObj = { type: 'text', text: processed.text || '🚀 Bangfai Commander', quickReply: isDM ? processed.quickReply : undefined };
     } else if (processed.type === 'flex') {
       messageObj = {
         type: 'flex',
-        altText: processed.altText || 'ระบบบริการ Rocket Science 🚀',
+        altText: processed.altText || 'ระบบบริการ Bangfai Commander 🚀',
         contents: processed.contents,
         quickReply: isDM ? processed.quickReply : undefined
       };
     } else {
       var alt = (processed.header && processed.header.contents && processed.header.contents[0] && processed.header.contents[0].text)
         || (processed.contents && processed.contents[0] && processed.contents[0].header && processed.contents[0].header.contents && processed.contents[0].header.contents[0].text)
-        || 'ระบบบริการ Rocket Science 🚀';
+        || 'ระบบบริการ Bangfai Commander 🚀';
       messageObj = {
         type: 'flex',
         altText: alt,
@@ -2713,7 +2713,7 @@ function adminCreatePlayer(lineId, displayName, initialBalance) {
   const balance = Number(initialBalance) || 0;
   sheet.appendRow([searchId, displayName.trim(), balance, new Date(), '', '', '']);
   // Welcome push
-  const msg = `🎉 ยินดีต้อนรับสู่ระบบ Rocket Science Billing ครับ!\n\nบัญชีของคุณถูกสร้างโดยแอดมินเรียบร้อยแล้ว\n💰 เครดิตเริ่มต้น: ${balance} แต้ม\n\nหากมีข้อสงสัยติดต่อฝ่ายสนับสนุน: 089-104-1992`;
+  const msg = `🎉 ยินดีต้อนรับสู่ระบบ Bangfai Commander Billing ครับ!\n\nบัญชีของคุณถูกสร้างโดยแอดมินเรียบร้อยแล้ว\n💰 เครดิตเริ่มต้น: ${balance} แต้ม\n\nหากมีข้อสงสัยติดต่อฝ่ายสนับสนุน: 089-104-1992`;
   pushToLine(searchId, msg);
   return getDashboardData();
 }
@@ -3507,7 +3507,7 @@ function pushLineGroupMessage(groupId, text) {
   if (typeof text === 'object' && text !== null) {
     var alt = (text.header && text.header.contents && text.header.contents[0] && text.header.contents[0].text)
       ? text.header.contents[0].text
-      : 'ระบบบริการ Rocket Science 🚀';
+      : 'ระบบบริการ Bangfai Commander 🚀';
     messageObj = { type: 'flex', altText: alt, contents: text };
   } else {
     messageObj = { type: 'text', text: String(text) };
@@ -3573,7 +3573,7 @@ function adminTestPushGroupMessage(targetGroupId) {
   if (!gid) {
     return { success: false, error: 'ไม่พบ Group ID ที่เชื่อมต่อ — กรุณาใส่ Group ID ก่อนทดสอบครับ' };
   }
-  var testMsg = '🔔 ทดสอบการเชื่อมต่อระบบ Rocket Science จาก Admin Web App (เวลา: ' + Utilities.formatDate(new Date(), 'GMT+7', 'HH:mm:ss') + ') 🚀';
+  var testMsg = '🔔 ทดสอบการเชื่อมต่อระบบ Bangfai Commander จาก Admin Web App (เวลา: ' + Utilities.formatDate(new Date(), 'GMT+7', 'HH:mm:ss') + ') 🚀';
   var res = pushLineGroupMessage(gid, testMsg);
   return {
     success: res.success,
@@ -3605,18 +3605,18 @@ function createLinePushRequest(userId, text) {
   var messageObj;
   if (typeof processed === 'object' && processed !== null) {
     if (processed.type === 'text') {
-      messageObj = { type: 'text', text: processed.text || '🚀 Rocket Science', quickReply: isGroup ? undefined : processed.quickReply };
+      messageObj = { type: 'text', text: processed.text || '🚀 Bangfai Commander', quickReply: isGroup ? undefined : processed.quickReply };
     } else if (processed.type === 'flex') {
       messageObj = {
         type: 'flex',
-        altText: processed.altText || 'ระบบบริการ Rocket Science 🚀',
+        altText: processed.altText || 'ระบบบริการ Bangfai Commander 🚀',
         contents: processed.contents,
         quickReply: isGroup ? undefined : processed.quickReply
       };
     } else {
       var alt2 = (processed.header && processed.header.contents && processed.header.contents[0] && processed.header.contents[0].text)
         ? processed.header.contents[0].text
-        : 'ระบบบริการ Rocket Science 🚀';
+        : 'ระบบบริการ Bangfai Commander 🚀';
       messageObj = {
         type: 'flex',
         altText: alt2,
@@ -3943,7 +3943,7 @@ function attachMainMenuQuickReply_(payload) {
   if (payload === null || payload === undefined) {
     return {
       type: 'text',
-      text: '🚀 Rocket Science',
+      text: '🚀 Bangfai Commander',
       quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS_ }
     };
   }
@@ -3958,7 +3958,7 @@ function attachMainMenuQuickReply_(payload) {
 
   if (typeof payload === 'object') {
     if (payload.type === 'bubble' || payload.type === 'carousel') {
-      var altText = (payload.header && payload.header.contents && payload.header.contents[0] && payload.header.contents[0].text) || payload.altText || '🚀 Rocket Science';
+      var altText = (payload.header && payload.header.contents && payload.header.contents[0] && payload.header.contents[0].text) || payload.altText || '🚀 Bangfai Commander';
       return {
         type: 'flex',
         altText: altText,
@@ -4005,7 +4005,7 @@ function stripMainMenuQuickReply_(payload) {
 function constructMainMenuQuickReply() {
   return {
     type: 'text',
-    text: '🚀 Rocket Science เมนูหลัก\n\nเลือกเมนูที่ต้องการด้านล่างได้เลยครับ 👇',
+    text: '🚀 Bangfai Commander เมนูหลัก\n\nเลือกเมนูที่ต้องการด้านล่างได้เลยครับ 👇',
     quickReply: {
       items: MAIN_MENU_QUICK_REPLY_ITEMS_
     }
@@ -4024,7 +4024,7 @@ function constructMainMenuFlex() {
       "contents": [
         {
           "type": "text",
-          "text": "🚀 Rocket Science Menu",
+          "text": "🚀 Bangfai Commander Menu",
           "weight": "bold",
           "color": "#FFFFFF",
           "size": "xs",
@@ -4633,7 +4633,7 @@ function constructRuleGuideFlex() {
       "contents": [
         {
           "type": "text",
-          "text": "🚀 ROCKET SCIENCE",
+          "text": "🚀 BANGFAI COMMANDER",
           "weight": "bold",
           "color": "#FDE047",
           "size": "xxs",
@@ -6153,7 +6153,7 @@ function sendAdminMessageToLine(targetId, messageText) {
     if (isObj) {
       var alt = (messageText.header && messageText.header.contents && messageText.header.contents[0] && messageText.header.contents[0].text)
         ? messageText.header.contents[0].text
-        : 'ระบบบริการ Rocket Science 🚀';
+        : 'ระบบบริการ Bangfai Commander 🚀';
       messageObj = { type: 'flex', altText: alt, contents: messageText };
     } else {
       messageObj = { type: 'text', text: String(messageText) };

@@ -559,7 +559,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     // ── Fallback for Unrecognized Private Messages ──
     if (!isGroup) {
       const fallbackFlex = generateNoticeFlex(
-        'Rocket Science',
+        'Bangfai Commander',
         'เลือกรายการจากเมนูด้านล่าง',
         'info',
         'เช็คยอด • ฝากเงิน • ถอนเงิน • กติกา • กระดานดวล'
@@ -2696,7 +2696,7 @@ async function replyToLine(replyToken: string, payload: any, env: Env, attachQui
     } else if (processed && processed.type === 'flex') {
       messageObj = processed;
     } else if (processed && (processed.type === 'bubble' || processed.type === 'carousel')) {
-      const altText = processed.header?.contents?.[0]?.text || processed.altText || 'Rocket Science';
+      const altText = processed.header?.contents?.[0]?.text || processed.altText || 'Bangfai Commander';
       messageObj = { type: 'flex', altText, contents: processed };
     } else if (processed && processed.type === 'text') {
       messageObj = processed;
@@ -2768,7 +2768,7 @@ export async function pushToLine(to: string, payload: any, env: Env): Promise<{ 
     } else if (processed && processed.type === 'flex') {
       messageObj = processed;
     } else if (processed && (processed.type === 'bubble' || processed.type === 'carousel')) {
-      const altText = processed.header?.contents?.[0]?.text || processed.altText || 'Rocket Science';
+      const altText = processed.header?.contents?.[0]?.text || processed.altText || 'Bangfai Commander';
       messageObj = { type: 'flex', altText, contents: processed };
     } else if (processed && processed.type === 'text') {
       messageObj = processed;
