@@ -1147,12 +1147,6 @@ export default function App() {
       return;
     }
 
-    const activeMatched = bets.filter(b => b.status === 'matched');
-    if (activeMatched.length === 0) {
-      addToast('ไม่พบแผลดวลที่จับคู่สำเร็จ (Matched Bets = 0) ในรอบนี้! ระบบไม่สามารถชำระแต้มได้', 'warning');
-      return;
-    }
-
     setFlightLogs(prev => [`[LAUNCHPAD] [${new Date().toLocaleTimeString()}] Manual telemetry result submitted: ${finalTime}s.`, ...prev]);
 
     resolveMatchedBets(finalTime);
@@ -1193,13 +1187,17 @@ export default function App() {
   const handleConfirmSettle = async (timeSec, preview, totals) => {
     const ok = await ask({
       title: `ยืนยันผล ${timeSec} วิ?`,
-      items: [
+      // A round with no matched pair still reports its flight time to the group.
+      items: preview.length > 0 ? [
         `ตัดสินผล ${preview.length} คู่ของรอบ ${activeRoundObj?.name || rocketName || 'ปัจจุบัน'}`,
         `จ่ายผู้ชนะรวม ${totals.paid.toLocaleString()} pt · คืนคู่เสมอ ${totals.refund.toLocaleString()} pt`,
         `ค่าธรรมเนียมรวม ${totals.fee.toLocaleString()} pt`,
         'ประกาศผลเข้ากลุ่ม LINE ทันที',
+      ] : [
+        `รอบ ${activeRoundObj?.name || rocketName || 'ปัจจุบัน'} ไม่มีคู่ที่ต่อติด ไม่มีการจ่ายแต้ม`,
+        'ประกาศเวลาบินเข้ากลุ่ม LINE ทันที',
       ],
-      confirmLabel: `ยืนยันและจ่าย ${preview.length} คู่`,
+      confirmLabel: preview.length > 0 ? `ยืนยันและจ่าย ${preview.length} คู่` : 'ยืนยันและส่งผลเวลา',
     });
     if (ok) handleSubmitOnsiteResult(timeSec);
   };
@@ -1487,7 +1485,7 @@ export default function App() {
   // Worker/GAS report an open round as 'ACTIVE'; legacy builds used 'OPEN'.
   const isRoundOpen = roundStatus === 'ACTIVE' || roundStatus === 'OPEN';
 
-  const NAV_GROUPS = ['รอบแข่ง', 'เงิน', 'กลุ่ม LINE และตั้งค่า'];
+  const NAV_GROUPS = ['รอบแข่ง', 'การเงิน', 'การตั้งค่า'];
   const navItems = [
     {
       id: 'quote',
@@ -1523,12 +1521,19 @@ export default function App() {
       attention: inFlightRounds.length > 0,
     },
     {
+      id: 'broadcast',
+      activeMatch: (t) => t === 'broadcast',
+      label: 'ประกาศและสรุปรายวัน',
+      icon: Radio,
+      section: 'รอบแข่ง',
+    },
+    {
       id: 'review',
       activeMatch: (t) => t === 'review',
       onClick: () => { setAdminTab('review'); setTxStatusFilter('escalated'); },
       label: 'สลิปรอตรวจ',
       icon: FileText,
-      section: 'เงิน',
+      section: 'การเงิน',
       badge: transactions.filter(t => t.status === 'escalated').length || null,
       attention: transactions.some(t => t.status === 'escalated'),
     },
@@ -1537,7 +1542,7 @@ export default function App() {
       activeMatch: (t) => t === 'players',
       label: 'ผู้เล่นและเครดิต',
       icon: Users,
-      section: 'เงิน',
+      section: 'การเงิน',
       badge: players.length || null,
     },
     {
@@ -1546,21 +1551,14 @@ export default function App() {
       onClick: () => { setAdminTab('logs'); setTxStatusFilter('all'); },
       label: 'ธุรกรรมทั้งหมด',
       icon: Database,
-      section: 'เงิน',
-    },
-    {
-      id: 'broadcast',
-      activeMatch: (t) => t === 'broadcast',
-      label: 'ประกาศและสรุปรายวัน',
-      icon: Radio,
-      section: 'กลุ่ม LINE และตั้งค่า',
+      section: 'การเงิน',
     },
     {
       id: 'bank',
       activeMatch: (t) => t === 'bank',
       label: 'บัญชีรับเงิน',
       icon: Landmark,
-      section: 'กลุ่ม LINE และตั้งค่า',
+      section: 'การตั้งค่า',
     },
   ];
   const activeNav = navItems.find((item) => item.activeMatch(adminTab));
@@ -1624,7 +1622,7 @@ export default function App() {
       <aside className="hidden lg:flex lg:fixed lg:inset-y-0 lg:left-0 lg:w-[240px] lg:z-40 flex-col justify-between select-none bg-[#16191D] text-[#C9CED6]">
         <div className="min-h-0 flex flex-col">
           <div className="px-5 pt-5 pb-4 flex flex-col gap-0.5">
-            <span className="text-[15px] font-bold text-white">Rocket Science</span>
+            <span className="text-[15px] font-bold text-white">Bangfai Commander</span>
             <span className="text-xs text-[#9AA2AD]">คอนโซลแอดมิน</span>
           </div>
 
@@ -2416,7 +2414,7 @@ export default function App() {
                           {preview.length === 0 ? (
                             <tr>
                               <td colSpan={7} className="py-10 text-center text-sm text-[#5B636E]">
-                                {matchedCount === 0 ? 'ไม่มีคู่ที่ต่อติดรอผล' : 'กรอกเวลาบินเพื่อดูผลของแต่ละคู่'}
+                                {matchedCount === 0 ? 'ไม่มีคู่ที่ต่อติดรอผล ส่งผลเวลาเข้ากลุ่มได้' : 'กรอกเวลาบินเพื่อดูผลของแต่ละคู่'}
                               </td>
                             </tr>
                           ) : preview.map((p) => (
@@ -2457,8 +2455,8 @@ export default function App() {
 
                     <div className="px-4 pb-4 flex flex-wrap items-center justify-end gap-3">
                       <span className="text-[13px] text-[#5B636E] mr-auto">กดซ้ำได้ปลอดภัย คู่ที่จ่ายแล้วจะไม่ถูกจ่ายซ้ำ</span>
-                      <button type="button" onClick={() => handleConfirmSettle(timeSec, preview, totals)} disabled={!hasTime || preview.length === 0} className={ui.primary}>
-                        {hasTime ? `ยืนยันผล ${timeSec} วิ · จ่าย ${preview.length} คู่` : 'กรอกเวลาบินก่อน'}
+                      <button type="button" onClick={() => handleConfirmSettle(timeSec, preview, totals)} disabled={!hasTime} className={ui.primary}>
+                        {!hasTime ? 'กรอกเวลาบินก่อน' : preview.length > 0 ? `ยืนยันผล ${timeSec} วิ · จ่าย ${preview.length} คู่` : `ส่งผลเวลา ${timeSec} วิ · ไม่มีคู่ดวล`}
                       </button>
                     </div>
                   </section>

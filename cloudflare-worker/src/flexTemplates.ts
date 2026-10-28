@@ -269,7 +269,7 @@ const duelTable = (orders: Order[]) => {
 export function generateSettlementFlex(name: string, finalSeconds: number, tMin: number, tMax: number, orders: Order[]): any {
   const shown = orders.slice(0, 25);
   return flex(
-    `ผลการแข่งขัน ${name} · ${finalSeconds} วิ · ${orders.length} คู่`,
+    `ผลการแข่งขัน ${name} · ${finalSeconds} วิ · ${orders.length > 0 ? `${orders.length} คู่` : 'ไม่มีคู่ดวล'}`,
     bubble({
       tone: 'info',
       icon: 'flag',
@@ -277,7 +277,7 @@ export function generateSettlementFlex(name: string, finalSeconds: number, tMin:
       compact: true,
       eyebrow: `ผลการแข่งขัน · ${name}`,
       title: `เวลาบิน ${finalSeconds} วิ`,
-      sub: `ช่าง ${tMin}–${tMax} วิ · ตัดสินผล ${orders.length} คู่`,
+      sub: `ช่าง ${tMin}–${tMax} วิ · ${orders.length > 0 ? `ตัดสินผล ${orders.length} คู่` : 'รอบนี้ไม่มีคู่ดวล'}`,
       body: shown.length > 0
         ? [
             ...duelTable(shown),
@@ -663,7 +663,7 @@ export function generateRuleGuideFlex(): any {
       tone: 'neutral',
       icon: 'book',
       size: 'mega',
-      eyebrow: 'Rocket Science',
+      eyebrow: 'Bangfai Commander',
       title: 'กติกาการเล่น',
       body: [
         text('1. เล่นราคาช่าง', { color: TONES.info.accent, weight: 'bold' }),
@@ -707,7 +707,7 @@ export const MAIN_MENU_QUICK_REPLY_ITEMS = [
  */
 export function attachMainMenuQuickReply(payload: any): any {
   if (payload === null || payload === undefined) {
-    const notice = generateNoticeFlex('Rocket Science', 'ยินดีต้อนรับสู่ระบบดวล Rocket Science');
+    const notice = generateNoticeFlex('Bangfai Commander', 'ยินดีต้อนรับสู่ระบบดวล Bangfai Commander');
     return {
       ...notice,
       quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
@@ -736,7 +736,7 @@ export function attachMainMenuQuickReply(payload: any): any {
   if (typeof payload === 'object') {
     // If it is a raw bubble or carousel container, wrap into a flex message with quickReply
     if (payload.type === 'bubble' || payload.type === 'carousel') {
-      const altText = payload.header?.contents?.[0]?.text || payload.altText || 'Rocket Science';
+      const altText = payload.header?.contents?.[0]?.text || payload.altText || 'Bangfai Commander';
       return {
         type: 'flex',
         altText,
