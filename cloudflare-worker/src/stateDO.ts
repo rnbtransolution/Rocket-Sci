@@ -181,6 +181,12 @@ export interface TxnOrderOp {
   /** Settle against the stored order and credit the winner (or both sides on a draw). */
   settle?: TxnSettleSpec;
   /**
+   * Re-settle an order that is already `settled`, on a corrected flight time:
+   * take back exactly what the stored result paid, then pay the new result.
+   * The clawback may leave a balance negative (owner decision, 2026-11-01).
+   */
+  resettle?: TxnSettleSpec;
+  /**
    * Balance moves derived from THIS order's stored values, applied after the
    * order checks pass: `{ who: 'creator'|'matcher', delta }`.
    */
@@ -985,12 +991,64 @@ export class RocketStateDO extends DurableObject<Env> {
           }
           next.status = 'settled';
           next.finalTime = Number(op.settle.finalSeconds);
+          // The band the result was decided on, so a later correction of the
+          // flight time uses the same band for an order with no range of its own.
+          next.settleTMin = Number(op.settle.tMin);
+          next.settleTMax = Number(op.settle.tMax);
           next.winnerSide = r.winnerSide;
           next.winnerName = r.winnerName;
           next.settledAt = now;
           next.grossWinAmount = r.winnerSide !== 'draw' ? r.amt : 0;
           next.commission = r.commission;
           next.payout = r.payout;
+          if (r.winnerSide !== 'draw') {
+            if (r.payout > 0) pendingCredits.push({ shortId: r.winnerId, lineUserId: r.winnerLineUserId, delta: r.payout });
+          } else if (r.amt > 0) {
+            if (stored.creatorId) pendingCredits.push({ shortId: stored.creatorId, lineUserId: stored.creatorLineUserId, delta: r.amt });
+            if (stored.matcherId) pendingCredits.push({ shortId: stored.matcherId, lineUserId: stored.matcherLineUserId, delta: r.amt });
+          }
+        }
+
+        if (op.resettle) {
+          if (String(stored.status) !== 'settled') throw new TxnAbort('order_status', String(stored.status), stored);
+          // 1. Undo what the stored result paid, from the stored values only.
+          const prevSide = String(stored.winnerSide || '');
+          if (prevSide === 'draw') {
+            if (amt > 0) {
+              if (stored.creatorId) pendingCredits.push({ shortId: stored.creatorId, lineUserId: stored.creatorLineUserId, delta: -amt });
+              if (stored.matcherId) pendingCredits.push({ shortId: stored.matcherId, lineUserId: stored.matcherLineUserId, delta: -amt });
+            }
+          } else if (prevSide === 'low' || prevSide === 'high') {
+            const creatorWon = stored.side === prevSide;
+            const id = creatorWon ? stored.creatorId : stored.matcherId;
+            const lid = creatorWon ? stored.creatorLineUserId : stored.matcherLineUserId;
+            const paid = Number(stored.payout) || 0;
+            if (!id) throw new TxnAbort('no_winner_party', op.orderNumber, stored);
+            if (paid > 0) pendingCredits.push({ shortId: id, lineUserId: lid, delta: -paid });
+          } else {
+            throw new TxnAbort('order_field', `winnerSide=${prevSide}`, stored);
+          }
+          // 2. Pay the corrected result on the band the order was settled on.
+          const band = {
+            ...op.resettle,
+            tMin: Number(stored.settleTMin) > 0 ? Number(stored.settleTMin) : op.resettle.tMin,
+            tMax: Number(stored.settleTMax) > 0 ? Number(stored.settleTMax) : op.resettle.tMax,
+          };
+          const r = this.computeSettlement(stored, band);
+          if (r.winnerSide !== 'draw' && !r.winnerId) throw new TxnAbort('no_winner_party', op.orderNumber, stored);
+          next.corrections = [
+            ...(Array.isArray(stored.corrections) ? stored.corrections : []),
+            { at: now, fromTime: Number(stored.finalTime), toTime: Number(op.resettle.finalSeconds), fromWinnerSide: prevSide, fromPayout: Number(stored.payout) || 0 },
+          ];
+          next.finalTime = Number(op.resettle.finalSeconds);
+          next.winnerSide = r.winnerSide;
+          next.winnerName = r.winnerName;
+          next.correctedAt = now;
+          next.grossWinAmount = r.winnerSide !== 'draw' ? r.amt : 0;
+          next.commission = r.commission;
+          next.payout = r.payout;
+          next.settleTMin = band.tMin;
+          next.settleTMax = band.tMax;
           if (r.winnerSide !== 'draw') {
             if (r.payout > 0) pendingCredits.push({ shortId: r.winnerId, lineUserId: r.winnerLineUserId, delta: r.payout });
           } else if (r.amt > 0) {

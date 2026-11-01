@@ -26,8 +26,10 @@ import {
   LogOut,
   KeyRound,
   Cloud,
-  Landmark
+  Landmark,
+  Banknote
 } from 'lucide-react';
+import { CorrectionPanel, PayoutPanel } from './MoneyPanels.jsx';
 
 const INITIAL_PLAYERS = [];
 
@@ -1538,6 +1540,13 @@ export default function App() {
       attention: transactions.some(t => t.status === 'escalated'),
     },
     {
+      id: 'payout',
+      activeMatch: (t) => t === 'payout',
+      label: 'จ่ายเงินรายวัน',
+      icon: Banknote,
+      section: 'การเงิน',
+    },
+    {
       id: 'players',
       activeMatch: (t) => t === 'players',
       label: 'ผู้เล่นและเครดิต',
@@ -2462,6 +2471,16 @@ export default function App() {
                   </section>
                 </div>
 
+                <CorrectionPanel
+                  run={runBackendFunction}
+                  ask={ask}
+                  addToast={addToast}
+                  ui={ui}
+                  pinField={VOID_PIN_FIELD}
+                  onDone={forceSyncFreshData}
+                  refreshKey={flights.length}
+                />
+
                 {flights.length > 0 && (
                   <section aria-labelledby="history-title" className={ui.panel}>
                     <div className={ui.panelHead}>
@@ -2679,12 +2698,12 @@ export default function App() {
                   <div>
                     <h3 className="text-base font-semibold text-[#16191D] flex items-center gap-2 font-heading">
                       <FileText size={18} className={isReviewOnly ? 'text-amber-600' : 'text-slate-600'} />
-                      {isReviewOnly ? 'ธุรกรรมรอตรวจสอบสลิป & คำขอถอน' : 'ประวัติการทำรายการฝาก-ถอนทั้งหมด'}
+                      {isReviewOnly ? 'สลิปรอตรวจสอบ' : 'ประวัติการเงินทั้งหมด'}
                     </h3>
                     <p className="text-xs text-[#5B636E] font-sans mt-0.5">
                       {isReviewOnly 
-                        ? 'สลิปโอนที่ยอดไม่ตรง หรือคำขอถอนเงินที่รอแอดมินตรวจสอบและยืนยัน'
-                        : 'บันทึกประวัติการเติมเงิน สแกนสลิป และถอนเครดิตทั้งหมดในระบบ'}
+                        ? 'สลิปที่ระบบอ่านไม่ได้หรือยอดไม่ตรง รอแอดมินตรวจสอบและยืนยัน'
+                        : 'เติมเงินจากสลิป การโอนจ่ายรายวัน การปรับยอด และการแก้ผล'}
                     </p>
                   </div>
                 </div>
@@ -2738,7 +2757,7 @@ export default function App() {
                         onClick={() => setTxTypeFilter('withdrawal')}
                         className={`px-2 py-1 rounded-lg text-[12px] transition-all ${txTypeFilter === 'withdrawal' ? 'bg-[#B42318] text-white' : 'bg-white text-[#B42318] border border-[#E7B4AE]'}`}
                       >
-                        ถอนเงิน
+                        จ่ายเงิน
                       </button>
                     </div>
 
@@ -2802,8 +2821,12 @@ export default function App() {
                               </td>
 
                               <td className="py-2.5 px-3 text-center">
-                                {isWithdrawal ? (
-                                  <span className="px-2 py-0.5 bg-[#F6D7D3] text-[#B42318] font-semibold rounded-md text-[12px]">ถอนเงิน</span>
+                                {tx.slipRef === 'RESULT_CORRECTION' ? (
+                                  <span className="px-2 py-0.5 bg-[#FDF1E1] text-[#8A4B00] font-semibold rounded-md text-[12px]">แก้ผล</span>
+                                ) : tx.slipRef === 'ADMIN_ADJUST' ? (
+                                  <span className="px-2 py-0.5 bg-[#EEF0F2] text-[#3B424C] font-semibold rounded-md text-[12px]">ปรับยอด</span>
+                                ) : isWithdrawal ? (
+                                  <span className="px-2 py-0.5 bg-[#F6D7D3] text-[#B42318] font-semibold rounded-md text-[12px]">จ่ายเงิน</span>
                                 ) : (
                                   <span className="px-2 py-0.5 bg-[#D3EBDD] text-[#1B6E43] font-semibold rounded-md text-[12px]">ฝากเงิน</span>
                                 )}
@@ -2869,6 +2892,10 @@ export default function App() {
           })()}
 
           {/* TAB 5: PLAYERS CREDIT */}
+          {adminTab === 'payout' && (
+            <PayoutPanel run={runBackendFunction} ask={ask} addToast={addToast} ui={ui} onDone={forceSyncFreshData} />
+          )}
+
           {adminTab === 'players' && (
             <div className="bg-white border border-[#D9DDE2] rounded-lg p-4 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#D9DDE2] pb-3">
@@ -3958,7 +3985,7 @@ export default function App() {
                   >
                     <div>
                       <h3 className="font-semibold text-base flex items-center gap-2" style={{ color: '#ffffff' }}>
-                        {isWithdrawal ? 'รายละเอียดคำขอถอนเงิน' : 'รายละเอียดการแจ้งสลิปเติมเงิน'}
+                        {isWithdrawal ? 'รายละเอียดการจ่ายเงิน' : 'รายละเอียดการแจ้งสลิปเติมเงิน'}
                         <span className="bg-white px-2 py-0.5 rounded font-mono text-xs" style={{ color: '#ffffff' }}>{tx.id}</span>
                       </h3>
                       <p className="text-xs mt-0.5" style={{ color: 'rgba(255, 255, 255, 0.9)' }}>ผู้เล่น: {tx.playerName} ({tx.playerId})</p>
@@ -3980,7 +4007,7 @@ export default function App() {
                         {isWithdrawal ? (
                           <div className="w-full max-w-xs h-[240px] bg-[#F7F8F9] border border-[#E7B4AE] rounded-lg p-4 flex flex-col items-center justify-between text-center select-none">
                                                         <div className="space-y-1">
-                              <span className="text-[12px] text-[#B42318] font-semibold bg-[#F6D7D3] px-2 py-0.5 rounded-md">คำขอถอนเงิน</span>
+                              <span className="text-[12px] text-[#B42318] font-semibold bg-[#F6D7D3] px-2 py-0.5 rounded-md">จ่ายเงิน</span>
                               <h4 className="text-2xl font-semibold text-[#B42318] font-mono">-{tx.requestedAmount}.00 THB</h4>
                             </div>
                             <div className="w-full bg-white border border-[#E7B4AE] rounded-lg p-2 text-[12px] text-[#B42318] font-bold leading-normal font-sans shadow-2xs">
@@ -4251,7 +4278,7 @@ function PlayerDashboard({ player, transactions, bets, playerUserId, players }) 
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                             !isWithdrawal ? 'bg-sky-50 text-sky-700 border border-sky-100' : 'bg-slate-100 text-slate-600 border border-slate-200'
                           }`}>
-                            {!isWithdrawal ? 'ฝากเงิน' : 'ถอนเงิน'}
+                            {!isWithdrawal ? 'ฝากเงิน' : 'จ่ายเงิน'}
                           </span>
                           <span className="text-[10px] font-mono text-slate-400 block mt-1">Ref: {t.slipRef || '-'}</span>
                           <span className="text-[9px] text-slate-400 block">{t.timestamp}</span>

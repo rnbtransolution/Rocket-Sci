@@ -8,7 +8,7 @@ import type { LineIconName } from './lineIcons.js';
  * word is read, so it follows the money, not the mood:
  *
  *   in       green   credit arrives — deposit credited, refund, admin top-up
- *   out      orange  credit leaves — withdrawal, admin deduction
+ *   out      orange  credit leaves — admin payout, admin deduction
  *   error    red     refused or failed, round void
  *   pending  amber   waiting on someone — slip under review, betting closed
  *   info     blue    round news — quote, result, daily summary (kept rare)
@@ -79,11 +79,20 @@ const panel = (contents: any[], o: Record<string, any> = {}) => ({
   ...o,
 });
 
-const button = (label: string, message: string, o: { style?: 'primary' | 'secondary'; color?: string } = {}) => ({
+/**
+ * Every action button is gold with a dark label: the owner asked for buttons
+ * that stand out on a phone. `secondary` is the style whose label LINE draws
+ * dark, so the colour below becomes the fill. (LINE does not let a bot colour
+ * Quick Reply chips; those get a gold dot icon instead, see QUICK_REPLY_ICON.)
+ */
+const GOLD = '#E8B931';
+const GOLD_TINT = '#F9EBC2';
+const GOLD_INK = '#5C4300';
+const button = (label: string, message: string) => ({
   type: 'button',
-  style: o.style ?? 'secondary',
+  style: 'secondary',
   height: 'sm',
-  ...(o.color ? { color: o.color } : {}),
+  color: GOLD,
   action: { type: 'message', label, text: message },
 });
 
@@ -329,12 +338,13 @@ export function generateOrderFlex(order: Order): any {
     type: 'box',
     layout: 'vertical',
     flex: full ? 2 : 1,
-    backgroundColor: full ? TONES.info.accent : TONES.info.tint,
+    // Gold, dark label: the full take solid, partial takes a lighter gold.
+    backgroundColor: full ? GOLD : GOLD_TINT,
     cornerRadius: 'md',
     ...btnPad,
     action: { type: 'message', label: `${val}`, text: `ต ${orderNumber} ${val}` },
     contents: [text(full ? `เต็ม ${val.toLocaleString()}` : val.toLocaleString(), {
-      size: 'sm', color: full ? '#FFFFFF' : TONES.info.accent, weight: 'bold', align: 'center', wrap: false, adjustMode: 'shrink-to-fit',
+      size: 'sm', color: full ? INK : GOLD_INK, weight: 'bold', align: 'center', wrap: false, adjustMode: 'shrink-to-fit',
     })],
   });
 
@@ -348,7 +358,7 @@ export function generateOrderFlex(order: Order): any {
       eyebrow: `ออเดอร์ #${orderNumber} · ${creatorName || '-'} · ${rocketName || 'บั้งไฟสด'}`,
       title: `${cardTitle}${isChotoy ? ' (ชตย)' : ''}`,
       body: [
-        // One row: partial takes, then the full take in solid blue. 12px gaps
+        // One row: partial takes, then the full take in solid gold. 12px gaps
         // and ~40px-tall buttons, so a tap does not land on the neighbour.
         {
           type: 'box',
@@ -530,34 +540,6 @@ export function generateInsufficientBalanceFlex(currentBalance: number, neededAm
   );
 }
 
-// ── 3f. Withdrawal Requested ──
-export function generateWithdrawalSuccessFlex(
-  withdrawAmt: number,
-  bankName: string,
-  accountNumber: string,
-  accountName: string,
-  remainingBalance: number
-): any {
-  return flex(
-    `ถอนเงิน -${pt(withdrawAmt)} · รอโอน`,
-    bubble({
-      tone: 'out',
-      icon: 'withdraw',
-      eyebrow: 'เงินออก · ถอนเงิน',
-      title: 'รับคำขอถอนแล้ว',
-      body: [
-        ...hero(`-${pt(withdrawAmt)}`, TONES.out.accent),
-        divider(),
-        row('ธนาคาร', bankName),
-        row('เลขบัญชี', accountNumber),
-        row('ชื่อบัญชี', accountName),
-        row('ยอดคงเหลือ', pt(remainingBalance)),
-        note('แอดมินจะโอนเข้าบัญชีนี้'),
-      ],
-    })
-  );
-}
-
 // ── 3g. Slip Received ──
 export function generateSlipReceivedFlex(txId: string): any {
   return flex(
@@ -686,19 +668,37 @@ export function generateRuleGuideFlex(): any {
         heading('ช่างต่อยกเลิก (ชตย)', 'md'),
         lines('ใส่ ชตย หลังจำนวนเงิน\n300-350ล500 ชตย · 350-400ถ500 ชตย'),
       ],
-      footer: [button('ดูกระดานดวล', 'กระดานดวล', { style: 'primary', color: TONES.neutral.accent })],
+      footer: [button('ดูกระดานดวล', 'กระดานดวล')],
     })
   );
 }
 
 // ── 6. Main Menu Quick Reply (floating at all times in DMs) ──
-export const MAIN_MENU_QUICK_REPLY_ITEMS = [
-  { type: 'action', action: { type: 'message', label: 'เช็คยอด', text: 'เช็คยอด' } },
-  { type: 'action', action: { type: 'message', label: 'ฝากเงิน', text: 'ฝากเงิน' } },
-  { type: 'action', action: { type: 'message', label: 'ถอนเงิน', text: 'ถอนเงิน' } },
-  { type: 'action', action: { type: 'message', label: 'กติกา', text: 'กติกา' } },
-  { type: 'action', action: { type: 'message', label: 'กระดานดวล', text: 'กระดานดวล' } },
+/**
+ * LINE draws Quick Reply chips white and gives bots no colour option; an icon
+ * is the only thing a bot can add. Each chip gets a small gold dot, served by
+ * this Worker, so the row reads as the gold menu. Without a public https base
+ * the chips go out plain rather than with a broken image.
+ */
+const QUICK_REPLY_ICON = 'gold';
+const QUICK_REPLY_LABELS: Array<[string, string]> = [
+  ['เช็คยอด', 'เช็คยอด'],
+  ['ฝากเงิน', 'ฝากเงิน'],
+  ['บัญชีรับเงิน', 'บัญชีรับเงิน'],
+  ['กติกา', 'กติกา'],
+  ['กระดานดวล', 'กระดานดวล'],
 ];
+function quickReplyItems(): any[] {
+  return QUICK_REPLY_LABELS.map(([label, msg]) => ({
+    type: 'action',
+    ...(iconBase ? { imageUrl: `${iconBase}/${QUICK_REPLY_ICON}.png?v=${ICON_VERSION}` } : {}),
+    action: { type: 'message', label, text: msg },
+  }));
+}
+/** Built per message, so the icon URL follows the request's public base. */
+export function mainMenuQuickReplyItems(): any[] {
+  return quickReplyItems();
+}
 
 /**
  * Attach the floating main-menu Quick Reply to any outgoing message.
@@ -710,7 +710,7 @@ export function attachMainMenuQuickReply(payload: any): any {
     const notice = generateNoticeFlex('Bangfai Commander', 'ยินดีต้อนรับสู่ระบบดวล Bangfai Commander');
     return {
       ...notice,
-      quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
+      quickReply: { items: mainMenuQuickReplyItems() },
     };
   }
 
@@ -728,7 +728,7 @@ export function attachMainMenuQuickReply(payload: any): any {
     const notice = generateNoticeFlex(title, bodyMessage, variant);
     return {
       ...notice,
-      quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
+      quickReply: { items: mainMenuQuickReplyItems() },
     };
   }
 
@@ -741,7 +741,7 @@ export function attachMainMenuQuickReply(payload: any): any {
         type: 'flex',
         altText,
         contents: payload,
-        quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
+        quickReply: { items: mainMenuQuickReplyItems() },
       };
     }
 
@@ -756,7 +756,7 @@ export function attachMainMenuQuickReply(payload: any): any {
       const notice = generateNoticeFlex(title, textStr, variant);
       return {
         ...notice,
-        quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
+        quickReply: { items: mainMenuQuickReplyItems() },
       };
     }
 
@@ -767,7 +767,7 @@ export function attachMainMenuQuickReply(payload: any): any {
       }
       return {
         ...payload,
-        quickReply: { items: MAIN_MENU_QUICK_REPLY_ITEMS },
+        quickReply: { items: mainMenuQuickReplyItems() },
       };
     }
   }
@@ -800,7 +800,7 @@ export function generateMainMenuQuickReply(displayName: string, balance: number)
   return {
     ...menu,
     quickReply: {
-      items: [...MAIN_MENU_QUICK_REPLY_ITEMS],
+      items: mainMenuQuickReplyItems(),
     },
   };
 }
@@ -814,17 +814,16 @@ export function generateMainMenuFlex(displayName: string, balance: number): any 
       icon: 'grid',
       eyebrow: 'เมนูหลัก',
       title: displayName || 'ผู้เล่น',
-      body: [row('ยอดคงเหลือ', pt(balance))],
-      // Deposit and withdraw carry the same colours as the cards they lead to.
+      body: [
+        row('ยอดคงเหลือ', pt(balance)),
+        note(PAYOUT_SCHEDULE_TEXT),
+      ],
       footer: [
         {
           type: 'box',
           layout: 'horizontal',
           spacing: 'sm',
-          contents: [
-            button('ฝากเงิน', 'ฝากเงิน', { style: 'primary', color: TONES.in.accent }),
-            button('ถอนเงิน', 'ถอนเงิน', { style: 'primary', color: TONES.out.accent }),
-          ],
+          contents: [button('ฝากเงิน', 'ฝากเงิน'), button('บัญชีรับเงิน', 'บัญชีรับเงิน')],
         },
         {
           type: 'box',
@@ -920,7 +919,12 @@ export function generateDepositFlex(bank: {
 }
 
 /** Slip verified and credited — the player sees the amount the slip proved. */
-export function generateSlipCreditedFlex(amount: number, newBalance: number, refCode: string): any {
+export function generateSlipCreditedFlex(
+  amount: number,
+  newBalance: number,
+  refCode: string,
+  payoutAccount?: { bankName: string; accountNumber: string; accountName: string } | null
+): any {
   const formattedAmt = Number(amount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const formattedBal = Number(newBalance || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return flex(
@@ -935,6 +939,20 @@ export function generateSlipCreditedFlex(amount: number, newBalance: number, ref
         divider(),
         row('ยอดคงเหลือ', `${formattedBal} pt`),
         row('เลขอ้างอิง', refCode, { color: MUTED, size: 'xs' }),
+        divider('lg'),
+        // The evening payout needs an account; ask while the player is here.
+        ...(payoutAccount
+          ? [
+              text('บัญชีรับเงิน', { size: 'xs', color: MUTED, margin: 'md' }),
+              text(`${payoutAccount.bankName} ${payoutAccount.accountNumber}`, { size: 'sm', color: INK, weight: 'bold' }),
+              text(payoutAccount.accountName, { size: 'xs', color: BODY }),
+              note('ไม่ถูกต้อง ส่งใหม่: ธนาคาร เลขบัญชี ชื่อบัญชี'),
+            ]
+          : [
+              text('ส่งเลขบัญชีรับเงินด้วย', { size: 'sm', color: TONES.pending.accent, weight: 'bold', margin: 'md' }),
+              bankFormatPanel(),
+              note(PAYOUT_SCHEDULE_TEXT),
+            ]),
       ],
     })
   );
@@ -960,61 +978,132 @@ export function generateDepositInvoiceFlex(depositAmt: number): any {
   );
 }
 
-// ── 9. Withdrawal (ถอนเงิน) ──
-export function generateWithdrawalFlex(bankName: string, accountNumber: string, accountName: string, balance: number): any {
-  const formattedBal = Number(balance || 0).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-  return flex(
-    `ถอนเงิน · ถอนได้ ${formattedBal} pt`,
-    bubble({
-      tone: 'out',
-      icon: 'withdraw',
-      eyebrow: 'ถอนเงิน',
-      title: 'แจ้งถอนเงิน',
-      body: [
-        ...hero(`${formattedBal} pt`, INK, 'ยอดที่ถอนได้'),
-        divider(),
-        row('ธนาคาร', bankName || '-'),
-        row('เลขบัญชี', accountNumber || '-'),
-        row('ชื่อบัญชี', accountName || '-'),
-        text('พิมพ์ "ถอน [จำนวน]" เพื่อส่งคำขอ', { color: INK, weight: 'bold', margin: 'md' }),
-      ],
-    })
-  );
+// ── 9. Payout account (บัญชีรับเงิน) ──
+
+/** There is no self-service withdrawal: the admin pays out by hand every evening. */
+export const PAYOUT_SCHEDULE_TEXT = 'แอดมินโอนเงินตามยอดคงเหลือให้ทุกวันหลัง 20:00 น. เข้าบัญชีรับเงินที่แจ้งไว้';
+
+/** How to send the account, shown wherever the bot asks for it. */
+function bankFormatPanel(): any {
+  return panel([
+    text('ส่งในแชตนี้: ธนาคาร เลขบัญชี ชื่อบัญชี', { size: 'sm', color: INK, weight: 'bold' }),
+    text('เช่น กสิกร 012-3-45678-9 สมชาย ใจดี', { size: 'xs', color: MUTED }),
+  ]);
 }
 
-// ── 10. Bank Registration ──
 /**
- * Asked to withdraw before their bank details are on file.
- *
- * Three things only: the format they must type (which they cannot guess), the
- * fact that nothing was deducted yet (the request is abandoned at this point,
- * and a player who cannot tell that will assume their points are gone), and the
- * exact command to repeat once they have sent it.
+ * Sent right after a slip (and on "บัญชีรับเงิน" when nothing is on file):
+ * the evening payout goes to this account, so the bot asks for it while the
+ * player is still in the chat.
  */
-export function generateBankRegistrationFlex(pendingAmount?: number): any {
-  const retry =
-    pendingAmount && pendingAmount > 0
-      ? `พิมพ์ "ถอน ${Number(pendingAmount).toLocaleString('th-TH')}" อีกครั้ง`
-      : 'พิมพ์ "ถอน" อีกครั้ง';
-
+export function generateBankRequestFlex(): any {
   return flex(
-    'ถอนเงิน · ลงทะเบียนบัญชีธนาคารก่อน',
+    'ส่งเลขบัญชีรับเงิน',
     bubble({
       tone: 'pending',
       icon: 'bank',
-      eyebrow: 'ถอนเงิน',
-      title: 'ลงทะเบียนบัญชีก่อน',
+      eyebrow: 'บัญชีรับเงิน',
+      title: 'ส่งเลขบัญชีรับเงิน',
       body: [
-        panel([
-          text('บัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ-สกุล]', { size: 'sm', color: INK, weight: 'bold' }),
-          text('เช่น บัญชี กสิกร 0123456789 สมชาย', { size: 'xs', color: MUTED }),
-        ]),
-        text(`ยังไม่หักเครดิต ส่งข้อมูลแล้ว${retry}`, { size: 'xs', color: BODY, margin: 'md' }),
+        text('ใช้สำหรับโอนเงินรางวัลให้คุณ', { size: 'sm', color: BODY }),
+        bankFormatPanel(),
+        note(PAYOUT_SCHEDULE_TEXT),
       ],
     })
   );
 }
 
+/** The account on file, with how to change it. */
+export function generateBankOnFileFlex(bankName: string, accountNumber: string, accountName: string, saved = false): any {
+  return flex(
+    saved ? 'บันทึกบัญชีรับเงินแล้ว' : 'บัญชีรับเงินของคุณ',
+    bubble({
+      tone: saved ? 'in' : 'neutral',
+      icon: saved ? 'check' : 'bank',
+      eyebrow: 'บัญชีรับเงิน',
+      title: saved ? 'บันทึกบัญชีแล้ว' : 'บัญชีรับเงินของคุณ',
+      body: [
+        row('ธนาคาร', bankName || '-'),
+        row('เลขบัญชี', accountNumber || '-'),
+        row('ชื่อบัญชี', accountName || '-'),
+        divider(),
+        note(PAYOUT_SCHEDULE_TEXT),
+        note('ต้องการเปลี่ยนบัญชี ส่งข้อมูลใหม่ในรูปแบบ: ธนาคาร เลขบัญชี ชื่อบัญชี'),
+      ],
+    })
+  );
+}
+
+/** Reply to "ถอน" now that withdrawal is no longer a player action. */
+export function generateNoWithdrawalFlex(hasBank: boolean): any {
+  return flex(
+    'การรับเงิน · แอดมินโอนให้ทุกวันหลัง 20:00 น.',
+    bubble({
+      tone: 'neutral',
+      icon: 'bank',
+      eyebrow: 'การรับเงิน',
+      title: 'ไม่ต้องแจ้งถอน',
+      body: [
+        text(PAYOUT_SCHEDULE_TEXT, { size: 'sm', color: BODY }),
+        ...(hasBank ? [] : [divider(), text('ยังไม่มีบัญชีรับเงิน', { size: 'sm', color: TONES.error.accent, weight: 'bold' }), bankFormatPanel()]),
+      ],
+      footer: [button('ดูบัญชีรับเงิน', 'บัญชีรับเงิน')],
+    })
+  );
+}
+
+/** DM after the admin records an evening transfer. */
+export function generatePayoutSentFlex(amount: number, bankName: string, accountNumber: string, remaining: number): any {
+  return flex(
+    `โอนเงินแล้ว ${Number(amount || 0).toLocaleString()} บาท`,
+    bubble({
+      tone: 'out',
+      icon: 'withdraw',
+      eyebrow: 'เงินออก · โอนให้แล้ว',
+      title: 'แอดมินโอนเงินแล้ว',
+      body: [
+        ...hero(`${Number(amount || 0).toLocaleString()} บาท`, TONES.out.accent),
+        divider(),
+        row('ธนาคาร', bankName || '-'),
+        row('เลขบัญชี', accountNumber || '-'),
+        row('ยอดคงเหลือ', pt(remaining)),
+      ],
+    })
+  );
+}
+
+/** DM when an admin corrected a round's flight time and this player's result moved. */
+export function generateResultCorrectionFlex(roundName: string, oldTime: number, newTime: number, delta: number, balance: number): any {
+  const up = delta >= 0;
+  return flex(
+    `แก้ผลรอบ ${roundName} · ${up ? '+' : ''}${pt(delta)}`,
+    bubble({
+      tone: up ? 'in' : 'out',
+      icon: 'stopwatch',
+      eyebrow: 'แก้ไขผล',
+      title: roundName || 'บั้งไฟ',
+      body: [
+        row('เวลาบินเดิม', `${oldTime} วิ`, { color: MUTED }),
+        row('เวลาบินที่ถูกต้อง', `${newTime} วิ`),
+        divider(),
+        ...hero(`${up ? '+' : ''}${pt(delta)}`, up ? TONES.in.accent : TONES.out.accent, 'ปรับยอดตามผลใหม่'),
+        row('ยอดคงเหลือ', pt(balance), balance < 0 ? { color: TONES.error.accent } : {}),
+        ...(balance < 0 ? [note('ยอดติดลบ เติมเครดิตก่อนเล่นต่อ')] : []),
+      ],
+    })
+  );
+}
+
+/** Group card: the admin entered the wrong time; this is the corrected result. Winners/losers only. */
+export function generateCorrectedSettlementFlex(roundName: string, oldTime: number, newTime: number, tMin: number, tMax: number, orders: Order[]): any {
+  const base = generateSettlementFlex(roundName, newTime, tMin, tMax, orders);
+  const card = base?.contents;
+  if (card && card.type === 'bubble' && card.header && Array.isArray(card.header.contents)) {
+    card.header.backgroundColor = TONES.pending.head;
+    card.header.contents.push(text(`แก้ไขผล · เวลาเดิม ${oldTime} วิ`, { size: 'xs', color: '#FFFFFF', margin: 'sm' }));
+  }
+  return { ...base, altText: `แก้ไขผล ${roundName || 'บั้งไฟ'} · เวลาบินที่ถูกต้อง ${newTime} วิ` };
+}
 
 // ── Daily Duel Summary (one card per rocket round) ──
 
