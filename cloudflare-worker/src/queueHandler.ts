@@ -13,16 +13,16 @@ import {
   generateMainMenuFlex,
   attachMainMenuQuickReply,
   stripQuickReply,
-  MAIN_MENU_QUICK_REPLY_ITEMS,
+  mainMenuQuickReplyItems,
   generateDepositFlex,
   generateTypedAmountHintFlex,
   generateDepositInvoiceFlex,
-  generateWithdrawalFlex,
-  generateBankRegistrationFlex,
+  generateBankRequestFlex,
+  generateBankOnFileFlex,
+  generateNoWithdrawalFlex,
   generateNoticeFlex,
   generateOrderCancelFlex,
   generateInsufficientBalanceFlex,
-  generateWithdrawalSuccessFlex,
   generateSlipReceivedFlex,
   generateSlipCreditedFlex,
   generateDailySummaryFlex,
@@ -208,107 +208,32 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
       return;
     }
 
-    // ── 1.4 Bank Account Registration ("บัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ-สกุล]") ──
-    const bankRegRegex = /^(?:บัญชี|ลงทะเบียนบัญชี|bank)\s+(\S+)\s+(\d{8,15})\s+(.+)$/i;
-    if (bankRegRegex.test(text)) {
-      const match = text.match(bankRegRegex)!;
-      profile.bankName = match[1];
-      profile.accountNumber = match[2];
-      profile.accountName = match[3].trim();
+    // ── 1.4 Payout account ("บัญชีรับเงิน", or the details themselves) ──
+    //
+    // There is no self-service withdrawal: the admin transfers every player's
+    // points by hand each evening after 20:00, to the account stored here.
+    const bankKeywords = ['บัญชีรับเงิน', 'บัญชี', 'เลขบัญชี', 'บัญชีธนาคาร'];
+    if (bankKeywords.includes(clean)) {
+      const payload = hasPayoutAccount(profile)
+        ? generateBankOnFileFlex(profile.bankName!, profile.accountNumber!, profile.accountName || profile.displayName)
+        : generateBankRequestFlex();
+      await deliverPrivateNotice(userId, replyToken, groupId, payload, env, profile.displayName, ctx);
+      return;
+    }
+    const bankDetails = parseBankAccountText(text, !isGroup);
+    if (bankDetails) {
+      profile.bankName = bankDetails.bankName;
+      profile.accountNumber = bankDetails.accountNumber;
+      profile.accountName = bankDetails.accountName;
       await savePlayerProfile(profile, env, ctx);
-      const bankSuccessFlex = generateNoticeFlex(
-        'บันทึกบัญชีธนาคารแล้ว',
-        `ธนาคาร: ${profile.bankName}\nเลขบัญชี: ${profile.accountNumber}\nชื่อ: ${profile.accountName}`,
-        'success',
-        'พิมพ์ "ถอน [จำนวน]" เพื่อแจ้งถอนได้ทันที'
-      );
-      await deliverPrivateNotice(userId, replyToken, groupId, bankSuccessFlex, env, profile.displayName, ctx);
+      const saved = generateBankOnFileFlex(profile.bankName, profile.accountNumber, profile.accountName, true);
+      await deliverPrivateNotice(userId, replyToken, groupId, saved, env, profile.displayName, ctx);
       return;
     }
 
-    // ── 1.5 Withdrawal Intent ("ถอน", "ถอนเงิน", "ถอนยอด", "withdraw") ──
-    const withdrawKeywords = ['ถอน', 'ถอนเงิน', 'ถอนยอด', 'withdraw'];
-    if (withdrawKeywords.includes(clean)) {
-      if (profile.bankName && profile.accountNumber) {
-        const withdrawFlex = generateWithdrawalFlex(
-          profile.bankName,
-          profile.accountNumber,
-          profile.accountName || profile.displayName,
-          profile.balance
-        );
-        await deliverPrivateNotice(userId, replyToken, groupId, withdrawFlex, env, profile.displayName, ctx);
-      } else {
-        const bankRegFlex = generateBankRegistrationFlex();
-        await deliverPrivateNotice(userId, replyToken, groupId, bankRegFlex, env, profile.displayName, ctx);
-      }
-      return;
-    }
-
-    // ── 1.6 Withdrawal Execution ("ถอน 500", "ถอน 1,000", "ถอน 500 บาท") ──
-    const withdrawAmtRegex = /^(?:ถอน|ถอนเงิน|ถอนยอด)\s*(\d+)\s*(?:บาท|thb|pt)?$/i;
-    if (withdrawAmtRegex.test(cleanWithoutCommas)) {
-      const match = cleanWithoutCommas.match(withdrawAmtRegex)!;
-      const withdrawAmt = parseInt(match[1], 10);
-      if (withdrawAmt < 100) {
-        const minFlex = generateNoticeFlex('ยอดถอนต่ำกว่าขั้นต่ำ', 'ถอนได้ตั้งแต่ 100 pt ขึ้นไป', 'error');
-        await deliverPrivateNotice(userId, replyToken, groupId, minFlex, env, profile.displayName, ctx);
-        return;
-      }
-      if (profile.balance < withdrawAmt) {
-        const needed = withdrawAmt - profile.balance;
-        const insufficientFlex = generateInsufficientBalanceFlex(profile.balance, needed);
-        await deliverPrivateNotice(userId, replyToken, groupId, insufficientFlex, env, profile.displayName, ctx);
-        return;
-      }
-      if (!profile.bankName || !profile.accountNumber) {
-        // Nothing is deducted and no request is opened — the player is told
-        // precisely what to send and that they then repeat the same command.
-        const bankRegFlex = generateBankRegistrationFlex(withdrawAmt);
-        await deliverPrivateNotice(userId, replyToken, groupId, bankRegFlex, env, profile.displayName, ctx);
-        return;
-      }
-
-      const txId = `WD${Date.now().toString(36).toUpperCase()}${Math.floor(100 + Math.random() * 900)}`;
-      const nowStr = new Date().toLocaleTimeString('th-TH', { hour12: false });
-      const newTx: Transaction = {
-        id: txId,
-        playerId: profile.shortId,
-        lineUserId: profile.lineUserId,
-        playerName: profile.displayName,
-        requestedAmount: withdrawAmt,
-        actualAmount: withdrawAmt,
-        slipRef: '',
-        status: 'escalated',
-        reviewReason: `แจ้งถอนเข้า ${profile.bankName} ${profile.accountNumber} (${profile.accountName || profile.displayName})`,
-        timestamp: nowStr,
-        type: 'withdraw',
-        createdAt: Date.now(),
-      };
-      // Debit and ledger entry in one atomic step. The balance test above used
-      // a snapshot; two "ถอน" messages sent together both passed it, and both
-      // were paid out of the same credit.
-      const wd = await ledger(env, {
-        balances: [{ shortId: profile.shortId, lineUserId: profile.lineUserId, delta: -withdrawAmt, requireSufficient: true }],
-        transactions: [{ id: txId, insert: newTx }],
-      }, ctx);
-      if (!wd.ok) {
-        const flex = wd.reason === 'insufficient'
-          ? generateInsufficientBalanceFlex(Number(wd.current?.balance) || 0, withdrawAmt - (Number(wd.current?.balance) || 0))
-          : generateNoticeFlex('ทำรายการไม่สำเร็จ', LEDGER_UNAVAILABLE_TEXT, 'warning');
-        await deliverPrivateNotice(userId, replyToken, groupId, flex, env, profile.displayName, ctx);
-        return;
-      }
-      profile.balance = balanceAfter(wd, profile.shortId) ?? profile.balance;
-      mirrorTransactionToSheets(newTx, env, ctx);
-
-      const withdrawSuccessFlex = generateWithdrawalSuccessFlex(
-        withdrawAmt,
-        profile.bankName,
-        profile.accountNumber,
-        profile.accountName || profile.displayName,
-        profile.balance
-      );
-      await deliverPrivateNotice(userId, replyToken, groupId, withdrawSuccessFlex, env, profile.displayName, ctx);
+    // ── 1.5 "ถอน" — withdrawal is not a player action any more ──
+    if (/^(?:ถอน|ถอนเงิน|ถอนยอด|withdraw)(?:\d+)?(?:บาท|thb|pt)?$/i.test(cleanWithoutCommas)) {
+      await deliverPrivateNotice(userId, replyToken, groupId, generateNoWithdrawalFlex(hasPayoutAccount(profile)), env, profile.displayName, ctx);
       return;
     }
 
@@ -562,7 +487,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
         'Bangfai Commander',
         'เลือกรายการจากเมนูด้านล่าง',
         'info',
-        'เช็คยอด • ฝากเงิน • ถอนเงิน • กติกา • กระดานดวล'
+        'เช็คยอด • ฝากเงิน • บัญชีรับเงิน • กติกา • กระดานดวล'
       );
       await deliverPrivateNotice(userId, replyToken, null, fallbackFlex, env, profile.displayName, ctx);
       return;
@@ -574,7 +499,7 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     const profile = await getOrCreatePlayerProfile(userId, env, ctx);
     const welcomeFlex = generateNoticeFlex(
       `ยินดีต้อนรับ ${profile.displayName}`,
-      'เช็คยอด ฝากเงิน ถอนเงิน และดูกติกาได้จากเมนูด้านล่าง',
+      'เช็คยอด ฝากเงิน แจ้งบัญชีรับเงิน และดูกติกาได้จากเมนูด้านล่าง',
       'info'
     );
     await deliverPrivateNotice(userId, event.replyToken, null, welcomeFlex, env, profile.displayName, ctx);
@@ -1278,7 +1203,12 @@ async function handleSlipUpload(
       userId,
       replyToken,
       groupId,
-      generateNoticeFlex('ได้รับสลิปแล้ว · รอแอดมินตรวจ', playerMessage, 'warning'),
+      generateNoticeFlex(
+        'ได้รับสลิปแล้ว · รอแอดมินตรวจ',
+        playerMessage,
+        'warning',
+        hasPayoutAccount(profile) ? undefined : 'ส่งเลขบัญชีรับเงินด้วย: ธนาคาร เลขบัญชี ชื่อบัญชี'
+      ),
       env,
       profile.displayName,
       ctx
@@ -1362,30 +1292,104 @@ async function handleSlipUpload(
   profile.balance = balanceAfter(credit, profile.shortId) ?? profile.balance + scan.amount;
   mirrorTransactionToSheets(tx, env, ctx);
 
-  // Register the payer's bank details. These are what a later "ถอน x,xxx"
-  // reuses, so a player who has deposited never has to type them again.
-  // (savePlayerProfile never writes the balance.)
-  if (scan.sender?.account && scan.sender.name) {
+  // The payer's account off the slip is kept only when it is complete. Thai
+  // bank slips mask the number (xxx-x-x1234-x), and a masked number is useless
+  // for the evening payout, so the card below asks the player for it instead.
+  const slipAccount = fullAccountNumber(scan.sender?.account);
+  if (!hasPayoutAccount(profile) && slipAccount && scan.sender?.name) {
     const withBank: PlayerProfile = {
       ...profile,
-      bankName: profile.bankName || scan.sender.bank || '',
-      accountNumber: profile.accountNumber || scan.sender.account,
+      bankName: profile.bankName || bankDisplayName(scan.sender.bank || '') || scan.sender.bank || '',
+      accountNumber: slipAccount,
       accountName: profile.accountName || scan.sender.name,
     };
-    if (withBank.accountNumber !== profile.accountNumber || withBank.accountName !== profile.accountName) {
-      await savePlayerProfile(withBank, env, ctx);
-    }
+    await savePlayerProfile(withBank, env, ctx); // never writes the balance
+    profile.bankName = withBank.bankName;
+    profile.accountNumber = withBank.accountNumber;
+    profile.accountName = withBank.accountName;
   }
 
   await deliverPrivateNotice(
     userId,
     replyToken,
     groupId,
-    generateSlipCreditedFlex(scan.amount, profile.balance, scan.refCode),
+    generateSlipCreditedFlex(scan.amount, profile.balance, scan.refCode, payoutAccountView(profile)),
     env,
     profile.displayName,
     ctx
   );
+}
+
+// ── Payout account helpers ──
+
+/** Canonical bank names, keyed by what players type (lower-case, no spaces/dots). */
+const BANK_ALIASES: Record<string, string> = {
+  'กสิกร': 'กสิกรไทย', 'กสิกรไทย': 'กสิกรไทย', 'kbank': 'กสิกรไทย', 'kasikorn': 'กสิกรไทย', 'กสก': 'กสิกรไทย',
+  'ไทยพาณิชย์': 'ไทยพาณิชย์', 'ไทยพาณิช': 'ไทยพาณิชย์', 'scb': 'ไทยพาณิชย์',
+  'กรุงเทพ': 'กรุงเทพ', 'bbl': 'กรุงเทพ', 'bangkokbank': 'กรุงเทพ',
+  'กรุงไทย': 'กรุงไทย', 'ktb': 'กรุงไทย',
+  'กรุงศรี': 'กรุงศรีอยุธยา', 'กรุงศรีอยุธยา': 'กรุงศรีอยุธยา', 'bay': 'กรุงศรีอยุธยา', 'krungsri': 'กรุงศรีอยุธยา',
+  'ทหารไทยธนชาต': 'ทหารไทยธนชาต', 'ทหารไทย': 'ทหารไทยธนชาต', 'ธนชาต': 'ทหารไทยธนชาต', 'ทีทีบี': 'ทหารไทยธนชาต', 'ttb': 'ทหารไทยธนชาต', 'tmb': 'ทหารไทยธนชาต',
+  'ออมสิน': 'ออมสิน', 'gsb': 'ออมสิน',
+  'ธกส': 'ธ.ก.ส.', 'baac': 'ธ.ก.ส.',
+  'อาคารสงเคราะห์': 'อาคารสงเคราะห์', 'ธอส': 'อาคารสงเคราะห์', 'ghb': 'อาคารสงเคราะห์',
+  'ซีไอเอ็มบี': 'ซีไอเอ็มบี', 'cimb': 'ซีไอเอ็มบี',
+  'ยูโอบี': 'ยูโอบี', 'uob': 'ยูโอบี',
+  'แลนด์แอนด์เฮ้าส์': 'แลนด์ แอนด์ เฮ้าส์', 'lhb': 'แลนด์ แอนด์ เฮ้าส์', 'lh': 'แลนด์ แอนด์ เฮ้าส์',
+  'เกียรตินาคิน': 'เกียรตินาคินภัทร', 'เกียรตินาคินภัทร': 'เกียรตินาคินภัทร', 'kkp': 'เกียรตินาคินภัทร',
+  'ทิสโก้': 'ทิสโก้', 'tisco': 'ทิสโก้',
+  'อิสลาม': 'อิสลามแห่งประเทศไทย', 'ibank': 'อิสลามแห่งประเทศไทย',
+  'พร้อมเพย์': 'พร้อมเพย์', 'promptpay': 'พร้อมเพย์',
+};
+
+/** A known bank's display name, or '' when the text names no bank we know. */
+export function bankDisplayName(raw: string): string {
+  const k = String(raw || '').toLowerCase().replace(/[\s.]/g, '').replace(/^ธนาคาร/, '').replace(/^ธ(?=[ก-๙])/, '');
+  return BANK_ALIASES[k] || '';
+}
+
+/** Digits of an account number that is complete (10–15 digits, not masked). */
+export function fullAccountNumber(raw: string | undefined): string {
+  const s = String(raw || '').trim();
+  if (!s || /[xX*•]/.test(s)) return '';
+  const digits = s.replace(/[\s-]/g, '');
+  return /^\d{10,15}$/.test(digits) ? digits : '';
+}
+
+export function hasPayoutAccount(p: PlayerProfile): boolean {
+  return !!(p.bankName && fullAccountNumber(p.accountNumber));
+}
+
+function payoutAccountView(p: PlayerProfile): { bankName: string; accountNumber: string; accountName: string } | null {
+  return hasPayoutAccount(p)
+    ? { bankName: p.bankName!, accountNumber: p.accountNumber!, accountName: p.accountName || p.displayName }
+    : null;
+}
+
+/**
+ * Read a payout account from a chat message.
+ *
+ *   บัญชี กสิกร 0123456789 สมชาย          (the old command, still accepted)
+ *   กสิกร 012-3-45678-9 สมชาย ใจดี        (what the bot now asks for)
+ *   ธนาคารไทยพาณิชย์ 1234567890 นายเอ บี
+ *
+ * Without the "บัญชี" prefix the bank must be one we recognise and the message
+ * must come from a DM, so a bet typed in the group is never read as a bank
+ * account.
+ */
+export function parseBankAccountText(input: string, isDm: boolean): { bankName: string; accountNumber: string; accountName: string } | null {
+  const t = String(input || '').trim().replace(/\s+/g, ' ');
+  const m = t.match(/^(?:(บัญชีรับเงิน|บัญชี|ลงทะเบียนบัญชี|bank)\s*)?(ธนาคาร\s*)?([^\d\s]+)\s+([\d][\d\s-]{8,22}\d)\s+(\S.*)$/i);
+  if (!m) return null;
+  const prefixed = !!m[1];
+  if (!prefixed && !isDm) return null;
+  const accountNumber = fullAccountNumber(m[4]);
+  if (!accountNumber) return null;
+  const known = bankDisplayName(m[3]);
+  if (!known && !prefixed) return null;
+  const accountName = m[5].trim();
+  if (accountName.length < 2 || /\d{3,}/.test(accountName)) return null;
+  return { bankName: known || m[3], accountNumber, accountName };
 }
 
 // ── Pending Orders & Lookup Helpers ──
@@ -2706,7 +2710,7 @@ async function replyToLine(replyToken: string, payload: any, env: Env, attachQui
 
     if (attachQuickReply) {
       if (!messageObj.quickReply || !Array.isArray(messageObj.quickReply.items) || messageObj.quickReply.items.length === 0) {
-        messageObj.quickReply = { items: MAIN_MENU_QUICK_REPLY_ITEMS };
+        messageObj.quickReply = { items: mainMenuQuickReplyItems() };
       }
     } else {
       // Explicitly delete quickReply if attachQuickReply is false (e.g. Group messages)
@@ -2778,7 +2782,7 @@ export async function pushToLine(to: string, payload: any, env: Env): Promise<{ 
 
     if (isUserDM) {
       if (!messageObj.quickReply || !Array.isArray(messageObj.quickReply.items) || messageObj.quickReply.items.length === 0) {
-        messageObj.quickReply = { items: MAIN_MENU_QUICK_REPLY_ITEMS };
+        messageObj.quickReply = { items: mainMenuQuickReplyItems() };
       }
     } else {
       // Groups (C...) and Rooms (R...) must NEVER carry floating Quick Reply menus

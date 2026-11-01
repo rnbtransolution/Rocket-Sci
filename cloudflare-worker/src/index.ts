@@ -63,6 +63,7 @@ import {
   dailySettledKey,
   getDailySettledOrders,
   voidInFlightRound,
+  hasPayoutAccount,
 } from './queueHandler.js';
 import {
   generateRuleGuideFlex,
@@ -71,7 +72,6 @@ import {
   generateDepositFlex,
   generateDepositInvoiceFlex,
   generatePendingBoardFlex,
-  generateWithdrawalFlex,
   generateOrderFlex,
   generateRocketLaunchedFlex,
   generateDailySummaryFlex,
@@ -79,6 +79,9 @@ import {
   generateNoticeFlex,
   generateVoidRoundFlex,
   generateSettlementFlex,
+  generateCorrectedSettlementFlex,
+  generateResultCorrectionFlex,
+  generatePayoutSentFlex,
   setPublicBaseUrl,
 } from './flexTemplates.js';
 
@@ -296,6 +299,59 @@ function settleRetryRefusal(error: string, lockedFinalTime: number, headers: Rec
     JSON.stringify({ success: false, error, data: { success: false, error, lockedFinalTime } }),
     { status: 409, headers: { 'Content-Type': 'application/json', ...headers } }
   );
+}
+
+/**
+ * Payout cutoff for a settlement: the first 20:00 Bangkok time after it. The
+ * admin transfers every player's points by hand after 20:00, so a result paid
+ * before then can still be corrected; after it, money has left and cannot be
+ * clawed back. (20:00 ICT is 13:00 UTC.)
+ */
+function payoutCutoff(settledAt: number): number {
+  const day = bangkokDay(settledAt);
+  let cutoff = Date.parse(`${day}T13:00:00Z`);
+  if (settledAt >= cutoff) cutoff += 24 * 3600_000;
+  return cutoff;
+}
+
+/** Same grouping as the daily summary card: one entry per rocket round. */
+function roundKeyOf(o: any): string {
+  return o.roundId || o.inFlightRoundId || `name:${o.rocketName || 'บั้งไฟสด'}`;
+}
+
+/** Settled rounds that are still before their payout cutoff, newest first. */
+async function correctableRounds(env: Env): Promise<Array<{ key: string; name: string; finalTime: number; tMin: number; tMax: number; pairs: number; settledAt: number; cutoff: number; orders: Order[] }>> {
+  const now = Date.now();
+  const days = [bangkokDay(now), bangkokDay(now - 24 * 3600_000)];
+  const byKey = new Map<string, Order[]>();
+  for (const day of days) {
+    for (const o of await getDailySettledOrders(day, env)) {
+      if (!o || !o.orderNumber) continue;
+      const k = roundKeyOf(o);
+      const list = byKey.get(k) || [];
+      if (!list.some((x) => x.orderNumber === o.orderNumber && Number(x.createdAt) === Number(o.createdAt))) list.push(o);
+      byKey.set(k, list);
+    }
+  }
+  const out = [];
+  for (const [key, orders] of byKey) {
+    const settledAt = Math.min(...orders.map((o: any) => Number(o.settledAt) || now));
+    const cutoff = payoutCutoff(settledAt);
+    if (now >= cutoff) continue;
+    const first: any = orders[0];
+    out.push({
+      key,
+      name: first.rocketName || 'บั้งไฟสด',
+      finalTime: Number(first.finalTime) || 0,
+      tMin: Number(first.settleTMin) || Number(first.rangeMin) || 0,
+      tMax: Number(first.settleTMax) || Number(first.rangeMax) || 0,
+      pairs: orders.length,
+      settledAt,
+      cutoff,
+      orders,
+    });
+  }
+  return out.sort((a, b) => b.settledAt - a.settledAt);
 }
 
 /** A flight time the admin actually entered. `Number('') || 0` settled every order as a low-side win. */
@@ -2263,6 +2319,194 @@ if (
             await savePlayerProfile(p, env, ctx);
           }
           result = { success: true };
+        } else if (functionName === 'adminListCorrectableRounds') {
+          const rounds = await correctableRounds(env);
+          result = {
+            success: true,
+            rounds: rounds.map(({ orders, ...r }) => ({ ...r, corrected: orders.some((o: any) => Array.isArray(o.corrections) && o.corrections.length > 0) })),
+          };
+        } else if (functionName === 'adminCorrectFlightTime') {
+          // args: [roundKey, newFinalSeconds, dangerPin]
+          // A wrong flight time is corrected by re-settling every pair of the
+          // round on the right one: the old payout is taken back and the new
+          // result paid, per order, in ONE atomic ledger step. A balance may go
+          // negative when a wrongly paid winner already spent the money.
+          const pinVerdict = await verifyDangerPin(state(env), args[2]);
+          if (!pinVerdict.ok) return pinRefusal(pinVerdict, corsHeaders);
+          const roundKey = String(args[0] || '');
+          const newTime = parseFlightSeconds(args[1]);
+          const target = (await correctableRounds(env)).find((r) => r.key === roundKey);
+          if (newTime === null) {
+            result = { success: false, error: 'กรุณาระบุเวลาบินที่ถูกต้อง (วินาที)' };
+          } else if (!target) {
+            result = { success: false, error: 'ไม่พบรอบนี้ หรือเลยเวลาจ่ายเงิน 20:00 น. แล้ว จึงแก้ผลไม่ได้' };
+          } else if (target.finalTime === newTime) {
+            result = { success: false, error: `รอบนี้ใช้เวลาบิน ${newTime} วิ อยู่แล้ว` };
+          } else {
+            const oldTime = target.finalTime;
+            const fallbackMin = target.tMin || 330;
+            const fallbackMax = target.tMax || 380;
+            const res = await ledger(env, {
+              orders: target.orders.map((o: any) => ({
+                orderNumber: o.orderNumber,
+                ...(o.createdAt ? { expectCreatedAt: Number(o.createdAt) } : {}),
+                expectStatus: ['settled'],
+                // A second correction racing this one must not reverse twice.
+                expectFields: { finalTime: Number(o.finalTime) },
+                resettle: { finalSeconds: newTime, tMin: fallbackMin, tMax: fallbackMax, commissionRate: PLATFORM_COMMISSION_RATE },
+              })),
+              lists: target.orders.flatMap((o: any) => [
+                { key: 'SETTLED_ORDERS_LIST', op: 'upsert' as const, orderNumber: o.orderNumber, cap: 100 },
+                { key: dailySettledKey(bangkokDay(Number(o.settledAt) || Date.now())), op: 'append' as const, orderNumber: o.orderNumber, cap: 1000 },
+              ]),
+            }, ctx);
+            if (!res.ok) {
+              result = {
+                success: false,
+                ledgerFailure: true,
+                error: res.reason === 'order_field' || res.reason === 'order_status'
+                  ? 'ผลรอบนี้ถูกเปลี่ยนไประหว่างนี้ (อาจมีการแก้ผลซ้ำ) รีเฟรชแล้วลองใหม่'
+                  : `แก้ผลไม่สำเร็จ (${res.reason}) ยอดเงินไม่เปลี่ยนแปลง`,
+              };
+            } else {
+              const corrected = target.orders
+                .map((o) => res.orders[o.orderNumber] as Order)
+                .filter(Boolean)
+                .sort((a: any, b: any) => (Number(a.settledAt) || 0) - (Number(b.settledAt) || 0));
+
+              // The rocket's own record, when it is still the board's round.
+              const arStr = await state(env).get('ACTIVE_ROUND');
+              const ar = arStr ? JSON.parse(arStr) : null;
+              if (ar && (ar.roundId ?? null) === ((corrected[0] as any)?.roundId ?? null) && Number(ar.finalTime) === oldTime) {
+                ar.finalTime = newTime;
+                ar.updatedAt = Date.now();
+                await state(env).put('ACTIVE_ROUND', JSON.stringify(ar));
+              }
+
+              // One audit line per player whose balance moved.
+              const moved = (res.balances || []).filter((b) => Math.round((b.after - b.before) * 100) !== 0);
+              for (const b of moved) {
+                const delta = b.after - b.before;
+                await addTransaction({
+                  id: `COR${Date.now().toString(36).toUpperCase()}${Math.floor(100 + Math.random() * 900)}`,
+                  playerId: b.shortId,
+                  lineUserId: b.lineUserId,
+                  playerName: b.displayName,
+                  requestedAmount: delta,
+                  actualAmount: delta,
+                  slipRef: 'RESULT_CORRECTION',
+                  status: 'success',
+                  reviewReason: `แก้ผล ${target.name}: เวลาบิน ${oldTime} → ${newTime} วิ (${b.before} → ${b.after})`,
+                  timestamp: formatTime(),
+                  type: 'transfer',
+                  createdAt: Date.now(),
+                }, env, ctx);
+              }
+
+              // Group: corrected result, winners and losers only (no amounts).
+              const targets = await resolveTargetGroupIds('ALL', env);
+              const tMinShown = Number((corrected[0] as any)?.settleTMin) || fallbackMin;
+              const tMaxShown = Number((corrected[0] as any)?.settleTMax) || fallbackMax;
+              const groupFlex = generateCorrectedSettlementFlex(target.name, oldTime, newTime, tMinShown, tMaxShown, corrected);
+              await Promise.all(targets.map((to) => pushToLine(to, groupFlex, env)));
+
+              // Each player whose money moved hears it privately, with the amount.
+              await Promise.all(moved
+                .filter((b) => String(b.lineUserId || '').startsWith('U'))
+                .map((b) => pushToLine(b.lineUserId, generateResultCorrectionFlex(target.name, oldTime, newTime, b.after - b.before, b.after), env).catch(() => null)));
+
+              result = {
+                success: true,
+                roundKey,
+                oldTime,
+                newTime,
+                correctedCount: corrected.length,
+                changes: moved.map((b) => ({ playerId: b.shortId, name: b.displayName, before: b.before, after: b.after, delta: b.after - b.before })),
+                negative: moved.filter((b) => b.after < 0).map((b) => ({ playerId: b.shortId, name: b.displayName, balance: b.after })),
+              };
+            }
+          }
+        } else if (functionName === 'adminListPayouts') {
+          // Evening payout sheet: every player holding points, with the account
+          // the admin transfers to. Negative balances (after a result correction)
+          // are listed so the admin can follow them up.
+          const players = await getPlayersList(env);
+          const rows = players
+            .filter((p: any) => p && Math.round(Number(p.balance) || 0) !== 0)
+            .map((p: any) => ({
+              playerId: p.shortId || p.id,
+              name: p.displayName || p.name || 'ผู้เล่น',
+              balance: Number(p.balance) || 0,
+              bankName: p.bankName || '',
+              accountNumber: p.accountNumber || p.bankAccount || '',
+              accountName: p.accountName || '',
+              hasAccount: hasPayoutAccount({ ...p, accountNumber: p.accountNumber || p.bankAccount || '' } as PlayerProfile),
+            }))
+            .sort((a, b) => b.balance - a.balance);
+          const today = bangkokDay();
+          const paidToday = (await getTransactionsList(env))
+            .filter((t: any) => t && t.slipRef === 'ADMIN_PAYOUT' && bangkokDay(Number(t.createdAt) || 0) === today)
+            .map((t: any) => ({ id: t.id, playerId: t.playerId, name: t.playerName, amount: Number(t.actualAmount) || 0, at: t.createdAt, timestamp: t.timestamp }));
+          result = { success: true, day: today, players: rows, paidToday };
+        } else if (functionName === 'adminRecordPayout') {
+          // args: [playerId, amount, requestId]
+          // The admin has transferred `amount` baht by hand; take the same
+          // points off the player. requestId comes from the console dialog, so
+          // a double click or a retried request records the payout once.
+          const playerId = String(args[0] || '');
+          const amount = Math.round(Number(args[1]));
+          const requestId = String(args[2] || '');
+          const players = await getPlayersList(env);
+          const p: any = players.find((x: any) => x && (x.shortId === playerId || x.id === playerId || x.lineUserId === playerId));
+          if (!p) {
+            result = { success: false, error: 'ไม่พบผู้เล่น' };
+          } else if (!Number.isFinite(amount) || amount <= 0) {
+            result = { success: false, error: 'ยอดโอนต้องมากกว่า 0' };
+          } else if (!/^[A-Za-z0-9_-]{6,40}$/.test(requestId)) {
+            result = { success: false, error: 'คำขอไม่ถูกต้อง รีเฟรชหน้าแล้วลองใหม่' };
+          } else {
+            const txId = `PO${requestId}`;
+            const bankLine = `${p.bankName || '-'} ${p.accountNumber || p.bankAccount || '-'}`;
+            const res = await ledger(env, {
+              balances: [{ shortId: p.shortId || p.id, lineUserId: p.lineUserId, delta: -amount, requireSufficient: true }],
+              transactions: [{
+                id: txId,
+                insert: {
+                  id: txId,
+                  playerId: p.shortId || p.id,
+                  lineUserId: p.lineUserId,
+                  playerName: p.displayName || p.name || 'ผู้เล่น',
+                  requestedAmount: amount,
+                  actualAmount: amount,
+                  slipRef: 'ADMIN_PAYOUT',
+                  status: 'success',
+                  reviewReason: `แอดมินโอนจ่าย ${amount.toLocaleString()} บาท เข้า ${bankLine}`,
+                  timestamp: formatTime(),
+                  type: 'withdraw',
+                  createdAt: Date.now(),
+                },
+              }],
+            }, ctx);
+            if (!res.ok && res.reason === 'tx_exists') {
+              result = { success: true, duplicate: true };
+            } else if (!res.ok) {
+              result = {
+                success: false,
+                ledgerFailure: true,
+                error: res.reason === 'insufficient'
+                  ? `ยอดคงเหลือไม่พอ (มี ${Number(res.current?.balance) || 0} pt)`
+                  : `บันทึกไม่สำเร็จ (${res.reason}) ยอดไม่เปลี่ยนแปลง`,
+              };
+            } else {
+              const after = res.balances[0]?.after ?? 0;
+              const tx = res.transactions[txId];
+              if (tx) mirrorTransactionToSheets(tx, env, ctx);
+              if (String(p.lineUserId || '').startsWith('U')) {
+                ctx.waitUntil(pushToLine(p.lineUserId, generatePayoutSentFlex(amount, p.bankName, p.accountNumber || p.bankAccount, after), env).catch(() => null));
+              }
+              result = { success: true, balance: after };
+            }
+          }
         } else if (functionName === 'adminResolveBets') {
           const finalSecondsParsed = parseFlightSeconds(args[0]);
           const tMin = Number(args[1]) || 330;
@@ -2284,7 +2528,7 @@ if (
           if (prior && prior.roundId === (lockRound.roundId ?? null) && prior.finalSeconds !== undefined
             && (prior.finalSeconds !== finalSeconds || prior.tMin !== tMin || prior.tMax !== tMax)) {
             return settleRetryRefusal(
-              `รอบนี้จ่ายไปแล้ว ${(prior.orderNumbers || []).length} แผลที่เวลาบิน ${prior.finalSeconds} วิ (ช่าง ${prior.tMin}–${prior.tMax}) — ตัดสินผลซ้ำต้องใช้ค่าเดิม`,
+              `รอบนี้จ่ายไปแล้ว ${(prior.orderNumbers || []).length} แผลที่เวลาบิน ${prior.finalSeconds} วิ (ช่าง ${prior.tMin}–${prior.tMax}) — ให้จ่ายส่วนที่เหลือด้วยค่าเดิมก่อน แล้วค่อยใช้ "แก้เวลาบิน"`,
               prior.finalSeconds,
               corsHeaders
             );
@@ -2427,7 +2671,7 @@ if (
               const lockedFinalTime = Number(paidAt.stored!.finalTime);
               const paidCount = storedOrders.filter(({ stored }) => stored?.status === 'settled').length;
               return settleRetryRefusal(
-                `บั้งไฟ "${targetRound.name || 'บั้งไฟสด'}" จ่ายไปแล้ว ${paidCount} แผลที่เวลาบิน ${lockedFinalTime} วิ — ตัดสินผลซ้ำต้องใช้เวลาเดิม`,
+                `บั้งไฟ "${targetRound.name || 'บั้งไฟสด'}" จ่ายไปแล้ว ${paidCount} แผลที่เวลาบิน ${lockedFinalTime} วิ — ให้จ่ายส่วนที่เหลือด้วยเวลาเดิมก่อน แล้วค่อยใช้ "แก้เวลาบิน"`,
                 lockedFinalTime,
                 corsHeaders
               );

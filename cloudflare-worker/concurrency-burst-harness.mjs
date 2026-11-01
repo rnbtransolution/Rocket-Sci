@@ -287,32 +287,29 @@ console.log('\nCANCEL RACING A MATCH ON THE SAME ORDER');
   check('cancel and match never both succeed', bad === 0, `${bad}/5 runs inconsistent`);
 }
 
-// ── 8. Two withdrawals at once with credit for one ─────────────────────────
-console.log('\nTWO SIMULTANEOUS WITHDRAWALS, CREDIT FOR ONE');
+// ── 8. Two evening payouts at once with credit for one ─────────────────────
+// Players no longer withdraw; the admin records each manual transfer.
+console.log('\nTWO SIMULTANEOUS PAYOUTS, CREDIT FOR ONE');
 {
   const P = player(701);
   const env = await freshEnv([P], 1000);
-  const prof = JSON.parse(await env.kvC.get(`USER_${P.lineUserId}`));
-  Object.assign(prof, { bankName: 'KBANK', accountNumber: '1234567890', accountName: 'P701' });
-  await env.kvC.put(`USER_${P.lineUserId}`, JSON.stringify(prof));
-  await env.kvC.put(`USER_${P.shortId}`, JSON.stringify(prof));
-  await Promise.all([env.say(P, 'ถอน 800'), env.say(P, 'ถอน 800')]);
-  await settle();
-  const d = await env.dashboard();
-  const wds = (d.transactions || []).filter((t) => t.type === 'withdraw' && t.playerId === P.shortId);
-  const bal = await env.balanceOf(P);
-  check('only one withdrawal request opened', wds.length === 1, `requests=${wds.length}`);
-  check('balance is 200, never negative', bal === 200, `balance=${bal}`);
-
-  // Admin double-clicks REJECT: the 800 comes back exactly once.
-  const id = wds[0]?.id;
   await Promise.all([
-    env.rpc('adminRejectTransaction', [id, 'test']),
-    env.rpc('adminRejectTransaction', [id, 'test']),
+    env.rpc('adminRecordPayout', [P.shortId, 800, 'burst_aaaaaa']),
+    env.rpc('adminRecordPayout', [P.shortId, 800, 'burst_bbbbbb']),
   ]);
   await settle();
-  const after = await env.balanceOf(P);
-  check('rejected withdrawal refunded exactly once (1000)', after === 1000, `balance=${after}`);
+  const d = await env.dashboard();
+  const paid = (d.transactions || []).filter((t) => t.slipRef === 'ADMIN_PAYOUT' && t.playerId === P.shortId);
+  check('only one payout recorded', paid.length === 1, `payouts=${paid.length}`);
+  check('balance is 200, never negative', (await env.balanceOf(P)) === 200, `balance=${await env.balanceOf(P)}`);
+
+  // The admin double-clicks "โอนแล้ว": same request id, deducted once.
+  await Promise.all([
+    env.rpc('adminRecordPayout', [P.shortId, 100, 'burst_cccccc']),
+    env.rpc('adminRecordPayout', [P.shortId, 100, 'burst_cccccc']),
+  ]);
+  await settle();
+  check('double-clicked payout deducted once (100)', (await env.balanceOf(P)) === 100, `balance=${await env.balanceOf(P)}`);
   await env.dispose();
 }
 
