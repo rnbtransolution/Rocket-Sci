@@ -80,6 +80,7 @@ import {
   generateVoidRoundFlex,
   generateSettlementFlex,
   generateCorrectedSettlementFlex,
+  generatePlayerSettlementFlex,
   generateResultCorrectionFlex,
   generatePayoutSentFlex,
   setPublicBaseUrl,
@@ -270,6 +271,56 @@ async function settleOrdersAtomically(
     }
   }
   return { settled, failed };
+}
+
+/**
+ * After a round is fully settled, each player in it gets one private card with
+ * their own pairs, the points each moved, and their balance. The group card
+ * stays amount-free; this is where a player sees what they won or lost.
+ * Best effort: a failed push (quota, blocked bot) never fails the settlement.
+ */
+async function dmSettlementResults(roundName: string, finalSeconds: number, orders: Order[], env: Env): Promise<{ sent: number; failed: number }> {
+  if (orders.length === 0) return { sent: 0, failed: 0 };
+  const players = await getPlayersList(env);
+  const byShortId = new Map(players.map((p: any) => [String(p.shortId || p.id || ''), p]));
+  const byLineId = new Map(players.filter((p: any) => p.lineUserId).map((p: any) => [String(p.lineUserId), p]));
+  type Line = { orderNumber: string; side: 'low' | 'high'; result: 'win' | 'lose' | 'draw'; delta: number };
+  const perPlayer = new Map<string, Line[]>();
+  const add = (lineUserId: string | null | undefined, shortId: string | null | undefined, line: Line) => {
+    const to = String(lineUserId || byShortId.get(String(shortId || ''))?.lineUserId || '');
+    if (!to.startsWith('U')) return;
+    if (!perPlayer.has(to)) perPlayer.set(to, []);
+    perPlayer.get(to)!.push(line);
+  };
+  for (const o of orders) {
+    if (!o || o.status !== 'settled') continue;
+    const amt = Number(o.amount) || 0;
+    const draw = o.winnerSide === 'draw';
+    const winGain = (Number(o.payout) || 0) - amt;
+    const creatorSide = o.side;
+    const matcherSide: 'low' | 'high' = o.side === 'high' ? 'low' : 'high';
+    const resultFor = (side: 'low' | 'high'): Line['result'] => (draw ? 'draw' : o.winnerSide === side ? 'win' : 'lose');
+    const deltaFor = (r: Line['result']) => (r === 'win' ? winGain : r === 'lose' ? -amt : 0);
+    const rc = resultFor(creatorSide);
+    add(o.creatorLineUserId, o.creatorId, { orderNumber: o.orderNumber, side: creatorSide, result: rc, delta: deltaFor(rc) });
+    if (o.matcherId || o.matcherLineUserId) {
+      const rm = resultFor(matcherSide);
+      add(o.matcherLineUserId, o.matcherId, { orderNumber: o.orderNumber, side: matcherSide, result: rm, delta: deltaFor(rm) });
+    }
+  }
+  const results = await Promise.all([...perPlayer.entries()].map(async ([to, lines]) => {
+    const p = byLineId.get(to);
+    const balance = p ? Number(p.balance) || 0 : null;
+    try {
+      const r = await pushToLine(to, generatePlayerSettlementFlex(roundName, finalSeconds, lines, balance), env);
+      return r.success;
+    } catch (_) {
+      return false;
+    }
+  }));
+  const sent = results.filter(Boolean).length;
+  if (sent < results.length) console.warn(`[Worker] settlement DM: ${results.length - sent} of ${results.length} players not reached`);
+  return { sent, failed: results.length - sent };
 }
 
 /**
@@ -2587,21 +2638,27 @@ if (
           // after a partial failure told the group the round was over while
           // some players were still unpaid, and the retry then sent a second.
           // The admin sees the failure in the console response below.
-          const targets = settleFailures.length === 0 ? await resolveTargetGroupIds('ALL', env) : [];
-          if (targets.length > 0) {
+          let dmReport: { sent: number; failed: number } | undefined;
+          if (settleFailures.length === 0) {
+            const targets = await resolveTargetGroupIds('ALL', env);
             const roundName = activeRound.name || 'บั้งไฟสด';
             const cardOrders = earlier.length > 0
               ? await roundSettledOrders(settledSoFar, resolvedOrders, env)
               : resolvedOrders;
-            // Flight time and every pair's winner and loser, in one card.
-            const settleFlex = generateSettlementFlex(roundName, finalSeconds, tMin, tMax, cardOrders);
-            await Promise.all(targets.map((to) => pushToLine(to, settleFlex, env)));
+            if (targets.length > 0) {
+              // Flight time and every pair's winner and loser, in one card.
+              const settleFlex = generateSettlementFlex(roundName, finalSeconds, tMin, tMax, cardOrders);
+              await Promise.all(targets.map((to) => pushToLine(to, settleFlex, env)));
+            }
+            // Then each player privately, with amounts.
+            dmReport = await dmSettlementResults(roundName, finalSeconds, cardOrders, env);
           }
 
           result = {
             success: settleFailures.length === 0,
             resolvedCount: resolvedOrders.length,
             finalTime: finalSeconds,
+            ...(dmReport ? { dmSent: dmReport.sent, dmFailed: dmReport.failed } : {}),
             ...(settleFailures.length > 0 ? { error: `ตัดสินผลไม่สำเร็จ ${settleFailures.length} แผล — ยังไม่ประกาศผลในกลุ่ม กดตัดสินผลซ้ำได้อย่างปลอดภัย (แผลที่จ่ายแล้วจะไม่ถูกจ่ายซ้ำ)`, failed: settleFailures, ledgerFailure: true } : {}),
           };
         } else if (functionName === 'adminGetDailySummary' || functionName === 'adminBroadcastDailySummary') {
@@ -2703,16 +2760,21 @@ if (
             // The group hears the result once, when every pair is paid (see
             // adminResolveBets). The parked round keeps its full order list,
             // so pairs paid by an earlier attempt are read back from it.
-            const targets = settleFailures.length === 0 ? await resolveTargetGroupIds('ALL', env) : [];
-            if (targets.length > 0) {
+            let dmReport: { sent: number; failed: number } | undefined;
+            if (settleFailures.length === 0) {
+              const targets = await resolveTargetGroupIds('ALL', env);
               const roundName = targetRound.name || 'บั้งไฟสด';
               const roundOrders = (targetRound.matchedOrders || [])
                 .map((o) => o?.orderNumber)
                 .filter((n): n is string => !!n && !unquoted.has(n));
               const cardOrders = await roundSettledOrders(roundOrders, resolvedOrders, env);
-              // Flight time and every pair's winner and loser, in one card.
-              const settleFlex = generateSettlementFlex(roundName, finalSeconds, tMin, tMax, cardOrders);
-              await Promise.all(targets.map((to) => pushToLine(to, settleFlex, env)));
+              if (targets.length > 0) {
+                // Flight time and every pair's winner and loser, in one card.
+                const settleFlex = generateSettlementFlex(roundName, finalSeconds, tMin, tMax, cardOrders);
+                await Promise.all(targets.map((to) => pushToLine(to, settleFlex, env)));
+              }
+              // Then each player privately, with amounts.
+              dmReport = await dmSettlementResults(roundName, finalSeconds, cardOrders, env);
             }
 
             result = {
@@ -2722,6 +2784,7 @@ if (
               resolvedCount: resolvedOrders.length,
               finalTime: finalSeconds,
               inFlightRounds: remaining,
+              ...(dmReport ? { dmSent: dmReport.sent, dmFailed: dmReport.failed } : {}),
               ...(settleFailures.length > 0 ? { error: `ตัดสินผลไม่สำเร็จ ${settleFailures.length} แผล — ยังไม่ประกาศผลในกลุ่ม กดตัดสินผลซ้ำได้อย่างปลอดภัย`, failed: settleFailures, ledgerFailure: true } : {}),
             };
           }
