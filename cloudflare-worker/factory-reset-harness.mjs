@@ -131,6 +131,36 @@ check('daily summary for the test period is empty', sum?.count === 0, `count=${s
 const pin = await rpc('adminGetDangerPinStatus', []);
 check('reset PIN stays configured', pin?.configured === true, JSON.stringify(pin));
 
+// ── Race: the Admin Console keeps polling while the reset runs ──
+// The reset deleted PLAYERS_LIST first and the player records after. A
+// dashboard poll in between found the list missing, rebuilt it from the
+// records not yet deleted and wrote it back — every balance included. The
+// list then outlived the reset, and a player who messaged the bot got the
+// old balance back from it.
+console.log('\n  -- reset while the console polls --');
+const racers = Array.from({ length: 80 }, (_, i) => ({
+  lineUserId: `U${String(i).padStart(32, 'e')}`,
+  name: `Racer ${i}`,
+}));
+for (const r of racers) await rpc('adminCreatePlayer', [r.lineUserId, r.name, 5000]);
+const seeded = await rpc('getDashboardData', []);
+check('racers are seeded with credit', (seeded?.players || []).filter((p) => p.balance === 5000).length === racers.length,
+  `players=${seeded?.players?.length}`);
+let polling = true;
+const poller = (async () => { while (polling) await rpc('getDashboardData', []); })();
+const pollers = [poller, ...Array.from({ length: 5 }, () => (async () => { while (polling) await rpc("getDashboardData", []); })())];
+const raced = await rpc('resetGoogleSheetsDatabase', ['583920']);
+polling = false;
+await Promise.all(pollers);
+check('reset under polling succeeds', raced?.success === true, JSON.stringify(raced)?.slice(0, 120));
+const afterRace = await rpc('getDashboardData', []);
+check('no player and no credit survive a reset under polling', (afterRace?.players || []).length === 0,
+  JSON.stringify((afterRace?.players || []).map((p) => [p.shortId, p.balance])));
+const back = await rpc('adminCreatePlayer', [racers[0].lineUserId, racers[0].name, 0]);
+const again = await rpc('getDashboardData', []);
+const reborn = (again?.players || []).find((p) => p.lineUserId === racers[0].lineUserId);
+check('a returning player starts at 0, not the old balance', reborn && reborn.balance === 0, JSON.stringify(reborn));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 await mf.dispose();
 process.exit(fail ? 1 : 0);

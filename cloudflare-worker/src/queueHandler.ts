@@ -2230,21 +2230,22 @@ export async function getPlayersList(env: Env): Promise<any[]> {
       try { list = JSON.parse(cached); } catch (_) {}
     }
 
-    let needsWriteBack = false;
     if (!list || list.length === 0) {
       const scanRes = await state(env).list({ prefix: 'USER_' });
       if (scanRes.keys && scanRes.keys.length > 0) {
         const promises = scanRes.keys.map(k => state(env).get(k.name));
         const raws = await Promise.all(promises);
         list = raws.filter(Boolean).map(r => JSON.parse(r!) as PlayerProfile);
-        needsWriteBack = true;
       }
     }
 
+    // Read-only. This used to save the rebuilt / de-duplicated list back, a
+    // read-modify-write from outside the DO. The console polls this every few
+    // seconds, so a poll that read the list just before a Factory Reset
+    // deleted it wrote every player and balance straight back, and returning
+    // players were then restored from it with their old credit. PLAYERS_LIST
+    // is written only by the DO (saveProfile / txn), atomically.
     const dedupedList = deduplicatePlayers(list);
-    if (needsWriteBack || dedupedList.length !== list.length) {
-      await state(env).put('PLAYERS_LIST', JSON.stringify(dedupedList.slice(-500)));
-    }
 
     const avatars = ['🐉', '🐯', '🦅', '🦁', '🐻', '🐼', '🦊', '🦉'];
     return dedupedList.map((p, idx) => ({

@@ -1777,8 +1777,10 @@ if (
           // 1. Clear atomic order state in KV
           await clearAllPendingOrders(env);
           await state(env).delete('IN_FLIGHT_ROUNDS');
-          // 2. Clear players, transactions, and logs in KV
-          await state(env).delete('PLAYERS_LIST');
+          // 2. Clear transactions and logs. PLAYERS_LIST goes AFTER the player
+          //    records (step 3) and again at the very end: deleted first, a
+          //    console poll in the gap rebuilt it from the records not yet
+          //    deleted, and every balance survived the reset.
           await state(env).delete('TRANSACTIONS_LIST');
           await state(env).delete('CHAT_LOGS');
           // 3. Clear all cached player profiles and raw LINE mappings
@@ -1819,6 +1821,15 @@ if (
           await Promise.all(
             ['PENDING_ORDERS_LIST', 'MATCHED_ORDERS_LIST', 'SETTLED_ORDERS_LIST', 'ACTIVE_ROUND'].map((k) => state(env).delete(k))
           );
+          // Last: the player directory, then one more pass over the player
+          // records in case anything recreated them while the reset ran.
+          await state(env).delete('PLAYERS_LIST');
+          try {
+            const lateUsers = await state(env).list({ prefix: 'USER_' });
+            const lateRaw = await state(env).list({ prefix: 'RAW_LINE_' });
+            await Promise.all([...(lateUsers.keys || []), ...(lateRaw.keys || [])].map((k) => state(env).delete(k.name)));
+          } catch (_) {}
+          await state(env).delete('PLAYERS_LIST');
 
           // 4. Forward database reset to Google Apps Script / Google Sheets.
           //
