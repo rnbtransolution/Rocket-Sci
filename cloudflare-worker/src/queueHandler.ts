@@ -51,9 +51,9 @@ export const RULE_GUIDE_TEXT = `📖 [กติกาการเล่น]
 📌 กฏที่ 2: การเปิดราคาเอง (กรณีช่างไม่ต่อย / ต้องมีเครดิตพอ)
 
 💰 การเปิดราคาเอง (เปิดแผลสดใหม่):
-⚠️ ช่วงราคาต้องห่างกัน 50 วิพอดี เช่น
+⚠️ ช่วงราคาห่างกันได้ไม่เกิน 80 วิ เช่น
 • 300-350ล500 | 300-350ถ500
-• 350-400ล500 | 350-400ถ500
+• 300-380ล500 | 300-380ถ500
 
 ⬆️ ช่างต่อยยกเลิก (ชตย) 
 ใส่ ชตย หลังจำนวนเงิน เช่น
@@ -662,11 +662,11 @@ async function handleCreateOrder(
       await deliverPrivateNotice(userId, replyToken, groupId, rangeFlex, env, profile.displayName, ctx);
       return;
     }
-    if (rangeMax - rangeMin > 50) {
+    if (rangeMax - rangeMin > 80) {
       const diff = rangeMax - rangeMin;
       const rangeSpanFlex = generateNoticeFlex(
         'ช่วงราคาห่างเกินไป',
-        `ช่วงราคาห่างกันได้ไม่เกิน 50 วิ\nคุณระบุ ${rangeMin}-${rangeMax} (ห่าง ${diff} วิ)`,
+        `ช่วงราคาห่างกันได้ไม่เกิน 80 วิ\nคุณระบุ ${rangeMin}-${rangeMax} (ห่าง ${diff} วิ)`,
         'error'
       );
       await deliverPrivateNotice(userId, replyToken, groupId, rangeSpanFlex, env, profile.displayName, ctx);
