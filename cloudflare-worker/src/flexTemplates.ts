@@ -14,12 +14,13 @@ import type { LineIconName } from './lineIcons.js';
  *   info     blue    round news — quote, result, daily summary (kept rare)
  *   neutral  slate   everything else — orders, matches, balance, board,
  *                    menu, rules, plain notices
+ *   launch   red-pink "บั้งไฟขึ้นแล้ว" only
  *
  * Copy is short and plain: no emoji, no slang, left-aligned, one idea per line.
  * Amounts are the largest text on a card that moves money.
  */
 
-type Tone = 'in' | 'out' | 'error' | 'pending' | 'info' | 'neutral';
+type Tone = 'in' | 'out' | 'error' | 'pending' | 'info' | 'neutral' | 'launch';
 
 const TONES: Record<Tone, { head: string; accent: string; tint: string }> = {
   in: { head: '#0B6B3F', accent: '#0F7B4A', tint: '#EAF5EF' },
@@ -28,6 +29,8 @@ const TONES: Record<Tone, { head: string; accent: string; tint: string }> = {
   pending: { head: '#8A5300', accent: '#9A5B00', tint: '#FDF4E3' },
   info: { head: '#1C3F94', accent: '#1E4DB7', tint: '#EBF0FB' },
   neutral: { head: '#2B3138', accent: '#3B424C', tint: '#F2F4F6' },
+  // "บั้งไฟขึ้นแล้ว" only: red-pink, so the launch stands apart from the amber pending cards.
+  launch: { head: '#D6336C', accent: '#C2255C', tint: '#FDECF2' },
 };
 
 const INK = '#16191D';
@@ -190,7 +193,7 @@ export function generateRocketLaunchedFlex(rocketName?: string): any {
   return flex(
     `บั้งไฟขึ้นแล้ว${rocketName ? ` · ${rocketName}` : ''} · ปิดรับแทง`,
     bubble({
-      tone: 'pending',
+      tone: 'launch',
       icon: 'rocket',
       compact: true,
       eyebrow: 'ปิดรับแทง',
@@ -1067,6 +1070,58 @@ export function generatePayoutSentFlex(amount: number, bankName: string, account
         row('ธนาคาร', bankName || '-'),
         row('เลขบัญชี', accountNumber || '-'),
         row('ยอดคงเหลือ', pt(remaining)),
+      ],
+    })
+  );
+}
+
+/**
+ * DM to one player after a round is settled: each of their pairs in this
+ * round with the result and the points it moved, then the net and balance.
+ * Private, so amounts are shown (the group card never shows them).
+ */
+export function generatePlayerSettlementFlex(
+  roundName: string,
+  finalSeconds: number,
+  lines: Array<{ orderNumber: string; side: 'low' | 'high'; result: 'win' | 'lose' | 'draw'; delta: number }>,
+  balance: number | null
+): any {
+  const net = lines.reduce((sum, l) => sum + l.delta, 0);
+  const wins = lines.filter((l) => l.result === 'win').length;
+  const losses = lines.filter((l) => l.result === 'lose').length;
+  const tone: Tone = net > 0 ? 'in' : net < 0 ? 'out' : 'neutral';
+  const signed = (n: number) => `${n > 0 ? '+' : ''}${pt(n)}`;
+  const shown = lines.slice(0, 20);
+  const cell = (value: string, o: Record<string, any> = {}) => text(value, { size: 'xs', wrap: false, ...o });
+  const resultRow = (l: (typeof lines)[number]) => ({
+    type: 'box',
+    layout: 'horizontal',
+    spacing: 'sm',
+    contents: [
+      cell(`#${l.orderNumber}`, { color: MUTED, flex: 3, adjustMode: 'shrink-to-fit' }),
+      cell(l.side === 'high' ? 'สูง (ล)' : 'ต่ำ (ถ)', { color: BODY, flex: 3 }),
+      cell(l.result === 'win' ? 'ชนะ' : l.result === 'lose' ? 'แพ้' : 'เสมอ', {
+        color: l.result === 'win' ? TONES.in.accent : l.result === 'lose' ? TONES.error.accent : BODY,
+        weight: 'bold',
+        flex: 2,
+      }),
+      cell(l.result === 'draw' ? 'คืนเต็ม' : signed(l.delta), { color: INK, flex: 4, align: 'end' }),
+    ],
+  });
+  return flex(
+    `ผล ${roundName} · ${finalSeconds} วิ · ${signed(net)}`,
+    bubble({
+      tone,
+      icon: 'flag',
+      eyebrow: `ผลของคุณ · ${roundName || 'บั้งไฟ'}`,
+      title: `เวลาบิน ${finalSeconds} วิ`,
+      sub: `ชนะ ${wins} · แพ้ ${losses}${lines.length - wins - losses > 0 ? ` · เสมอ ${lines.length - wins - losses}` : ''}`,
+      body: [
+        ...shown.map(resultRow),
+        ...(lines.length > shown.length ? [note(`และอีก ${lines.length - shown.length} แผล`, 'sm')] : []),
+        divider(),
+        ...hero(signed(net), net > 0 ? TONES.in.accent : net < 0 ? TONES.out.accent : INK, 'สุทธิรอบนี้ (หักค่าธรรมเนียม 10% ของฝั่งที่ชนะแล้ว)'),
+        ...(balance !== null ? [row('ยอดคงเหลือ', pt(balance), balance < 0 ? { color: TONES.error.accent } : {})] : []),
       ],
     })
   );
