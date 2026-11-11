@@ -131,6 +131,12 @@ export interface Order {
    * range at all, so it could never be settled.
    */
   offsetConfirmedAt?: number;
+  /**
+   * ชตย (ช่างต่อยกเลิก) on a self-opened custom range: if the ช่าง announces a
+   * price for this rocket, the order is cancelled and both sides refunded in
+   * full, matched or not. Only ever set on betType 'custom_range'.
+   */
+  isChotoy?: boolean;
   /** The loser's stake on a settled order — what the winner won gross. */
   grossWinAmount?: number;
   /**

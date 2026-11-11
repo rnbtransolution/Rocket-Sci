@@ -56,7 +56,7 @@ function parse(raw) {
   const m = t.match(betRegex);
   if (m) return { kind: 'bet', offset: m[1] ?? null, cmd: m[2], amount: m[3] ?? null };
   const r = t.match(rangeBetRegex);
-  if (r) return { kind: 'range', min: r[1], max: r[2], cmd: r[3], amount: r[4] ?? null };
+  if (r) return { kind: 'range', min: r[1], max: r[2], cmd: r[3], amount: r[4] ?? null, chotoy: Boolean(r[5]) };
   return { kind: 'none' };
 }
 
@@ -120,6 +120,52 @@ for (const [input, min, max, cmd] of [
 ]) {
   const p = parse(input);
   check(`"${input}" -> ${min}-${max} ${cmd}`, p.kind === 'range' && p.min === min && p.max === max && p.cmd === cmd, JSON.stringify(p));
+}
+
+// ── 11 Nov 2026 rule card: every word and example on it must parse ─────────
+console.log('\nRULE CARD 11 NOV — keywords, sides, spaces, ชตย');
+{
+  const hi = src.match(/const HIGH_SIDE_WORDS = (\[[^\]]*\]);/);
+  check('HIGH_SIDE_WORDS found in source', Boolean(hi));
+  const HIGH = hi ? eval(hi[1]) : [];
+  const side = (cmd) => (HIGH.includes(cmd) ? 'high' : 'low');
+  for (const [input, cmd, s, amount] of [
+    ['ช่างไล่500', 'ช่างไล่', 'high', '500'], ['ไล่500', 'ไล่', 'high', '500'], ['ลง500', 'ลง', 'high', '500'],
+    ['ชล500', 'ชล', 'high', '500'], ['ช่างยัง500', 'ช่างยัง', 'low', '500'], ['ช่างถอย500', 'ช่างถอย', 'low', '500'],
+    ['ชย500', 'ชย', 'low', '500'], ['ชถ500', 'ชถ', 'low', '500'], ['ยัง500', 'ยัง', 'low', '500'],
+    ['ย500', 'ย', 'low', '500'], ['ถอย500', 'ถอย', 'low', '500'], ['ถ500', 'ถ', 'low', '500'],
+    ['ยั่ง500', 'ยั่ง', 'low', '500'], ['+5ล500', 'ล', 'high', '500'], ['-5ถ500', 'ถ', 'low', '500'],
+    ['+10ช่างไล่500', 'ช่างไล่', 'high', '500'], ['ชล 500', 'ชล', 'high', '500'], ['+10 ชล 500', 'ชล', 'high', '500'],
+  ]) {
+    const p = parse(input);
+    check(`"${input}" -> ${cmd} (${s}) ${amount}`, p.kind === 'bet' && p.cmd === cmd && side(p.cmd) === s && p.amount === amount, JSON.stringify(p));
+  }
+  for (const [input, min, max, cmd, s, chotoy] of [
+    ['300-350ล500', '300', '350', 'ล', 'high', false],
+    ['350-400ถ500', '350', '400', 'ถ', 'low', false],
+    ['300-350ล500 ชตย', '300', '350', 'ล', 'high', true],
+    ['300-350ล500ชตย', '300', '350', 'ล', 'high', true],
+    ['350-400ถ500 ชตย', '350', '400', 'ถ', 'low', true],
+    ['350-400ถ500ชตย', '350', '400', 'ถ', 'low', true],
+    ['300-350 ลง 500 ชตย', '300', '350', 'ลง', 'high', true],
+    ['300-350ช่างถอย1,000ชตย', '300', '350', 'ช่างถอย', 'low', true],
+  ]) {
+    const p = parse(input);
+    check(`"${input}" -> ${min}-${max} ${s}${chotoy ? ' ชตย' : ''}`,
+      p.kind === 'range' && p.min === min && p.max === max && p.cmd === cmd && side(p.cmd) === s && p.chotoy === chotoy, JSON.stringify(p));
+  }
+  // Bare everyday words must not open a default 500 pt order.
+  const bare = src.match(/const bareChatWord = (\/.*\/[a-z]*);/);
+  check('bareChatWord guard found in source', Boolean(bare));
+  const bareRx = bare ? eval(bare[1]) : /$^/;
+  for (const w of ['ยัง', 'ลง', 'ช่างไล่', 'ช่างถอย', 'ช่างยัง']) {
+    check(`bare "${w}" is chat, not an order`, bareRx.test(w));
+  }
+  for (const w of ['ชล', 'ถ', 'ยัง500', 'ลง500']) {
+    check(`"${w}" is not blocked by the bare-word guard`, !bareRx.test(w));
+  }
+  // ชตย on a quote order is refused with a notice, not swallowed.
+  check('ชตย on a quote order gets a notice', /ใส่ ชตย ไม่ได้กับราคาช่าง/.test(src));
 }
 
 // ── Non-commands must still be rejected, not swallowed ──────────────────────

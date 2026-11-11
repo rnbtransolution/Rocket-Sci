@@ -28,37 +28,28 @@ import {
   generateDailySummaryFlex,
 } from './flexTemplates.js';
 
-export const RULE_GUIDE_TEXT = `📖 [กติกาการเล่น]
+/** Order keywords that bet on the high side (ช่างไล่). Every other keyword is the low side. */
+const HIGH_SIDE_WORDS = ['ช่างไล่', 'ชล', 'ล', 'ลง', 'สูง', 'ไล่'];
 
-📌 กฏที่ 1: เล่นราคาช่าง
+export const RULE_GUIDE_TEXT = `[กติกาการเล่น]
 
-🎉 ทายว่าชนะ (สูง):
-• ช่างไล่ / ชล / ไล่ / ลง
-• +5ชล / +5ล / +5ไล่
-• -5ชล / -5ล / -5ไล่
-💵 พิมพ์คีย์เวิร์ดตามด้วยจำนวนเงิน (ตัวเลขเท่านั้น)
-เช่น ชล100 , ชล1000 , ชล10000
+1. เล่นราคาช่าง (ทายตามราคาที่ช่างเสนอ)
+รูปแบบ: [ปรับราคา][คำย่อ][แต้ม] พิมพ์ติดกันได้เลย
+เช่น ชล500 · +10ชล500 · -5ถ500
 
-👊 ทายว่าแพ้ (ต่ำ):
-• ช่างยั่ง / ช่างถอย / ชย
-• ชถ / ยั่ง / ย / ถอย / ถ
-• +5ชย / +5ชถ / +5ย / +5ถ
-• -5ชย / -5ชถ / -5ย / -5ถ
-เช่น ชถ100 , ชถ1000
+ทายว่าชนะ (สูง / ช่างไล่): ช่างไล่ · ชล · ไล่ · ลง
+ทายว่าแพ้ (ต่ำ / ช่างถอย): ช่างยัง · ช่างถอย · ชย · ชถ · ยัง · ย · ถอย · ถ
+ปรับราคาใส่ไว้หน้าคำย่อ ได้แค่ +5 · +10 · -5 · -10
 
------------------------------
+2. เปิดราคาเอง (ใช้ได้เมื่อช่างไม่ต่อยราคา · ต้องมีเครดิตพอ)
+รูปแบบ: [ช่วงราคา][คำย่อ][แต้ม] พิมพ์ติดกันได้เลย
+ช่วงราคาห่างกันได้ไม่เกิน 80 วิ
+• 300-350ล500 ทายฝั่งไล่
+• 350-400ถ500 ทายฝั่งถอย
 
-📌 กฏที่ 2: การเปิดราคาเอง (กรณีช่างไม่ต่อย / ต้องมีเครดิตพอ)
-
-💰 การเปิดราคาเอง (เปิดแผลสดใหม่):
-⚠️ ช่วงราคาห่างกันได้ไม่เกิน 80 วิ เช่น
-• 300-350ล500 | 300-350ถ500
-• 300-380ล500 | 300-380ถ500
-
-⬆️ ช่างต่อยยกเลิก (ชตย) 
-ใส่ ชตย หลังจำนวนเงิน เช่น
-• 300-350ล500 ชตย
-• 350-400ถ500 ชตย`;
+ช่างต่อยกเลิก (ชตย): ต่อท้ายด้วย ชตย เช่น 300-350ล500ชตย
+เว้นวรรคก่อน ชตย หรือไม่ก็ได้
+ถ้าช่างต่อยราคาภายหลัง แผลนี้ยกเลิกและคืนแต้มเต็มทั้งสองฝั่ง แม้จับคู่แล้ว`;
 
 /**
  * Verify whether a LINE user has administrative privileges for chat commands
@@ -372,8 +363,8 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     }
 
     // ── 4. Order Creation Formulas (e.g. "ล500", "ล 500", "ชล500", "+10ชล500", "300-350ล100") ──
-    const betRegex = /^(?:([+-]?\d+)\s*)?(ชล|ชถ|ชย|ชต|ย|ถ|ล|สูง|ต่ำ|ยั่ง|ถอย|ไล่)\s*(\d+)?(?:\s*(?:pt|แต้ม))?$/i;
-    const rangeBetRegex = /^(\d+)\s*[-/]\s*(\d+)\s*(ชล|ชถ|ชย|ชต|ย|ถ|ล|สูง|ต่ำ)\s*(\d+)?(?:\s*(?:pt|แต้ม))?$/i;
+    const betRegex = /^(?:([+-]?\d+)\s*)?(ช่างไล่|ช่างยัง|ช่างยั่ง|ช่างถอย|ชล|ชถ|ชย|ชต|ลง|ล|ยัง|ยั่ง|ย|ถอย|ถ|สูง|ต่ำ|ไล่)\s*(\d+)?(?:\s*(?:pt|แต้ม))?$/i;
+    const rangeBetRegex = /^(\d+)\s*[-/]\s*(\d+)\s*(ช่างไล่|ช่างยัง|ช่างยั่ง|ช่างถอย|ชล|ชถ|ชย|ชต|ลง|ล|ยัง|ยั่ง|ย|ถอย|ถ|สูง|ต่ำ|ไล่)\s*(\d+)?(?:\s*(?:pt|แต้ม))?(?:\s*(ชตย))?$/i;
 
     // Thousands separators are stripped before matching. Players type "ชล1,000"
     // — it is how every other amount in this system is written, and the
@@ -385,7 +376,25 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
     // string, so the comma can never survive into the parsed amount.
     const betText = text.replace(/,/g, '');
 
-    if (betRegex.test(betText) || rangeBetRegex.test(betText)) {
+    // "ยัง", "ลง" and the "ช่าง…" words are everyday chat ("ยัง" = not yet,
+    // "ช่างไล่!" is cheering). Bare, they would open a 500 pt order by default,
+    // so these words only count as an order when a stake follows them.
+    const bareChatWord = /^(ยัง|ลง|ช่างไล่|ช่างยัง|ช่างยั่ง|ช่างถอย)$/;
+
+    // ชตย only means something on a self-opened range. On a quote order it
+    // would be silently dropped, so tell the player instead of guessing.
+    const chotoyStripped = betText.replace(/\s*ชตย$/, '');
+    if (chotoyStripped !== betText && betRegex.test(chotoyStripped)) {
+      const chotoyQuoteFlex = generateNoticeFlex(
+        'ใส่ ชตย ไม่ได้กับราคาช่าง',
+        'ชตย ใช้ได้เฉพาะตอนเปิดราคาเอง\nเช่น 300-350ล500 ชตย',
+        'error'
+      );
+      await deliverPrivateNotice(userId, replyToken, groupId, chotoyQuoteFlex, env, profile.displayName, ctx);
+      return;
+    }
+
+    if ((betRegex.test(betText) && !bareChatWord.test(betText)) || rangeBetRegex.test(betText)) {
       await handleCreateOrder(betText, betRegex, rangeBetRegex, profile, userId, groupId, replyToken, env, ctx);
       return;
     }
@@ -544,6 +553,9 @@ async function handleCreateOrder(
   let rangeMax = 380;
   let isCustom = false;
   let offsetDelta = 0;
+  // ชตย: the player's own range is cancelled, and both sides refunded, if the
+  // ช่าง announces a price for this rocket (see cancelChotoyOrdersOnQuote).
+  let isChotoy = false;
 
   // Resolve target group for broadcasting order cards
   const activeGroupId = await state(env).get('ACTIVE_GROUP_ID');
@@ -619,13 +631,14 @@ async function handleCreateOrder(
     rangeMin = parseInt(match[1], 10);
     rangeMax = parseInt(match[2], 10);
     const cmd = match[3];
-    side = ['ชล', 'ล', 'สูง', 'ไล่'].includes(cmd) ? 'high' : 'low';
+    side = HIGH_SIDE_WORDS.includes(cmd) ? 'high' : 'low';
     amount = match[4] ? parseInt(match[4], 10) : 500;
     isCustom = true;
+    isChotoy = Boolean(match[5]);
   } else if (betRegex.test(text)) {
     const match = text.match(betRegex)!;
     const cmd = match[2];
-    side = ['ชล', 'ล', 'สูง', 'ไล่'].includes(cmd) ? 'high' : 'low';
+    side = HIGH_SIDE_WORDS.includes(cmd) ? 'high' : 'low';
     amount = match[3] ? parseInt(match[3], 10) : 500;
     if (match && match[1]) {
       const rawOffset = match[1].replace('+', '').trim();
@@ -709,6 +722,17 @@ async function handleCreateOrder(
   for (let attempt = 0; attempt < 5; attempt++) {
     const orderNumber = pickOrderNumber();
     const quoteReleased = !!(round && round.quoteReleased === true);
+    // The ช่าง has already priced this rocket, so the ชตย condition has
+    // already happened: the order would be cancelled the moment it opened.
+    if (isChotoy && quoteReleased) {
+      const chotoyLateFlex = generateNoticeFlex(
+        'ช่างต่อยราคาแล้ว',
+        `เปิดแผล ชตย ไม่ได้ ราคาช่าง ${round?.targetMin}-${round?.targetMax} วิ\nเล่นราคาช่างได้เลย เช่น ชล500 · ชถ500`,
+        'warning'
+      );
+      await deliverPrivateNotice(userId, replyToken, groupId, chotoyLateFlex, env, profile.displayName, ctx);
+      return;
+    }
     isPreQuote = !isCustom && !quoteReleased;
     newOrder = {
       orderNumber,
@@ -726,6 +750,7 @@ async function handleCreateOrder(
       rocketName: round?.name || null,
       roundId: round?.roundId ?? null,
       offset: isPreQuote ? offsetDelta : undefined,
+      ...(isCustom && isChotoy ? { isChotoy: true } : {}),
       createdAt: Date.now(),
       id: `bet_${orderNumber}`,
       playerLowId: side === 'low' ? profile.shortId : null,
@@ -1659,6 +1684,74 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
     console.log(`[Worker] cancelHeldPreQuoteOrders: Cancelled + refunded ${cancelledCount} pre-quote orders.`);
   } catch (err) {
     console.error('[Worker] cancelHeldPreQuoteOrders error:', err);
+  }
+  return { cancelled: cancelledCount, cancelledOrderNumbers };
+}
+
+/**
+ * ชตย (ช่างต่อยกเลิก): a player who opens their own range with ชตย is betting
+ * only on the case where the ช่าง never prices the rocket. When the ช่าง does
+ * announce a price, every ชตย order on the board is cancelled and BOTH sides
+ * get their full stake back, matched or not (owner's decision, 11 Nov 2026).
+ * This is the one case where a matched order is cancelled on its own; it
+ * happens only through the quote, never at a player's or admin's request.
+ *
+ * Must run after ACTIVE_ROUND is written with quoteReleased: true. An order
+ * committed before that write is on a list read here; one arriving after it
+ * fails the order commit's quoteReleased check and is refused instead.
+ */
+export async function cancelChotoyOrdersOnQuote(env: Env, ctx?: ExecutionContext): Promise<{ cancelled: number; cancelledOrderNumbers: string[] }> {
+  let cancelledCount = 0;
+  const cancelledOrderNumbers: string[] = [];
+  try {
+    const [pendingList, matchedList] = await Promise.all([
+      getPendingOrdersList(env),
+      getMatchedOrdersList(env),
+    ]);
+    const seen = new Set<string>();
+    const candidates: Order[] = [];
+    for (const o of [...pendingList, ...matchedList]) {
+      if (!o || !o.orderNumber || o.isChotoy !== true || o.betType !== 'custom_range' || seen.has(o.orderNumber)) continue;
+      seen.add(o.orderNumber);
+      candidates.push(o);
+    }
+
+    for (const item of candidates) {
+      try {
+        const order = await getOrderRecord(item.orderNumber, env);
+        if (!order) continue;
+        const amt = Number(order.amount) || 0;
+        const refund = await refundOrderOnce(order, env, ctx, 'cancel_chotoy_on_quote', {
+          allowedStatuses: ['pending_match', 'matched'],
+          expectFields: { betType: 'custom_range', isChotoy: true },
+        });
+        if (!refund.refunded) continue;
+        cancelledCount++;
+        cancelledOrderNumbers.push(order.orderNumber);
+
+        const parties: Array<{ id: string; lineId?: string | null; name?: string | null }> = [
+          { id: order.creatorId, lineId: order.creatorLineUserId, name: order.creatorName },
+        ];
+        if (order.matcherId) {
+          parties.push({ id: order.matcherId, lineId: order.matcherLineUserId, name: order.matcherName });
+        }
+        await Promise.all(parties.map(async (p) => {
+          if (!p.id) return;
+          const rawLine = (await state(env).get(`RAW_LINE_${p.id}`)) || p.lineId || p.id;
+          const chotoyFlex = generateNoticeFlex(
+            `ยกเลิก #${order.orderNumber} (ชตย)`,
+            `ช่างต่อยราคาแล้ว แผล ชตย ยกเลิกตามกติกา\nคืนเครดิต +${amt.toLocaleString()} pt แล้ว`,
+            'in'
+          );
+          await deliverPrivateNotice(rawLine, undefined, order.groupId || null, chotoyFlex, env, p.name || undefined);
+        }));
+      } catch (err) {
+        console.error(`[Worker] cancelChotoyOrdersOnQuote #${item.orderNumber}:`, err);
+      }
+    }
+    console.log(`[Worker] cancelChotoyOrdersOnQuote: cancelled + refunded ${cancelledCount} ชตย orders.`);
+  } catch (err) {
+    console.error('[Worker] cancelChotoyOrdersOnQuote error:', err);
   }
   return { cancelled: cancelledCount, cancelledOrderNumbers };
 }
