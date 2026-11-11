@@ -650,26 +650,33 @@ export function generateRuleGuideFlex(): any {
       size: 'mega',
       eyebrow: 'Bangfai Commander',
       title: 'กติกาการเล่น',
+      // Rewritten 11 Nov 2026 after the test round: players could not tell
+      // whether a space was needed. The parser now accepts both, so the card
+      // shows one way to type (all together) and says spaces do not matter.
       body: [
         text('1. เล่นราคาช่าง', { color: TONES.info.accent, weight: 'bold' }),
-        heading('ทายว่าชนะ (สูง)', 'sm'),
-        lines('ช่างไล่ · ชล · ไล่ · ลง\n+5ชล · +5ล · +5ไล่\n-5ชล · -5ล · -5ไล่'),
-        heading('ทายว่าแพ้ (ต่ำ)', 'md'),
-        lines('ช่างยัง · ช่างถอย · ชย\nชถ · ยัง · ย · ถอย · ถ\n+5ชย · +5ชถ · +5ย · +5ถ\n-5ชย · -5ชถ · -5ย · -5ถ'),
-        // The keyword list and the amount were shown separately, so nothing
-        // showed that they combine into ONE message, or that the offset goes
-        // in front. One worked example settles it.
+        text('ทายตามราคาที่ช่างเสนอ', { size: 'xs', color: MUTED }),
         panel([
-          text('รูปแบบเต็ม: [ปรับราคา] คีย์เวิร์ด จำนวนแต้ม', { size: 'xs', color: INK, weight: 'bold' }),
-          text('เช่น ชล500 · +10ชล500 · -5ชถ1,000 · ชถ100', { size: 'xs', color: BODY }),
+          text('[ปรับราคา][คำย่อ][แต้ม] พิมพ์ติดกันได้เลย', { size: 'xs', color: INK, weight: 'bold' }),
+          text('เช่น ชล500 · +10ชล500 · -5ถ500', { size: 'xs', color: BODY }),
         ], { margin: 'md' }),
+        heading('ทายว่าชนะ (สูง / ช่างไล่)', 'md'),
+        lines('ช่างไล่ · ชล · ไล่ · ลง'),
+        heading('ทายว่าแพ้ (ต่ำ / ช่างถอย)', 'md'),
+        lines('ช่างยัง · ช่างถอย · ชย · ชถ\nยัง · ย · ถอย · ถ'),
+        heading('ปรับราคา', 'md'),
+        lines('ใส่ไว้หน้าคำย่อ ได้แค่ +5 · +10 · -5 · -10'),
         divider('lg'),
         text('2. เปิดราคาเอง', { color: TONES.info.accent, weight: 'bold', margin: 'lg' }),
-        text('กรณีช่างไม่ต่อย · ต้องมีเครดิตพอ', { size: 'xs', color: MUTED }),
-        heading('ช่วงราคาห่างกันไม่เกิน 80 วิ', 'md'),
-        lines('300-350ล500 · 300-350ถ500\n300-380ล500 · 300-380ถ500'),
+        text('ใช้ได้เมื่อช่างไม่ต่อยราคา · ต้องมีเครดิตพอ', { size: 'xs', color: MUTED }),
+        panel([
+          text('[ช่วงราคา][คำย่อ][แต้ม] พิมพ์ติดกันได้เลย', { size: 'xs', color: INK, weight: 'bold' }),
+          text('300-350ล500 ทายฝั่งไล่\n350-400ถ500 ทายฝั่งถอย', { size: 'xs', color: BODY }),
+        ], { margin: 'md' }),
+        lines('ช่วงราคาห่างกันได้ไม่เกิน 80 วิ'),
         heading('ช่างต่อยกเลิก (ชตย)', 'md'),
-        lines('ใส่ ชตย หลังจำนวนเงิน\n300-350ล500 ชตย · 350-400ถ500 ชตย'),
+        lines('ต่อท้ายด้วย ชตย เช่น 300-350ล500ชตย\nเว้นวรรคก่อน ชตย หรือไม่ก็ได้'),
+        lines('ถ้าช่างต่อยราคาภายหลัง แผลนี้ยกเลิกและคืนแต้มเต็มทั้งสองฝั่ง แม้จับคู่แล้ว'),
       ],
       footer: [button('ดูกระดานดวล', 'กระดานดวล')],
     })

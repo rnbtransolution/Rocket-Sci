@@ -34,6 +34,7 @@ import {
   clearAllPendingOrders,
   cancelHeldPreQuoteOrders,
   releaseHeldPreQuoteOrders,
+  cancelChotoyOrdersOnQuote,
   autoMatchPendingPairs,
   voidAllRoundOrders,
   getPendingOrdersList,
@@ -2151,6 +2152,11 @@ if (
           };
           await state(env).put('ACTIVE_ROUND', JSON.stringify(roundData));
 
+          // ชตย orders exist only for the case where the ช่าง never prices the
+          // rocket. The price is out, so they are cancelled and refunded first,
+          // before the release auto-matches anything on the board.
+          const chotoy = await cancelChotoyOrdersOnQuote(env, ctx);
+
           await releaseHeldPreQuoteOrders(min, max, env, ctx, name);
 
           const quoteFlex = generateQuoteFlex(name, min, max, isChotoy);
@@ -2176,6 +2182,7 @@ if (
               success: allSuccess,
               targets,
               round: roundData,
+              chotoyCancelled: chotoy.cancelledOrderNumbers,
               error: allSuccess ? undefined : (quotaError?.error || 'ส่งข้อความเข้าบางกลุ่มไม่สำเร็จ'),
               code: quotaError ? 429 : (allSuccess ? 200 : 400),
               isQuotaExhausted: !!quotaError,
