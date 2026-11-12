@@ -1,5 +1,5 @@
 /**
- * ชตย (ช่างต่อยกเลิก) lifecycle harness.
+ * ชตย (ช่างต่อยยกเลิก) lifecycle harness.
  *
  * Rule (owner, 11 Nov 2026): a self-opened range typed with ชตย is cancelled
  * when the ช่าง announces a price, and BOTH sides get their full stake back,
