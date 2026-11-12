@@ -47,7 +47,7 @@ export const RULE_GUIDE_TEXT = `[กติกาการเล่น]
 • 300-350ล500 ทายฝั่งไล่
 • 350-400ถ500 ทายฝั่งถอย
 
-ช่างต่อยกเลิก (ชตย): ต่อท้ายด้วย ชตย เช่น 300-350ล500ชตย
+ช่างต่อยยกเลิก (ชตย): ต่อท้ายด้วย ชตย เช่น 300-350ล500ชตย
 เว้นวรรคก่อน ชตย หรือไม่ก็ได้
 ถ้าช่างต่อยราคาภายหลัง แผลนี้ยกเลิกและคืนแต้มเต็มทั้งสองฝั่ง แม้จับคู่แล้ว`;
 
@@ -1689,7 +1689,7 @@ export async function cancelHeldPreQuoteOrders(env: Env, ctx?: ExecutionContext)
 }
 
 /**
- * ชตย (ช่างต่อยกเลิก): a player who opens their own range with ชตย is betting
+ * ชตย (ช่างต่อยยกเลิก): a player who opens their own range with ชตย is betting
  * only on the case where the ช่าง never prices the rocket. When the ช่าง does
  * announce a price, every ชตย order on the board is cancelled and BOTH sides
  * get their full stake back, matched or not (owner's decision, 11 Nov 2026).
