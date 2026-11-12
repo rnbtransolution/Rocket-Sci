@@ -86,7 +86,7 @@ const panel = (contents: any[], o: Record<string, any> = {}) => ({
  * Every action button is gold with a dark label: the owner asked for buttons
  * that stand out on a phone. `secondary` is the style whose label LINE draws
  * dark, so the colour below becomes the fill. (LINE does not let a bot colour
- * Quick Reply chips; those get a gold dot icon instead, see QUICK_REPLY_ICON.)
+ * Quick Reply chips; those carry an emoji in the label instead, see QUICK_REPLY_LABELS.)
  */
 const GOLD = '#E8B931';
 const GOLD_TINT = '#F9EBC2';
@@ -685,23 +685,21 @@ export function generateRuleGuideFlex(): any {
 
 // ── 6. Main Menu Quick Reply (floating at all times in DMs) ──
 /**
- * LINE draws Quick Reply chips white and gives bots no colour option; an icon
- * is the only thing a bot can add. Each chip gets a small gold dot, served by
- * this Worker, so the row reads as the gold menu. Without a public https base
- * the chips go out plain rather than with a broken image.
+ * LINE draws Quick Reply chips white and gives bots no colour option. Each
+ * label starts with an emoji that hints at what the chip does, so a new player
+ * can tell the buttons apart without learning a colour code. No image icon:
+ * one symbol per chip reads cleaner on a small screen.
  */
-const QUICK_REPLY_ICON = 'gold';
 const QUICK_REPLY_LABELS: Array<[string, string]> = [
-  ['เช็คยอด', 'เช็คยอด'],
-  ['ฝากเงิน', 'ฝากเงิน'],
-  ['บัญชีรับเงิน', 'บัญชีรับเงิน'],
-  ['กติกา', 'กติกา'],
-  ['กระดานดวล', 'กระดานดวล'],
+  ['💳 เช็คยอด', 'เช็คยอด'],
+  ['💰 ฝากเงิน', 'ฝากเงิน'],
+  ['🏦 บัญชีรับเงิน', 'บัญชีรับเงิน'],
+  ['📖 กติกา', 'กติกา'],
+  ['📋 กระดานดวล', 'กระดานดวล'],
 ];
 function quickReplyItems(): any[] {
   return QUICK_REPLY_LABELS.map(([label, msg]) => ({
     type: 'action',
-    ...(iconBase ? { imageUrl: `${iconBase}/${QUICK_REPLY_ICON}.png?v=${ICON_VERSION}` } : {}),
     action: { type: 'message', label, text: msg },
   }));
 }
