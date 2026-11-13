@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 /**
  * Two console panels that move money after a round:
@@ -13,6 +13,19 @@ import { useState, useEffect, useCallback } from 'react';
  * the rest of App.jsx.
  */
 
+/**
+ * The console passes `run` and `addToast` as new functions on every render, and
+ * it re-renders every few seconds while it polls. Depending on them directly
+ * made each panel reload on every render, so the button flickered between
+ * "กำลังโหลด" and "รีเฟรช" and the Worker was called non-stop. The ref always
+ * holds the latest function without being a dependency.
+ */
+function useLatest(value) {
+  const ref = useRef(value);
+  useEffect(() => { ref.current = value; });
+  return ref;
+}
+
 const fmt = (n) => Number(n || 0).toLocaleString('th-TH');
 const clock = (ts) => new Date(ts).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Bangkok' });
 const dayLabel = (ts) => new Date(ts).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', timeZone: 'Asia/Bangkok' });
@@ -21,18 +34,19 @@ export function CorrectionPanel({ run, ask, addToast, ui, pinField, onDone, refr
   const [rounds, setRounds] = useState([]);
   const [loading, setLoading] = useState(false);
   const [busyKey, setBusyKey] = useState(null);
+  const runRef = useLatest(run);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await run('adminListCorrectableRounds', []);
+      const res = await runRef.current('adminListCorrectableRounds', []);
       setRounds(Array.isArray(res?.rounds) ? res.rounds : []);
     } catch (err) {
       console.error('adminListCorrectableRounds', err);
     } finally {
       setLoading(false);
     }
-  }, [run]);
+  }, [runRef]);
 
   useEffect(() => { load(); }, [load, refreshKey]);
 
@@ -125,17 +139,20 @@ export function PayoutPanel({ run, ask, addToast, ui, onDone }) {
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState(null);
 
+  const runRef = useLatest(run);
+  const toastRef = useLatest(addToast);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await run('adminListPayouts', []);
+      const res = await runRef.current('adminListPayouts', []);
       if (res?.success) setSheet({ players: res.players || [], paidToday: res.paidToday || [], day: res.day });
     } catch (err) {
-      addToast(`โหลดรายการจ่ายเงินไม่สำเร็จ: ${err.message || err}`, 'danger');
+      toastRef.current(`โหลดรายการจ่ายเงินไม่สำเร็จ: ${err.message || err}`, 'danger');
     } finally {
       setLoading(false);
     }
-  }, [run, addToast]);
+  }, [runRef, toastRef]);
 
   useEffect(() => { load(); }, [load]);
 
