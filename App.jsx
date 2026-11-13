@@ -1840,7 +1840,7 @@ export default function App() {
         </header>
 
         {/* Mobile / tablet navigation (< lg) */}
-        <nav aria-label="เมนูแอดมิน" className="lg:hidden p-1 flex text-[13px] overflow-x-auto gap-1 rounded-md bg-white border border-[#D9DDE2]">
+        <nav aria-label="เมนูแอดมิน" className="lg:hidden p-1 grid grid-cols-2 sm:grid-cols-5 text-[13px] gap-1 rounded-md bg-white border border-[#D9DDE2]">
           {navItems.map(item => {
             const IconComp = item.icon;
             const isActive = item.activeMatch(adminTab);
@@ -1849,14 +1849,14 @@ export default function App() {
                 key={item.id}
                 onClick={() => (item.onClick ? item.onClick() : setAdminTab(item.id))}
                 aria-current={isActive ? 'page' : undefined}
-                className={`min-h-[40px] px-3 rounded flex items-center gap-1.5 whitespace-nowrap cursor-pointer shrink-0 ${
+                className={`min-w-0 min-h-[40px] px-2.5 rounded flex items-center gap-1.5 text-left cursor-pointer ${
                   isActive ? 'bg-[#16191D] text-white font-medium' : 'text-[#3B424C] hover:bg-[#F3F4F6]'
                 }`}
               >
-                <IconComp size={14} />
-                <span>{item.label}</span>
+                <IconComp size={14} className="shrink-0" />
+                <span className="min-w-0 flex-1 leading-tight">{item.label}</span>
                 {item.badge !== null && item.badge !== undefined && (
-                  <span className={`text-[11px] font-mono ${item.attention ? 'px-1 rounded bg-[#F0C46A] text-[#16191D]' : 'opacity-70'}`}>
+                  <span className={`shrink-0 whitespace-nowrap text-[11px] font-mono ${item.attention ? 'px-1 rounded bg-[#F0C46A] text-[#16191D]' : 'opacity-70'}`}>
                     {item.badge}
                   </span>
                 )}
