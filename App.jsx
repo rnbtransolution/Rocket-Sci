@@ -27,7 +27,9 @@ import {
   KeyRound,
   Cloud,
   Landmark,
-  Banknote
+  Banknote,
+  ChevronDown,
+  Check
 } from 'lucide-react';
 import { CorrectionPanel, PayoutPanel } from './MoneyPanels.jsx';
 
@@ -392,6 +394,7 @@ export default function App() {
   const [betSearchQuery, setBetSearchQuery] = useState('');
   const [toasts, setToasts] = useState([]);
   const { ask, dialog } = useAdminDialog();
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
   // Transaction filtering & search & detail modal states
   const [txSearchQuery, setTxSearchQuery] = useState('');
@@ -1576,6 +1579,35 @@ export default function App() {
     ? (activeRoundObj?.quoteReleased ? 'เปิดราคาแล้ว' : 'รอราคาช่าง')
     : roundStatus === 'CLOSED' ? 'ปิดรับแทง' : roundStatus === 'IDLE' || !roundStatus ? 'ยังไม่เปิดรอบ' : roundStatus;
   const headerBtn = 'min-h-[40px] px-3 rounded-md border border-[#C3C9D1] bg-white text-[13px] font-medium text-[#16191D] hover:bg-[#F3F4F6] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0';
+  const menuItem = 'w-full min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-left text-[13px] font-medium text-[#16191D] hover:bg-[#F3F4F6] cursor-pointer';
+  const passwordExpiringSoon = passwordStatus?.daysUntilExpiry !== undefined && passwordStatus.daysUntilExpiry <= 7;
+
+  // Where the current rocket is in its life, so the console can point at the
+  // next thing to do. Display only: it reads round state and never changes it.
+  const FLOW_STEPS = [
+    { n: 1, tab: 'next_rocket', label: 'เปิดบั้งไฟ', hint: 'ยังไม่มีรอบที่เปิดรับ เริ่มจากตั้งชื่อบั้งไฟแล้วเปิดรอบ', action: 'ไปเปิดบั้งไฟ' },
+    { n: 2, tab: 'quote', label: 'ออกราคาช่าง', hint: 'รอบเปิดแล้ว ผู้เล่นเปิดแผลล่วงหน้าได้ ประกาศราคาช่างเมื่อช่างต่อยราคา', action: 'ไปออกราคาช่าง' },
+    { n: 3, tab: 'broadcast', label: 'บั้งไฟขึ้น ปิดรับ', hint: 'กำลังรับดวล พอบั้งไฟขึ้นให้กด “บั้งไฟออกแล้ว” เพื่อปิดรับทันที', action: 'ไปหน้าปิดรับ' },
+    { n: 4, tab: 'settle', label: 'ป้อนผลเวลา', hint: 'ปิดรับแล้ว ใส่เวลาบินเพื่อตัดสินผลและจ่ายแต้ม', action: 'ไปป้อนผลเวลา' },
+  ];
+  const flowCurrent = isRoundOpen
+    ? (activeRoundObj?.quoteReleased ? 3 : 2)
+    : roundStatus === 'CLOSED' ? 4 : 1;
+  const flowStep = FLOW_STEPS[flowCurrent - 1];
+  const flowOnStepTab = flowStep.tab === 'quote' ? (adminTab === 'quote' || adminTab === 'rocket') : adminTab === flowStep.tab;
+
+  // Preset announcements for the free-text box. Keep the wording clear of
+  // "NNN-NNN" and of the words the Worker treats as commands when an admin
+  // sends them (ปิดรับดวล, เปิดรอบ, กติกา ...): those act on the round.
+  const QUICK_MESSAGES = [
+    { label: 'วิธีรับแผล (จับคู่)', text: 'วิธีรับแผลจับคู่ดวล ทำได้ 2 วิธี\n1. กดปุ่มยอดบนการ์ดแผลที่ต้องการได้เลย\n2. พิมพ์เลขออเดอร์ เว้นวรรค แล้วตามด้วยเครดิตที่จะดวล เช่น 1234 500\nรับได้ขั้นต่ำ 100 เครดิต' },
+    { label: 'บั้งไฟพร้อมแล้ว เชิญเปิดแผล', text: `บั้งไฟ ${rocketName || activeRoundObj?.name || 'รอบใหม่'} พร้อมแล้ว เปิดแผลเล่นได้เลยครับ` },
+    { label: 'บั้งไฟกำลังขึ้นแท่นยิง', text: 'เตรียมพร้อม! บั้งไฟกำลังขึ้นติดตั้งบนแท่นยิง โปรดเตรียมแต้มให้พร้อมสำหรับการท้าดวล' },
+    { label: 'พักเบรก 15 นาที', text: 'ประกาศจากสนาม: ขณะนี้อยู่ในช่วงพักเบรก 15 นาที จะเริ่มเปิดรับดวลรอบถัดไปเร็ว ๆ นี้ครับ' },
+    { label: 'ฝนตก พักการยิงชั่วคราว', text: 'ประกาศจากสนาม: เนื่องจากสภาพอากาศมีฝนตก จึงขอพักการปล่อยบั้งไฟชั่วคราว เมื่อพร้อมจะแจ้งให้ทราบครับ' },
+    { label: 'จบการแข่งขันประจำวัน', text: 'สรุปผลการแข่งขันและการดวลประจำวันเสร็จสิ้นเรียบร้อย ขอบพระคุณสมาชิกทุกท่านที่ร่วมสนุกครับ' },
+  ];
+
   // Shared console styles for redesigned pages.
   const ui = {
     panel: 'bg-white border border-[#D9DDE2] rounded-lg',
@@ -1732,43 +1764,78 @@ export default function App() {
               <RotateCcw size={14} className="text-[#5B636E]" />
               <span>ปิดรอบ</span>
             </button>
-            <button
-              onClick={() => { refreshPasswordStatus(); setShowPasswordChange(true); }}
-              className={`${headerBtn} ${
-                passwordStatus && passwordStatus.daysUntilExpiry !== undefined && passwordStatus.daysUntilExpiry <= 7 ? 'border-[#E8C48F] text-[#8A4B00]' : ''
-              }`}
-              title={
-                passwordStatus?.daysUntilExpiry !== undefined
-                  ? `เปลี่ยนรหัสผ่าน (หมดอายุใน ${passwordStatus.daysUntilExpiry} วัน · Recovery Codes คงเหลือ ${passwordStatus.recoveryCodesRemaining ?? '-'})`
-                  : 'เปลี่ยนรหัสผ่าน'
-              }
-            >
-              <KeyRound size={14} className="text-[#5B636E]" />
-              <span>เปลี่ยนรหัสผ่าน</span>
-              {passwordStatus?.daysUntilExpiry !== undefined && passwordStatus.daysUntilExpiry <= 7 && (
-                <span className="px-1.5 py-0.5 rounded bg-[#FDF1E1] text-[#8A4B00] text-[11px] font-semibold">
-                  {passwordStatus.daysUntilExpiry} วัน
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => { refreshPasswordStatus(); setShowRecoveryCodes(true); }}
-              className={headerBtn}
-              title={`สร้าง Recovery Codes ใหม่ (คงเหลือ ${passwordStatus?.recoveryCodesRemaining ?? '-'})`}
-            >
-              <ShieldCheck size={14} className="text-[#5B636E]" />
-              <span>Recovery Codes</span>
-            </button>
-            {adminRole === 'superadmin' && (
-              <button onClick={resetConsoleState} className={`${headerBtn} text-[#B42318]`} title="ล้างข้อมูลระบบทั้งหมด (เฉพาะ Super Admin)">
-                <RotateCcw size={14} />
-                <span>ล้างข้อมูลระบบ</span>
+            <div className="relative shrink-0">
+              <button
+                onClick={() => setAccountMenuOpen(o => !o)}
+                aria-haspopup="menu"
+                aria-expanded={accountMenuOpen}
+                className={`${headerBtn} ${passwordExpiringSoon ? 'border-[#E8C48F] text-[#8A4B00]' : ''}`}
+              >
+                <KeyRound size={14} className="text-[#5B636E]" />
+                <span>บัญชีและระบบ</span>
+                {passwordExpiringSoon && (
+                  <span className="px-1.5 py-0.5 rounded bg-[#FDF1E1] text-[#8A4B00] text-[11px] font-semibold">
+                    รหัสผ่านเหลือ {passwordStatus.daysUntilExpiry} วัน
+                  </span>
+                )}
+                <ChevronDown size={14} className="text-[#5B636E]" />
               </button>
-            )}
-            <button onClick={handleAdminLogout} className={headerBtn} title="ออกจากระบบแอดมิน">
-              <LogOut size={14} className="text-[#5B636E]" />
-              <span>ออกจากระบบ</span>
-            </button>
+              {accountMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setAccountMenuOpen(false)} />
+                  <div role="menu" className="absolute right-0 z-50 mt-1.5 w-64 py-1 rounded-md border border-[#C3C9D1] bg-white shadow-lg">
+                    <div className="px-3 py-2 text-[12px] text-[#5B636E] border-b border-[#E6E9ED]">
+                      เข้าใช้งานเป็น {adminRole === 'superadmin' ? 'Super Admin' : `Admin${usernameInput ? ` (${usernameInput})` : ''}`}
+                    </div>
+                    <button
+                      role="menuitem"
+                      onClick={() => { setAccountMenuOpen(false); refreshPasswordStatus(); setShowPasswordChange(true); }}
+                      className={menuItem}
+                    >
+                      <KeyRound size={15} className="text-[#5B636E] shrink-0" />
+                      <span className="flex flex-col">
+                        <span>เปลี่ยนรหัสผ่าน</span>
+                        {passwordStatus?.daysUntilExpiry !== undefined && (
+                          <span className={`text-[12px] ${passwordExpiringSoon ? 'text-[#8A4B00]' : 'text-[#8A929D]'}`}>หมดอายุใน {passwordStatus.daysUntilExpiry} วัน</span>
+                        )}
+                      </span>
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={() => { setAccountMenuOpen(false); refreshPasswordStatus(); setShowRecoveryCodes(true); }}
+                      className={menuItem}
+                    >
+                      <ShieldCheck size={15} className="text-[#5B636E] shrink-0" />
+                      <span className="flex flex-col">
+                        <span>Recovery Codes</span>
+                        <span className="text-[12px] text-[#8A929D]">คงเหลือ {passwordStatus?.recoveryCodesRemaining ?? '-'} ชุด</span>
+                      </span>
+                    </button>
+                    {adminRole === 'superadmin' && (
+                      <button
+                        role="menuitem"
+                        onClick={() => { setAccountMenuOpen(false); resetConsoleState(); }}
+                        className={`${menuItem} text-[#B42318] border-t border-[#E6E9ED]`}
+                      >
+                        <RotateCcw size={15} className="shrink-0" />
+                        <span className="flex flex-col">
+                          <span>ล้างข้อมูลระบบ</span>
+                          <span className="text-[12px] text-[#8A929D]">เฉพาะ Super Admin · ต้องใส่ PIN</span>
+                        </span>
+                      </button>
+                    )}
+                    <button
+                      role="menuitem"
+                      onClick={() => { setAccountMenuOpen(false); handleAdminLogout(); }}
+                      className={`${menuItem} border-t border-[#E6E9ED]`}
+                    >
+                      <LogOut size={15} className="text-[#5B636E] shrink-0" />
+                      <span>ออกจากระบบ</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </header>
 
@@ -1800,6 +1867,57 @@ export default function App() {
 
         {/* Main Sandbox Grid (Standardized to corporate light 100% width column) */}
         <main className="w-full space-y-5">
+          {/* What to do next for the current rocket */}
+          {activeNav?.section === 'รอบแข่ง' && (
+            <section aria-label="ขั้นตอนของรอบนี้" className="bg-white border border-[#D9DDE2] rounded-lg overflow-hidden">
+              <ol className="m-0 p-0 list-none grid grid-cols-4 divide-x divide-[#E6E9ED] border-b border-[#D9DDE2]">
+                {FLOW_STEPS.map((st) => {
+                  const isCurrent = st.n === flowCurrent;
+                  const isDone = st.n < flowCurrent;
+                  return (
+                    <li key={st.n} className="min-w-0">
+                      <button
+                        onClick={() => setAdminTab(st.tab)}
+                        aria-current={isCurrent ? 'step' : undefined}
+                        className={`w-full min-h-[48px] px-2 sm:px-3 py-2 flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-1 sm:gap-2 cursor-pointer text-center sm:text-left ${
+                          isCurrent ? 'bg-[#EEF2FB]' : 'bg-white hover:bg-[#F7F8F9]'
+                        }`}
+                      >
+                        <span className={`w-6 h-6 rounded-full shrink-0 inline-flex items-center justify-center text-[12px] font-semibold ${
+                          isCurrent ? 'bg-[#1E4DB7] text-white' : isDone ? 'bg-[#E2F2E9] text-[#1B6E43]' : 'bg-[#EEF0F2] text-[#5B636E]'
+                        }`}>
+                          {isDone ? <Check size={13} /> : st.n}
+                        </span>
+                        <span className={`text-[12px] sm:text-[13px] leading-tight ${
+                          isCurrent ? 'font-semibold text-[#1E4DB7]' : isDone ? 'text-[#3B424C]' : 'text-[#5B636E]'
+                        }`}>
+                          {st.label}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+              <div className="px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="min-w-0 flex flex-col gap-0.5">
+                  <span className="text-[13px] text-[#16191D]">
+                    <span className="font-semibold">ขั้นต่อไป:</span> {flowStep.hint}
+                  </span>
+                  {inFlightRounds.length > 0 && (
+                    <button onClick={() => setAdminTab('next_rocket')} className="self-start text-[13px] text-[#8A4B00] hover:underline cursor-pointer">
+                      มีบั้งไฟบนฟ้า {inFlightRounds.length} ลำรอป้อนผลเวลา · ดูคิว
+                    </button>
+                  )}
+                </div>
+                {!flowOnStepTab && (
+                  <button onClick={() => setAdminTab(flowStep.tab)} className="min-h-[40px] px-3.5 rounded-md border border-[#1E4DB7] bg-white hover:bg-[#EEF2FB] text-[13px] font-semibold text-[#1E4DB7] inline-flex items-center justify-center shrink-0 cursor-pointer">
+                    {flowStep.action}
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
+
           {/* Summary numbers */}
           <section aria-label="ตัวเลขสรุป" className="grid grid-cols-2 md:grid-cols-4 gap-px bg-[#D9DDE2] border border-[#D9DDE2] rounded-lg overflow-hidden">
             {[
@@ -3409,49 +3527,32 @@ export default function App() {
                 <div className="bg-[#F7F8F9] border border-[#D9DDE2] rounded-lg p-4 space-y-3">
                   {/* Quick Preset Buttons */}
                   <div className="space-y-1.5">
-                    <span className="text-[12px] font-bold text-[#5B636E] block">ข้อความด่วนแนะนำ (คลิกเพื่อใส่ข้อความ):</span>
+                    <span className="text-[12px] font-bold text-[#5B636E] block">ข้อความด่วน กดเพื่อใส่ข้อความ แก้ได้ก่อนส่ง</span>
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => setCustomBroadcastText('ประกาศจากสนาม: ขณะนี้อยู่ในช่วงพักเบรก 15 นาที จะเริ่มเปิดรับดวลรอบถัดไปเร็ว ๆ นี้ครับ')}
-                        className="px-2.5 py-1 bg-white hover:bg-[#EEF2FB] text-[#3B424C] hover:text-[#1E4DB7] border border-[#D9DDE2] rounded-lg text-[12px] font-bold transition-all cursor-pointer"
-                      >
-                        พักเบรก 15 นาที
-                      </button>
-                      <button
-                        onClick={() => setCustomBroadcastText('ประกาศจากสนาม: เนื่องจากสภาพอากาศมีฝนตก จึงขอพักการปล่อยบั้งไฟชั่วคราว เมื่อพร้อมจะแจ้งให้ทราบครับ')}
-                        className="px-2.5 py-1 bg-white hover:bg-[#EEF2FB] text-[#3B424C] hover:text-[#1E4DB7] border border-[#D9DDE2] rounded-lg text-[12px] font-bold transition-all cursor-pointer"
-                      >
-                        ฝนตก พักการยิงชั่วคราว
-                      </button>
-                      <button
-                        onClick={() => setCustomBroadcastText('เตรียมพร้อม! บั้งไฟกำลังขึ้นติดตั้งบนแท่นยิง โปรดเตรียมแต้มให้พร้อมสำหรับการท้าดวล')}
-                        className="px-2.5 py-1 bg-white hover:bg-[#EEF2FB] text-[#3B424C] hover:text-[#1E4DB7] border border-[#D9DDE2] rounded-lg text-[12px] font-bold transition-all cursor-pointer"
-                      >
-                        บั้งไฟกำลังขึ้นแท่นยิง
-                      </button>
-                      <button
-                        onClick={() => setCustomBroadcastText(`บั้งไฟ ${rocketName || activeRoundObj?.name || 'รอบใหม่'} พร้อมแล้ว เปิดแผลเล่นได้เลยครับ`)}
-                        className="px-2.5 py-1 bg-[#EEF2FB] hover:bg-[#E3EAFB] text-[#16191D] border border-[#C7D3F1] rounded-lg text-[12px] font-semibold transition-all cursor-pointer"
-                      >
-                        บั้งไฟพร้อมแล้ว เชิญเปิดแผล
-                      </button>
-                      <button
-                        onClick={() => setCustomBroadcastText('สรุปผลการแข่งขันและการดวลประจำวันเสร็จสิ้นเรียบร้อย ขอบพระคุณสมาชิกทุกท่านที่ร่วมสนุกครับ')}
-                        className="px-2.5 py-1 bg-white hover:bg-[#EEF2FB] text-[#3B424C] hover:text-[#1E4DB7] border border-[#D9DDE2] rounded-lg text-[12px] font-bold transition-all cursor-pointer"
-                      >
-                        จบการแข่งขันประจำวัน
-                      </button>
+                      {QUICK_MESSAGES.map((m) => (
+                        <button
+                          key={m.label}
+                          onClick={() => setCustomBroadcastText(m.text)}
+                          className={`min-h-[36px] px-3 py-1.5 border rounded-lg text-[13px] font-semibold cursor-pointer ${
+                            customBroadcastText === m.text
+                              ? 'bg-[#EEF2FB] border-[#1E4DB7] text-[#1E4DB7]'
+                              : 'bg-white hover:bg-[#EEF2FB] border-[#D9DDE2] text-[#3B424C] hover:text-[#1E4DB7]'
+                          }`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
                   {/* Textarea Input */}
                   <div className="space-y-1">
                     <textarea
-                      rows={3}
+                      rows={customBroadcastText.includes('\n') ? 6 : 3}
                       value={customBroadcastText}
                       onChange={(e) => setCustomBroadcastText(e.target.value)}
                       placeholder="พิมพ์ข้อความที่ต้องการประกาศส่งตรงเข้ากลุ่ม LINE..."
-                      className="w-full bg-white border border-[#D9DDE2] text-[#16191D] px-3 py-2.5 rounded-lg text-xs font-sans focus:ring-2 focus:ring-[#1E4DB7]/30 focus:outline-none placeholder-slate-400"
+                      className="w-full bg-white border border-[#D9DDE2] text-[#16191D] px-3 py-2.5 rounded-lg text-sm leading-relaxed font-sans focus:ring-2 focus:ring-[#1E4DB7]/30 focus:outline-none placeholder-slate-400"
                     />
                   </div>
 
