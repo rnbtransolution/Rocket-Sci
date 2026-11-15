@@ -406,6 +406,11 @@ async function correctableRounds(env: Env): Promise<Array<{ key: string; name: s
   return out.sort((a, b) => b.settledAt - a.settledAt);
 }
 
+/** True while the active board still holds a matched pair waiting for its result. */
+async function boardHasOpenDuels(env: Env): Promise<boolean> {
+  return (await getMatchedOrdersList(env)).some((o) => o && o.status === 'matched');
+}
+
 /** A flight time the admin actually entered. `Number('') || 0` settled every order as a low-side win. */
 function parseFlightSeconds(v: unknown): number | null {
   const n = Number(v);
@@ -559,8 +564,7 @@ export default {
           (e) => e.replyToken && /^0000[0-9a-f]{26,}$/.test(e.replyToken)
         );
 
-        const interactiveProcessing = Promise.all(
-          events.map(async (event) => {
+        const handleEvent = async (event: LineEvent) => {
             try {
               if (!isVerifyProbe) {
                 // Deduplicate redelivered webhook events if LINE provides webhookEventId
@@ -591,8 +595,20 @@ export default {
                 }));
               } catch (_) {}
             }
-          })
-        );
+        };
+        // Orders and takes run one after another, in the order LINE received
+        // them. Run together, a "ต" could be handled before the order sent
+        // just ahead of it in the same delivery, and "take the newest order"
+        // then took an older one or found none. Slip images go to the scanner
+        // on their own so a slow scan never holds up the betting messages.
+        const ordered = [...events].sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
+        const isSlip = (e: LineEvent) => e.type === 'message' && e.message?.type === 'image';
+        const interactiveProcessing = Promise.all([
+          ...ordered.filter(isSlip).map(handleEvent),
+          (async () => {
+            for (const event of ordered.filter((e) => !isSlip(e))) await handleEvent(event);
+          })(),
+        ]);
 
         // Immediate HTTP 200 OK (< 15ms) to satisfy LINE Webhook 1-second timeout SLA.
         // ctx.waitUntil keeps background isolate alive to finish all processing, KV updates & LINE messages.
@@ -1343,7 +1359,15 @@ if (
           }
         } else if (functionName === 'adminSetPlayerBalance') {
           const userId = args[0];
-          const newBal = Number(args[1]) || 0;
+          // An empty or mistyped amount used to become 0 and wipe the balance.
+          const newBalRaw = args[1] === '' || args[1] === null || args[1] === undefined ? NaN : Number(args[1]);
+          if (!Number.isFinite(newBalRaw) || newBalRaw < 0) {
+            return new Response(JSON.stringify({ success: false, error: 'ยอดเครดิตต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป — ยอดเงินไม่เปลี่ยนแปลง' }), {
+              status: 400,
+              headers: { 'Content-Type': 'application/json', ...corsHeaders },
+            });
+          }
+          const newBal = newBalRaw;
           const passedName = args[2] ? String(args[2]).trim() : '';
 
           const players = await getPlayersList(env);
@@ -1513,6 +1537,25 @@ if (
             if (lineUserId) idsToDelete.add(lineUserId);
             if (shortId) idsToDelete.add(shortId);
 
+            // A player with an order still open or awaiting its result cannot
+            // be deleted: settling or refunding that order needs both player
+            // records, so the other side's stake would be stuck with it.
+            const [livePending, liveMatched, liveInFlight] = await Promise.all([
+              getPendingOrdersList(env), getMatchedOrdersList(env), getInFlightRounds(env),
+            ]);
+            const liveOrders = [
+              ...livePending,
+              ...liveMatched,
+              ...liveInFlight.flatMap((r) => r.matchedOrders || []),
+            ].filter((o: any) => o && [o.creatorId, o.creatorLineUserId, o.matcherId, o.matcherLineUserId]
+              .some((id) => typeof id === 'string' && idsToDelete.has(id)));
+            if (liveOrders.length > 0) {
+              return new Response(JSON.stringify({
+                success: false,
+                error: `ลบผู้เล่นนี้ยังไม่ได้ — มีแผลค้างอยู่ ${liveOrders.length} แผล (#${liveOrders.slice(0, 5).map((o: any) => o.orderNumber).join(', #')}) รอให้ตัดสินผลหรือยกเลิกก่อน`,
+              }), { status: 409, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            }
+
             const keysToDelete: string[] = [];
             for (const id of idsToDelete) {
               keysToDelete.push(`USER_${id}`);
@@ -1645,6 +1688,15 @@ if (
           const voidRes = await voidInFlightRound(roundId, env, ctx);
           if (!voidRes.found) {
             result = { success: false, error: 'ไม่พบรอบบั้งไฟที่กำลังลอยอยู่' };
+          } else if (voidRes.failed > 0) {
+            // Nothing is announced: the round is still parked with those pairs.
+            result = {
+              success: false,
+              ledgerFailure: true,
+              error: `โมฆะไม่ครบ — คืนแต้มแล้ว ${voidRes.voided} แผล แต่อีก ${voidRes.failed} แผลคืนไม่สำเร็จ รอบยังอยู่ในคิว กดโมฆะซ้ำได้ (แผลที่คืนแล้วจะไม่ถูกคืนซ้ำ)`,
+              voided: voidRes.voided,
+              failed: voidRes.failed,
+            };
           } else {
             const targets = await resolveTargetGroupIds(target, env);
             if (targets.length > 0) {
@@ -1683,12 +1735,22 @@ if (
           if (closeLock && closeLock.status === 'ACTIVE') {
             await state(env).put('ACTIVE_ROUND', JSON.stringify({ ...closeLock, status: 'CLOSED', updatedAt: Date.now() }));
           }
-          const { voided } = await voidAllRoundOrders(env, ctx);
+          const { voided, failed: closeFailed } = await voidAllRoundOrders(env, ctx);
           let voidedInFlight = 0;
+          let failedInFlight = 0;
           const inFlightList = await getInFlightRounds(env);
           for (const flt of inFlightList) {
             const vr = await voidInFlightRound(flt.roundId, env, ctx);
             voidedInFlight += vr.voided;
+            failedInFlight += vr.failed;
+          }
+          if (closeFailed + failedInFlight > 0) {
+            // The round stays locked (CLOSED) with those orders still listed,
+            // so pressing the button again finishes the job.
+            return new Response(JSON.stringify({
+              success: false,
+              error: `ปิดรอบไม่ครบ — คืนแต้มแล้ว ${voided + voidedInFlight} แผล แต่อีก ${closeFailed + failedInFlight} แผลคืนไม่สำเร็จ รอบยังล็อกอยู่ กดปิดรอบซ้ำได้ (แผลที่คืนแล้วจะไม่ถูกคืนซ้ำ)`,
+            }), { status: 409, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
           }
 
           await Promise.all([
@@ -1976,7 +2038,13 @@ if (
             const clean = !isObj ? String(messageText || '').replace(/\s+/g, '').toLowerCase() : '';
 
             if (!isObj) {
-              const rangeMatch = String(messageText).match(/(\d{3})\s*[-/]\s*(\d{3})/);
+              // Free text is an announcement first. It acts as a command only
+              // when the WHOLE message is that command. Matching anywhere in
+              // the text meant "…จะเริ่มเปิดรับดวลรอบถัดไป…" closed the round
+              // and refunded the board ("เปิดรับดวล" contains "ปิดรับดวล"),
+              // and any NNN-NNN in a notice (a phone number, a time) silently
+              // became the round's price.
+              const rangeMatch = String(messageText).trim().match(/^(\d{3})\s*[-/]\s*(\d{3})$/);
               if (rangeMatch) {
                 const roundStr = await state(env).get('ACTIVE_ROUND');
                 const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', status: 'ACTIVE' };
@@ -2010,7 +2078,7 @@ if (
               } else if (clean === 'กระดานดวล' || clean === 'กระดาน' || clean === 'board') {
                 const pending = await getPendingOrdersList(env);
                 payload = generatePendingBoardFlex(pending);
-              } else if (clean.includes('ปิดรับดวล') || clean.startsWith('ปิดรอบ') || clean.startsWith('ล็อครอบ')) {
+              } else if (clean === 'ปิดรับดวล' || clean === 'ปิดรอบ' || clean === 'ล็อครอบ') {
                 const roundStr = await state(env).get('ACTIVE_ROUND');
                 const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
                 round.status = 'CLOSED';
@@ -2020,7 +2088,7 @@ if (
                   await cancelHeldPreQuoteOrders(env, ctx);
                 }
                 await clearAllPendingOrders(env, ctx);
-              } else if (clean.startsWith('เปิดรอบ') || clean.startsWith('เปิดรับดวล')) {
+              } else if (clean === 'เปิดรอบ' || clean === 'เปิดรับดวล') {
                 const roundStr = await state(env).get('ACTIVE_ROUND');
                 let round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', targetMin: 330, targetMax: 380 };
                 // Reopening a CLOSED round un-does a Final Call on the same rocket.
@@ -2205,10 +2273,19 @@ if (
 
           const voidFlex = generateVoidRoundFlex();
 
-          await voidAllRoundOrders(env, ctx);
+          const voidOutcome = await voidAllRoundOrders(env, ctx);
 
           const targets = await resolveTargetGroupIds(target, env);
-          if (targets.length === 0) {
+          if (voidOutcome.failed > 0) {
+            // The group is not told the round is void while stakes are held.
+            result = {
+              success: false,
+              ledgerFailure: true,
+              error: `โมฆะไม่ครบ — คืนแต้มแล้ว ${voidOutcome.voided} แผล แต่อีก ${voidOutcome.failed} แผลคืนไม่สำเร็จ ยังไม่ประกาศในกลุ่ม กดโมฆะซ้ำได้ (แผลที่คืนแล้วจะไม่ถูกคืนซ้ำ)`,
+              voided: voidOutcome.voided,
+              failed: voidOutcome.failed,
+            };
+          } else if (targets.length === 0) {
             result = { success: false, error: 'ไม่พบกลุ่ม LINE ที่เชื่อมต่อ' };
           } else {
             const sendResults = await Promise.all(targets.map((to) => pushToLine(to, voidFlex, env)));
@@ -2601,6 +2678,21 @@ if (
               prior.finalSeconds,
               corsHeaders
             );
+          }
+
+          // A second submit on a round that is already over (settled or void)
+          // with nothing left on its board is a repeat, not a new result. It
+          // used to overwrite the recorded flight time, flip a VOID round to
+          // RESOLVED and send the group a second, empty result card.
+          if (lockRound && (lockRound.status === 'RESOLVED' || lockRound.status === 'VOID')
+            && !(await boardHasOpenDuels(env))) {
+            const doneMsg = lockRound.status === 'VOID'
+              ? 'รอบนี้ถูกโมฆะไปแล้ว ไม่มีแผลให้ตัดสิน — เปิดรอบใหม่ก่อน'
+              : `รอบนี้ตัดสินผลไปแล้ว${Number(lockRound.finalTime) > 0 ? ` ที่ ${lockRound.finalTime} วิ` : ''} — ถ้าเวลาบินผิดให้ใช้ "แก้เวลาบิน"`;
+            return new Response(JSON.stringify({ success: false, error: doneMsg, data: { success: false, error: doneMsg, alreadySettled: true } }), {
+              status: 409,
+              headers: { 'Content-Type': 'application/json', ...corsHeaders },
+            });
           }
 
           // Lock the round first, so no order can be opened or matched while

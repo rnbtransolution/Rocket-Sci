@@ -28,6 +28,9 @@ import {
   generateDailySummaryFlex,
 } from './flexTemplates.js';
 
+/** Statuses of an order that is over: its number is free to be reused. */
+const FINISHED_ORDER_STATUSES = ['cancelled', 'settled', 'resolved', 'void'];
+
 /** Order keywords that bet on the high side (ช่างไล่). Every other keyword is the low side. */
 const HIGH_SIDE_WORDS = ['ช่างไล่', 'ชล', 'ล', 'ลง', 'สูง', 'ไล่'];
 
@@ -338,9 +341,11 @@ export async function processLineEvent(event: LineEvent, env: Env, ctx?: Executi
           targetOrderNo = numStr;
           matchAmt = undefined;
         } else {
-          // Check if exists as order
+          // An order number only while that order is live. Numbers are reused
+          // and finished orders are kept for 30 days, so "ต 1000" (take 1000)
+          // used to hit an old settled #1000 and answer "ตัดสินผลไปแล้ว".
           const exists = await getOrderRecord(numStr, env);
-          if (exists) {
+          if (exists && !FINISHED_ORDER_STATUSES.includes(String(exists.status))) {
             targetOrderNo = numStr;
             matchAmt = undefined;
           } else {
@@ -953,7 +958,10 @@ async function handleMatchOrder(
   const MIN_MATCH_POINTS = 100;
   const MIN_MATCH_RATIO = 0.20;
 
-  if (matchAmt !== undefined) {
+  // The floors only limit a PARTIAL take. An order can be opened from 50 pt, and
+  // its card's full-take button sends "ต <no> <amount>": with the floors applied
+  // to that too, an order under 100 pt could never be taken from its own card.
+  if (matchAmt !== undefined && matchAmt !== Number(order.amount)) {
     if (matchAmt < MIN_MATCH_POINTS) {
       const msg = `ยอดดวลขั้นต่ำคือ ${MIN_MATCH_POINTS.toLocaleString()} pt (คุณระบุ ${matchAmt.toLocaleString()} pt)`;
       await deliverPrivateNotice(userId, replyToken, groupId, generateMatchMismatchFlex(resolvedNo, msg, `พิมพ์ "ต <เลข order> <ยอด>" โดยยอดไม่ต่ำกว่า ${MIN_MATCH_POINTS} pt`), env, profile.displayName, ctx);
@@ -1465,13 +1473,23 @@ export interface RefundOutcome {
   /** True only for the caller that actually moved the money. */
   refunded: boolean;
   /** Why nothing was credited. */
-  reason?: 'already_refunded' | 'claim_unavailable' | 'not_refundable';
+  reason?: 'already_refunded' | 'claim_unavailable' | 'not_refundable' | 'party_missing';
   amount: number;
   creatorCredited: boolean;
   matcherCredited: boolean;
   newCreatorBalance?: number;
   /** The order as stored after the refund (or as found, when refused). */
   order?: Order;
+}
+
+/**
+ * True when a refund did not go through and the order is still holding stake:
+ * the ledger was unreachable, or a party of the order has no player record.
+ * (An order that was already refunded, settled or cancelled is not owed one.)
+ */
+export function refundStillOwed(r: RefundOutcome): boolean {
+  if (r.refunded) return false;
+  return r.reason === 'claim_unavailable' || r.reason === 'party_missing';
 }
 
 /** Every status from which an order still holds stake that can be returned. */
@@ -1546,7 +1564,10 @@ export async function refundOrderOnce(
       refunded: false,
       reason: res.reason === 'unavailable' || res.reason === 'error'
         ? 'claim_unavailable'
-        : res.reason === 'claimed' ? 'already_refunded' : 'not_refundable',
+        : res.reason === 'claimed' ? 'already_refunded'
+        // A creator or matcher with no player record: nothing was credited to
+        // either side, so the order still holds both stakes.
+        : res.reason === 'player_not_found' ? 'party_missing' : 'not_refundable',
       amount: Number(res.current?.amount ?? order.amount) || 0,
       creatorCredited: false,
       matcherCredited: false,
@@ -1976,8 +1997,9 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
  * Voids the entire round: cancels BOTH pending_match and matched orders,
  * refunding 100% of points to both creator and matcher.
  */
-export async function voidAllRoundOrders(env: Env, ctx?: ExecutionContext): Promise<{ voided: number }> {
+export async function voidAllRoundOrders(env: Env, ctx?: ExecutionContext): Promise<{ voided: number; failed: number }> {
   let voidedCount = 0;
+  let failedCount = 0;
   try {
     const [pendingList, matchedList] = await Promise.all([
       getPendingOrdersList(env),
@@ -1994,13 +2016,15 @@ export async function voidAllRoundOrders(env: Env, ctx?: ExecutionContext): Prom
       // and removes it from both lists.
       const refund = await refundOrderOnce(order, env, ctx, 'void_round');
       if (refund.refunded) voidedCount++;
+      else if (refundStillOwed(refund)) failedCount++;
     }
 
     console.log(`[Worker] voidAllRoundOrders: Voided and refunded ${voidedCount} orders 100%.`);
   } catch (err) {
     console.error('[Worker] voidAllRoundOrders error:', err);
+    failedCount++;
   }
-  return { voided: voidedCount };
+  return { voided: voidedCount, failed: failedCount };
 }
 
 export async function getPendingOrdersList(env: Env): Promise<Order[]> {
@@ -2169,17 +2193,18 @@ export async function voidInFlightRound(
   roundId: string,
   env: Env,
   ctx?: ExecutionContext
-): Promise<{ found: boolean; voided: number; roundName?: string }> {
+): Promise<{ found: boolean; voided: number; failed: number; roundName?: string }> {
   const inFlightList = await getInFlightRounds(env);
   const target = inFlightList.find((r) => r.roundId === roundId);
   if (!target) {
-    return { found: false, voided: 0 };
+    return { found: false, voided: 0, failed: 0 };
   }
 
   // Refund first, remove the round last. In the other order a failure part-way
   // left orders with stakes held and no round left to void or settle them.
   // Each refund is idempotent, so retrying a half-finished void is safe.
   let voidedCount = 0;
+  let failedCount = 0;
   for (const item of target.matchedOrders || []) {
     if (!item || !item.orderNumber) continue;
     // The parked snapshot's createdAt pins the refund to THIS order even if its
@@ -2188,10 +2213,14 @@ export async function voidInFlightRound(
       allowedStatuses: ['matched', 'refunding'],
     });
     if (refund.refunded) voidedCount++;
+    else if (refundStillOwed(refund)) failedCount++;
   }
 
-  await state(env).removeInFlight(roundId);
-  return { found: true, voided: voidedCount, roundName: target.name };
+  // A refund that could not be written leaves that pair's stakes held. The
+  // round stays parked so the void can be run again; it used to be removed
+  // regardless, and the pair was then left with nothing to void or settle it.
+  if (failedCount === 0) await state(env).removeInFlight(roundId);
+  return { found: true, voided: voidedCount, failed: failedCount, roundName: target.name };
 }
 
 async function resolveOrderNumber(
@@ -2388,9 +2417,21 @@ export async function savePlayerProfile(profile: PlayerProfile, env: Env, ctx?: 
     // LINE OA and an approval from the Admin Console could interleave: the
     // Admin Console read PLAYERS_LIST mid-flight and cached a stale balance,
     // leaving the console and the OA showing different numbers.
-    const savedAtomically = await state(env).saveProfile(profile, entry);
+    let savedAtomically = await state(env).saveProfile(profile, entry);
+    // With the Durable Object bound, a failed save is retried once and then
+    // dropped. The key-by-key fallback below writes the caller's snapshot
+    // balance, and after a passing error those writes reach the Durable
+    // Object: a name or bank edit could put back a balance from before a bet.
+    const hasLedgerStore = Boolean((env as any).ROCKET_STATE);
+    if (!savedAtomically && hasLedgerStore) {
+      savedAtomically = await state(env).saveProfile(profile, entry);
+      if (!savedAtomically) {
+        console.error(`[Worker] savePlayerProfile: could not save ${profile.shortId}; profile fields not updated`);
+        return;
+      }
+    }
     if (!savedAtomically) {
-      // Fallback (Durable Object unavailable): original best-effort behaviour.
+      // Fallback (no Durable Object at all): original best-effort behaviour.
       const primaryPuts: Promise<any>[] = [];
       if (profile.lineUserId && profile.lineUserId.startsWith('U')) {
         primaryPuts.push(state(env).put(`USER_${profile.lineUserId}`, profileJson));
@@ -2428,18 +2469,33 @@ function syncBalanceToSheets(
   const gasUrl = env.GAS_FALLBACK_URL;
   const lineUserId = p.lineUserId;
   const balance = p.after ?? p.balance;
+  const send = (bal: number | undefined, name: string | undefined) =>
+    fetch(gasUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        functionName: 'adminSetPlayerBalance',
+        args: [lineUserId, bal, name, true],
+        apiKey: env.ADMIN_API_KEY,
+      }),
+    }).catch((e) => console.warn('[Worker] Sheets player balance sync error:', e));
   const runGasSync = async () => {
     if (!(await isGasSyncThrottled('SAVE', lineUserId, env))) {
-      await fetch(gasUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          functionName: 'adminSetPlayerBalance',
-          args: [lineUserId, balance, p.displayName, true],
-          apiKey: env.ADMIN_API_KEY,
-        }),
-      }).catch((e) => console.warn('[Worker] Sheets player balance sync error:', e));
+      await send(balance, p.displayName);
+      return;
     }
+    // Throttled: this change is not sent now. Dropping it left the sheet on an
+    // older balance whenever a player's last move of a burst fell inside the
+    // window (bet at 0s, payout at 5s: the sheet kept the post-bet figure).
+    // One trailing sync per window sends whatever the balance is by then.
+    if (!ctx || (await isGasSyncThrottled('TRAIL', lineUserId, env))) return;
+    await new Promise((r) => setTimeout(r, (GAS_SYNC_THROTTLE_SECONDS + 1) * 1000));
+    const raw = await state(env).get(`USER_${lineUserId}`).catch(() => null);
+    if (!raw) return;
+    try {
+      const latest = JSON.parse(raw) as PlayerProfile;
+      await send(Number(latest.balance) || 0, latest.displayName);
+    } catch (_) {}
   };
   if (ctx) {
     ctx.waitUntil(runGasSync());
@@ -2544,7 +2600,17 @@ export async function addTransaction(tx: Transaction, env: Env, ctx?: ExecutionC
   try {
     // Atomic upsert — a deposit/withdrawal arriving from LINE OA can never be
     // clobbered by a concurrent Admin Console approval on the same ledger.
-    const stored = await state(env).upsertTransaction(tx);
+    let stored = await state(env).upsertTransaction(tx);
+    // Same reasoning as savePlayerProfile: the fallback rewrites the whole
+    // ledger list from a snapshot and trims it to 100, which can drop requests
+    // still waiting for an admin. Only used when there is no Durable Object.
+    if (!stored && (env as any).ROCKET_STATE) {
+      stored = await state(env).upsertTransaction(tx);
+      if (!stored) {
+        console.error(`[Worker] addTransaction: could not record ${tx.id}`);
+        return;
+      }
+    }
     if (!stored) {
       const list = await getTransactionsList(env);
       const updated = [tx, ...list.filter(t => t.id !== tx.id)].slice(0, 100);
@@ -2563,16 +2629,21 @@ export function mirrorTransactionToSheets(tx: Transaction, env: Env, ctx?: Execu
       const syncPromise = fetch(env.GAS_FALLBACK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        // `mirrorTransaction` writes one row per transaction id and updates
+        // it when the status changes. This used to call `logTransaction`,
+        // which the Apps Script dispatcher does not expose, so every call came
+        // back "Unknown function" and the Transactions sheet stayed empty.
         body: JSON.stringify({
-          functionName: 'logTransaction',
+          functionName: 'mirrorTransaction',
           args: [
+            tx.id,
             tx.playerId,
             tx.playerName,
             tx.requestedAmount,
             tx.actualAmount,
-            tx.id,
+            tx.slipRef || '',
             tx.status,
-            tx.reviewReason,
+            tx.reviewReason || '',
           ],
           apiKey: env.ADMIN_API_KEY,
         }),
