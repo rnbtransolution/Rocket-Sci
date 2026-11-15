@@ -34,6 +34,7 @@ import {
   clearAllPendingOrders,
   cancelHeldPreQuoteOrders,
   releaseHeldPreQuoteOrders,
+  reRangeBandOrdersOnRequote,
   cancelChotoyOrdersOnQuote,
   autoMatchPendingPairs,
   voidAllRoundOrders,
@@ -1190,7 +1191,19 @@ if (
             // Status flip and credit in ONE atomic step, conditional on the
             // stored status. Two approve clicks (or two admins) used to both
             // pass the "already processed" check and credit the deposit twice.
+            // A slip the scanner verified but could not credit: approving it
+            // uses the slip up in the same step, so the player sending it
+            // again cannot be credited a second time. If it was already
+            // credited that way meanwhile, the approval is refused.
+            const slipClaim = !isWithdrawal && (targetTx as any).slipVerified === true && targetTx.slipRef && requested > 0
+              ? [{
+                  key: `SLIP:${targetTx.slipRef}`,
+                  payload: { refCode: targetTx.slipRef, amount: requested, playerId: targetTx.playerId, lineUserId: targetTx.lineUserId, txId, at: Date.now() },
+                  ttlMs: 90 * 24 * 60 * 60 * 1000,
+                }]
+              : undefined;
             const res = await ledger(env, {
+              ...(slipClaim ? { claims: slipClaim } : {}),
               transactions: [{
                 id: txId,
                 mustExist: true,
@@ -1203,6 +1216,8 @@ if (
             if (!res.ok) {
               result = res.reason === 'tx_status'
                 ? { success: false, error: 'รายการนี้ได้รับการดำเนินการไปแล้ว', txId }
+                : res.reason === 'claimed'
+                ? { success: false, error: `สลิป ${targetTx.slipRef} ถูกเติมเครดิตไปแล้ว (ผู้เล่นส่งซ้ำ) — ไม่ได้เติมซ้ำ กรุณากดปฏิเสธรายการนี้`, txId }
                 : { success: false, error: `อนุมัติไม่สำเร็จ (${res.reason}) — ไม่มีการเปลี่ยนแปลงยอดเงิน`, txId, ledgerFailure: true };
             } else {
               const tx = res.transactions[txId] || targetTx;
@@ -1553,6 +1568,21 @@ if (
               return new Response(JSON.stringify({
                 success: false,
                 error: `ลบผู้เล่นนี้ยังไม่ได้ — มีแผลค้างอยู่ ${liveOrders.length} แผล (#${liveOrders.slice(0, 5).map((o: any) => o.orderNumber).join(', #')}) รอให้ตัดสินผลหรือยกเลิกก่อน`,
+              }), { status: 409, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            }
+
+            // Points are money. Deleting the record would make a balance vanish
+            // with nothing in the ledger, so it has to be paid out or set to 0
+            // first; both of those leave an entry.
+            const heldRecords = await Promise.all([...idsToDelete].map((id) => state(env).get(`USER_${id}`)));
+            const heldBalance = heldRecords.reduce((max, raw) => {
+              const b = Number(raw ? safeJson<any>(raw)?.balance : 0);
+              return Number.isFinite(b) && b > max ? b : max;
+            }, 0);
+            if (heldBalance > 0) {
+              return new Response(JSON.stringify({
+                success: false,
+                error: `ลบผู้เล่นนี้ยังไม่ได้ — ยังมีเครดิต ${heldBalance.toLocaleString()} pt จ่ายคืนหรือปรับยอดเป็น 0 ก่อน`,
               }), { status: 409, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
             }
 
@@ -2048,10 +2078,17 @@ if (
               if (rangeMatch) {
                 const roundStr = await state(env).get('ACTIVE_ROUND');
                 const round = roundStr ? JSON.parse(roundStr) : { name: 'บั้งไฟสด', status: 'ACTIVE' };
+                const oldBand = { min: Number(round.targetMin), max: Number(round.targetMax) };
                 round.targetMin = Number(rangeMatch[1]);
                 round.targetMax = Number(rangeMatch[2]);
                 round.updatedAt = Date.now();
                 await state(env).put('ACTIVE_ROUND', JSON.stringify(round));
+                // Typing a bare range re-prices a priced rocket the same way a
+                // second quote does, so its ราคาช่าง orders follow.
+                if (round.quoteReleased === true && round.roundId && (round.status === 'ACTIVE' || round.status === 'CLOSED')) {
+                  await reRangeBandOrdersOnRequote(oldBand, { min: round.targetMin, max: round.targetMax }, String(round.roundId), env, ctx, round.name);
+                  await autoMatchPendingPairs(env, ctx);
+                }
               }
 
               if (clean === 'กติกา' || clean === 'rule' || clean === 'rules' || clean === 'วิธีเล่น' || clean === 'คู่มือ') {
@@ -2225,6 +2262,15 @@ if (
           // before the release auto-matches anything on the board.
           const chotoy = await cancelChotoyOrdersOnQuote(env, ctx);
 
+          // A second price on a rocket that already has one is a correction:
+          // every ราคาช่าง order of this round follows it, before the release
+          // below auto-matches the board on the new band.
+          const reRanged = continuesRound && existing.quoteReleased === true
+            ? await reRangeBandOrdersOnRequote(
+                { min: Number(existing.targetMin), max: Number(existing.targetMax) },
+                { min, max }, String(existing.roundId), env, ctx, name)
+            : { pending: 0, matched: 0 };
+
           await releaseHeldPreQuoteOrders(min, max, env, ctx, name);
 
           const quoteFlex = generateQuoteFlex(name, min, max, isChotoy);
@@ -2251,6 +2297,7 @@ if (
               targets,
               round: roundData,
               chotoyCancelled: chotoy.cancelledOrderNumbers,
+              reRanged,
               error: allSuccess ? undefined : (quotaError?.error || 'ส่งข้อความเข้าบางกลุ่มไม่สำเร็จ'),
               code: quotaError ? 429 : (allSuccess ? 200 : 400),
               isQuotaExhausted: !!quotaError,
@@ -2921,39 +2968,6 @@ if (
 
           await processLineEvent(mockEvent, env, ctx);
           result = { success: true, simulatedText: text };
-        } else if (functionName === 'saveOpenBet') {
-          const orderNo = args[0];
-          const creatorId = args[1];
-          const creatorName = args[2];
-          const side = args[3] === 'low' || args[3] === 'high' ? args[3] : 'low';
-          const amount = Number(args[4]) || 100;
-          const targetMin = Number(args[5]) || 330;
-          const targetMax = Number(args[6]) || 380;
-          const isChotoy = Boolean(args[7]);
-          const rocketName = args[8] || 'บั้งไฟสด';
-
-          const activeGroupId = await state(env).get('ACTIVE_GROUP_ID');
-          const newOrder = {
-            orderNumber: String(orderNo),
-            creatorId,
-            creatorName,
-            side,
-            amount,
-            status: 'open',
-            groupId: activeGroupId || '',
-            targetMin,
-            targetMax,
-            isChotoy,
-            rocketName,
-            createdAt: Date.now(),
-          };
-
-          await env.KV_ORDERS.put(`ORDER_${orderNo}`, JSON.stringify(newOrder));
-          const orderFlex = generateOrderFlex(newOrder as any);
-          if (activeGroupId) {
-            await pushToLine(activeGroupId, orderFlex, env);
-          }
-          result = { success: true, order: newOrder };
         } else if (functionName === 'adminGetDebugLogs') {
           const [lastOrderDebug, lastLineError, lastLineSuccess, lastWebhookError, lastDelivery] = await Promise.all([
             state(env).get('LAST_ORDER_CREATE_DEBUG'),

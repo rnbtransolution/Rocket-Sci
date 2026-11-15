@@ -1066,6 +1066,18 @@ export class RocketStateDO extends DurableObject<Env> {
         }
 
         orders.set(op.orderNumber, next);
+
+        // The mirror half of an auto-matched pair holds no stake and never
+        // settles on its own. It is closed here, in the step that finishes its
+        // partner; left as `matched_paired` it was never swept and its number
+        // could never be issued again. `resolved` moves no credit.
+        const pairNo = stored.pairedOrderNumber ? String(stored.pairedOrderNumber) : '';
+        if (pairNo && !TERMINAL_ORDER_STATUSES.has(String(stored.status)) && TERMINAL_ORDER_STATUSES.has(String(next.status))) {
+          const mirror = orders.get(pairNo) ?? this.liveJson<any>(`ORDER_${pairNo}`);
+          if (mirror && String(mirror.status) === 'matched_paired' && String(mirror.pairedOrderNumber || '') === String(op.orderNumber)) {
+            orders.set(pairNo, { ...mirror, status: 'resolved', settledAt: now, closedWithOrder: String(op.orderNumber) });
+          }
+        }
       }
 
       // 4. Ledger entries (deposits / withdrawals).
@@ -1353,7 +1365,18 @@ export class RocketStateDO extends DurableObject<Env> {
                        json_extract(v, '$.createdAt'), ?) < ?;`,
       now,
       cutoff
-    ).rowsWritten;
+    ).rowsWritten
+      // Mirrors paired before `pairedOrderNumber` existed have nothing that
+      // closes them. They hold no stake (the partner order names both players),
+      // so one matched longer ago than the retention window is dropped too.
+      + sql.exec(
+        `DELETE FROM state
+          WHERE k GLOB 'ORDER_*' AND json_valid(v)
+            AND json_extract(v, '$.status') = 'matched_paired'
+            AND COALESCE(json_extract(v, '$.matchedAt'), json_extract(v, '$.createdAt'), ?) < ?;`,
+        now,
+        cutoff
+      ).rowsWritten;
     // SETTLED_DAY_<YYYY-MM-DD>: ISO dates compare as strings.
     const cutoffDay = new Date(cutoff).toISOString().slice(0, 10);
     const days = sql.exec(
