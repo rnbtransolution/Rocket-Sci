@@ -155,6 +155,12 @@ export interface Order {
    * into, or settled on, the next one. Absent on orders from before round IDs.
    */
   roundId?: string | null;
+  /**
+   * The other half of an auto-matched pair. The low order carries the duel and
+   * settles; the high order is its `matched_paired` mirror, holds no stake of
+   * its own, and is closed in the same step that finishes the low order.
+   */
+  pairedOrderNumber?: string | null;
   /** ID of the in-flight round snapshot when this order is parked while Rocket B opens. */
   inFlightRoundId?: string | null;
 }
@@ -192,6 +198,12 @@ export interface Transaction {
   slipRef?: string;
   status: 'pending' | 'success' | 'escalated' | 'rejected';
   reviewReason?: string;
+  /**
+   * The slip scanner verified this slip, but the credit could not be written.
+   * `requestedAmount` is the amount the slip proves, and approving the entry
+   * takes the claim on `slipRef` so the same slip cannot be credited again.
+   */
+  slipVerified?: boolean;
   timestamp: string;
   type: 'deposit' | 'withdraw' | 'transfer';
   createdAt: number;

@@ -754,7 +754,9 @@ async function handleCreateOrder(
       userTypedCmd: text,
       rocketName: round?.name || null,
       roundId: round?.roundId ?? null,
-      offset: isPreQuote ? offsetDelta : undefined,
+      // Kept on every ราคาช่าง order, so a corrected price can move it (see
+      // reRangeBandOrdersOnRequote). A player's own range has no offset.
+      offset: isCustom ? undefined : offsetDelta,
       ...(isCustom && isChotoy ? { isChotoy: true } : {}),
       createdAt: Date.now(),
       id: `bet_${orderNumber}`,
@@ -1216,17 +1218,21 @@ async function handleSlipUpload(
   const nowStr = new Date().toLocaleTimeString('th-TH', { hour12: false });
   const txId = `TX${Date.now().toString(36).toUpperCase()}${Math.floor(100 + Math.random() * 900)}`;
 
-  const escalate = async (detail: string, playerMessage: string, slipRef = '') => {
+  // `verifiedAmount` is passed only for a slip the scanner verified but the
+  // ledger could not credit: the entry then carries the amount the slip proves,
+  // so the admin's Approve credits it (it used to be 0 and credit nothing).
+  const escalate = async (detail: string, playerMessage: string, slipRef = '', verifiedAmount = 0) => {
     const tx: Transaction = {
       id: txId,
       playerId: profile.shortId,
       lineUserId: profile.lineUserId,
       playerName: profile.displayName,
-      requestedAmount: 0,
+      requestedAmount: verifiedAmount > 0 ? verifiedAmount : 0,
       actualAmount: 0,
       slipRef: slipRef || messageId,
       status: 'escalated',
       reviewReason: detail,
+      ...(verifiedAmount > 0 && slipRef ? { slipVerified: true } : {}),
       timestamp: nowStr,
       type: 'deposit',
       createdAt: Date.now(),
@@ -1317,7 +1323,8 @@ async function handleSlipUpload(
       await escalate(
         `Slip ${scan.refCode} verified (${scan.amount}) but auto-credit failed: ${credit.reason} — approve manually`,
         'เติมเครดิตอัตโนมัติไม่ได้ในขณะนี้ แอดมินจะตรวจและเติมให้',
-        scan.refCode
+        scan.refCode,
+        scan.amount
       );
     }
     return;
@@ -1896,6 +1903,131 @@ export async function releaseHeldPreQuoteOrders(
 }
 
 /**
+ * A second price for a rocket that is already priced: the ช่าง corrected it, or
+ * the admin mistyped the first one.
+ *
+ * Every ราคาช่าง order is a bet on "the ช่าง price, plus or minus an offset" —
+ * its card shows what the player typed (ชล500, ชถ500 +5), never the seconds. So
+ * all of them follow the corrected price, matched or not. Before this only the
+ * pairs matched ahead of the first price moved (releaseHeldPreQuoteOrders);
+ * anything opened or matched after it stayed on the withdrawn price, and two
+ * duels on the same rocket could be settled on different bands.
+ *
+ * A player's own range (custom_range) is what they typed and is never touched.
+ * Only orders of this round move. No credit moves.
+ */
+export async function reRangeBandOrdersOnRequote(
+  oldBand: { min: number; max: number },
+  newBand: { min: number; max: number },
+  roundId: string,
+  env: Env,
+  ctx?: ExecutionContext,
+  rocketName?: string
+): Promise<{ pending: number; matched: number }> {
+  const out = { pending: 0, matched: 0 };
+  if (!roundId || !(newBand.min > 0) || !(newBand.max > 0)) return out;
+
+  const [pending, matchedNow] = await Promise.all([getPendingOrdersList(env), getMatchedOrdersList(env)]);
+  const candidates = new Set<string>();
+  for (const o of [...pending, ...matchedNow]) {
+    if (o && o.orderNumber && o.betType === 'range' && o.roundId === roundId) candidates.add(o.orderNumber);
+  }
+
+  const movedPending: Order[] = [];
+  const movedMatched: Order[] = [];
+
+  for (const orderNumber of candidates) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const order = await getOrderRecord(orderNumber, env);
+      if (!order || order.betType !== 'range' || order.roundId !== roundId) break;
+      if (order.status !== 'pending_match' && order.status !== 'matched') break;
+
+      // Orders from before the offset was stored: read it off the old price.
+      // Both ends must agree and be a real offset, or the order is left alone.
+      let offset = Number(order.offset);
+      if (order.offset === undefined || order.offset === null || !Number.isFinite(offset)) {
+        const dMin = Number(order.rangeMin) - oldBand.min;
+        const dMax = Number(order.rangeMax) - oldBand.max;
+        if (!Number.isFinite(dMin) || dMin !== dMax) break;
+        offset = dMin;
+      }
+      if (![0, 5, -5, 10, -10].includes(offset)) break;
+
+      const rangeMin = newBand.min + offset;
+      const rangeMax = newBand.max + offset;
+      if (Number(order.rangeMin) === rangeMin && Number(order.rangeMax) === rangeMax) break;
+
+      const patch = { rangeMin, rangeMax, offset, ...(rocketName ? { rocketName } : {}), requotedAt: Date.now() };
+      const isMatched = order.status === 'matched';
+      const ops: any[] = [{
+        orderNumber,
+        expectCreatedAt: Number(order.createdAt) || 0,
+        expectStatus: [order.status],
+        expectFields: { betType: 'range' },
+        patch,
+      }];
+      // The mirror of an auto-matched pair shows the same duel; keep it in step.
+      if (isMatched && order.pairedOrderNumber) {
+        const mirror = await getOrderRecord(String(order.pairedOrderNumber), env);
+        if (mirror && mirror.status === 'matched_paired' && String(mirror.pairedOrderNumber || '') === orderNumber) {
+          ops.push({ orderNumber: mirror.orderNumber, expectCreatedAt: Number(mirror.createdAt) || 0, expectStatus: ['matched_paired'], patch });
+        }
+      }
+      const res = await ledger(env, {
+        orders: ops,
+        lists: [{ key: isMatched ? 'MATCHED_ORDERS_LIST' : 'PENDING_ORDERS_LIST', op: 'upsert', orderNumber }],
+      }, ctx);
+      if (res.ok) {
+        (isMatched ? movedMatched : movedPending).push(res.orders[orderNumber] as Order);
+        break;
+      }
+      // Matched (or cancelled) between the read and the write: look again once.
+      if (res.reason === 'order_status') continue;
+      console.error(`[Worker] reRangeBandOrdersOnRequote: #${orderNumber} not moved (${res.reason})`);
+      break;
+    }
+  }
+  out.pending = movedPending.length;
+  out.matched = movedMatched.length;
+
+  // DM only. One notice per player for their open orders, the match card again
+  // for each duel so both sides hold the band it will be settled on.
+  const lineOf = async (id?: string | null, fallback?: string | null) =>
+    (id ? await state(env).get(`RAW_LINE_${id}`) : null) || fallback || '';
+  const tasks: Promise<any>[] = [];
+  const byCreator = new Map<string, Order[]>();
+  for (const o of movedPending) {
+    if (!byCreator.has(o.creatorId)) byCreator.set(o.creatorId, []);
+    byCreator.get(o.creatorId)!.push(o);
+  }
+  for (const [creatorId, list] of byCreator) {
+    tasks.push((async () => {
+      const to = await lineOf(creatorId, list[0].creatorLineUserId);
+      if (!to) return;
+      const lines = list.map((o) => `#${o.orderNumber} ${Number(o.amount).toLocaleString()} pt ${o.side === 'low' ? 'ชถ/ต่ำ' : 'ชล/สูง'} · ${o.rangeMin}-${o.rangeMax}s`);
+      await pushToLine(to, generateNoticeFlex(`ราคาช่างแก้เป็น ${newBand.min}-${newBand.max}s`, `แผลที่รอคู่ปรับตามราคาใหม่แล้ว\n${lines.join('\n')}`, 'info'), env);
+    })());
+  }
+  for (const o of movedMatched) {
+    tasks.push((async () => {
+      const flex = generateMatchNotificationFlex(o);
+      const cLine = await lineOf(o.creatorId, o.creatorLineUserId);
+      const mLine = await lineOf(o.matcherId, o.matcherLineUserId);
+      const sends: Promise<any>[] = [];
+      if (cLine) sends.push(pushToLine(cLine, flex, env));
+      if (mLine && mLine !== cLine) sends.push(pushToLine(mLine, flex, env));
+      await Promise.all(sends);
+    })());
+  }
+  await Promise.all(tasks.map((t) => t.catch((e) => console.error('[Worker] re-quote notice failed:', e))));
+
+  if (out.pending || out.matched) {
+    console.log(`[Worker] reRangeBandOrdersOnRequote: ${oldBand.min}-${oldBand.max} -> ${newBand.min}-${newBand.max}, moved ${out.pending} open and ${out.matched} matched orders.`);
+  }
+  return out;
+}
+
+/**
  * Pairs up pending_match orders of the same amount on opposite sides (low vs high),
  * marks both as matched to each other, refund-agnostic (balances already held),
  * and notifies both players via DM with the match flex.
@@ -1936,6 +2068,7 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
         const now = Date.now();
         const lowPatch = {
           status: 'matched',
+          pairedOrderNumber: high.orderNumber,
           matcherId: high.creatorId,
           matcherName: high.creatorName,
           matcherLineUserId: high.creatorLineUserId,
@@ -1947,6 +2080,7 @@ export async function autoMatchPendingPairs(env: Env, ctx?: ExecutionContext): P
         };
         const highPatch = {
           status: 'matched_paired',
+          pairedOrderNumber: low.orderNumber,
           matcherId: low.creatorId,
           matcherName: low.creatorName,
           matcherLineUserId: low.creatorLineUserId,
