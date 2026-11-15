@@ -575,6 +575,9 @@ function executeAdminAction(functionName, args, adminKey) {
     case 'adminDeletePlayer': 
       invalidateDashboardCache();
       return adminDeletePlayer(args[0]);
+    case 'mirrorTransaction':
+      invalidateDashboardCache();
+      return mirrorTransaction(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
     case 'saveOpenBet': 
       invalidateDashboardCache();
       return saveOpenBet(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9]);
@@ -2473,6 +2476,36 @@ function matchExistingOpenBet(userId, displayName, targetOrderNo, customMatchAmo
   }
 }
 
+/**
+ * Sheets copy of one Worker ledger entry: one row per transaction id. A later
+ * call with the same id (approve / reject) updates that row instead of adding
+ * a second one.
+ */
+function mirrorTransaction(txId, userId, displayName, reqAmt, actAmt, refCode, status, reason) {
+  var id = txId ? txId.toString().trim() : '';
+  if (!id) return { success: false, error: 'Missing transaction id' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Transactions');
+    var row = [id, userId || '', displayName || '', Number(reqAmt) || 0, Number(actAmt) || 0, refCode || '', status || '', reason || '', new Date()];
+    var last = sheet.getLastRow();
+    if (last >= 2) {
+      var ids = sheet.getRange(2, 1, last - 1, 1).getValues();
+      for (var i = ids.length - 1; i >= 0; i--) {
+        if (ids[i][0] && ids[i][0].toString().trim() === id) {
+          sheet.getRange(i + 2, 1, 1, row.length).setValues([row]);
+          return { success: true, txId: id, updated: true };
+        }
+      }
+    }
+    sheet.appendRow(row);
+    return { success: true, txId: id, updated: false };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function logTransaction(userId, displayName, reqAmt, actAmt, refCode, status, reason) {
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Transactions');
   const searchId = userId ? userId.toString().trim() : '';
@@ -2753,8 +2786,11 @@ function adminSetPlayerBalance(userId, newBalance, displayName, suppressPush) {
       if (displayName && !data[i][1]) {
         sheet.getRange(i + 1, 2).setValue(displayName);
       }
-      // Log as admin adjustment if balance changed
-      if (bal !== oldBalance) {
+      // Log as admin adjustment if balance changed. Not for the Worker's balance
+      // mirror (suppressPush): that call follows every bet, take and payout, so
+      // each one was written here as "Admin set balance". Real adjustments made
+      // in the console arrive through mirrorTransaction with their own id.
+      if (bal !== oldBalance && !suppressPush) {
         const tSheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Transactions');
         const txId = 'ADJ' + new Date().getTime();
         tSheet.appendRow([txId, col0 || searchId, data[i][1] || 'ผู้เล่น', bal - oldBalance, bal, 'ADMIN_ADJUST', 'success', `Admin set balance: ${oldBalance} → ${bal}`, new Date()]);
