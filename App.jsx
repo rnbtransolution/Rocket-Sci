@@ -29,9 +29,11 @@ import {
   Landmark,
   Banknote,
   ChevronDown,
-  Check
+  Check,
+  MessageCircle
 } from 'lucide-react';
 import { CorrectionPanel, PayoutPanel } from './MoneyPanels.jsx';
+import ChatPanel from './ChatPanel.jsx';
 
 const INITIAL_PLAYERS = [];
 
@@ -384,6 +386,9 @@ export default function App() {
   // Dashboard & Navigation controls (default to quote setup first)
   const [adminTab, setAdminTab] = useState('quote'); // 'quote' | 'settle' | 'bets' | 'review' | 'players' | 'logs' | 'broadcast' | 'bank'
   const [customBroadcastText, setCustomBroadcastText] = useState('');
+  // Admin chat: inbox (polled for the nav badge) and a player to open from the player list.
+  const [dmInbox, setDmInbox] = useState({ threads: [], unreadTotal: 0 });
+  const [chatOpenUserId, setChatOpenUserId] = useState(null);
   // Daily duel summary: the Thai calendar day to summarise, and its preview.
   const bangkokToday = () => new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   const [summaryDay, setSummaryDay] = useState(bangkokToday);
@@ -1349,6 +1354,26 @@ export default function App() {
   };
 
   // Security Checks
+  // Poll the admin chat inbox: every 4 s on the chat tab, every 10 s elsewhere.
+  const runForInbox = useRef(null);
+  useEffect(() => { runForInbox.current = runBackendFunction; });
+  const refreshDmInbox = useCallback(async () => {
+    try {
+      const res = await runForInbox.current('getDmInbox', []);
+      if (res?.success) setDmInbox({ threads: res.threads || [], unreadTotal: res.unreadTotal || 0 });
+    } catch {
+      // Retried on the next tick.
+    }
+  }, []);
+  useEffect(() => {
+    if (!adminAuthenticated || playerUserId) return undefined;
+    refreshDmInbox();
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') refreshDmInbox();
+    }, adminTab === 'chat' ? 4000 : 10000);
+    return () => clearInterval(t);
+  }, [adminAuthenticated, playerUserId, adminTab, refreshDmInbox]);
+
   if (playerUserId) {
     const matchedPlayer = players.find(p => p.id === playerUserId) || {
       name: playerUserId,
@@ -1490,7 +1515,7 @@ export default function App() {
   // Worker/GAS report an open round as 'ACTIVE'; legacy builds used 'OPEN'.
   const isRoundOpen = roundStatus === 'ACTIVE' || roundStatus === 'OPEN';
 
-  const NAV_GROUPS = ['รอบแข่ง', 'การเงิน', 'การตั้งค่า'];
+  const NAV_GROUPS = ['รอบแข่ง', 'ผู้เล่น', 'การเงิน', 'การตั้งค่า'];
   const navItems = [
     {
       id: 'quote',
@@ -1531,6 +1556,15 @@ export default function App() {
       label: 'ประกาศและสรุปรายวัน',
       icon: Radio,
       section: 'รอบแข่ง',
+    },
+    {
+      id: 'chat',
+      activeMatch: (t) => t === 'chat',
+      label: 'แชตผู้เล่น',
+      icon: MessageCircle,
+      section: 'ผู้เล่น',
+      badge: dmInbox.unreadTotal || null,
+      attention: dmInbox.unreadTotal > 0,
     },
     {
       id: 'review',
@@ -3014,6 +3048,19 @@ export default function App() {
             <PayoutPanel run={runBackendFunction} ask={ask} addToast={addToast} ui={ui} onDone={forceSyncFreshData} />
           )}
 
+          {adminTab === 'chat' && (
+            <ChatPanel
+              run={runBackendFunction}
+              addToast={addToast}
+              ui={ui}
+              inbox={dmInbox}
+              players={players}
+              refreshInbox={refreshDmInbox}
+              openUserId={chatOpenUserId}
+              onOpened={() => setChatOpenUserId(null)}
+            />
+          )}
+
           {adminTab === 'players' && (
             <div className="bg-white border border-[#D9DDE2] rounded-lg p-4 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#D9DDE2] pb-3">
@@ -3093,6 +3140,16 @@ export default function App() {
                           {/* Actions */}
                           <td className="py-3 px-3">
                             <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              {/* Open this player's LINE chat */}
+                              {p.lineUserId && String(p.lineUserId).startsWith('U') && (
+                                <button
+                                  title="แชตกับผู้เล่น"
+                                  onClick={() => { setChatOpenUserId(p.lineUserId); setAdminTab('chat'); }}
+                                  className="px-2.5 py-1.5 bg-[#EEF2FB] border border-[#C7D3F1] text-[#1E4DB7] text-[12px] font-bold rounded-lg hover:bg-[#E3EAFB] transition-all"
+                                >
+                                  แชต
+                                </button>
+                              )}
                               {/* Edit profile & balance */}
                               <button
                                 title="แก้ไขชื่อ / เครดิต"

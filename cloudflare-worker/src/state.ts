@@ -92,6 +92,8 @@ interface DOStub {
   getClaim(claimKey: string): Promise<string | null>;
   patchTransactionStatus(txId: string, status: string, reviewReason: string, actualAmount?: number | null): Promise<string | null>;
   appendChatLog(logJson: string, limit?: number): Promise<void>;
+  dmAppend(userId: string, entryJson: string, displayName: string | null, threadLimit?: number, inboxLimit?: number): Promise<void>;
+  dmMarkRead(userId: string): Promise<void>;
   writeMany(entries: Array<[string, string]>, expiresAt?: number): Promise<void>;
   saveProfile(profileJson: string, entryJson: string, limit?: number): Promise<string | null>;
   txn(specJson: string): Promise<string>;
@@ -252,6 +254,33 @@ export class StateStore {
     } catch (err) {
       this.tripCircuit(err);
       console.warn('[StateStore] atomic appendChatLog failed:', err);
+      return false;
+    }
+  }
+
+  /** Append a message to a player's admin chat thread (Durable Object only). */
+  async dmAppend(userId: string, entry: unknown, displayName: string | null): Promise<boolean> {
+    const stub = this.stub();
+    if (!stub) return false;
+    try {
+      await stub.dmAppend(userId, JSON.stringify(entry), displayName);
+      return true;
+    } catch (err) {
+      this.tripCircuit(err);
+      console.warn('[StateStore] dmAppend failed:', err);
+      return false;
+    }
+  }
+
+  /** Zero a player's unread count in the admin chat inbox. */
+  async dmMarkRead(userId: string): Promise<boolean> {
+    const stub = this.stub();
+    if (!stub) return false;
+    try {
+      await stub.dmMarkRead(userId);
+      return true;
+    } catch (err) {
+      this.tripCircuit(err);
       return false;
     }
   }
