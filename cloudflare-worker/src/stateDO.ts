@@ -62,7 +62,7 @@ interface StateRow {
  * Object is local; a primary-key read is microseconds and stays synchronous,
  * so a ledger txn is exactly as atomic as before.
  */
-const COLD_PREFIXES = ['ORDER_', 'SETTLED_DAY_', 'CLAIM_'];
+const COLD_PREFIXES = ['ORDER_', 'SETTLED_DAY_', 'CLAIM_', 'DM_THREAD_'];
 const COLD_GLOB = COLD_PREFIXES.map((p) => `k GLOB '${p}*'`).join(' OR ');
 const isCold = (key: string) => COLD_PREFIXES.some((p) => key.startsWith(p));
 
@@ -707,6 +707,60 @@ export class RocketStateDO extends DurableObject<Env> {
       'CHAT_LOGS',
       serialized
     );
+  }
+
+  // ── Admin ↔ player direct chat ────────────────────────────────────────────
+
+  /**
+   * Append one message to a player's DM thread and update the inbox row, in a
+   * single commit. A player message raises the unread count; an admin or bot
+   * message leaves it alone. The thread is a cold key (SQLite only) so chat
+   * history never grows the in-memory mirror.
+   */
+  async dmAppend(userId: string, entryJson: string, displayName: string | null, threadLimit = 300, inboxLimit = 500): Promise<void> {
+    await this.ready;
+    if (!userId) return;
+    let entry: any;
+    try { entry = JSON.parse(entryJson); } catch (_) { return; }
+    const threadKey = `DM_THREAD_${userId}`;
+    let thread: any[] = [];
+    const tRow = this.cache.get(threadKey);
+    if (tRow) { try { thread = JSON.parse(tRow.v) || []; } catch (_) { thread = []; } }
+    thread.push(entry);
+    let inbox: Record<string, any> = {};
+    const iRow = this.cache.get('DM_INBOX');
+    if (iRow) { try { inbox = JSON.parse(iRow.v) || {}; } catch (_) { inbox = {}; } }
+    const prev = inbox[userId] || { userId, displayName: '', unread: 0 };
+    inbox[userId] = {
+      ...prev,
+      displayName: displayName || prev.displayName || '',
+      human: Boolean(prev.human) || entry.from !== 'bot',
+      lastAt: entry.at,
+      lastFrom: entry.from,
+      lastText: String(entry.text || '').slice(0, 120),
+      unread: entry.from === 'user' ? (Number(prev.unread) || 0) + 1 : Number(prev.unread) || 0,
+    };
+    const ids = Object.keys(inbox);
+    if (ids.length > inboxLimit) {
+      ids.sort((a, b) => (inbox[a].lastAt || 0) - (inbox[b].lastAt || 0));
+      for (const id of ids.slice(0, ids.length - inboxLimit)) delete inbox[id];
+    }
+    this.commit([
+      [threadKey, JSON.stringify(thread.slice(-threadLimit)), 0],
+      ['DM_INBOX', JSON.stringify(inbox), 0],
+    ]);
+  }
+
+  /** Clear a player's unread count once an admin has opened the thread. */
+  async dmMarkRead(userId: string): Promise<void> {
+    await this.ready;
+    const iRow = this.cache.get('DM_INBOX');
+    if (!iRow) return;
+    let inbox: Record<string, any> = {};
+    try { inbox = JSON.parse(iRow.v) || {}; } catch (_) { return; }
+    if (!inbox[userId] || !inbox[userId].unread) return;
+    inbox[userId] = { ...inbox[userId], unread: 0 };
+    this.commit([['DM_INBOX', JSON.stringify(inbox), 0]]);
   }
 
   /**

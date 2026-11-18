@@ -46,6 +46,7 @@ import {
   addTransaction,
   pushToLine,
   logUserMessage,
+  recordDirectMessage,
   getMatchedOrdersList,
   getSettledOrdersList,
   addToSettledOrdersList,
@@ -1876,6 +1877,12 @@ if (
           //    deleted, and every balance survived the reset.
           await state(env).delete('TRANSACTIONS_LIST');
           await state(env).delete('CHAT_LOGS');
+          // Admin chat history belongs to the players being wiped.
+          try {
+            const dmScan = await state(env).list({ prefix: 'DM_THREAD_' });
+            await Promise.all((dmScan.keys || []).map((k) => state(env).delete(k.name)));
+            await state(env).delete('DM_INBOX');
+          } catch (_) {}
           // 3. Clear all cached player profiles and raw LINE mappings
           try {
             const userScan = await state(env).list({ prefix: 'USER_' });
@@ -3084,6 +3091,90 @@ if (
               pendingInconsistencies: inconsistencies.filter((x) => !x.agrees),
               pendingCrossCheck: inconsistencies,
             };
+          }
+        } else if (functionName === 'getDmInbox') {
+          // Admin chat: one row per player who has a DM thread, newest first.
+          const [inboxRaw, players] = await Promise.all([state(env).get('DM_INBOX'), getPlayersList(env)]);
+          let inbox: Record<string, any> = {};
+          try { inbox = inboxRaw ? JSON.parse(inboxRaw) || {} : {}; } catch (_) { inbox = {}; }
+          const byLine = new Map<string, any>();
+          for (const p of players || []) if (p && p.lineUserId) byLine.set(p.lineUserId, p);
+          // Threads with only bot cards (settlement results, notices) stay out
+          // of the list until the player or an admin writes; they still open
+          // from the player list.
+          const threads = Object.values(inbox).filter((t: any) => t && t.human).map((t: any) => {
+            const p = byLine.get(t.userId);
+            return {
+              userId: t.userId,
+              shortId: p?.shortId || null,
+              displayName: p?.displayName || t.displayName || 'ผู้เล่น',
+              balance: typeof p?.balance === 'number' ? p.balance : null,
+              lastAt: t.lastAt || 0,
+              lastFrom: t.lastFrom || '',
+              lastText: t.lastText || '',
+              unread: Number(t.unread) || 0,
+            };
+          }).sort((a, b) => b.lastAt - a.lastAt);
+          result = { success: true, threads, unreadTotal: threads.reduce((n, t) => n + t.unread, 0) };
+        } else if (functionName === 'getDmThread') {
+          // Admin chat: messages of one player. Opening the thread marks it read
+          // unless the caller passes markRead === false (background refresh of
+          // a thread the admin is not looking at).
+          const userId = String(args[0] || '').trim();
+          if (!/^U[0-9a-f]{32}$/i.test(userId)) {
+            result = { success: false, error: 'รหัสผู้ใช้ LINE ไม่ถูกต้อง' };
+          } else {
+            const raw = await state(env).get(`DM_THREAD_${userId}`);
+            let messages: any[] = [];
+            try { messages = raw ? JSON.parse(raw) || [] : []; } catch (_) { messages = []; }
+            if (args[1] !== false) await state(env).dmMarkRead(userId);
+            result = { success: true, userId, messages };
+          }
+        } else if (functionName === 'adminSendDirectMessage') {
+          // Admin chat: send a plain text message to one player's LINE DM.
+          // Sent as a push, so it counts toward the LINE OA monthly quota. The
+          // text goes straight to the player and is never parsed as a command.
+          const userId = String(args[0] || '').trim();
+          const text = String(args[1] || '').trim();
+          if (!/^U[0-9a-f]{32}$/i.test(userId)) {
+            result = { success: false, error: 'รหัสผู้ใช้ LINE ไม่ถูกต้อง' };
+          } else if (!text) {
+            result = { success: false, error: 'กรุณาพิมพ์ข้อความ' };
+          } else if (text.length > 2000) {
+            result = { success: false, error: 'ข้อความยาวเกิน 2,000 ตัวอักษร' };
+          } else {
+            const sent = await pushToLine(userId, text, env, { skipChatLog: true, plainText: true });
+            if (sent.success) {
+              await recordDirectMessage(env, userId, { from: 'admin', type: 'text', text, by: sessionClaims?.sub || 'admin' });
+              await state(env).dmMarkRead(userId);
+              result = { success: true };
+            } else {
+              result = { success: false, error: sent.error || 'ส่งข้อความไม่สำเร็จ' };
+            }
+          }
+        } else if (functionName === 'getDmImage') {
+          // Admin chat: fetch an image a player sent (LINE keeps content for a
+          // limited time) and return it as a data URL for the console.
+          const messageId = String(args[0] || '').trim();
+          if (!/^\d{5,25}$/.test(messageId)) {
+            result = { success: false, error: 'รหัสรูปภาพไม่ถูกต้อง' };
+          } else {
+            const res = await fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
+              headers: { Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}` },
+            });
+            if (!res.ok) {
+              result = { success: false, error: res.status === 404 ? 'รูปนี้หมดอายุใน LINE แล้ว' : `โหลดรูปไม่สำเร็จ (HTTP ${res.status})` };
+            } else {
+              const buf = new Uint8Array(await res.arrayBuffer());
+              if (buf.length > 6 * 1024 * 1024) {
+                result = { success: false, error: 'รูปใหญ่เกินกว่าจะแสดงในหน้านี้' };
+              } else {
+                let bin = '';
+                for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+                const type = res.headers.get('content-type') || 'image/jpeg';
+                result = { success: true, dataUrl: `data:${type};base64,${btoa(bin)}` };
+              }
+            }
           }
         } else if (functionName === 'adminInspectOrder') {
           // Read-only single-order lookup, for investigating a disputed balance.

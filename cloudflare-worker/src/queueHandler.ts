@@ -71,11 +71,90 @@ async function isSenderLineAdmin(userId: string | undefined, env: Env): Promise<
   return false;
 }
 
+// ── Admin chat (console ↔ player DM) ──
+
+/**
+ * Reply tokens of DM events in progress, mapped to the player's LINE user id,
+ * so a bot reply sent with that token can be filed in the player's chat thread.
+ * Tokens are unique and single-use; entries are removed when the event ends.
+ */
+const DM_REPLY_TARGETS = new Map<string, string>();
+
+/** One-line summary of a LINE message object for the admin chat thread. */
+export function summarizeLineMessage(payload: any): { type: string; text: string } {
+  if (payload == null) return { type: 'text', text: '' };
+  if (typeof payload === 'string') return { type: 'text', text: payload };
+  if (payload.type === 'text') return { type: 'text', text: String(payload.text || '') };
+  if (payload.type === 'flex') return { type: 'card', text: String(payload.altText || 'การ์ด') };
+  if (payload.type === 'bubble' || payload.type === 'carousel') {
+    return { type: 'card', text: String(payload.header?.contents?.[0]?.text || payload.altText || 'การ์ด') };
+  }
+  return { type: String(payload.type || 'other'), text: String(payload.altText || payload.text || `[${payload.type || 'ข้อความ'}]`) };
+}
+
+/**
+ * File one message in a player's chat thread. Never throws: chat history is a
+ * convenience for the admin and must not hold up betting or money handling.
+ */
+export async function recordDirectMessage(
+  env: Env,
+  userId: string,
+  entry: { from: 'user' | 'admin' | 'bot'; type: string; text: string; messageId?: string; by?: string; at?: number },
+  displayName?: string | null
+): Promise<void> {
+  if (!userId || !userId.startsWith('U')) return;
+  try {
+    let name = displayName || null;
+    if (!name && entry.from === 'user') {
+      try {
+        const cached = await state(env).get(`USER_${userId}`);
+        if (cached) name = JSON.parse(cached).displayName || null;
+      } catch (_) {}
+    }
+    const at = entry.at || Date.now();
+    await state(env).dmAppend(userId, {
+      id: `${at}-${Math.random().toString(36).slice(2, 8)}`,
+      at,
+      from: entry.from,
+      type: entry.type,
+      text: String(entry.text || '').slice(0, 2000),
+      ...(entry.messageId ? { messageId: entry.messageId } : {}),
+      ...(entry.by ? { by: entry.by } : {}),
+    }, name);
+  } catch (err) {
+    console.warn('[recordDirectMessage] failed:', err);
+  }
+}
+
 /**
  * Cloudflare Worker Queue & Background Event Processor
  * Executes all order validation, atomic balance locking, and LINE API calls with sub-second latency.
  */
 export async function processLineEvent(event: LineEvent, env: Env, ctx?: ExecutionContext): Promise<void> {
+  const src = event.source || {};
+  const dmUser = !src.groupId && !src.roomId && src.userId ? src.userId : null;
+  if (dmUser && event.type === 'message') {
+    const m: any = event.message || {};
+    const entry =
+      m.type === 'text'
+        ? { type: 'text', text: String(m.text || '') }
+        : m.type === 'image'
+          ? { type: 'image', text: '[รูปภาพ]', messageId: m.id }
+          : m.type === 'sticker'
+            ? { type: 'sticker', text: '[สติกเกอร์]' }
+            : { type: String(m.type || 'other'), text: `[${m.type || 'ข้อความ'}]` };
+    const task = recordDirectMessage(env, dmUser, { from: 'user', at: Number(event.timestamp) || Date.now(), ...entry });
+    if (ctx) ctx.waitUntil(task); else await task;
+  }
+  if (dmUser && event.replyToken) DM_REPLY_TARGETS.set(event.replyToken, dmUser);
+  try {
+    await handleLineEvent(event, env, ctx);
+  } finally {
+    if (event.replyToken) DM_REPLY_TARGETS.delete(event.replyToken);
+  }
+}
+
+async function handleLineEvent(event: LineEvent, env: Env, ctx?: ExecutionContext): Promise<void> {
   const source = event.source || {};
   const userId = source.userId;
   const groupId = source.groupId || source.roomId || null;
@@ -3039,6 +3118,11 @@ async function replyToLine(replyToken: string, payload: any, env: Env, attachQui
       } catch (_) {}
       return false;
     }
+    const dmTarget = DM_REPLY_TARGETS.get(replyToken);
+    if (dmTarget) {
+      const sum = summarizeLineMessage(messageObj);
+      await recordDirectMessage(env, dmTarget, { from: 'bot', type: sum.type, text: sum.text });
+    }
     try {
       state(env).put('LAST_LINE_SUCCESS', JSON.stringify({
         action: 'replyToLine',
@@ -3061,10 +3145,14 @@ async function replyToLine(replyToken: string, payload: any, env: Env, attachQui
   }
 }
 
-export async function pushToLine(to: string, payload: any, env: Env): Promise<{ success: boolean; code?: number; error?: string }> {
+export async function pushToLine(to: string, payload: any, env: Env, opts: { skipChatLog?: boolean; plainText?: boolean } = {}): Promise<{ success: boolean; code?: number; error?: string }> {
   try {
     const isUserDM = !!(to && to.startsWith('U'));
-    const processed = isUserDM ? attachMainMenuQuickReply(payload) : stripQuickReply(payload);
+    // plainText: an admin typing to a player is sent as an ordinary chat
+    // bubble, not re-styled into a notice card.
+    const processed = opts.plainText
+      ? { type: 'text', text: typeof payload === 'string' ? payload : String(payload?.text || '') }
+      : isUserDM ? attachMainMenuQuickReply(payload) : stripQuickReply(payload);
     let messageObj: any;
     if (typeof processed === 'string') {
       messageObj = { type: 'text', text: processed };
@@ -3128,6 +3216,10 @@ export async function pushToLine(to: string, payload: any, env: Env): Promise<{ 
         code: res.status,
         error: `LINE API Error (HTTP ${res.status}): ${errBody}`,
       };
+    }
+    if (isUserDM && !opts.skipChatLog) {
+      const sum = summarizeLineMessage(messageObj);
+      await recordDirectMessage(env, to, { from: 'bot', type: sum.type, text: sum.text });
     }
     try {
       await state(env).put('LAST_LINE_SUCCESS', JSON.stringify({
