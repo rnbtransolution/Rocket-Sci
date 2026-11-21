@@ -31,6 +31,33 @@ import {
 /** Statuses of an order that is over: its number is free to be reused. */
 const FINISHED_ORDER_STATUSES = ['cancelled', 'settled', 'resolved', 'void'];
 
+/**
+ * A bare "ต 1234" naming an order that finished this recently is not read as
+ * an amount (see the explicit-order branch of the match commands).
+ */
+const RECENT_FINISHED_ORDER_MS = 24 * 60 * 60 * 1000;
+
+/** How long a "you were already told" marker for a group tap is kept. */
+const GROUP_NOTICE_ONCE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Should a refusal for a tap made in the LINE group be sent?
+ *
+ * From the group every private notice is a push to the player's DM, and each
+ * push uses the OA's monthly quota. Players tap a taken order's card again and
+ * again, and each tap used to push the same "already matched" card. Now the
+ * first tap for a given key is answered and repeats are silent. A DM tap is
+ * always answered: it uses the reply token, which is free.
+ */
+async function firstGroupNotice(env: Env, groupId: string | null, key: string): Promise<boolean> {
+  if (!groupId) return true;
+  try {
+    return await state(env).claimExclusive(`NOTICE:${key}`, { at: Date.now() }, GROUP_NOTICE_ONCE_MS);
+  } catch {
+    return true;
+  }
+}
+
 /** Order keywords that bet on the high side (ช่างไล่). Every other keyword is the low side. */
 const HIGH_SIDE_WORDS = ['ช่างไล่', 'ชล', 'ล', 'ลง', 'สูง', 'ไล่'];
 
@@ -376,6 +403,9 @@ async function handleLineEvent(event: LineEvent, env: Env, ctx?: ExecutionContex
         const cancelFlex = generateOrderCancelFlex(targetNo, cancelRes.amount || 0, cancelRes.balance ?? profile.balance);
         await deliverPrivateNotice(userId, replyToken, groupId, cancelFlex, env, profile.displayName, ctx);
       } else {
+        // Tapping ยกเลิก on a locked order again and again: tell them once.
+        if (cancelRes.message !== LEDGER_UNAVAILABLE_TEXT
+            && !(await firstGroupNotice(env, groupId, `cancel:${targetNo}:${profile.shortId}`))) return;
         const cancelErrFlex = generateNoticeFlex('ยกเลิกไม่ได้', cancelRes.message, 'error');
         await deliverPrivateNotice(userId, replyToken, groupId, cancelErrFlex, env, profile.displayName, ctx);
       }
@@ -424,9 +454,27 @@ async function handleLineEvent(event: LineEvent, env: Env, ctx?: ExecutionContex
           // and finished orders are kept for 30 days, so "ต 1000" (take 1000)
           // used to hit an old settled #1000 and answer "ตัดสินผลไปแล้ว".
           const exists = await getOrderRecord(numStr, env);
+          const finishedAt = exists
+            ? Number((exists as any).settledAt || (exists as any).refundedAt || (exists as any).cancelledAt
+                || (exists as any).updatedAt || exists.createdAt) || 0
+            : 0;
           if (exists && !FINISHED_ORDER_STATUSES.includes(String(exists.status))) {
             targetOrderNo = numStr;
             matchAmt = undefined;
+          } else if (exists && Date.now() - finishedAt < RECENT_FINISHED_ORDER_MS) {
+            // Ambiguous: most likely a tap on an older board card for #numStr,
+            // which used to send a bare "ต 1234". Taking it as 1234 pt would
+            // match a different order with real money, so ask instead.
+            if (await firstGroupNotice(env, groupId, `ambiguous:${numStr}:${Number(exists.createdAt) || 0}:${profile.shortId}`)) {
+              const askFlex = generateNoticeFlex(
+                `แผล #${numStr} ปิดไปแล้ว`,
+                `ถ้าต้องการรับดวล ${parseInt(numStr, 10).toLocaleString()} แต้มจากแผลล่าสุด พิมพ์ "ต ${numStr} แต้ม"`,
+                'warning',
+                'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่าง'
+              );
+              await deliverPrivateNotice(userId, replyToken, groupId, askFlex, env, profile.displayName, ctx);
+            }
+            return;
           } else {
             // Treat as amount for latest open bet
             targetOrderNo = undefined;
@@ -968,6 +1016,8 @@ async function handleMatchOrder(
   const roundStr = await state(env).get('ACTIVE_ROUND');
   const round = roundStr ? (JSON.parse(roundStr) as RocketRound) : null;
   if (round && round.status !== 'ACTIVE') {
+    // Once per player per round: after Final Call the whole board gets tapped.
+    if (!(await firstGroupNotice(env, groupId, `closed:${round.roundId || ''}:${profile.shortId}`))) return;
     const closedFlex = generateNoticeFlex(
       'ปิดรับดวลแล้ว',
       'รอบนี้ล็อกระหว่างการแข่งขัน รอเปิดรอบถัดไป',
@@ -997,7 +1047,15 @@ async function handleMatchOrder(
   // cancelled with both sides refunded if the admin never sends one. So it must
   // not be rejected here the way a cancelled order is.
   const isPreQuoteHeld = order.status === 'pending_hold' && order.betType === 'pre_quote';
+  // One refusal per player per order (the number is reused later, so the
+  // order's createdAt is part of the key).
+  const orderNoticeKey = `order:${resolvedNo}:${Number(order.createdAt) || 0}:${profile.shortId}`;
   if (order.status !== 'pending_match' && !isPreQuoteHeld) {
+    // The two players of a matched order already have the match card; a
+    // second tap from either of them gets no reply at all.
+    const isMatched = order.status === 'matched' || order.status === 'matched_paired';
+    if (isMatched && (order.matcherId === profile.shortId || order.creatorId === profile.shortId)) return;
+    if (!(await firstGroupNotice(env, groupId, orderNoticeKey))) return;
     // Each status gets its own explanation. This used to be a two-way ternary
     // that called everything which was not `matched` "cancelled" — so an order
     // merely WAITING for the rocket price to be announced was reported as
@@ -1020,6 +1078,7 @@ async function handleMatchOrder(
   }
 
   if (order.creatorId === profile.shortId) {
+    if (!(await firstGroupNotice(env, groupId, orderNoticeKey))) return;
     await deliverPrivateNotice(userId, replyToken, groupId, generateMatchMismatchFlex(resolvedNo, 'รับแผลของตัวเองไม่ได้', 'เลือกแผลของผู้เล่นอื่น'), env, profile.displayName, ctx);
     return;
   }
@@ -1132,6 +1191,12 @@ async function handleMatchOrder(
     let msg: string;
     let hint = 'พิมพ์ "กระดานดวล" เพื่อดูแผลที่ยังว่าง';
     const curStatus = res.current?.status;
+    // A double tap: the first tap matched this order a moment ago, so the
+    // second one finds it taken by this same player. Nothing to tell them.
+    if (res.reason === 'order_status' && res.current?.matcherId === profile.shortId) return;
+    // The order is gone or was never takeable: same once-per-order rule as above.
+    if (['order_status', 'own_order', 'order_field'].includes(String(res.reason))
+        && !(await firstGroupNotice(env, groupId, orderNoticeKey))) return;
     if (res.reason === 'round_closed') {
       msg = 'ปิดรับดวลแล้ว รอบนี้ล็อกระหว่างการแข่งขัน';
     } else if (res.reason === 'round_changed') {
