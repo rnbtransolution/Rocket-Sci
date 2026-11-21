@@ -300,9 +300,9 @@ export class StateStore {
     if (stub) {
       try {
         const claimed = await stub.claimExclusive(claimKey, payloadJson, ttlMs);
-        // Webhook-dedup claims are high-volume and short-lived; they are not
-        // worth a KV write per LINE message.
-        if (claimed && !claimKey.startsWith('EVENT:')) {
+        // Webhook-dedup claims and once-only group notice markers are
+        // high-volume and short-lived; they are not worth a KV write each.
+        if (claimed && !claimKey.startsWith('EVENT:') && !claimKey.startsWith('NOTICE:')) {
           const now = Date.now();
           const exp = ttlMs > 0 ? now + ttlMs : 0;
           StateStore.fallbackClaims.set(claimKey, { v: payloadJson, exp });

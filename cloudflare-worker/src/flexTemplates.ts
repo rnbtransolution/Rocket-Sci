@@ -612,7 +612,9 @@ export function generatePendingBoardFlex(pendingList: Order[]): any {
           cornerRadius: 'md',
           paddingTop: '8px',
           paddingBottom: '8px',
-          action: { type: 'message', label: `ต ${b.orderNumber}`, text: `ต ${b.orderNumber}` },
+          // "#" marks an order number: a bare "ต 1234" is read as 1234 pt once
+          // order #1234 is over, which would take a different order.
+          action: { type: 'message', label: `ต ${b.orderNumber}`, text: `ต #${b.orderNumber}` },
           contents: [text('รับดวล', { size: 'sm', color: '#FFFFFF', weight: 'bold', align: 'center', wrap: false, adjustMode: 'shrink-to-fit' })],
         },
       ],
