@@ -128,7 +128,7 @@ function extractSender(data: any): SlipSender | undefined {
 async function downloadSlipImage(messageId: string, env: Env): Promise<{ base64: string; mimeType: string } | null> {
   if (!env.LINE_CHANNEL_ACCESS_TOKEN) return null;
 
-  const metaRes = await fetch(`https://api.line.me/v2/bot/message/${messageId}/content`, {
+  const metaRes = await fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
     headers: { Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}` },
   }).catch(() => null);
   if (!metaRes || !metaRes.ok) return null;
@@ -150,7 +150,12 @@ async function downloadSlipImage(messageId: string, env: Env): Promise<{ base64:
  * Read a slip image and return what it proves, or why it cannot be trusted.
  * Never throws — every failure mode is returned so the caller can escalate.
  */
-export async function scanSlipImage(messageId: string, env: Env): Promise<SlipScanResult> {
+export async function scanSlipImage(
+  messageId: string,
+  env: Env,
+  /** When the slip reached the bot; an admin rescan judges the age from this, not from now. */
+  receivedAt: number = Date.now()
+): Promise<SlipScanResult> {
   if (!env.SLIP_API_KEY) {
     return {
       ok: false,
@@ -283,7 +288,7 @@ export async function scanSlipImage(messageId: string, env: Env): Promise<SlipSc
   if (dateTime) {
     const slipDate = new Date(dateTime);
     if (!Number.isNaN(slipDate.getTime())) {
-      const ageHours = (Date.now() - slipDate.getTime()) / (60 * 60 * 1000);
+      const ageHours = (receivedAt - slipDate.getTime()) / (60 * 60 * 1000);
       if (ageHours > SLIP_MAX_AGE_HOURS) {
         return {
           ok: false,

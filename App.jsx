@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { CorrectionPanel, PayoutPanel } from './MoneyPanels.jsx';
 import ChatPanel from './ChatPanel.jsx';
+import SlipReviewModal from './SlipReviewModal.jsx';
 
 const INITIAL_PLAYERS = [];
 
@@ -1078,13 +1079,21 @@ export default function App() {
   };
 
   // Admin Manual Slip Reviews
-  const handleAdminApproveReview = (txId) => {
+  const handleAdminApproveReview = (txId, typedAmount) => {
     const targetTx = transactions.find(t => t.id === txId);
     if (!targetTx || targetTx.status !== 'escalated') {
       addToast('รายการนี้ถูกดำเนินการไปแล้วหรือไม่อยู่ในสถานะรอตรวจสอบ', 'warning');
       return;
     }
-    const approvedAmount = (targetTx.actualAmount && targetTx.actualAmount > 0) ? targetTx.actualAmount : (targetTx.requestedAmount || 0);
+    const isWd = txId.startsWith('WD') || targetTx.type === 'withdraw';
+    const hasTyped = !isWd && typeof typedAmount === 'number' && typedAmount > 0;
+    const approvedAmount = hasTyped ? typedAmount : (Number(targetTx.requestedAmount) || 0);
+    // A deposit with no amount on record cannot be approved blind: open the
+    // slip so the admin can rescan it or type the amount they checked.
+    if (!isWd && !(approvedAmount > 0)) {
+      setTxDetailModal(targetTx);
+      return;
+    }
 
     // OPTIMISTIC UPDATE: Update React State Instantly (0ms response time for admin!)
     setTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'success', actualAmount: approvedAmount, reviewReason: 'Manually approved by admin' } : t));
@@ -1094,8 +1103,9 @@ export default function App() {
     addToast(txId.startsWith('WD') ? `แอดมินอนุมัติคำขอถอนเงินยอด ${targetTx.requestedAmount} THB โอนเงินแล้วเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)` : `แอดมินอนุมัติเครดิตเติมเงินยอด ${approvedAmount} THB แมนนวลเรียบร้อย (ส่งข้อความ LINE บอกผู้เล่นแล้ว)`, 'success');
 
     // Run backend via Cloudflare Worker Edge API
-    runBackendFunction('adminApproveTransaction', [txId])
-      .then(() => {
+    runBackendFunction('adminApproveTransaction', hasTyped ? [txId, typedAmount] : [txId])
+      .then((res) => {
+        if (res && res.success === false) throw new Error(res.error || 'อนุมัติไม่สำเร็จ');
         if (typeof window !== 'undefined' && typeof window.forceSyncFreshData === 'function') {
           window.forceSyncFreshData();
         }
@@ -1256,102 +1266,6 @@ export default function App() {
     }
   };
 
-  // Render dynamic visual bank slip card in Light Mode
-  const renderSlipCard = (presetId, isCustom, custAmt) => {
-    let p;
-    const effectiveAmt = custAmt || 100;
-    if (isCustom || !presetId) {
-      p = {
-        bankName: 'ธนาคารไทยพาณิชย์ (SCB)',
-        amount: effectiveAmt,
-        actualAmount: effectiveAmt,
-        refCode: 'CUSTX' + effectiveAmt + '9982',
-        senderName: 'คุณ (You)',
-        bankLogo: '',
-        gradient: 'from-purple-50 to-purple-100 border-purple-200 text-purple-950',
-        isValidQR: true
-      };
-    } else {
-      p = SLIP_PRESETS.find(pr => pr.id === presetId) || {
-        bankName: 'ธนาคารกสิกรไทย (KBANK)',
-        amount: effectiveAmt,
-        actualAmount: effectiveAmt,
-        refCode: 'KBNK' + effectiveAmt + '8827',
-        senderName: 'คุณ (You)',
-        bankLogo: '',
-        gradient: 'from-emerald-50 to-emerald-100 border-emerald-200 text-emerald-950',
-        isValidQR: true
-      };
-    }
-
-    return (
-      <div className={`w-full max-w-sm rounded-2xl bg-gradient-to-br ${p.gradient} p-4 border border-slate-200 text-slate-800 font-sans flex flex-col justify-between shadow-sm relative overflow-hidden shrink-0`}>
-        <div className="absolute -top-12 -right-12 w-32 h-32 rounded-full bg-slate-900/5 pointer-events-none"></div>
-        
-        <div className="flex items-center justify-between border-b border-slate-200/80 pb-2 mb-3">
-          <div className="flex items-center gap-1.5">
-            <span className="text-lg">{p.bankLogo}</span>
-            <div className="flex flex-col">
-              <span className="text-[11px] font-extrabold tracking-wide uppercase text-slate-800">e-Slip Verified</span>
-              <span className="text-[9px] text-slate-500">{p.bankName.split(' ')[0]} Transfer</span>
-            </div>
-          </div>
-          <span className="text-[9.5px] font-mono text-slate-500">{new Date().toLocaleDateString('th-TH')}</span>
-        </div>
-
-        <div className="space-y-2 text-xs">
-          <div className="flex justify-between items-center bg-white px-2 py-1.5 rounded-lg border border-slate-200/50">
-            <span className="text-slate-500 text-[10px]">จาก (Sender):</span>
-            <span className="font-bold text-[11px] text-slate-800">{p.senderName}</span>
-          </div>
-
-          <div className="flex justify-between items-center bg-white px-2 py-1.5 rounded-lg border border-slate-200/50">
-            <span className="text-slate-500 text-[10px]">ไปยัง (Receiver):</span>
-            <span className="font-bold text-[11px] text-sky-700">บจก. ร็อคเก็ต ไซเอนซ์</span>
-          </div>
-
-          <div className="text-center py-2 bg-slate-200/40 rounded-xl my-2 border border-slate-200">
-            <span className="text-[9px] text-slate-500 block">จำนวนเงินโอนจริง (Amount)</span>
-            <span className="text-2xl font-black tracking-tight text-slate-800 font-mono">
-              {p.actualAmount || p.amount}.00 <span className="text-xs font-bold text-slate-500">THB</span>
-            </span>
-          </div>
-
-          <div className="flex flex-col gap-0.5 text-[9.5px] text-slate-500 font-mono">
-            <div>รหัสอ้างอิง: {p.refCode}</div>
-            <div className="flex items-center justify-between mt-1">
-              <span>สถานะ QR: {p.isValidQR ? 'มีรหัสตรวจพบ' : 'ไม่มี/เสียหาย'}</span>
-              <span className="text-[8px] px-1.5 py-0.5 bg-slate-200/60 rounded text-slate-600 font-bold">API LINKED</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-3 flex justify-between items-center border-t border-slate-200 pt-2 text-[9px] text-slate-500">
-          <span className="flex items-center gap-0.5 font-bold">
-            <ShieldCheck size={11} className="text-emerald-600" />
-            ตรวจสอบอัตโนมัติ 1:1
-          </span>
-          <div className="w-8 h-8 bg-white p-0.5 rounded flex items-center justify-center shrink-0 border border-slate-200">
-            {p.isValidQR ? (
-              <svg viewBox="0 0 100 100" className="w-full h-full text-slate-800" fill="currentColor">
-                <rect width="100" height="100" fill="white"/>
-                <rect x="10" y="10" width="30" height="30" fill="currentColor"/>
-                <rect x="60" y="10" width="30" height="30" fill="currentColor"/>
-                <rect x="10" y="60" width="30" height="30" fill="currentColor"/>
-                <rect x="65" y="65" width="20" height="20" fill="currentColor"/>
-                <rect x="45" y="45" width="10" height="10" fill="currentColor"/>
-                <rect x="20" y="20" width="10" height="10" fill="white"/>
-                <rect x="70" y="20" width="10" height="10" fill="white"/>
-                <rect x="20" y="70" width="10" height="10" fill="white"/>
-              </svg>
-            ) : (
-              <div className="text-[7.5px] text-rose-500 font-black font-sans text-center leading-none">BLURRY</div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   // Security Checks
   // Poll the admin chat inbox: every 4 s on the chat tab, every 10 s elsewhere.
@@ -4124,131 +4038,21 @@ export default function App() {
           )}
 
           {/* ── TRANSACTION DETAIL & SLIP PREVIEW MODAL ── */}
-          {txDetailModal && (() => {
-            const tx = txDetailModal;
-            const isWithdrawal = tx.id.startsWith('WD') || 
-              (tx.slipRef && tx.slipRef.toString().toUpperCase().includes('WD')) || 
-              (tx.reviewReason && tx.reviewReason.toString().toLowerCase().includes('withdraw'));
-
-            return (
-              <div 
-                className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in font-sans"
-                onClick={e => { if (e.target === e.currentTarget) setTxDetailModal(null); }}
-              >
-                <div className="bg-white rounded-lg w-full max-w-2xl overflow-hidden border border-[#D9DDE2] max-h-[90vh] flex flex-col">
-                  {/* Modal Header */}
-                  <div 
-                    className={`px-6 py-4 flex items-center justify-between text-white ${isWithdrawal ? 'bg-[#B42318] bg-[#F7F8F9]' : 'bg-[#1E4DB7] bg-[#F7F8F9]'}`}
-                    style={{ backgroundColor: isWithdrawal ? '#B4400F' : '#0B6B3F', color: '#ffffff' }}
-                  >
-                    <div>
-                      <h3 className="font-semibold text-base flex items-center gap-2" style={{ color: '#ffffff' }}>
-                        {isWithdrawal ? 'รายละเอียดการจ่ายเงิน' : 'รายละเอียดการแจ้งสลิปเติมเงิน'}
-                        <span className="bg-white px-2 py-0.5 rounded font-mono text-xs" style={{ color: '#ffffff' }}>{tx.id}</span>
-                      </h3>
-                      <p className="text-xs mt-0.5" style={{ color: 'rgba(255, 255, 255, 0.9)' }}>ผู้เล่น: {tx.playerName} ({tx.playerId})</p>
-                    </div>
-                    <button 
-                      onClick={() => setTxDetailModal(null)}
-                      className="w-8 h-8 rounded-full bg-white hover:bg-white flex items-center justify-center font-bold transition-all"
-                      style={{ color: '#ffffff' }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-
-                  {/* Modal Body */}
-                  <div className="p-6 overflow-y-auto space-y-5 flex-1 text-xs text-[#16191D]">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Left: e-Slip Visual */}
-                      <div className="flex justify-center shrink-0">
-                        {isWithdrawal ? (
-                          <div className="w-full max-w-xs h-[240px] bg-[#F7F8F9] border border-[#E7B4AE] rounded-lg p-4 flex flex-col items-center justify-between text-center select-none">
-                                                        <div className="space-y-1">
-                              <span className="text-[12px] text-[#B42318] font-semibold bg-[#F6D7D3] px-2 py-0.5 rounded-md">จ่ายเงิน</span>
-                              <h4 className="text-2xl font-semibold text-[#B42318] font-mono">-{tx.requestedAmount}.00 THB</h4>
-                            </div>
-                            <div className="w-full bg-white border border-[#E7B4AE] rounded-lg p-2 text-[12px] text-[#B42318] font-bold leading-normal font-sans shadow-2xs">
-                              {tx.reviewReason.replace('Withdrawal request to ', '')}
-                            </div>
-                          </div>
-                        ) : (
-                          renderSlipCard(tx.presetId, true, (tx.requestedAmount && tx.requestedAmount > 0) ? tx.requestedAmount : (tx.actualAmount || 100))
-                        )}
-                      </div>
-
-                      {/* Right: Key Info Grid */}
-                      <div className="space-y-3 flex flex-col justify-between">
-                        <div className="bg-[#F7F8F9] p-3.5 rounded-lg border border-[#D9DDE2] space-y-2">
-                          <div className="flex justify-between items-center border-b border-[#D9DDE2] pb-2">
-                            <span className="text-[#5B636E] font-bold">สถานะทำรายการ:</span>
-                            <span>
-                              {tx.status === 'success' && <span className="badge-success px-2 py-0.5 rounded-lg font-bold">อนุมัติเรียบร้อย</span>}
-                              {tx.status === 'escalated' && <span className="badge-warning px-2 py-0.5 rounded-lg font-bold">รออนุมัติแมนนวล</span>}
-                              {tx.status === 'rejected' && <span className="badge-high px-2 py-0.5 rounded-lg font-bold">✕ ปฏิเสธบิล</span>}
-                            </span>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-2 font-mono pt-1">
-                            <div className="bg-white p-2.5 rounded-lg border border-[#D9DDE2]">
-                              <span className="text-[12px] text-[#8A929D] block font-sans font-bold">ยอดสั่งเติม:</span>
-                              <span className="text-base font-semibold text-[#16191D]">{tx.requestedAmount}.00 THB</span>
-                            </div>
-                            <div className="bg-white p-2.5 rounded-lg border border-[#D9DDE2]">
-                              <span className="text-[12px] text-[#8A929D] block font-sans font-bold">ยอดสแกนจริง:</span>
-                              <span className="text-base font-semibold text-[#1B6E43]">{tx.actualAmount}.00 THB</span>
-                            </div>
-                          </div>
-
-                          <div className="space-y-1 font-mono text-[12px] pt-1">
-                            <div><span className="text-[#8A929D] font-sans">เลขอ้างอิง Ref:</span> <strong className="text-[#16191D]">{tx.slipRef || 'N/A'}</strong></div>
-                            <div><span className="text-[#8A929D] font-sans">เวลาทำรายการ:</span> <strong className="text-[#16191D]">{tx.timestamp}</strong></div>
-                            <div><span className="text-[#8A929D] font-sans">สาเหตุ / หมายเหตุ:</span> <strong className="text-[#B42318]">{tx.reviewReason}</strong></div>
-                          </div>
-                        </div>
-
-                        {/* OCR Logs */}
-                        {tx.logs && tx.logs.length > 0 && (
-                          <div className="p-3 bg-[#16191D] text-slate-200 rounded-lg text-[12px] font-mono space-y-1 max-h-[100px] overflow-y-auto">
-                            <span className="text-[#1B6E43] font-bold block font-sans">Scan Analysis Logs:</span>
-                            {tx.logs.map((l, i) => (
-                              <div key={i}>{l}</div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Modal Footer */}
-                  <div className="px-6 py-3 bg-[#F7F8F9] border-t border-[#D9DDE2] flex justify-between items-center gap-3">
-                    <button 
-                      onClick={() => setTxDetailModal(null)}
-                      className="px-4 py-2 border border-[#C3C9D1] rounded-lg text-[#3B424C] font-bold text-xs hover:bg-[#EEF0F2] transition-all"
-                    >
-                      ปิดหน้าต่าง
-                    </button>
-                    {tx.status === 'escalated' && (
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={() => { handleAdminRejectReview(tx.id, isWithdrawal ? 'ปฏิเสธคำขอและส่งแต้มคืนเข้าบัญชี' : 'ปฏิเสธเนื่องจากไม่มียอดโอนจริง'); setTxDetailModal(null); }}
-                          className="px-4 py-2 bg-[#FBEAE8] border border-[#E7B4AE] hover:bg-[#B42318] text-[#B42318] hover:text-white rounded-lg text-xs font-bold transition-all"
-                        >
-                          ✕ ปฏิเสธรายการ
-                        </button>
-                        <button 
-                          onClick={() => { handleAdminApproveReview(tx.id); setTxDetailModal(null); }}
-                          className="px-5 py-2 bg-[#1B6E43] hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition-all"
-                        >
-                          ยืนยันอนุมัติ ({isWithdrawal ? tx.requestedAmount : (tx.actualAmount || tx.requestedAmount)} THB)
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
+          {txDetailModal && (
+            <SlipReviewModal
+              key={txDetailModal.id}
+              tx={txDetailModal}
+              run={runBackendFunction}
+              onClose={() => setTxDetailModal(null)}
+              onApprove={(id, amount) => { handleAdminApproveReview(id, amount); setTxDetailModal(null); }}
+              onReject={(id, reason) => { handleAdminRejectReview(id, reason); setTxDetailModal(null); }}
+              onRescanned={(res) => {
+                setTxDetailModal(null);
+                addToast(`ตรวจสลิปผ่าน เติม ${Number(res.amount).toLocaleString()} pt แล้ว (เลขอ้างอิง ${res.refCode})`, 'success');
+                if (typeof window !== 'undefined' && typeof window.forceSyncFreshData === 'function') window.forceSyncFreshData();
+              }}
+            />
+          )}
 
           </div>
         </main>

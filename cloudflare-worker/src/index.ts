@@ -3,6 +3,7 @@ import { Env, LineWebhookPayload, QueueMessage, LineEvent, PlayerProfile, Order,
 import { verifyLineSignature } from './signature.js';
 import { state, type TxnSpec } from './state.js';
 import { getPaymentBank, setPaymentBank } from './paymentBank.js';
+import { scanSlipImage } from './slipScanner.js';
 import {
   setAdminPassword,
   verifyAdminLogin,
@@ -1188,7 +1189,25 @@ if (
             result = { success: false, error: 'Transaction not found', txId };
           } else {
             const isWithdrawal = String(txId).startsWith('WD') || targetTx.type === 'withdraw';
-            const requested = Number(targetTx.requestedAmount) || 0;
+            const stored = Number(targetTx.requestedAmount) || 0;
+            // The admin may type the amount for a deposit whose slip the
+            // scanner could not read (stored amount 0, or a wrong guess). A
+            // slip the scanner verified keeps its proven amount.
+            const typed = Number(args[1]);
+            const hasTyped = !isWithdrawal && args[1] !== undefined && args[1] !== null && args[1] !== '';
+            const verified = (targetTx as any).slipVerified === true && stored > 0;
+            let amountError = '';
+            if (hasTyped && (!Number.isFinite(typed) || typed <= 0 || typed > 1_000_000 || Math.round(typed * 100) !== typed * 100)) {
+              amountError = 'ยอดที่ระบุไม่ถูกต้อง';
+            } else if (hasTyped && verified && typed !== stored) {
+              amountError = `สลิปนี้ตรวจแล้วว่าโอน ${stored.toLocaleString()} บาท แก้ยอดไม่ได้`;
+            } else if (!isWithdrawal && !hasTyped && !(stored > 0)) {
+              amountError = 'รายการนี้ยังไม่มียอด กรุณากรอกยอดที่โอนจริงก่อนอนุมัติ';
+            }
+            const requested = hasTyped ? typed : stored;
+            if (amountError) {
+              result = { success: false, error: amountError, txId };
+            } else {
             // Status flip and credit in ONE atomic step, conditional on the
             // stored status. Two approve clicks (or two admins) used to both
             // pass the "already processed" check and credit the deposit twice.
@@ -1203,15 +1222,21 @@ if (
                   ttlMs: 90 * 24 * 60 * 60 * 1000,
                 }]
               : undefined;
+            const typedCredit = hasTyped && requested !== stored;
             const res = await ledger(env, {
               ...(slipClaim ? { claims: slipClaim } : {}),
               transactions: [{
                 id: txId,
                 mustExist: true,
                 expectStatusNotIn: ['success', 'rejected'],
-                patch: { status: 'success', actualAmount: requested },
-                creditRequested: !isWithdrawal && requested > 0,
+                patch: typedCredit
+                  ? { status: 'success', requestedAmount: requested, actualAmount: requested, reviewReason: `Manually approved: ${requested} THB entered by admin` }
+                  : { status: 'success', actualAmount: requested },
+                creditRequested: !typedCredit && !isWithdrawal && requested > 0,
               }],
+              ...(typedCredit
+                ? { balances: [{ shortId: targetTx.playerId, lineUserId: targetTx.lineUserId, delta: requested }] }
+                : {}),
             }, ctx);
 
             if (!res.ok) {
@@ -1242,6 +1267,73 @@ if (
                   ? { warning: 'ยอดฝากในรายการนี้เป็น 0 — ไม่ได้เพิ่มเครดิต กรุณาปรับยอดผู้เล่นด้วยตนเอง' }
                   : {}),
               };
+            }
+            }
+          }
+        } else if (functionName === 'adminRescanSlip') {
+          // Run a pending deposit's slip image through the slip scanner again
+          // (e.g. the first scan failed on an outage). A verified slip credits
+          // exactly what it proves, under the same SLIP:<ref> claim as the
+          // automatic path, so it can never be credited twice.
+          const txId = String(args[0] || '');
+          const txs = await getTransactionsList(env);
+          const targetTx: any = txs.find(t => t.id === txId);
+          const isWithdrawal = !targetTx || String(txId).startsWith('WD') || targetTx.type === 'withdraw';
+          const messageId = targetTx
+            ? String(targetTx.messageId || (/^\d{10,25}$/.test(String(targetTx.slipRef || '')) ? targetTx.slipRef : ''))
+            : '';
+          if (!targetTx) {
+            result = { success: false, error: 'ไม่พบรายการนี้', txId };
+          } else if (isWithdrawal) {
+            result = { success: false, error: 'รายการถอนเงินไม่มีสลิปให้ตรวจ', txId };
+          } else if (targetTx.status === 'success' || targetTx.status === 'rejected') {
+            result = { success: false, error: 'รายการนี้ได้รับการดำเนินการไปแล้ว', txId };
+          } else if (!messageId) {
+            result = { success: false, error: 'รายการนี้ไม่มีรูปสลิปให้ตรวจซ้ำ กรุณาตรวจยอดเองแล้วกรอกยอด', txId };
+          } else {
+            const scan = await scanSlipImage(messageId, env, Number(targetTx.createdAt) || Date.now());
+            if (!scan.ok) {
+              result = { success: false, error: `ตรวจสลิปไม่ผ่าน: ${scan.detail}`, txId };
+            } else {
+              const res = await ledger(env, {
+                claims: [{
+                  key: `SLIP:${scan.refCode}`,
+                  payload: { refCode: scan.refCode, amount: scan.amount, playerId: targetTx.playerId, lineUserId: targetTx.lineUserId, txId, messageId, at: Date.now() },
+                  ttlMs: 90 * 24 * 60 * 60 * 1000,
+                }],
+                transactions: [{
+                  id: txId,
+                  mustExist: true,
+                  expectStatusNotIn: ['success', 'rejected'],
+                  patch: {
+                    status: 'success',
+                    requestedAmount: scan.amount,
+                    actualAmount: scan.amount,
+                    slipRef: scan.refCode,
+                    slipVerified: true,
+                    messageId,
+                    reviewReason: `Verified by admin rescan. Ref: ${scan.refCode}`,
+                  },
+                }],
+                balances: [{ shortId: targetTx.playerId, lineUserId: targetTx.lineUserId, delta: scan.amount }],
+              }, ctx);
+              if (!res.ok) {
+                result = res.reason === 'claimed'
+                  ? { success: false, duplicate: true, error: `สลิปนี้ (เลขอ้างอิง ${scan.refCode}) ถูกเติมเครดิตไปแล้ว ไม่เติมซ้ำ กรุณากดปฏิเสธรายการนี้`, txId }
+                  : res.reason === 'tx_status'
+                  ? { success: false, error: 'รายการนี้ได้รับการดำเนินการไปแล้ว', txId }
+                  : { success: false, error: `เติมเครดิตไม่สำเร็จ (${res.reason}) ไม่มีการเปลี่ยนแปลงยอดเงิน`, txId };
+              } else {
+                const tx = res.transactions[txId] || targetTx;
+                const credited = res.balances[0];
+                mirrorTransactionToSheets(tx, env, ctx);
+                const line = credited?.lineUserId || (String(tx.lineUserId || '').startsWith('U') ? tx.lineUserId : '');
+                if (line && line.startsWith('U')) {
+                  const text = generateNoticeFlex('เติมเครดิตแล้ว', `ฝาก ${scan.amount.toLocaleString()} บาท\nยอดคงเหลือ ${(credited?.after ?? 0).toLocaleString()} pt`, 'in');
+                  ctx?.waitUntil(pushToLine(line, text, env).catch(e => console.error(e)));
+                }
+                result = { success: true, txId, amount: scan.amount, refCode: scan.refCode, ...(credited ? { balance: credited.after } : {}) };
+              }
             }
           }
         } else if (functionName === 'adminRejectTransaction') {

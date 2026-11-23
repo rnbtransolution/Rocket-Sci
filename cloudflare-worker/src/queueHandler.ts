@@ -1377,6 +1377,7 @@ async function handleSlipUpload(
       status: 'escalated',
       reviewReason: detail,
       ...(verifiedAmount > 0 && slipRef ? { slipVerified: true } : {}),
+      ...(messageId ? { messageId } : {}),
       timestamp: nowStr,
       type: 'deposit',
       createdAt: Date.now(),
