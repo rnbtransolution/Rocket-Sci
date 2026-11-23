@@ -184,7 +184,23 @@ check('the same slip cannot be approved a second time', a2.body.success === fals
 check('  and that entry stays open for the admin to reject', (d.transactions || []).find((t) => t.id === 'TXVERIFIED2')?.status === 'escalated');
 const a3 = await call('adminApproveTransaction', ['TXUNREAD']);
 d = await dash();
-check('an unread slip (amount 0) still credits nothing and says so', a3.body.success === true && Boolean(a3.body.warning) && bal(d, P2) === 5700, JSON.stringify(a3.body).slice(0, 160));
+check('an unread slip (amount 0) cannot be approved without an amount', a3.body.success === false && bal(d, P2) === 5700 && (d.transactions || []).find((t) => t.id === 'TXUNREAD')?.status === 'escalated', JSON.stringify(a3.body).slice(0, 160));
+const a4 = await call('adminApproveTransaction', ['TXVERIFIED2', 999]);
+d = await dash();
+check('a verified slip refuses a different typed amount', a4.body.success === false && bal(d, P2) === 5700, JSON.stringify(a4.body).slice(0, 160));
+const a5 = await call('adminApproveTransaction', ['TXUNREAD', 'abc']);
+check('a non-numeric typed amount is refused', a5.body.success === false);
+const a6 = await call('adminApproveTransaction', ['TXUNREAD', 500]);
+d = await dash();
+const unread = (d.transactions || []).find((t) => t.id === 'TXUNREAD');
+check('the admin-typed amount (500) is credited once and recorded', a6.body.success === true && bal(d, P2) === 6200 && unread?.status === 'success' && unread?.requestedAmount === 500 && unread?.actualAmount === 500, `${JSON.stringify(a6.body).slice(0, 120)} P2 ${bal(d, P2)}`);
+const a7 = await call('adminApproveTransaction', ['TXUNREAD', 500]);
+d = await dash();
+check('  and a second click does not credit again', a7.body.success === false && bal(d, P2) === 6200);
+const r1 = await call('adminRescanSlip', ['TXVERIFIED2']);
+check('rescan of an entry with no slip image is refused', r1.body.success === false, JSON.stringify(r1.body).slice(0, 160));
+const r2 = await call('adminRescanSlip', ['TXUNREAD']);
+check('rescan of a finished entry is refused', r2.body.success === false && bal(await dash(), P2) === 6200, JSON.stringify(r2.body).slice(0, 160));
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed\n`);
 await mf.dispose();

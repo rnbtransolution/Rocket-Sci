@@ -204,6 +204,8 @@ export interface Transaction {
    * takes the claim on `slipRef` so the same slip cannot be credited again.
    */
   slipVerified?: boolean;
+  /** LINE message id of the slip image, so the console can show it and rescan it. */
+  messageId?: string;
   timestamp: string;
   type: 'deposit' | 'withdraw' | 'transfer';
   createdAt: number;
