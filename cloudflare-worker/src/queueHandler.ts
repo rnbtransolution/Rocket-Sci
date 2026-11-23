@@ -330,6 +330,19 @@ async function handleLineEvent(event: LineEvent, env: Env, ctx?: ExecutionContex
       await deliverPrivateNotice(userId, replyToken, groupId, saved, env, profile.displayName, ctx);
       return;
     }
+    const bankProblem = bankAccountNearMiss(text, !isGroup);
+    if (bankProblem) {
+      await deliverPrivateNotice(
+        userId,
+        replyToken,
+        groupId,
+        generateNoticeFlex('บันทึกบัญชีไม่ได้', `${bankProblem}\n\nรูปแบบ: ธนาคาร เลขบัญชี ชื่อบัญชี\nเช่น กสิกร 012-3-45678-9 สมชาย ใจดี`, 'error'),
+        env,
+        profile.displayName,
+        ctx
+      );
+      return;
+    }
 
     // ── 1.5 "ถอน" — withdrawal is not a player action any more ──
     if (/^(?:ถอน|ถอนเงิน|ถอนยอด|withdraw)(?:\d+)?(?:บาท|thb|pt)?$/i.test(cleanWithoutCommas)) {
@@ -1575,6 +1588,28 @@ export function parseBankAccountText(input: string, isDm: boolean): { bankName: 
   const accountName = m[5].trim();
   if (accountName.length < 2 || /\d{3,}/.test(accountName)) return null;
   return { bankName: known || m[3], accountNumber, accountName };
+}
+
+/**
+ * A DM that is clearly an attempt to send a payout account (a bank we know, or
+ * the "บัญชี" prefix, then a number and a name) but whose number is not a
+ * complete account number. Returns what to tell the player, or '' when the
+ * message is not such an attempt. Without this the player got the generic menu
+ * card and no hint that the number was one digit short.
+ */
+export function bankAccountNearMiss(input: string, isDm: boolean): string {
+  if (!isDm) return '';
+  const t = String(input || '').trim().replace(/\s+/g, ' ');
+  const m = t.match(/^(?:(บัญชีรับเงิน|บัญชี|ลงทะเบียนบัญชี|bank)\s*)?(ธนาคาร\s*)?([^\d\s]+)\s+([\dxX*•][\dxX*•\s-]{2,30}[\dxX*•])(?:\s+(\S.*))?$/i);
+  if (!m) return '';
+  if (!m[1] && !bankDisplayName(m[3])) return '';
+  const raw = m[4];
+  if (/[xX*•]/.test(raw)) return 'เลขบัญชีถูกปิดบางหลัก (xxx) กรุณาพิมพ์เลขบัญชีเต็มทุกหลัก';
+  const digits = raw.replace(/[\s-]/g, '');
+  if (digits.length < 10) return `เลขบัญชี ${digits} มี ${digits.length} หลัก ซึ่งไม่ครบ\nเลขบัญชีธนาคารมีอย่างน้อย 10 หลัก กรุณาตรวจแล้วส่งใหม่`;
+  if (digits.length > 15) return `เลขบัญชี ${digits} ยาวเกินไป (${digits.length} หลัก) กรุณาตรวจแล้วส่งใหม่`;
+  if (!m[5] || m[5].trim().length < 2) return 'กรุณาใส่ชื่อบัญชีต่อท้ายเลขบัญชีด้วย';
+  return '';
 }
 
 // ── Pending Orders & Lookup Helpers ──
