@@ -51,6 +51,14 @@ export type SlipScanResult =
       escalate: true;
       /** True when the API was the problem rather than the slip. */
       apiFailure?: boolean;
+      /**
+       * The same image may pass a few minutes later: the bank had not published
+       * the transfer yet (Bangkok Bank is often minutes behind), the image could
+       * not be downloaded, or the slip API had a hiccup. These are re-checked
+       * automatically before an admin has to look. A slip that failed one of the
+       * guards (no reference, no amount, too old) is never retried.
+       */
+      retryable?: boolean;
     };
 
 const SLIP_API_URL = 'https://connect.slip2go.com/api/verify-slip/qr-base64/info';
@@ -172,6 +180,7 @@ export async function scanSlipImage(
       ok: false,
       escalate: true,
       apiFailure: true,
+      retryable: true,
       message: 'ดาวน์โหลดรูปสลิปไม่ได้\nส่งสลิปใหม่อีกครั้ง หรือรอแอดมินตรวจ',
       detail: `Could not download LINE message content for ${messageId}`,
     };
@@ -195,6 +204,7 @@ export async function scanSlipImage(
       ok: false,
       escalate: true,
       apiFailure: true,
+      retryable: true,
       message: 'ระบบตรวจสลิปขัดข้อง\nส่งให้แอดมินตรวจแล้ว รอสักครู่',
       detail: `Slip API connectivity failure: ${err?.message || String(err)}`,
     };
@@ -219,6 +229,8 @@ export async function scanSlipImage(
       ok: false,
       escalate: true,
       apiFailure: true,
+      // A lapsed subscription or a rejected key will not fix itself in ten minutes.
+      retryable: !isExpired && response.status !== 401,
       message: isBangkokPending
         ? 'ธนาคารกรุงเทพอัปเดตข้อมูลช้ากว่าปกติ ระบบยังตรวจสลิปไม่ได้\nส่งให้แอดมินแล้ว จะเติมเครดิตโดยเร็ว'
         : isExpired
@@ -236,6 +248,7 @@ export async function scanSlipImage(
       ok: false,
       escalate: true,
       apiFailure: true,
+      retryable: true,
       message: 'อ่านผลตรวจสลิปไม่สำเร็จ\nส่งให้แอดมินตรวจแล้ว',
       detail: `Slip API returned non-JSON: ${responseText.slice(0, 200)}`,
     };
@@ -250,9 +263,13 @@ export async function scanSlipImage(
   if (!isSuccess) {
     const apiMessage = String(payload?.message || payload?.error?.message || '').trim();
     const unreadable = payload?.code === '200500' || /QR|อ่านไม่|ไม่พบข้อมูลสลิป/i.test(apiMessage);
+    // Slip2Go answers "not found" (and sometimes "Slip is fraud", code 200500)
+    // for a genuine Bangkok Bank transfer checked within minutes of being made;
+    // the same image passes once the bank publishes it. Seen 23 Nov 2026.
     return {
       ok: false,
       escalate: true,
+      retryable: true,
       message: unreadable
         ? 'สแกนสลิปไม่ผ่าน: ไม่พบข้อมูลในระบบธนาคาร หรือ QR ไม่ชัด\nส่งให้แอดมินตรวจแล้ว'
         : `สแกนสลิปไม่ผ่าน: ${apiMessage || 'ยืนยันสลิปนี้ไม่ได้'}\nส่งให้แอดมินตรวจแล้ว`,
