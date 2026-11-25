@@ -854,12 +854,35 @@ export function generateMainMenuFlex(displayName: string, balance: number): any 
  * scanner reads the amount off it and credits exactly that. Asking for a number
  * first only created a way for the two to disagree.
  */
-const bankPanel = (bank: { bankName: string; accountNumber: string; accountName: string; note?: string }) =>
+interface DepositBank {
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  note?: string;
+}
+
+/**
+ * One-tap copy of the account number (LINE clipboard action, LINE 14.0+).
+ * Text inside a Flex card cannot be long-pressed and copied, so without this
+ * the player had to read the number off the card and retype it.
+ * Digits only: several Thai bank apps reject a pasted number with dashes.
+ */
+const copyAccountButton = (accountNumber: string) => ({
+  type: 'button',
+  style: 'secondary',
+  height: 'sm',
+  color: GOLD,
+  margin: 'sm',
+  action: { type: 'clipboard', label: 'คัดลอกเลขบัญชี', clipboardText: String(accountNumber || '').replace(/\D/g, '') },
+});
+
+const bankPanel = (bank: DepositBank) =>
   panel([
     row('ธนาคาร', bank.bankName),
     row('เลขบัญชี', bank.accountNumber, { color: TONES.in.accent }),
     row('ชื่อบัญชี', bank.accountName),
     ...(bank.note ? [divider('sm'), row('หมายเหตุ', bank.note, { color: TONES.out.accent })] : []),
+    ...(String(bank.accountNumber || '').replace(/\D/g, '') ? [copyAccountButton(bank.accountNumber)] : []),
   ]);
 
 // ── 7b. Typed-Amount Hint (typed "1000" or "ฝาก 1000") ──
@@ -871,12 +894,7 @@ const bankPanel = (bank: { bankName: string; accountNumber: string; accountName:
  * Steps are real nested boxes: the marker sits in a fixed-width column so a
  * wrapped line indents under the step instead of under the number.
  */
-export function generateTypedAmountHintFlex(bank: {
-  bankName: string;
-  accountNumber: string;
-  accountName: string;
-  note?: string;
-}): any {
+export function generateTypedAmountHintFlex(bank: DepositBank): any {
   const step = (marker: string, content: any[]) => ({
     type: 'box',
     layout: 'horizontal',
@@ -905,12 +923,7 @@ export function generateTypedAmountHintFlex(bank: {
   );
 }
 
-export function generateDepositFlex(bank: {
-  bankName: string;
-  accountNumber: string;
-  accountName: string;
-  note?: string;
-}): any {
+export function generateDepositFlex(bank: DepositBank): any {
   return flex(
     'ฝากเงิน · โอนแล้วส่งสลิป',
     bubble({
