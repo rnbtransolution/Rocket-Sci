@@ -44,4 +44,4 @@ echo "image uploaded"
 
 curl -sS -f -X POST -H "$AUTH" -H 'Content-Length: 0' "$API/user/all/richmenu/$ID" >/dev/null
 echo "set as default for all users: $ID"
-echo "Older menus stay on the OA; remove one with: bash $0 delete <id>"
+echo "Older menus stay on the OA; remove one with: bash \"$0\" delete <id>"
