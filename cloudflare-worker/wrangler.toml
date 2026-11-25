@@ -61,3 +61,8 @@ GAS_FALLBACK_URL = "https://script.google.com/macros/s/AKfycbzzzrz0KDdYOwZ7nK7Sx
 # Public https origin for LINE card icons. Optional: defaults to the origin
 # each request arrives on (the workers.dev URL or a custom domain).
 # PUBLIC_BASE_URL = "https://example.com"
+
+# Every minute: re-check deposit slips the bank had not published yet
+# (Bangkok Bank transfers show up a few minutes late). See retryPendingSlips.
+[triggers]
+crons = ["* * * * *"]

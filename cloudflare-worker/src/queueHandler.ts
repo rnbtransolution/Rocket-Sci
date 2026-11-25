@@ -1378,7 +1378,14 @@ async function handleSlipUpload(
   // `verifiedAmount` is passed only for a slip the scanner verified but the
   // ledger could not credit: the entry then carries the amount the slip proves,
   // so the admin's Approve credits it (it used to be 0 and credit nothing).
-  const escalate = async (detail: string, playerMessage: string, slipRef = '', verifiedAmount = 0) => {
+  const escalate = async (
+    detail: string,
+    playerMessage: string,
+    slipRef = '',
+    verifiedAmount = 0,
+    slipRetry?: Transaction['slipRetry'],
+    title = 'ได้รับสลิปแล้ว · รอแอดมินตรวจ'
+  ) => {
     const tx: Transaction = {
       id: txId,
       playerId: profile.shortId,
@@ -1391,6 +1398,7 @@ async function handleSlipUpload(
       reviewReason: detail,
       ...(verifiedAmount > 0 && slipRef ? { slipVerified: true } : {}),
       ...(messageId ? { messageId } : {}),
+      ...(slipRetry ? { slipRetry } : {}),
       timestamp: nowStr,
       type: 'deposit',
       createdAt: Date.now(),
@@ -1401,7 +1409,7 @@ async function handleSlipUpload(
       replyToken,
       groupId,
       generateNoticeFlex(
-        'ได้รับสลิปแล้ว · รอแอดมินตรวจ',
+        title,
         playerMessage,
         'warning',
         hasPayoutAccount(profile) ? undefined : 'ส่งเลขบัญชีรับเงินด้วย: ธนาคาร เลขบัญชี ชื่อบัญชี'
@@ -1427,6 +1435,22 @@ async function handleSlipUpload(
   const scan = await scanSlipImage(messageId, env);
 
   if (!scan.ok) {
+    if (scan.retryable && messageId) {
+      // Usually a Bangkok Bank transfer sent seconds ago: the bank has not
+      // published it yet. retryPendingSlips() checks the same image again and
+      // credits it; the admin only gets it if every retry fails.
+      await escalate(
+        `${scan.detail} — auto re-check scheduled (${SLIP_RETRY_AFTER_MIN.join(', ')} min)`,
+        'ธนาคารยังไม่ยืนยันรายการนี้ (ธนาคารกรุงเทพมักช้ากว่าปกติไม่กี่นาที)\n' +
+          `ระบบจะตรวจซ้ำและเติมเครดิตให้อัตโนมัติภายใน ${SLIP_RETRY_AFTER_MIN[SLIP_RETRY_AFTER_MIN.length - 1]} นาที\n` +
+          'ไม่ต้องส่งสลิปซ้ำ',
+        '',
+        0,
+        { attempts: 0, nextAt: Date.now() + SLIP_RETRY_AFTER_MIN[0] * 60_000 },
+        'ได้รับสลิปแล้ว · รอธนาคารยืนยัน'
+      );
+      return;
+    }
     await escalate(scan.detail, scan.message);
     return;
   }
@@ -1516,6 +1540,131 @@ async function handleSlipUpload(
     profile.displayName,
     ctx
   );
+}
+
+// ── Automatic slip re-check ──
+
+/**
+ * Minutes after the slip arrived at which a held slip is scanned again.
+ * Bangkok Bank publishes a transfer a few minutes after it is made, so a slip
+ * sent straight away fails the first check and passes a little later.
+ */
+export const SLIP_RETRY_AFTER_MIN = [2, 5, 10];
+
+/**
+ * Re-scan every held deposit whose next re-check is due (run by the cron every
+ * minute). A slip that now verifies is credited under the same SLIP:<ref> claim
+ * as every other path, in one step with the status change, so it can never be
+ * credited twice even if an admin approves or rescans it at the same moment.
+ * After the last retry the entry simply stays with the admin, as before.
+ */
+export async function retryPendingSlips(env: Env, ctx?: ExecutionContext, now = Date.now()): Promise<{ checked: number; credited: number }> {
+  const txs = await getTransactionsList(env);
+  const due = txs.filter((t) =>
+    t && t.type === 'deposit' && t.status === 'escalated' &&
+    t.slipRetry && typeof t.slipRetry.nextAt === 'number' && t.slipRetry.nextAt <= now &&
+    t.messageId
+  );
+  let credited = 0;
+  for (const tx of due) {
+    if (await retryOneSlip(tx, env, ctx, now)) credited++;
+  }
+  return { checked: due.length, credited };
+}
+
+async function retryOneSlip(tx: Transaction, env: Env, ctx: ExecutionContext | undefined, now: number): Promise<boolean> {
+  const attempts = (tx.slipRetry?.attempts || 0) + 1;
+  const nextMin = SLIP_RETRY_AFTER_MIN[attempts];
+  const nextAt = nextMin !== undefined ? tx.createdAt + nextMin * 60_000 : undefined;
+  const label = `Auto re-check ${attempts}/${SLIP_RETRY_AFTER_MIN.length}`;
+
+  // Book the attempt before the slow scan, so an overlapping cron run does not
+  // pick up the same entry. Fails quietly if an admin has settled it meanwhile.
+  const booked = await ledger(env, {
+    transactions: [{
+      id: tx.id,
+      mustExist: true,
+      expectStatusNotIn: ['success', 'rejected'],
+      patch: { slipRetry: { attempts, ...(nextAt !== undefined ? { nextAt } : {}) } },
+    }],
+  }, ctx);
+  if (!booked.ok) return false;
+
+  const scan = await scanSlipImage(String(tx.messageId), env, Number(tx.createdAt) || now);
+
+  if (!scan.ok) {
+    const stop = !scan.retryable || nextAt === undefined;
+    await ledger(env, {
+      transactions: [{
+        id: tx.id,
+        mustExist: true,
+        expectStatusNotIn: ['success', 'rejected'],
+        patch: {
+          reviewReason: stop
+            ? `${label} failed, needs admin: ${scan.detail}`
+            : `${label} failed, next at ${new Date(nextAt!).toLocaleTimeString('th-TH', { hour12: false, timeZone: 'Asia/Bangkok' })}: ${scan.detail}`,
+          slipRetry: { attempts, ...(stop ? {} : { nextAt }) },
+        },
+      }],
+    }, ctx);
+    return false;
+  }
+
+  const res = await ledger(env, {
+    claims: [{
+      key: `SLIP:${scan.refCode}`,
+      payload: { refCode: scan.refCode, amount: scan.amount, playerId: tx.playerId, lineUserId: tx.lineUserId, txId: tx.id, messageId: tx.messageId, at: now },
+      ttlMs: 90 * 24 * 60 * 60 * 1000,
+    }],
+    transactions: [{
+      id: tx.id,
+      mustExist: true,
+      expectStatusNotIn: ['success', 'rejected'],
+      patch: {
+        status: 'success',
+        requestedAmount: scan.amount,
+        actualAmount: scan.amount,
+        slipRef: scan.refCode,
+        slipVerified: true,
+        slipRetry: { attempts },
+        reviewReason: `Auto-approved on ${label.toLowerCase()}. Ref: ${scan.refCode}`,
+      },
+    }],
+    balances: [{ shortId: tx.playerId, lineUserId: tx.lineUserId, delta: scan.amount }],
+  }, ctx);
+
+  if (!res.ok) {
+    if (res.reason !== 'tx_status') {
+      // Already credited from another submission (possibly someone else's), or
+      // the ledger refused: stop retrying and leave it for the admin to judge.
+      await ledger(env, {
+        transactions: [{
+          id: tx.id,
+          mustExist: true,
+          expectStatusNotIn: ['success', 'rejected'],
+          patch: {
+            slipRetry: { attempts },
+            ...(res.reason === 'claimed' ? { slipRef: scan.refCode } : {}),
+            reviewReason: res.reason === 'claimed'
+              ? `${label}: duplicate slip reference ${scan.refCode} — already credited from another submission; check who before approving`
+              : `${label}: slip ${scan.refCode} verified (${scan.amount}) but credit failed: ${res.reason} — approve manually`,
+          },
+        }],
+      }, ctx);
+    }
+    return false;
+  }
+
+  const done = res.transactions[tx.id] || tx;
+  mirrorTransactionToSheets(done as Transaction, env, ctx);
+  const after = res.balances[0]?.after;
+  const line = res.balances[0]?.lineUserId || (String(tx.lineUserId || '').startsWith('U') ? tx.lineUserId! : '');
+  if (line && line.startsWith('U')) {
+    const profile = await getOrCreatePlayerProfile(line, env, ctx).catch(() => null);
+    const card = generateSlipCreditedFlex(scan.amount, after ?? profile?.balance ?? 0, scan.refCode, profile ? payoutAccountView(profile) : null);
+    await pushToLine(line, card, env).catch((e) => console.error('[slip retry] push failed', e));
+  }
+  return true;
 }
 
 // ── Payout account helpers ──

@@ -68,6 +68,7 @@ import {
   getDailySettledOrders,
   voidInFlightRound,
   hasPayoutAccount,
+  retryPendingSlips,
 } from './queueHandler.js';
 import {
   generateRuleGuideFlex,
@@ -3433,6 +3434,19 @@ if (
    * Cloudflare Worker Queue Consumer Handler
    * Acknowledges and archives events for telemetry / persistence
    */
+  /**
+   * Cron, every minute: re-check slips that failed on arrival because the bank
+   * had not published the transfer yet (see retryPendingSlips).
+   */
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    try {
+      const r = await retryPendingSlips(env, ctx, controller.scheduledTime || Date.now());
+      if (r.checked) console.log(`[cron] slip re-check: ${r.checked} checked, ${r.credited} credited`);
+    } catch (err) {
+      console.error('[cron] slip re-check failed:', err);
+    }
+  },
+
   async queue(batch: MessageBatch<QueueMessage>, env: Env): Promise<void> {
     for (const message of batch.messages) {
       try {

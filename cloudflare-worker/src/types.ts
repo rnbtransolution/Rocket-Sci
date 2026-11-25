@@ -208,6 +208,12 @@ export interface Transaction {
   slipVerified?: boolean;
   /** LINE message id of the slip image, so the console can show it and rescan it. */
   messageId?: string;
+  /**
+   * Automatic re-check of a slip the scanner could not verify on arrival
+   * (usually a Bangkok Bank transfer the bank had not published yet).
+   * `nextAt` is absent once the retries are used up or have stopped.
+   */
+  slipRetry?: { attempts: number; nextAt?: number };
   timestamp: string;
   type: 'deposit' | 'withdraw' | 'transfer';
   createdAt: number;
