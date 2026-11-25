@@ -30,6 +30,8 @@ export interface Env {
   GOOGLE_SERVICE_ACCOUNT_JSON?: string;
 
   // Configuration vars
+  /** "off" = no Quick Reply chips in DMs (the rich menu replaces them). */
+  DM_QUICK_REPLY?: string;
   ENVIRONMENT?: string;
   SPREADSHEET_ID?: string;
   GAS_FALLBACK_URL?: string;
