@@ -4,6 +4,7 @@
 #   bash tools/rich-menu/setup.sh            create + set default
 #   bash tools/rich-menu/setup.sh list       show rich menus on the OA
 #   bash tools/rich-menu/setup.sh off        remove the default (chips only)
+#   bash tools/rich-menu/setup.sh delete ID  delete an old rich menu
 # Token comes from System/.env (LINE_CHANNEL_ACCESS_TOKEN). Rich menu calls
 # do not count against the monthly message quota.
 set -euo pipefail
@@ -18,6 +19,10 @@ case "${1:-create}" in
   list)
     curl -sS -H "$AUTH" "$API/richmenu/list"; echo
     echo "default:"; curl -sS -H "$AUTH" "$API/user/all/richmenu"; echo
+    exit 0 ;;
+  delete)
+    [ -n "${2:-}" ] || { echo "usage: setup.sh delete richmenu-..."; exit 1; }
+    curl -sS -f -X DELETE -H "$AUTH" "$API/richmenu/$2" >/dev/null; echo "deleted $2"
     exit 0 ;;
   off)
     curl -sS -X DELETE -H "$AUTH" "$API/user/all/richmenu"; echo "default rich menu removed"
@@ -39,5 +44,4 @@ echo "image uploaded"
 
 curl -sS -f -X POST -H "$AUTH" -H 'Content-Length: 0' "$API/user/all/richmenu/$ID" >/dev/null
 echo "set as default for all users: $ID"
-echo "Older menus stay on the OA; remove one with:"
-echo "  curl -X DELETE -H \"Authorization: Bearer \$TOKEN\" $API/richmenu/<id>"
+echo "Older menus stay on the OA; remove one with: bash $0 delete <id>"
