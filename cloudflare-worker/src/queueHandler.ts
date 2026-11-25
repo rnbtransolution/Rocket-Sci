@@ -3170,6 +3170,16 @@ async function recordActiveGroup(groupId: string, env: Env): Promise<void> {
 
 // ── LINE HTTP Dispatchers ──
 
+/**
+ * DM chips can be switched off once the LINE rich menu (tools/rich-menu) is
+ * live, since the rich menu sends the same words. wrangler.toml var
+ * DM_QUICK_REPLY: "off" drops the chips from every DM; anything else keeps them.
+ * Group messages never carry chips either way.
+ */
+function dmQuickReplyOn(env: Env): boolean {
+  return String(env.DM_QUICK_REPLY || 'on').trim().toLowerCase() !== 'off';
+}
+
 async function replyToLine(replyToken: string, payload: any, env: Env, attachQuickReply = false): Promise<boolean> {
   try {
     const processed = attachQuickReply ? attachMainMenuQuickReply(payload) : stripQuickReply(payload);
@@ -3187,7 +3197,7 @@ async function replyToLine(replyToken: string, payload: any, env: Env, attachQui
       messageObj = { type: 'text', text: String(processed) };
     }
 
-    if (attachQuickReply) {
+    if (attachQuickReply && dmQuickReplyOn(env)) {
       if (!messageObj.quickReply || !Array.isArray(messageObj.quickReply.items) || messageObj.quickReply.items.length === 0) {
         messageObj.quickReply = { items: mainMenuQuickReplyItems() };
       }
@@ -3268,7 +3278,7 @@ export async function pushToLine(to: string, payload: any, env: Env, opts: { ski
       messageObj = { type: 'text', text: String(processed) };
     }
 
-    if (isUserDM) {
+    if (isUserDM && dmQuickReplyOn(env)) {
       if (!messageObj.quickReply || !Array.isArray(messageObj.quickReply.items) || messageObj.quickReply.items.length === 0) {
         messageObj.quickReply = { items: mainMenuQuickReplyItems() };
       }
